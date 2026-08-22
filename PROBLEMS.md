@@ -122,3 +122,28 @@ worktree rather than pass absolute paths around. Moving the directory somewhere
 space-free was considered and rejected: Application Support is where this
 belongs, and a warning is cheaper than a non-standard location.
 
+## `showSettingsWindow:` silently does nothing for a SwiftUI `Settings` scene
+
+`NSApp.sendAction(Selector(("showSettingsWindow:")), …)` returns without error
+and without opening anything. It is the macOS 13 selector, and a SwiftUI
+`Settings` scene does not respond to it. The screenshot harness kept capturing
+the reader and there was no signal at all that the request had been dropped.
+
+`SWIFTUI-RULES.md` §6.4 already had the answer: on macOS 14 the idiom is
+`@Environment(\.openSettings)`. That is an environment action, so only a *view*
+can invoke it — the model exposes a request counter and `RootView` performs it,
+the same shape already used for the jobs window.
+
+**Rule:** anything that opens a scene goes through the environment action, with
+the model asking rather than doing.
+
+## `NSApp.keyWindow` is not the frontmost window
+
+The capture helper picked `keyWindow`, fell through to `mainWindow`, and so
+photographed the reader sitting *behind* a freshly opened Settings window — which
+is in front without being key.
+
+`NSApp.orderedWindows` is front-to-back and is the question actually being
+asked. `CGWindowListCopyWindowInfo` (used by the external capture path) is
+already ordered the same way.
+
