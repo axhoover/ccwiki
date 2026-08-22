@@ -1,36 +1,113 @@
-# Starter
+# CityDesk
 
-A clean, modern **SwiftUI macOS app template** you fork by copying. It's the
-smallest thing that still demonstrates the patterns you actually reuse:
+A native macOS reader for the [cryptology.city](https://cryptology.city) wiki,
+and a launcher for headless agent jobs that ingest papers and open pull requests
+against it.
 
-- A two-column `NavigationSplitView` — a sidebar driving a measure-capped
-  lorem-ipsum reading column and a native, sortable `Table`.
-- One `@Observable @MainActor` model, a centralized `Theme` type/metrics
-  system, a reusable status badge, and a designed empty state.
-- A **no-Xcode** SwiftPM build: `swift build` + `build.sh` produce a signed
-  `.app`; `make dist` does the full sign → notarize → staple → zip release.
-- Swift 6 strict concurrency, macOS 14+, zero third-party dependencies.
+CityDesk is a **client** of `axhoover/cryptology.city`. The GitHub repo is the
+only canonical store; the app owns no content and never merges anything.
 
-## Quick start
+- **Read offline.** A pull-only git clone, rendered in a `WKWebView` with a
+  vendored Markdown + KaTeX + pseudocode.js pipeline. No network at read time.
+- **Links that behave like the website's.** `[[wikilinks]]` resolve through a
+  line-by-line port of Quartz's own slug rules, tested against the wiki's test
+  suite and against all ~673 links in the live corpus.
+- **Find things.** ⌘O fuzzy quick-switcher over titles, aliases and paper
+  titles; ⇧⌘F full-text search over everything, backed by SQLite FTS5.
+- **Ingest papers.** Drop a PDF or paste an eprint/arXiv/DOI URL; CityDesk runs
+  `claude` in a throwaway git worktree and it opens a **draft** PR. *(M2 — see
+  [plans/ingestion.md](plans/ingestion.md).)*
+
+## Requirements
+
+- macOS 14 or newer
+- A Swift 6 toolchain (Xcode, or the swift.org installer)
+- `git` — for the clone
+- `node` ≥ 20, `gh`, and the `claude` CLI — for ingestion jobs only; the reader
+  works without them
+
+A Finder-launched app inherits launchd's `PATH`, which is
+`/usr/bin:/bin:/usr/sbin:/sbin` — enough for `/usr/bin/git` and nothing else.
+CityDesk searches Homebrew's directories and `~/.local/bin` as well, and falls
+back to asking a login shell, so a normal Homebrew or npm install is found
+automatically.
+
+## Setup
 
 ```sh
-cp -R swiftui-app MyApp && cd MyApp
-git init
-./scripts/rename.sh MyApp        # rename target/.app/bundle id/sources in one pass
-make run                         # build + launch
+git clone <this repo> citydesk && cd citydesk
+
+./scripts/vendor-web.sh    # fetch the offline render pipeline (once, needs network)
+make check                 # compile + unit tests
+make run                   # build the .app and launch it
 ```
 
-Then read **[PLAN.md](PLAN.md)** — it's the two-minute onboarding for a fresh
-copy and the index to everything else (`plans/`, `PROGRESS.md`, `PROBLEMS.md`,
-`SWIFTUI-RULES.md`).
+`scripts/vendor-web.sh` downloads pinned, checksum-verified copies of
+markdown-it, KaTeX and the wiki's patched pseudocode.js into `Resources/web/`.
+The app never touches the network for rendering; this is the one step that does.
+Re-verify an existing tree with `./scripts/vendor-web.sh --check`.
+
+### First launch
+
+CityDesk clones the wiki (~35 MB) into
+`~/Library/Application Support/CityDesk/repo` and builds a search index. After
+that, reading needs no network — ⌘R fast-forwards when you want an update.
+
+```
+~/Library/Application Support/CityDesk/
+├── repo/          the pull-only clone: the reader's copy, never written to
+├── worktrees/     one git worktree per ingestion job
+├── library/       PDFs you drop on the app (deliberately outside the repo)
+├── index/         search.sqlite3 — derived, safe to delete at any time
+└── logs/          per-job transcripts
+```
+
+Delete `index/` any time you like; it rebuilds in about a tenth of a second.
+Delete `repo/` and CityDesk re-clones on the next sync.
+
+### For ingestion jobs
+
+```sh
+gh auth login                       # needs `repo` scope to open a PR
+claude --version                    # https://claude.com/claude-code
+node --version                      # the wiki's lint is a node script
+```
+
+`gh` must be authenticated as an account that can push a branch to
+`axhoover/cryptology.city`. CityDesk opens **draft** PRs and never marks one
+ready for review.
+
+## Keyboard
+
+| | |
+|---|---|
+| ⌘O | Quick switcher |
+| ⌘F / ⌘G / ⇧⌘G | Find on page / next / previous |
+| ⇧⌘F | Search all pages |
+| ⌘R | Sync with GitHub |
+| ⌘[ / ⌘] | Back / forward |
+| ⌥⌘I | Toggle inspector |
+| ⌘0 | Go home |
 
 ## Make targets
 
 ```
-make check   compile-only gate        make run    build + launch
-make test    run the test suite       make dist   signed release zip
-make help    everything else
+make check         compile + unit tests — the gate after every change
+make run           build and launch
+make shots         drive the app and capture screenshots (the visual gate)
+make test-corpus   validate the resolver against the real cloned wiki
+make dist          signed + notarized release zip
+make help          everything else
 ```
 
-Requires macOS 14+ and a Swift 6 toolchain (Xcode or swift.org). `make run`
-ad-hoc signs, so it works on a bare machine with no certificates.
+`make shots` needs the **Screen Recording** permission (System Settings →
+Privacy & Security → Screen & System Audio Recording) for the process running
+it. Without it, it falls back to an in-app capture that renders everything
+except vibrancy backdrops.
+
+`make run` ad-hoc signs, so it works on a bare machine with no certificates.
+
+## Where to read next
+
+[PLAN.md](PLAN.md) is the index to everything: architecture, the Quartz slug
+port, the render pipeline, search, ingestion, and the design system.

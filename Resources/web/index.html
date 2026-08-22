@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CityDesk</title>
+<!-- Everything here is served by CityDeskSchemeHandler out of the app bundle.
+     No inline <script> — the CSP served with this document is script-src 'self',
+     so the only JS that runs is these files plus the WKUserScript the app
+     injects at documentStart. -->
+<link rel="stylesheet" href="/_/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/_/vendor/pseudocode/pseudocode.min.css">
+<link rel="stylesheet" href="/_/app.css">
+</head>
+<body>
+<main id="page" class="page"></main>
+
+<!-- Load order is mandatory: pseudocode.js resolves its math backend from the
+     global `katex` symbol at construction time. -->
+<script src="/_/vendor/katex/katex.min.js"></script>
+<script src="/_/vendor/pseudocode/pseudocode.js"></script>
+<script src="/_/vendor/markdown-it/markdown-it.umd.min.js"></script>
+<script src="/_/vendor/markdown-it/markdown-it-footnote.min.js"></script>
+<script src="/_/vendor/markdown-it/markdown-it-mark.min.js"></script>
+<script src="/_/vendor/markdown-it/github-slugger.umd.js"></script>
+<script src="/_/citydesk.js"></script>
+</body>
+</html>

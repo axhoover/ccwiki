@@ -1,9 +1,10 @@
-# Starter — a clean SwiftUI macOS app template
+# CityDesk — an offline reader for cryptology.city, and an agent job launcher
 #
 # Quick start:
-#   make           # debug-builds via SwiftPM into ./build/Starter.app
+#   make           # debug-builds via SwiftPM into ./build/CityDesk.app
 #   make run       # build + launch
-#   make check     # compile only, no bundling/signing (agent / CI gate)
+#   make check     # compile + unit tests — the gate after every change
+#   make shots     # drive the app and capture screenshots (the visual gate)
 #   make test      # run the SwiftPM test suite
 #   make install   # copy to /Applications/ and register with LaunchServices
 #   make help      # full target list
@@ -13,17 +14,18 @@
 # codesign / notarytool / stapler). `make dist` produces a
 # signed-and-stapled release zip once signing identities are configured.
 #
-# Renaming the template? Run `./scripts/rename.sh NewName` — it rewrites
-# every reference (this Makefile included) in one pass.
+# Offline render pipeline: `./scripts/vendor-web.sh` fetches the pinned,
+# checksum-verified markdown-it / KaTeX / pseudocode.js assets into
+# Resources/web/. Run once after cloning; the app never fetches at runtime.
 
 CONFIG       := debug
-APP          := build/Starter.app
+APP          := build/CityDesk.app
 LSREGISTER   := /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister
 MIN_MACOS    := 14
 MIN_SWIFT    := 6.0
 
-APP_NAME      := Starter
-ENTITLEMENTS  := Starter/Starter.entitlements
+APP_NAME      := CityDesk
+ENTITLEMENTS  := CityDesk/CityDesk.entitlements
 
 # ---------------------------------------------------------------------------
 # Release variables
@@ -56,7 +58,7 @@ NOTARY_PROFILE ?= starter-notary
 PROVISION_PROFILE ?=
 NOTES_FILE       ?=
 
-.PHONY: all deps build check test release run clean install uninstall register help \
+.PHONY: all deps build check build-only test test-corpus release run clean install uninstall register help \
         icon check-version notary-setup sign zip-notary notarize staple zip-release \
         checksum verify-release dist github-release print-version
 
@@ -65,8 +67,11 @@ all: build
 help:
 	@echo "Build:"
 	@echo "  make / build      Build $(CONFIG) into ./$(APP)  (default)"
-	@echo "  check             Compile only (swift build) — no bundle/sign; CI/agent gate"
+	@echo "  check             Compile + unit tests — the gate after every change"
+	@echo "  build-only        Compile only, no tests"
 	@echo "  test              Run the SwiftPM test suite"
+	@echo "  test-corpus       …and validate against the real cloned wiki"
+	@echo "  shots             Drive the app and capture screenshots (visual gate)"
 	@echo "  release           Build release into ./$(APP)"
 	@echo "  run               Build and launch $(APP_NAME)"
 	@echo "  icon              Regenerate build/AppIcon.icns from scripts/make-icon.swift"
@@ -135,8 +140,17 @@ build: deps $(APP_ICON)
 release: deps $(APP_ICON)
 	SIGN_IDENTITY="$(DEV_IDENTITY)" PROVISION_PROFILE="$(PROVISION_PROFILE)" VERSION="$(VERSION)" ./build.sh release
 
-# Compile-only gate — no .app, no signing. CI / agent verification.
+# The gate to run after every change: compile, then run the unit tests. No
+# .app, no signing. `make shots` is the visual half of the gate — a passing
+# build is not a passing app (SWIFTUI-RULES.md §9.3).
 check: deps
+	swift build -c $(CONFIG)
+	@echo "✓ compiles ($(CONFIG))"
+	swift test
+	@echo "✓ tests pass"
+
+# Compile only, for when you just want to know it builds.
+build-only: deps
 	swift build -c $(CONFIG)
 	@echo "✓ compiles ($(CONFIG))"
 
@@ -144,6 +158,13 @@ check: deps
 test: deps
 	swift test
 	@echo "✓ tests pass"
+
+# The corpus suite additionally validates against a real clone: every wikilink
+# in ~300 pages, the whole frontmatter schema, and the live macro table. Skipped
+# by `make test` because it needs the clone to exist.
+test-corpus: deps
+	CITYDESK_WIKI="$(HOME)/Library/Application Support/CityDesk/repo" swift test
+	@echo "✓ tests pass against the real corpus"
 
 print-version:
 	@echo "VERSION=$(VERSION)"
@@ -282,3 +303,20 @@ github-release:
 	  --title "$(APP_NAME) $(VERSION)" \
 	  $(if $(NOTES_FILE),--notes-file "$(NOTES_FILE)",--generate-notes)
 	@echo "✓ published v$(VERSION)"
+
+# ---------------------------------------------------------------------------
+# Visual gate
+# ---------------------------------------------------------------------------
+# SwiftUI's compile guarantees are weak — a passing build is not a passing app
+# (SWIFTUI-RULES.md §9.3). `make shots` drives the real .app through a scripted
+# plan and writes PNGs, with no Screen Recording permission required: the app
+# draws its own views (see Sources/CityDesk/App/ScreenshotRunner.swift).
+#
+#   make shots                       # the default plan
+#   make shots PLAN='page:index.md'  # one specific view
+SHOTS_DIR ?= build/shots
+PLAN      ?= home,page:Primitives/pseudorandom-function.md,page:Assumptions/learning-with-errors.md,backlinks,switcher:prf,search:oblivious transfer,folder:References,page:References/AGGM06 - On basing one-way functions on NP-hardness.md,light,page:Primitives/pseudorandom-function.md
+
+.PHONY: shots
+shots: build
+	./scripts/shots.sh "$(PWD)/$(SHOTS_DIR)" "$(PLAN)"

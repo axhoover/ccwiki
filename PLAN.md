@@ -1,173 +1,124 @@
-# Starter — a clean SwiftUI macOS app template
+# CityDesk
 
-**You just `cp -R`'d this directory to start a new app. Read this first — it
-takes about two minutes, and it's also the master index to everything else.**
+**A native macOS reader for the [cryptology.city](https://cryptology.city) wiki,
+and a launcher for headless agent jobs that ingest papers and open PRs against
+it.**
 
-This is a deliberately small, modern macOS app you fork by copying. It ships
-a real two-pane app (a NavigationSplitView with a lorem-ipsum reading column
-and a native sortable `Table`), a no-Xcode SwiftPM build system, and the
-conventions/skills wiring that the rest of these docs assume.
+This file is the index. Depth lives in [plans/](plans/); the running log lives in
+[PROGRESS.md](PROGRESS.md). A future agent should be able to read this file plus
+`PROGRESS.md` and be up to speed.
 
 ---
 
-## 1. The first five minutes (do this in order)
+## 1. What it is, in one paragraph
 
-You copied a template named **Starter**. Make it yours:
+CityDesk is a *client* of `axhoover/cryptology.city`. The GitHub repo is the only
+canonical store; the app owns no content. It keeps a pull-only git clone in
+Application Support, renders pages offline with a vendored Markdown + KaTeX +
+pseudocode.js pipeline in a `WKWebView`, and resolves `[[wikilinks]]` by porting
+Quartz's own slug rules exactly. Separately, it runs `claude` in throwaway git
+worktrees to draft paper-ingestion PRs — always draft, never merged.
+
+## 2. Getting started
 
 ```sh
-# 0. From inside your new copy, start a fresh history (the template ships
-#    with none of its own — there is nothing to disconnect from).
-git init
-
-# 1. Rename everything — target, .app, bundle id, sources, this file's
-#    siblings — in one pass. NewName must be a valid Swift identifier.
-./scripts/rename.sh NewName                 # bundle id → com.example.newname
-./scripts/rename.sh NewName com.you.newname # …or pass your own bundle id
-
-# 2. Confirm it still builds and launches as the new app.
-make check       # compile-only gate
-make run         # build the .app, sign ad-hoc, launch it
-
-# 3. Make these yours by hand (rename.sh leaves them alone on purpose):
-#    - VERSION                       → reset to 0.1.0 (it already is)
-#    - Resources/Info.plist          → NSHumanReadableCopyright (your name/year)
-#    - Resources/Info.plist          → LSApplicationCategoryType (App Store category)
-#    - this PLAN.md / README.md      → describe YOUR app, not the template
-
-# 4. Throw away the template's training wheels once you don't need them:
-rm scripts/rename.sh        # one-shot; no reason to keep it
-# …and start logging YOUR work in PROGRESS.md (see §5).
+make check     # compile + 47 unit tests — run this after every change
+make run       # build the .app and launch it
+make shots     # drive the app and capture screenshots (the visual gate)
+make help      # everything else
 ```
 
-After step 2 you have a running, renamed, ad-hoc-signed macOS app. Everything
-below is reference for when you start adding features.
+First launch clones the wiki (~35 MB) into
+`~/Library/Application Support/CityDesk/repo` and builds the search index. After
+that, reading needs no network. Setup details are in [README.md](README.md).
 
-> **Why a rename script instead of placeholders?** A `cp -R` template should
-> become a real, differently-named app with one command — not leave you
-> find-replacing "Starter" across a dozen files and forgetting the bundle id.
-> The mechanics live in [plans/renaming.md](plans/renaming.md).
+## 3. The non-negotiables
 
----
+These are architectural constraints, not preferences. Changing one is a
+redesign, not a refactor.
 
-## 2. What you're starting from
+| Constraint | Why | Where |
+|---|---|---|
+| The clone is **pull-only** | The app is a reader; a dirty reader checkout is a bug with no good recovery | `GitService.sync` uses `--ff-only` and says so loudly when it fails |
+| Jobs run in **git worktrees** | A job cannot dirty the reader's checkout, and jobs can run in parallel | `GitService.addWorktree`, `AppPaths.worktrees` |
+| Rendering is **fully offline** | Reading must work on a plane | Vendored into `Resources/web/`; a CSP header and a scheme handler make it structural, not aspirational |
+| The **search index is derived** | Never authoritative, safe to delete at any time | `SearchIndex.reset()` is a legitimate answer to any problem |
+| **PDFs never enter the repo** | They are job inputs; References pages point at eprint/arXiv/DOI | `AppPaths.library` sits outside the clone |
+| **Never merge a PR** | The app's job ends at "draft PR opened" | `prompts/ingest.md`, Step 6 |
 
-| Layer            | What's here                                                            |
-|------------------|-----------------------------------------------------------------------|
-| App              | `NavigationSplitView` → sidebar + (lorem reading column \| `Table`)    |
-| State            | one `@Observable @MainActor AppModel`, owned with `@State`            |
-| Build            | `swift build` + `build.sh` bundle/sign — **no Xcode project, no xcodebuild** |
-| Release          | `make dist`: sign → notarize → staple → zip → checksum                |
-| Tests            | swift-testing suite under `Tests/`                                     |
-| Conventions      | `CLAUDE.md` / `AGENTS.md`, `SWIFTUI-RULES.md`, three design skills     |
-
-The app is intentionally minimal but *complete* — it's the smallest thing that
-still demonstrates the patterns you'll actually reuse (split-view nav, a
-centralized type/metrics `Theme`, a reusable badge component, an empty state,
-a sortable table, a measure-capped reading column).
-
----
-
-## 3. Where things live
+## 4. Where things live
 
 ```
 .
-├── Package.swift            SwiftPM manifest (one exe target, one test target)
 ├── Makefile                 the entry point for everything — `make help`
-├── build.sh                 swift build → .app bundle → codesign (driven by make)
-├── VERSION                  fallback release version (git tag wins over it)
-├── Resources/Info.plist     bundle metadata; __VERSION__ placeholders filled at build
-├── Starter/                 Starter.entitlements (sandboxed by default)
+├── build.sh                 swift build → .app bundle → codesign
+├── prompts/ingest.md        the agent prompt template for an ingestion job
 ├── scripts/
-│   ├── make-icon.swift      generates build/AppIcon.icns (pure CoreGraphics)
-│   └── rename.sh            the §1 rename tool (delete after use)
-├── Sources/Starter/         the app (one type per file — see plans/architecture.md)
-└── Tests/StarterTests/      swift-testing
+│   ├── vendor-web.sh        fetch the pinned offline render pipeline (run once)
+│   ├── shots.sh             drive the app and capture screenshots
+│   ├── window-id.swift      helper for shots.sh
+│   └── make-icon.swift      generates build/AppIcon.icns
+├── Resources/
+│   ├── Info.plist
+│   └── web/                 the reader: index.html, app.css, citydesk.js, vendor/
+├── CityDesk/                CityDesk.entitlements (NOT sandboxed — see §5)
+├── Sources/CityDesk/
+│   ├── App/                 CityDeskApp, AppModel, AppPaths, Theme, ScreenshotRunner
+│   ├── Wiki/                pure, testable: slugs, wikilinks, frontmatter, macros, index
+│   ├── Reader/              the WKWebView, its scheme handler, and the render request
+│   ├── Search/              SQLite FTS5 and the fuzzy quick-switcher matcher
+│   ├── Jobs/                subprocess plumbing, tool discovery, git
+│   └── UI/                  the SwiftUI views
+└── Tests/CityDeskTests/     47 tests; see §6
 ```
 
-(File and directory names containing "Starter" are rewritten by `rename.sh`.)
+## 5. Documentation index
 
----
-
-## 4. Documentation index
-
-This file is the index; depth lives in `plans/`. Keep that contract as you
-grow — a future agent should be able to read `PLAN.md` + `PROGRESS.md` and be
-up to speed (per `CLAUDE.md`).
-
-- [plans/architecture.md](plans/architecture.md) — the app's shape: scenes,
-  `AppModel`, navigation, the view tree, how to add a destination.
-- [plans/build-system.md](plans/build-system.md) — how `make` / `build.sh`
-  turn `swift build` into a signed `.app`, and the release pipeline.
-- [plans/design-system.md](plans/design-system.md) — the `Theme` type scale +
-  metrics, the macOS idioms applied, and the skills that govern UI work.
-- [plans/renaming.md](plans/renaming.md) — what `rename.sh` touches, what it
-  deliberately doesn't, and how to rename by hand if you'd rather.
-- [PROGRESS.md](PROGRESS.md) — running log; start appending your own entries.
-- [PROBLEMS.md](PROBLEMS.md) — "things that bit us" pattern lessons.
+- [plans/architecture.md](plans/architecture.md) — the layers, what each owns,
+  and the path from `git pull` to a rendered page.
+- [plans/wiki-model.md](plans/wiki-model.md) — the Quartz slug port, wikilink
+  resolution, the frontmatter subset, and the macro table. **The fiddliest code
+  in the app and the most heavily tested.**
+- [plans/render-pipeline.md](plans/render-pipeline.md) — the vendored JS, why
+  each package, the `citydesk://` scheme handler, and the CSP.
+- [plans/search.md](plans/search.md) — the FTS5 schema, tokenizer choices, and
+  query escaping.
+- [plans/ingestion.md](plans/ingestion.md) — the worktree lifecycle, the prompt
+  composition rule, and what CityDesk checks before and after the agent runs.
+- [plans/build-system.md](plans/build-system.md) — `make` / `build.sh`, the
+  release pipeline, and why the app is not sandboxed.
+- [plans/design-system.md](plans/design-system.md) — the two type systems (app
+  chrome vs document), the macOS idioms applied, and the visual gate.
+- [PROGRESS.md](PROGRESS.md) — running log, newest first.
+- [PROBLEMS.md](PROBLEMS.md) — things that bit us.
 - [SWIFTUI-RULES.md](SWIFTUI-RULES.md) — hard-won SwiftUI rules; the code here
-  already follows them, and they're cited inline where they apply.
+  follows them and cites them inline.
 
----
+## 6. Testing
 
-## 5. Make targets you'll use daily
+`make check` compiles and runs the suite. Two components carry the weight, both
+because they are exactly reproducible and silently wrong when they drift:
 
-```
-make check     compile only — the fast agent/CI gate (no bundle, no signing)
-make run       build the .app and launch it
-make test      run the swift-testing suite
-make           build build/Starter.app (debug)
-make icon      regenerate the app icon from scripts/make-icon.swift
-make clean     remove build/ .build/ dist/
-make dist      signed + notarized release zip (needs a vX.Y.Z tag + signing identity)
-make help      everything else
-```
+- **`QuartzSlugTests` / `GithubSluggerTests`** — a port of the wiki's own
+  `quartz/util/path.test.ts`, assertion for assertion, plus the two slugifiers'
+  divergent character rules. If these fail, the app shows links the website does
+  not have.
+- **`WikilinkResolutionTests`** — end-to-end resolution against a fixture wiki
+  carrying one of every hazard in the real corpus: a two-owner alias, a
+  case-mismatched alias, a `KEY - Title.md` filename with `&` and `(`, a folder
+  with no index note, an asset embed, and wikilinks inside code fences.
+- **`FuzzyMatcherTests` / `QuickSwitcherRankingTests`** — the ⌘O ranking.
+- **`CorpusTests`** — runs only when `CITYDESK_WIKI` points at a real clone
+  (`make test-corpus`). Resolves all ~673 wikilinks in ~300 pages, validates the
+  whole frontmatter schema, and parses the live macro table.
 
-The non-negotiable loop while developing: **`make check` after every change,
-`make run` before you trust a UI change.** SwiftUI's compile guarantees are
-weak; a passing build is not a passing app (`SWIFTUI-RULES.md` §9).
+`make shots` is the other half of the gate: it drives the real app through a
+plan of views and captures each one. See
+[plans/design-system.md](plans/design-system.md).
 
----
+## 7. The working agreement
 
-## 6. Adding your own features
-
-- **A new sidebar section:** add a case to `SidebarSection`, give it a title +
-  SF Symbol, and add a branch to `RootView.detail`. That's the whole wiring.
-- **Real data:** replace `SampleData` / `SampleItem` and point `AppModel` at
-  your model. The views take their data as parameters, so they don't care.
-- **A dependency:** add it under `dependencies` in `Package.swift` and to the
-  `Starter` target. If it ships a `*.bundle`, `build.sh` already copies bundles
-  into `Contents/Resources` for you.
-- **Type & layout:** every font and metric is in `Theme`. Add there, don't
-  sprinkle literals (`SWIFTUI-RULES.md` §2.4).
-
-See [plans/architecture.md](plans/architecture.md) for the longer version.
-
----
-
-## 7. The working agreement (skills & conventions)
-
-`CLAUDE.md` / `AGENTS.md` are the law for agents working in this repo. The
-short version, carried over from the template:
-
-- Drive UI work through the **macos-design**, **typography-designer**, and
-  **swiftui-pro** skills — before deciding on a design and after writing it.
 - Keep this `PLAN.md` as the index; put depth in `plans/`; log in `PROGRESS.md`.
-- You may open PRs, but never merge to `main` yourself.
-
-These are good defaults for any app you grow from here — keep them, or adjust
-`CLAUDE.md` to match your own workflow.
-
----
-
-## 8. Before you ship
-
-Distribution is real-signing + notarization, documented in
-[plans/build-system.md](plans/build-system.md). The one-time setup:
-
-```sh
-make notary-setup TEAM_ID=XXXXXXXXXX APPLE_ID=you@example.com   # interactive
-git tag v0.1.0 && make dist                                     # sign→notarize→zip
-```
-
-`make run` needs none of that — it ad-hoc signs, which is all you need to run
-your own app locally.
+- Run `make check` after every change and `make shots` before trusting a UI one.
+- You may open PRs. **Never merge to `main` yourself** — and the app must never
+  merge one either.

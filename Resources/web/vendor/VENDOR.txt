@@ -1,0 +1,13 @@
+CityDesk vendored web assets — regenerate with scripts/vendor-web.sh
+Generated: 2026-08-22T02:55:34Z
+
+markdown-it            15.0.0   MIT   dist/browser/markdown-it.umd.min.js  -> window.markdownit
+markdown-it-footnote   4.0.0    MIT   dist/markdown-it-footnote.min.js     -> window.markdownitFootnote
+markdown-it-mark       4.0.0    MIT   dist/markdown-it-mark.min.js         -> window.markdownitMark
+markdown-it-anchor     9.2.1    Unlicense dist/markdownItAnchor.umd.js         -> window.markdownItAnchor
+github-slugger         2.0.0    MIT   UMD shim (see script)                -> window.GithubSlugger
+katex                  0.16.47  MIT   dist/katex.min.{js,css} + 20 woff2    -> window.katex
+pseudocode (css)       2.4.1    MIT   build/pseudocode.min.css
+pseudocode (js)        PATCHED FORK from axhoover/cryptology.city@75f254251cd77489c40df4e664b9ccf4521b976a
+                       quartz/static/pseudocode.js — adds \algname{...};
+                       sha256 98fa1ecb0383e71e3c5d85b26b18e4f625800fbedc628fc14e445f4aa414a8e2   -> window.pseudocode

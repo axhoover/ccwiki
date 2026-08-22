@@ -6,9 +6,9 @@ provider (`swift`, `codesign`, `notarytool`, `stapler`).
 
 ## The pieces
 
-- **`Package.swift`** — one `executableTarget` (`Starter`) + one `testTarget`.
+- **`Package.swift`** — one `executableTarget` (`CityDesk`) + one `testTarget`.
   Swift 6 language mode. Zero third-party dependencies.
-- **`build.sh`** — `swift build` → assemble `build/Starter.app` (Info.plist
+- **`build.sh`** — `swift build` → assemble `build/CityDesk.app` (Info.plist
   with `__SHORT_VERSION__`/`__BUILD_VERSION__` substituted, `PkgInfo`, any
   dependency `*.bundle`s copied into `Contents/Resources`, the icon) → codesign.
   Falls back to ad-hoc signing (`-`) when no real identity is available, so
@@ -16,9 +16,9 @@ provider (`swift`, `codesign`, `notarytool`, `stapler`).
 - **`Makefile`** — the front door. `make help` lists everything.
 - **`Resources/Info.plist`** — bundle metadata. Version strings are
   placeholders filled at build time.
-- **`Starter/Starter.entitlements`** — App Sandbox **on** by default (the safe
-  modern baseline, required for the App Store). Add capabilities as needed; the
-  file documents the common ones.
+- **`CityDesk/CityDesk.entitlements`** — App Sandbox **off**, deliberately. See
+  "The app is not sandboxed" below; the template's default was on, and CityDesk
+  cannot use it.
 
 ## Permissions & capabilities
 
@@ -45,7 +45,7 @@ doing it for you:
 | `make check`  | `swift build` only — fast compile gate for CI/agents      |
 | `make test`   | `swift test` (swift-testing)                              |
 | `make run`    | build the `.app`, ad-hoc sign, `open` it                 |
-| `make` / build| `build/Starter.app` (debug)                              |
+| `make` / build| `build/CityDesk.app` (debug)                              |
 | `make icon`   | regenerate `build/AppIcon.icns`                          |
 | `make clean`  | remove `build/ .build/ dist/`                            |
 
@@ -78,3 +78,70 @@ make notary-setup TEAM_ID=XXXXXXXXXX APPLE_ID=you@example.com
 
 The minimum a change must pass: `make check && make test`. The minimum a *UI*
 change must pass: also `make run` and look at it — see `SWIFTUI-RULES.md` §9.
+
+
+---
+
+# CityDesk additions
+
+The sections above are the template's build system, and they still describe it
+accurately. Four things are specific to this app.
+
+## Vendored web resources are plain files, not a SwiftPM bundle
+
+`build.sh` copies `Resources/web/` into `Contents/Resources/web`. It is
+deliberately **not** a SwiftPM `resources:` declaration, and this is not a style
+preference:
+
+SwiftPM's generated accessor resolves `Bundle.module` against
+`Bundle.main.bundleURL`, which for an app is `CityDesk.app` — the bundle
+**root**, not `Contents/Resources`. So `Bundle.module` looks for
+`CityDesk.app/CityDesk_CityDesk.bundle`. It appears to work on the machine that
+built it only because the accessor falls back to a hardcoded absolute `.build`
+path; ship that to anyone else's Mac and the app hard-crashes on first resource
+access. Putting the bundle at the `.app` root does fix the lookup, and then
+`codesign --verify --strict` fails with "unsealed contents present in the bundle
+root", which breaks `make dist` and notarization.
+
+Plain files in `Contents/Resources` are the only strictly-valid home.
+`Bundle.main.resourceURL` finds them, and `codesign --verify --strict` passes.
+
+`./scripts/vendor-web.sh` fetches them; `--check` verifies an installed tree.
+Run it after a fresh clone of this repo — the app will not render without it,
+and `build.sh` prints a warning if the directory is missing.
+
+## The app is not sandboxed
+
+`CityDesk/CityDesk.entitlements` has no `com.apple.security.app-sandbox` key at
+all. The app's whole job is to drive developer tooling that lives outside any
+container — `git` against a clone in Application Support, and `claude` and `gh`
+inside git worktrees — and a sandboxed process cannot spawn arbitrary helper
+executables. CityDesk therefore ships outside the Mac App Store.
+
+The two hardened-runtime exceptions (`disable-library-validation`, `allow-jit`)
+are no-ops for the ad-hoc `make run` build and are what a Developer ID +
+notarized build needs to keep working.
+
+**Keep double hyphens out of the comments in that file.** AMFI parses
+entitlements with a strict XML parser that rejects `--` inside a comment, and
+the failure surfaces during `codesign` as an unhelpful
+`AMFIUnserializeXML: syntax error near line N`.
+
+## No SPM dependencies, including for SQLite
+
+`Package.swift` stays at zero configuration. `import SQLite3` compiles and
+auto-links `/usr/lib/libsqlite3.dylib` because the SDK's module map carries
+`link "sqlite3"`. No `systemLibrary` target, no `linkerSettings`, no shim. See
+[search.md](search.md).
+
+## Make targets specific to this app
+
+```
+make check         compile + 47 unit tests — the gate after every change
+make test-corpus   …and validate against the real cloned wiki
+make shots         drive the app and capture screenshots (the visual gate)
+```
+
+`make check` runs the tests because a compile-only gate on a SwiftUI app tells
+you almost nothing. `make shots` is documented in
+[design-system.md](design-system.md).

@@ -3,10 +3,72 @@
 Running log. Append an entry per meaningful change: what you did, what you
 learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
-> Once you've renamed the template, the entry below is history — leave it as
-> the record of where the scaffold came from, and log your own work above it.
-
 ---
+
+## 2026-08-22 — M1: the reader
+
+CityDesk reads the wiki offline. `make check` (47 tests) and `make shots` both
+pass; screenshots are in `build/shots/`.
+
+**Recon first.** Seven parallel agents read the wiki repo and the platform
+before any code was written, and three findings changed the design:
+
+1. **The LaTeX macros are not in `Glossary/latex-macros.md`.** That page is a
+   documentation table of macro *names*. The definitions are in `macros.ts` at
+   the repo root, as a TS `Record<string,string>`, and `quartz.config.ts` feeds
+   that object to both `Plugin.Latex` and `Plugin.Pseudocode`. The brief said to
+   inspect how the glossary page stores them; the answer is that it does not.
+2. **The wiki ships a patched `pseudocode.js`** with an `\algname{...}`
+   directive that upstream `pseudocode@2.4.1` does not have — and all 58
+   pseudocode blocks in the corpus use it. Vendoring from npm would throw a
+   parse error on every algorithm block in the wiki. `scripts/vendor-web.sh`
+   pulls it from a pinned wiki commit and checks its sha256.
+3. **The repo already has an ingestion prompt** —
+   `.github/prompts/paper-submission.md`, 238 lines, with five merged `[paper]`
+   commits behind it. So `prompts/ingest.md` here is an envelope that points the
+   agent at the repo's own contract read from the live worktree, and adds only
+   the local checks the server pipeline cannot run. No house style is compiled
+   into the binary.
+
+**Built.** The Quartz slug port (`path.ts` line by line, plus github-slugger),
+the wikilink resolver, a YAML-subset frontmatter parser, the `macros.ts`
+tokenizer, the page index with backlinks, the `citydesk://` scheme handler and
+web controller, the vendored render pipeline, SQLite FTS5 search, the fuzzy
+quick-switcher, git sync, and the three-pane UI. Nine hundred lines of it are
+ports; the value is in matching Quartz exactly rather than approximately.
+
+**Gates.** `make check` = compile + 47 unit tests. `make test-corpus`
+additionally resolves all 673 wikilinks in the real 293-page corpus: 660 pages,
+1 asset, 6 folders, 3 same-page anchors, and exactly the 3 known dead links —
+matching the recon's independent count. All 297 pages pass the frontmatter
+schema check, and all 122 macros parse.
+
+**What surprised us.**
+
+- The quick switcher's model was correct and its *view* was stale.
+  `ForEach(Array(results.enumerated()), id: \.element.id)` plus index-based
+  selection meant the footer count updated on every keystroke while the rows
+  kept showing the previous query. Unit tests could not have caught it; the
+  screenshot gate did, on its first run. The rule is now: selection by id,
+  never by index, and never enumerate into a `ForEach`.
+- `screencapture` needs the Screen Recording permission, which an agent session
+  does not have by default. The app grew a `ScreenshotRunner` that drives itself
+  through a plan of views and hands off to `scripts/shots.sh` — which turns out
+  to be a better gate than ad-hoc screenshots anyway, because it is repeatable.
+- Two path bugs cost real time, both from trailing slashes and strict parsers:
+  a URL built from a directory carries a trailing `/`, so the scheme handler's
+  `hasPrefix(root + "/")` containment check was testing for a double slash and
+  404ing every asset; and AMFI rejects `--` inside an XML comment in an
+  entitlements file, surfacing as `syntax error near line 16` during codesign.
+
+**Deliberate divergences from the website**, both documented in
+`plans/wiki-model.md`: unresolved wikilinks render as visibly broken rather than
+as links to nowhere, and the reference byline paragraph is hidden in the page
+because the app's own reference bar carries it and stays visible while scrolling.
+Everything else — including Quartz's quirks around repeated headings, `a#x#y`
+anchors, and case-sensitive slug matching — is reproduced rather than fixed.
+
+**Next: M2, ingestion.** Designed in `plans/ingestion.md`, not yet built.
 
 ## 2026-06-28 — Metabolized learnings from the first app on this template
 
@@ -30,7 +92,7 @@ deleted the copy. Where each landed:
 Appended §11/§12 rather than renumbering so the existing §9/§10 cross-references
 in `PLAN.md` / `PROGRESS.md` stay valid.
 
-## 2026-06-28 — Template scaffold (the "Starter" baseline)
+## 2026-06-28 — Template scaffold (the "CityDesk" baseline)
 
 Built the template this repo ships as:
 
@@ -38,7 +100,7 @@ Built the template this repo ships as:
   generalized: `Package.swift` (one exe + one test target, Swift 6 mode, no
   deps), `build.sh` (swift build → `.app` → codesign, ad-hoc fallback),
   `Makefile` (build/check/test/run/install + sign→notarize→staple→zip `dist`
-  pipeline), `Resources/Info.plist`, sandboxed `Starter.entitlements`,
+  pipeline), `Resources/Info.plist`, sandboxed `CityDesk.entitlements`,
   `scripts/make-icon.swift` (pure-CoreGraphics doc-and-table glyph).
 - **App**: `NavigationSplitView` with a `SidebarSection` enum driving a lorem
   reading column (`ReadingView`, measure-capped) and a native sortable `Table`

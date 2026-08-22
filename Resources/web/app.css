@@ -1,0 +1,435 @@
+/* CityDesk reader theme.
+ *
+ * The page inside the web view is a *document*, not app chrome — so it is set
+ * in a serif at a reading size with a capped measure, while the surrounding
+ * SwiftUI shell carries the 13 px system-font macOS UI. `ui-serif` resolves to
+ * New York on macOS, which is the closest offline stand-in for the website's
+ * Source Serif 4.
+ *
+ * Light and dark are designed separately rather than inverted: dark mode pulls
+ * the backgrounds further apart and lifts the accent, because there is no
+ * ambient light doing that work for it.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #ffffff;
+  --bg-raised: #f7f6fa;
+  --bg-sunken: #f0edf7;
+  --rule: rgba(0, 0, 0, 0.09);
+  --rule-strong: rgba(0, 0, 0, 0.16);
+
+  --text: #1a0a2e;
+  --text-secondary: #5c5470;
+  --text-tertiary: #8d86a0;
+
+  --accent: #5a1f8a;
+  --accent-hover: #7a30b8;
+  --accent-wash: rgba(90, 31, 138, 0.08);
+  --broken: #b3261e;
+  --highlight: #e0c8ff88;
+
+  --measure: 42rem;
+  --gutter: 2.75rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16141a;
+    --bg-raised: #201d27;
+    --bg-sunken: #2a2632;
+    --rule: rgba(255, 255, 255, 0.11);
+    --rule-strong: rgba(255, 255, 255, 0.2);
+
+    --text: #ece9f2;
+    --text-secondary: #a49cb5;
+    --text-tertiary: #7a7288;
+
+    --accent: #c39af0;
+    --accent-hover: #d9bcff;
+    --accent-wash: rgba(176, 122, 212, 0.14);
+    --broken: #ff8a80;
+    --highlight: #7030a877;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html {
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-serif, "New York", Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--accent-wash); }
+
+/* ------------------------------------------------------------------ layout */
+
+.page {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 2.25rem var(--gutter) 6rem;
+}
+
+@media (max-width: 600px) {
+  :root { --gutter: 1.5rem; }
+}
+
+/* --------------------------------------------------------------- headings */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  margin: 0;
+  scroll-margin-top: 1.25rem;
+}
+
+h1 { font-size: 1.9rem; font-weight: 700; letter-spacing: -0.024em; margin-bottom: 0.5rem; }
+h2 { font-size: 1.36rem; margin: 2.4rem 0 0.6rem; }
+h3 { font-size: 1.08rem; margin: 1.8rem 0 0.4rem; }
+h4 { font-size: 0.96rem; margin: 1.4rem 0 0.3rem; color: var(--text-secondary); }
+
+/* The first H1 is the page title; a later H1 is a top-level section divider
+ * (`# Variations`, `# Other results`) and reads better with a rule above it. */
+h1 + p { margin-top: 0.35rem; }
+
+.page > h1:not(:first-child) {
+  font-size: 1.5rem;
+  margin-top: 3rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+}
+
+h2 + h3 { margin-top: 1rem; }
+
+/* ------------------------------------------------------------------- text */
+
+p, ul, ol, blockquote, table, .math-display, .pseudocode-container {
+  margin: 0 0 1.05rem;
+}
+
+li { margin: 0.22rem 0; }
+li > ul, li > ol { margin: 0.22rem 0 0.35rem; }
+
+ul, ol { padding-left: 1.4rem; }
+
+strong { font-weight: 650; }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 2rem 0;
+}
+
+blockquote {
+  border-left: 2px solid var(--rule-strong);
+  padding: 0.1rem 0 0.1rem 1rem;
+  color: var(--text-secondary);
+}
+
+mark {
+  background: var(--highlight);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 0.12em;
+}
+
+/* ------------------------------------------------------------------ links */
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+a:hover {
+  color: var(--accent-hover);
+  border-bottom-color: var(--accent-hover);
+}
+
+a.external::after {
+  content: "↗";
+  font-size: 0.72em;
+  vertical-align: 0.35em;
+  margin-left: 0.12em;
+  opacity: 0.6;
+}
+
+/* A wikilink whose target does not exist. The website silently renders these
+ * as links to nowhere; showing them as broken is strictly more useful when the
+ * whole point of the app is editing the wiki. */
+a.broken {
+  color: var(--broken);
+  border-bottom: 1px dashed color-mix(in srgb, var(--broken) 50%, transparent);
+  cursor: help;
+}
+
+a.folder {
+  white-space: nowrap;
+}
+
+a.folder::before {
+  content: "";
+  display: inline-block;
+  width: 0.72em;
+  height: 0.62em;
+  margin-right: 0.28em;
+  vertical-align: -0.02em;
+  border-radius: 1.5px 3px 3px 3px;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+/* ------------------------------------------------------------------- code */
+
+code, kbd, samp, pre {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 0.855em;
+}
+
+:not(pre) > code {
+  background: var(--bg-sunken);
+  border-radius: 4px;
+  padding: 0.1em 0.34em;
+}
+
+pre {
+  background: var(--bg-sunken);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------- math */
+
+.katex { font-size: 1.045em; }
+
+/* Long display equations scroll inside their own box rather than widening the
+ * page — `\Adv^{\mathrm{iprf}}_{\mathsf{iPRF},\calA}(\secpar) := …` overflows a
+ * 42rem measure easily. */
+.math-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.35rem 0;
+}
+
+.math-display .katex-display { margin: 0.6rem 0; }
+
+.katex-error {
+  color: var(--broken) !important;
+  background: color-mix(in srgb, var(--broken) 10%, transparent);
+  border-radius: 3px;
+  padding: 0 0.2em;
+}
+
+.math-error {
+  color: var(--broken);
+  background: color-mix(in srgb, var(--broken) 10%, transparent);
+}
+
+/* ------------------------------------------------------------- pseudocode */
+
+.ps-root {
+  font-size: 0.94rem;
+}
+
+.pseudocode-container {
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  padding: 0.35rem 0.9rem 0.55rem;
+  overflow-x: auto;
+}
+
+.ps-algorithm { border-color: var(--rule-strong) !important; }
+.ps-algorithm.with-caption > .ps-line:first-child { border-color: var(--rule-strong) !important; }
+.ps-root .ps-comment { color: var(--text-tertiary); }
+.ps-root .ps-keyword { color: var(--text); }
+
+/* The site groups a `\algname{Game}` block with the oracle blocks that follow
+ * it and lays them out side by side; the cryptography reads far worse stacked.
+ * Falls back to stacking when the window is narrow. */
+.game-group {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  margin: 0 0 1.05rem;
+}
+
+.game-group > .pseudocode-container { margin: 0; flex: 1 1 0; min-width: 0; }
+.game-group > .oracle-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.game-group > .oracle-column > .pseudocode-container { margin: 0; }
+
+@media (max-width: 760px) {
+  .game-group { flex-direction: column; }
+  .game-group > .pseudocode-container,
+  .game-group > .oracle-column { width: 100%; }
+}
+
+.pseudocode-error {
+  background: color-mix(in srgb, var(--broken) 8%, var(--bg-sunken));
+  border: 1px solid color-mix(in srgb, var(--broken) 35%, transparent);
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+/* ----------------------------------------------------------------- tables */
+
+.table-scroll { overflow-x: auto; margin: 0 0 1.05rem; }
+
+table {
+  border-collapse: collapse;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.87rem;
+  width: 100%;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.36rem 0.7rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom-color: var(--rule-strong);
+  white-space: nowrap;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+
+/* -------------------------------------------------------------- callouts */
+
+.callout {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--callout-tint, var(--text-tertiary));
+  border-radius: 7px;
+  background: var(--bg-raised);
+  padding: 0.7rem 0.95rem;
+  margin: 0 0 1.05rem;
+}
+
+.callout-title {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--callout-tint, var(--text-secondary));
+  margin-bottom: 0.3rem;
+}
+
+.callout > :last-child { margin-bottom: 0; }
+.callout-note     { --callout-tint: #3478f6; }
+.callout-tip      { --callout-tint: #1f9d55; }
+.callout-warning  { --callout-tint: #c2760a; }
+.callout-danger   { --callout-tint: var(--broken); }
+.callout-example  { --callout-tint: var(--accent); }
+.callout-quote    { --callout-tint: var(--text-tertiary); }
+
+/* -------------------------------------------------------------- footnotes */
+
+.footnotes {
+  margin-top: 3rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.footnotes hr { display: none; }
+.footnote-backref { border-bottom: none; }
+
+/* ------------------------------------------------------- reference byline */
+
+/* The paragraph immediately under a reference H1:
+ * `**Authors:** … | **Venue:** … | [Source](…)`
+ *
+ * Hidden, because the app's own reference bar carries exactly this and stays
+ * visible while you scroll. The rule below is what styles it if that bar is
+ * ever removed. */
+.byline {
+  display: none;
+}
+
+.byline-visible {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.855rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 1.6rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.byline strong { color: var(--text-tertiary); font-weight: 600; }
+
+/* ------------------------------------------------------------ folder page */
+
+.folder-list { list-style: none; padding: 0; }
+
+.folder-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.32rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.folder-list .folder-title { flex: 1 1 auto; }
+.folder-list .folder-meta {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.76rem;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- notices */
+
+.notice {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.82rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  padding: 0.6rem 0.8rem;
+  margin: 0 0 1.4rem;
+  color: var(--text-secondary);
+}
+
+.notice-warning {
+  border-color: color-mix(in srgb, #c2760a 45%, transparent);
+  background: color-mix(in srgb, #c2760a 8%, var(--bg-raised));
+}
+
+/* Landing/empty state shown before a page is selected. */
+.placeholder {
+  color: var(--text-tertiary);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  text-align: center;
+  padding: 6rem 0;
+}
