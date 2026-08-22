@@ -147,7 +147,7 @@ struct PageRenderer: Sendable {
             }
 
         var html = "<h1>\(Self.escape(slug))</h1>\n"
-        html += "<p class=\"byline\">\(children.count) page"
+        html += "<p class=\"folder-count\">\(children.count) page"
         html += children.count == 1 ? "" : "s"
         html += "</p>\n<ul class=\"folder-list\">\n"
         for page in children {

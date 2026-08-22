@@ -23,7 +23,7 @@ struct ReaderView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if findPresented { findBar }
         }
-        .navigationTitle(model.currentPage?.displayTitle ?? "CityDesk")
+        .navigationTitle(documentTitle)
         .navigationSubtitle(subtitle)
         .focusedSceneValue(\.findAction, FindAction {
             findPresented = true
@@ -136,6 +136,12 @@ struct ReaderView: View {
         if source.contains("arxiv.org") { return "arXiv" }
         if source.contains("doi.org") { return "DOI" }
         return "Source"
+    }
+
+    private var documentTitle: String {
+        if let page = model.currentPage { return page.displayTitle }
+        if case .folder(let slug) = model.location { return slug }
+        return "CityDesk"
     }
 
     /// A reference's frontmatter `title` is its citation key, which is exactly

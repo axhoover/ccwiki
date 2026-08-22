@@ -390,6 +390,15 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* ------------------------------------------------------------ folder page */
 
+.folder-count {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.855rem;
+  color: var(--text-secondary);
+  margin: 0 0 1.6rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+
 .folder-list { list-style: none; padding: 0; }
 
 .folder-list li {
