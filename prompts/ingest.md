@@ -51,12 +51,12 @@ alone; nothing else is reading it.
 - **Your shell already starts in that directory. Do not `cd`.** Tool permissions
   match on a command's first word, so `cd X && git status` is denied while
   `git status` is allowed — a previous run lost seven turns to exactly this.
-- **The path contains a space.** On the rare occasion you do need it, quote it,
-  and never hand a percent-encoded form to a tool: `Application%20Support` is
-  not a directory, and node fails with `ENOENT` on it. The repo's own
-  `scripts/*.mjs` read `import.meta.url.pathname` without decoding it, so if one
-  of them chokes on the path, symlink the worktree somewhere space-free and run
-  it from there.
+- **Do not redirect output to anywhere outside the worktree.** `npm ci >
+  /tmp/log` is refused as a write outside the working directory, which took a
+  previous run's `npm ci` down with it. Redirect inside the worktree, or just
+  let the output come back to you.
+- **To read a PDF, use the `Read` tool.** It handles PDFs directly. Do not shell
+  out to `pdftotext`.
 - Branch: `{{BRANCH}}`, already created for you off `origin/{{BASE_BRANCH}}`.
 - {{SKILL_NOTE}}
 
@@ -192,6 +192,11 @@ of a turn budget you may need for the lint.
   filters the *output*, not the analysis: an alias collision your new page causes
   is reported against the *pre-existing* page, so a per-file run hides the very
   error you introduced.
+- The worktree path deliberately contains no spaces, so the repo's scripts —
+  several of which read `import.meta.url.pathname` without percent-decoding it —
+  work directly. You should not need a symlink or `--preserve-symlinks`; if you
+  find yourself reaching for one, say so in the PR body, because something has
+  changed.
 - `npm run sync-cryptobib` prints roughly a hundred pre-existing drift warnings.
   That is the accepted steady state. **Do not fix them**; you are only checking
   that it does not fail on *your* key.

@@ -22,8 +22,13 @@ of it would teach agents the wrong thing forever.
 
 ## 2. Worktree lifecycle
 
+**Worktrees live in `~/Library/Caches/CCwiki/worktrees`, not Application
+Support**, because that path contains a space and a worktree is where
+third-party tooling runs. See [PROBLEMS.md](../PROBLEMS.md) — it cost two jobs
+before it was fixed properly.
+
 ```
-git -C repo worktree add ../worktrees/<job-id> -b ingest/<slug> origin/<default>
+git -C repo worktree add <caches>/worktrees/<job-id> -b ingest/<slug> origin/<default>
 cd worktrees/<job-id>
 git submodule update --init --depth 1 --recursive     # cryptobib is a submodule
 claude -p "<composed prompt>"

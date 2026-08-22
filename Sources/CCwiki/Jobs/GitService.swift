@@ -247,6 +247,22 @@ struct GitService: Sendable {
         return "\(preferred)-\(UUID().uuidString.prefix(8))"
     }
 
+    /// Re-register worktrees whose directory has moved.
+    ///
+    /// A worktree records its own absolute path in two places, so moving one
+    /// leaves git unable to find it. `git worktree repair` fixes both sides,
+    /// and is a no-op when nothing moved — cheap enough to run on every sync.
+    func repairWorktrees(clone: URL, worktreeRoot: URL) async {
+        let manager = FileManager.default
+        let entries = (try? manager.contentsOfDirectory(
+            at: worktreeRoot, includingPropertiesForKeys: nil)) ?? []
+        guard !entries.isEmpty else { return }
+
+        _ = await run(["-C", clone.path(percentEncoded: false), "worktree", "repair"]
+            + entries.map { $0.path(percentEncoded: false) })
+        _ = await run(["-C", clone.path(percentEncoded: false), "worktree", "prune"])
+    }
+
     func removeWorktree(clone: URL, at path: URL, force: Bool) async -> Bool {
         var arguments = [
             "-C", clone.path(percentEncoded: false),

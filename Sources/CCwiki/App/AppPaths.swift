@@ -19,14 +19,32 @@ struct AppPaths: Sendable {
     static let defaultBranch = "main"
 
     let support: URL
+    /// Space-free scratch space. See `worktrees`.
+    let cacheRoot: URL
 
     /// The pull-only clone. The app fast-forwards it and reads it; it never
     /// commits, branches or writes content here.
     var clone: URL { support.appending(path: "repo") }
     /// `content/` inside the clone — everything the reader shows.
     var content: URL { clone.appending(path: "content") }
-    /// One worktree per ingestion job.
-    var worktrees: URL { support.appending(path: "worktrees") }
+    /// One worktree per ingestion job — **deliberately not under Application
+    /// Support**.
+    ///
+    /// That path contains a space, and a worktree is where third-party
+    /// developer tooling runs: `npm`, `npx`, `tsx`, `quartz`. The wiki's own
+    /// `scripts/*.mjs` read `import.meta.url.pathname` without percent-decoding
+    /// it, so a space becomes `%20` and they fail with `ENOENT`. Two consecutive
+    /// ingestion jobs lost turns to this — one worked around it with a symlink
+    /// (which then needed `ln`, which is not in the tool allow-list), the other
+    /// gave up on `sync-cryptobib` entirely and verified the citation key by
+    /// hand.
+    ///
+    /// `~/Library/Caches` has no space and is exactly the right semantics: a
+    /// worktree is disposable by construction — created per job, pruned on
+    /// success. If the OS ever purges one mid-job, git fails loudly and the
+    /// transcript is still in `logs/`, which stays under Application Support
+    /// with everything else durable.
+    var worktrees: URL { cacheRoot.appending(path: "worktrees") }
     /// Dropped PDFs. These are inputs to a job and never enter the repo.
     var library: URL { support.appending(path: "library") }
     var index: URL { support.appending(path: "index") }
@@ -42,12 +60,52 @@ struct AppPaths: Sendable {
                 .appending(path: "Resources/web")
     }
 
+    init(support: URL, cacheRoot: URL) {
+        self.support = support
+        self.cacheRoot = cacheRoot
+    }
+
+    /// Everything under one root. For tests and scratch trees, where the
+    /// space-free split that `standard()` makes has nothing to protect against.
+    init(support: URL) {
+        self.init(support: support, cacheRoot: support)
+    }
+
     static func standard() -> AppPaths {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
         let support = base.appending(path: "CCwiki")
         migrateFromEarlierName(into: support, base: base)
-        return AppPaths(support: support)
+
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Caches")
+        let paths = AppPaths(support: support, cacheRoot: caches.appending(path: "CCwiki"))
+        paths.migrateWorktreesOutOfSupport()
+        return paths
+    }
+
+    /// Move worktrees left in the old, space-bearing location.
+    ///
+    /// They belong to jobs that failed and were kept for inspection, so
+    /// stranding them would strand the evidence.
+    private func migrateWorktreesOutOfSupport() {
+        let manager = FileManager.default
+        let old = support.appending(path: "worktrees")
+        guard let stale = try? manager.contentsOfDirectory(
+            at: old, includingPropertiesForKeys: nil), !stale.isEmpty
+        else { return }
+
+        try? manager.createDirectory(at: worktrees, withIntermediateDirectories: true)
+        for directory in stale {
+            let destination = worktrees.appending(path: directory.lastPathComponent)
+            guard !manager.fileExists(atPath: destination.path(percentEncoded: false)) else {
+                continue
+            }
+            try? manager.moveItem(at: directory, to: destination)
+        }
+        // A git worktree records its own path, so anything moved has to be
+        // re-registered. `git worktree repair` does exactly that, and the
+        // app runs it on the next sync (see GitService.repairWorktrees).
     }
 
     /// The app was called CityDesk before it was called CCwiki.
@@ -67,7 +125,7 @@ struct AppPaths: Sendable {
 
     /// Creates the directory tree. Called once at launch; cheap and idempotent.
     func createDirectories() throws {
-        for directory in [support, worktrees, library, index, logs] {
+        for directory in [support, cacheRoot, worktrees, library, index, logs] {
             try FileManager.default.createDirectory(
                 at: directory, withIntermediateDirectories: true)
         }

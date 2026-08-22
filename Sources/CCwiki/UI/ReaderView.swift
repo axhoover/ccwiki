@@ -59,6 +59,18 @@ struct ReaderView: View {
 
                 Spacer(minLength: Theme.small)
 
+                // On a listing, the one control worth having to hand. Half the
+                // Primitives are stubs, so this is the difference between a
+                // page of things to read and a page of things to write.
+                if case .folder = model.location {
+                    Toggle("Hide stubs", isOn: Binding(
+                        get: { model.hidesStubs },
+                        set: { model.hidesStubs = $0 }))
+                        .toggleStyle(.checkbox)
+                        .font(Theme.Fonts.meta)
+                        .help("Also applies to the sidebar. Change it in Settings (⌘,) too.")
+                }
+
                 if let page = model.currentPage, let modified = model.modifiedDates[page.path] {
                     Text(modified, format: .relative(presentation: .named))
                         .font(Theme.Fonts.meta)

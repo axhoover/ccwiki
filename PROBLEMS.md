@@ -107,20 +107,47 @@ runaway job is the user's Cancel button and the live cost readout**, both of
 which the jobs panel already has — not a number chosen in advance by someone who
 has not watched the job run.
 
-## The worktree path contains a space, and that costs agent turns
+## A space in the worktree path costs agent turns — move the directory
 
 `~/Library/Application Support/CCwiki/worktrees/<id>` is the conventionally
-correct place for it, and CCwiki's own subprocess calls are safe — arguments
-go through `Process.arguments`, never a shell. But an *agent* composing its own
-shell commands has to quote it every time, and the first real ingestion job lost
-turns to `ENOENT: no such file or directory, scandir
-'/Users/…/Application%20Support/…/content'` — a percent-encoded path handed to
-node.
+correct home, and CCwiki's own subprocess calls are safe: arguments go through
+`Process.arguments`, never a shell. But a worktree is where *third-party*
+tooling runs — `npm`, `npx`, `tsx`, `quartz` — and the wiki's own
+`scripts/*.mjs` read `import.meta.url.pathname` without percent-decoding it, so
+the space arrives as `%20` and they fail with `ENOENT`.
 
-`prompts/ingest.md` now says so explicitly and tells the agent to run from the
-worktree rather than pass absolute paths around. Moving the directory somewhere
-space-free was considered and rejected: Application Support is where this
-belongs, and a warning is cheaper than a non-standard location.
+**The first fix was a warning in the prompt. That was wrong, and two consecutive
+jobs proved it.** One symlinked the worktree into `/tmp` to dodge the path —
+which then needed `ln`, not in the tool allow-list, so it burned three denials
+getting there. The next gave up on `sync-cryptobib` entirely and verified the
+citation key by hand. A warning does not fix a broken path; it just moves the
+cost onto the agent.
+
+Worktrees now live in `~/Library/Caches/CCwiki/worktrees`, which has no space
+and is exactly the right semantics: a worktree is disposable by construction,
+created per job and pruned on success. Everything durable — the clone, the PDF
+library, the index, the job transcripts — stays in Application Support. A git
+worktree records its own absolute path, so `GitService.repairWorktrees` runs
+`git worktree repair` on load to re-register anything that moved.
+
+**Rule:** if third-party tooling will run inside a directory, the path has to be
+boring. Warning the tooling's operator is not a fix.
+
+## Two guardrails that deny commands your allow-list permits
+
+Claude Code refuses these regardless of `--allowedTools`, and both bit a real
+job:
+
+- **Redirection outside the working directory.** `npm ci > /tmp/log 2>&1` is
+  refused as a write outside the session's allowed directories — and it takes
+  the whole compound command with it, so an allow-listed `npm ci` never runs.
+- **Compound commands** where any single part is unapproved. `cd X && git
+  status` is denied for the `cd`, not the `git`.
+
+`prompts/ingest.md` now says both plainly. The general shape: the allow-list
+governs what the agent *may* do, and these guardrails govern *how* it may
+phrase it — a prompt that only addresses the first still loses turns to the
+second.
 
 ## `showSettingsWindow:` silently does nothing for a SwiftUI `Settings` scene
 

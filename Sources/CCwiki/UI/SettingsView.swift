@@ -15,6 +15,8 @@ struct SettingsView: View {
         TabView {
             toolsTab
                 .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
+            readingTab
+                .tabItem { Label("Reading", systemImage: "book") }
             storageTab
                 .tabItem { Label("Storage", systemImage: "internaldrive") }
             aboutTab
@@ -117,6 +119,33 @@ struct SettingsView: View {
     }
 
     // MARK: Storage
+
+    private var readingTab: some View {
+        Form {
+            Section {
+                Toggle("Hide stub pages", isOn: Binding(
+                    get: { model.hidesStubs },
+                    set: { model.hidesStubs = $0 }))
+                if model.hiddenStubCount > 0 {
+                    LabeledContent("Currently hidden") {
+                        Text("\(model.hiddenStubCount) pages")
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            } header: {
+                Text("Sidebar and listings")
+            } footer: {
+                Text("A stub is a page with little on it yet — half the Primitives are "
+                    + "stubs today. Hide them to read; show them to find work. Links, ⌘O "
+                    + "and search always reach every page either way.")
+                .font(Theme.Fonts.meta)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
 
     private var storageTab: some View {
         Form {

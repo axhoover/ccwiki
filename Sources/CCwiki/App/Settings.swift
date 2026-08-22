@@ -10,6 +10,18 @@ import Foundation
 struct CCwikiSettings: Sendable {
 
     private static let toolOverrideKey = "ccwiki.toolOverrides"
+    private static let hidesStubsKey = "ccwiki.hidesStubs"
+
+    /// Hide `status: stub` pages in the sidebar and on folder listings.
+    ///
+    /// Worth a preference because the ratio is lopsided and uneven: 19 of 38
+    /// Primitives are stubs, against 4 of 200 References. Someone reading
+    /// wants the pages with something on them; someone looking for work to do
+    /// wants the opposite, which is why this is a toggle and not a default.
+    static var hidesStubs: Bool {
+        get { UserDefaults.standard.bool(forKey: hidesStubsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: hidesStubsKey) }
+    }
 
     /// `ToolLocator.Tool.rawValue` → an absolute path the user picked.
     static func toolOverrides() -> [ToolLocator.Tool: String] {

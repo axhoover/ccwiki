@@ -5,6 +5,40 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-08-22 — Folder listings grow up; the ingestion path stops fighting itself
+
+**Folder pages** now carry sticky alphabetical dividers and a **Hide stubs**
+checkbox, mirrored in Settings and applied to the sidebar as well. The numbers
+argue for it: 19 of 38 Primitives are stubs, against 4 of 200 References — so
+"hide stubs" is the difference between a page of things to read and a page of
+things to write, and it is a toggle rather than a default because both are
+legitimate. The listing says how many it is hiding.
+
+**The ingestion path's space problem is fixed at the cause.** A second real job
+threw three confusing symptoms — `sync-cryptobib` failing, `npm ci` "not
+installed", and a denied `ln` — and every one traced to the same thing: the
+worktree lived under `~/Library/Application Support`, whose space arrives as
+`%20` in the wiki's own `scripts/*.mjs`, which read `import.meta.url.pathname`
+without decoding it. The agent worked around it with a symlink into `/tmp`,
+which then needed `ln`, which is not in the allow-list.
+
+**The earlier fix — a warning in the prompt — was wrong, and I said so in
+PROBLEMS.md.** A warning does not fix a broken path; it moves the cost onto the
+agent, and it cost two jobs. Worktrees now live in
+`~/Library/Caches/CCwiki/worktrees`: no space, and exactly the right semantics
+for something created per job and pruned on success. Everything durable stays in
+Application Support. `GitService.repairWorktrees` runs `git worktree repair` on
+load, because a worktree records its own absolute path.
+
+Verified directly: `readdirSync` on an un-decoded `import.meta.url.pathname` —
+the precise call that failed — now succeeds in the new location.
+
+**Two guardrails were also mis-modelled.** Claude Code refuses output redirection
+outside the working directory and refuses compound commands where any part is
+unapproved, both regardless of `--allowedTools`. That is why an allow-listed
+`npm ci` never ran: it was `npm ci > /tmp/log 2>&1`. The prompt now says both
+plainly, and points at the `Read` tool for PDFs instead of `pdftotext`.
+
 ## 2026-08-22 — Renamed to CCwiki; the sidebar stops treating references as peers
 
 **Renamed** from the CityDesk working title. Target, bundle id, type names, the

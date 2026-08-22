@@ -132,6 +132,25 @@ Nothing is lost: ⌘O fuzzy-matches every reference by key, alias or paper title
 ⇧⌘F searches their full text, and every citation in the wiki is a link. The
 sidebar was never the fast way to reach one.
 
+### The folder listing earns its keep
+
+Since that page is now the only way to browse a folder, it does two things the
+site's version does not:
+
+- **Alphabetical dividers that stick** to the top of the viewport while you
+  scroll their group. In a 200-row list, knowing you are in the B's without
+  scrolling back is the whole game. The letter comes from the same sort key
+  Quartz uses — the citation key in References, the title everywhere else —
+  and anything not starting with a letter (`#P`, a digit) files under `#`
+  rather than inventing a divider of its own.
+- **A "Hide stubs" checkbox**, in the info strip and mirrored in Settings.
+  The ratio is lopsided and uneven: **19 of 38 Primitives are stubs**, against
+  4 of 200 References. Someone reading wants the pages with something on them;
+  someone looking for work to do wants exactly the opposite. That is a toggle,
+  not a default. It applies to the sidebar too — the counts change with it —
+  and the listing says how many it is hiding rather than quietly showing a
+  shorter list than the repo has.
+
 *Considered and rejected:* a two-mode sidebar with a filterable references list
 (a mode you have to remember you are in, for a list ⌘O already beats), and
 grouping references by year (structure the repo does not have, and not how

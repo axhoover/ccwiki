@@ -21,6 +21,17 @@ final class AppModel {
     private(set) var canPushToRemote = false
     private(set) var vendorManifest: String?
 
+    /// Hide stub pages in the sidebar and on folder listings. Persisted.
+    var hidesStubs: Bool = CCwikiSettings.hidesStubs {
+        didSet {
+            guard hidesStubs != oldValue else { return }
+            CCwikiSettings.hidesStubs = hidesStubs
+            // The tree recomputes on read; the rendered folder page does not.
+            webController.invalidate()
+            renderCurrent()
+        }
+    }
+
     // MARK: Library
 
     /// The parsed wiki. `nil` until the first load finishes.
@@ -228,6 +239,9 @@ final class AppModel {
         }
 
         await refreshPushCapability()
+        if let git = gitService {
+            await git.repairWorktrees(clone: paths.clone, worktreeRoot: paths.worktrees)
+        }
         // A crash or force-quit mid-job leaves a worktree behind, and
         // `git worktree add` will refuse to reuse the path. Finding them at
         // launch is cheaper than making the user learn `git worktree prune`.
@@ -337,8 +351,11 @@ final class AppModel {
                 PageTreeNode.ancestors(of: path, excluding: Self.kindsOutsideTree))
         case .folder(let slug):
             expandedFolders.insert(slug)
+            // A folder listing is not one of the tree's rows, so leaving the
+            // previous page highlighted claims you are somewhere you are not.
+            sidebarSelection = nil
         case .empty:
-            break
+            sidebarSelection = nil
         }
     }
 
@@ -389,7 +406,8 @@ final class AppModel {
             guard let page = index.pages[path] else { return }
             webController.render(renderer.request(for: page, anchor: anchor, notices: notices))
         case .folder(let slug):
-            webController.render(renderer.folderRequest(slug: slug, notices: notices))
+            webController.render(renderer.folderRequest(
+                slug: slug, hidingStubs: hidesStubs, notices: notices))
         case .empty:
             break
         }
@@ -460,11 +478,22 @@ final class AppModel {
     /// The sidebar's directory tree, mirroring the repo minus the references.
     func pageTree() -> [PageTreeNode] {
         guard let index else { return [] }
-        return PageTreeNode.build(pages: index.allPages, excluding: Self.kindsOutsideTree)
+        return PageTreeNode.build(
+            pages: index.allPages.filter { !hidesStubs || $0.status != .stub },
+            excluding: Self.kindsOutsideTree)
     }
 
     var referenceCount: Int {
-        index?.allPages.count { $0.kind == .reference } ?? 0
+        index?.allPages.count {
+            $0.kind == .reference && (!hidesStubs || $0.status != .stub)
+        } ?? 0
+    }
+
+    /// Stubs currently being hidden, so the UI can say so rather than quietly
+    /// showing a shorter list than the repo has.
+    var hiddenStubCount: Int {
+        guard hidesStubs, let index else { return 0 }
+        return index.allPages.count { $0.status == .stub }
     }
 
     /// The pages that cite the page being read.

@@ -138,30 +138,49 @@ struct PageRenderer: Sendable {
     /// emitter, sorted by `frontmatter.title` lower-cased (`quartz.config.ts`
     /// configures exactly that comparator). Since the site publishes them, the
     /// reader has to have them too, or six links on the front page go nowhere.
-    func folderRequest(slug: String, notices: [RenderRequest.Notice] = []) -> RenderRequest {
-        let children = index.pages.values
-            .filter { $0.slug.hasPrefix(slug + "/") }
-            .sorted {
-                $0.title.lowercased().compare($1.title.lowercased(), options: [], range: nil,
-                                              locale: .current) == .orderedAscending
-            }
+    ///
+    /// CCwiki adds two things the site's version does not have, because its
+    /// version of this page is not asked to hold 200 rows: alphabetical
+    /// dividers that stick to the top of the viewport while you scroll their
+    /// group, and the option to leave stubs out.
+    func folderRequest(
+        slug: String, hidingStubs: Bool = false, notices: [RenderRequest.Notice] = []
+    ) -> RenderRequest {
+        let all = index.pages.values.filter { $0.slug.hasPrefix(slug + "/") }
+        let hidden = hidingStubs ? all.count { $0.status == .stub } : 0
+        let children = all
+            .filter { !hidingStubs || $0.status != .stub }
+            .sorted { sortKey($0) < sortKey($1) }
 
         var html = "<h1>\(Self.escape(slug))</h1>\n"
         html += "<p class=\"folder-count\">\(children.count) page"
         html += children.count == 1 ? "" : "s"
-        html += "</p>\n<ul class=\"folder-list\">\n"
+        if hidden > 0 { html += " · \(hidden) stub\(hidden == 1 ? "" : "s") hidden" }
+        html += "</p>\n"
+
+        // Group by the first character of the sort key — a citation key in
+        // References, a title everywhere else.
+        var currentLetter: String?
+        var open = false
         for page in children {
-            let href = CCwikiURL.page(path: page.path)
-            html += "<li><span class=\"folder-title\"><a class=\"internal\" href=\""
-            html += Self.escape(href) + "\">" + Self.escape(page.title) + "</a></span>"
-            if page.kind == .reference {
-                html += "<span class=\"folder-meta\">" + Self.escape(page.displayTitle) + "</span>"
-            } else {
-                html += "<span class=\"folder-meta\">" + page.status.label + "</span>"
+            let letter = Self.dividerLetter(sortKey(page))
+            if letter != currentLetter {
+                if open { html += "</ul>\n</section>\n" }
+                currentLetter = letter
+                open = true
+                html += "<section class=\"folder-group\">\n"
+                html += "<h2 class=\"folder-letter\">\(Self.escape(letter))</h2>\n"
+                html += "<ul class=\"folder-list\">\n"
             }
-            html += "</li>\n"
+            html += row(for: page)
         }
-        html += "</ul>\n"
+        if open { html += "</ul>\n</section>\n" }
+
+        if children.isEmpty {
+            html += "<p class=\"placeholder\">Nothing here"
+            html += hidden > 0 ? " but stubs." : "."
+            html += "</p>\n"
+        }
 
         return RenderRequest(
             path: slug,
@@ -171,6 +190,29 @@ struct PageRenderer: Sendable {
             links: [:],
             anchor: nil,
             notices: notices)
+    }
+
+    private func row(for page: WikiPage) -> String {
+        var html = "<li><span class=\"folder-title\"><a class=\"internal\" href=\""
+        html += Self.escape(CCwikiURL.page(path: page.path)) + "\">"
+        html += Self.escape(page.title) + "</a></span>"
+        if page.kind == .reference {
+            html += "<span class=\"folder-meta\">" + Self.escape(page.displayTitle) + "</span>"
+        } else {
+            html += "<span class=\"folder-meta folder-status-\(page.status.rawValue)\">"
+            html += page.status.label + "</span>"
+        }
+        return html + "</li>\n"
+    }
+
+    /// Quartz sorts folder listings by `frontmatter.title` lower-cased.
+    private func sortKey(_ page: WikiPage) -> String { page.title.lowercased() }
+
+    /// The heading a page files under. Anything not starting with a letter —
+    /// `#P`, a digit — groups together rather than making a divider of its own.
+    static func dividerLetter(_ key: String) -> String {
+        guard let first = key.first, first.isLetter else { return "#" }
+        return String(first).uppercased()
     }
 
     static func escape(_ text: String) -> String {

@@ -399,7 +399,26 @@ tbody tr:last-child td { border-bottom: none; }
   border-bottom: 1px solid var(--rule);
 }
 
-.folder-list { list-style: none; padding: 0; }
+.folder-group { margin: 0 0 1.4rem; }
+
+/* The divider sticks while you scroll its group, so a 200-row list always says
+ * where you are. */
+.folder-letter {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  margin: 0;
+  padding: 0.4rem 0 0.25rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.folder-list { list-style: none; padding: 0; margin: 0; }
 
 .folder-list li {
   display: flex;
@@ -410,6 +429,9 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 .folder-list .folder-title { flex: 1 1 auto; }
+/* A stub is worth spotting in a list of things to read. */
+.folder-list .folder-status-stub { color: #c2760a; }
+
 .folder-list .folder-meta {
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-size: 0.76rem;

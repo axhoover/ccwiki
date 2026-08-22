@@ -58,11 +58,19 @@ that, reading needs no network — ⌘R fast-forwards when you want an update.
 ```
 ~/Library/Application Support/CCwiki/
 ├── repo/          the pull-only clone: the reader's copy, never written to
-├── worktrees/     one git worktree per ingestion job
 ├── library/       PDFs you drop on the app (deliberately outside the repo)
 ├── index/         search.sqlite3 — derived, safe to delete at any time
 └── logs/          per-job transcripts
+
+~/Library/Caches/CCwiki/
+└── worktrees/     one git worktree per ingestion job
 ```
+
+Worktrees live under `Caches` on purpose: `Application Support` has a space in
+it, and a worktree is where `npm`, `npx` and the wiki's own node scripts run —
+several of which read `import.meta.url.pathname` without percent-decoding it and
+fail on `%20`. A worktree is disposable by construction, so `Caches` is also the
+honest semantics.
 
 Delete `index/` any time you like; it rebuilds in about a tenth of a second.
 Delete `repo/` and CCwiki re-clones on the next sync.

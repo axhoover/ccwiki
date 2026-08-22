@@ -147,6 +147,7 @@ struct PromptComposer: Sendable {
         "Bash(echo:*)", "Bash(pwd)", "Bash(test:*)", "Bash(diff:*)",
         "Bash(sort:*)", "Bash(uniq:*)", "Bash(cut:*)", "Bash(basename:*)",
         "Bash(dirname:*)", "Bash(hexdump:*)", "Bash(xxd:*)", "Bash(od:*)",
+        "Bash(pdftotext:*)", "Bash(mdls:*)",
         "WebFetch", "WebSearch",
     ]
 }
