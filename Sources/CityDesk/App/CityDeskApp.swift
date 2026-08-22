@@ -29,6 +29,11 @@ struct CityDeskApp: App {
         }
         .defaultSize(width: 1000, height: 640)
         .keyboardShortcut("j", modifiers: [.command, .shift])
+
+        Settings {
+            SettingsView()
+                .environment(model)
+        }
     }
 
     static let jobsWindowID = "citydesk.jobs"

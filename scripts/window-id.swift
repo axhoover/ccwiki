@@ -14,7 +14,7 @@ let windows = CGWindowListCopyWindowInfo(
 for window in windows {
     guard window[kCGWindowOwnerName as String] as? String == owner,
           let bounds = window[kCGWindowBounds as String] as? [String: Any],
-          let width = bounds["Width"] as? Double, width > 400,
+          let width = bounds["Width"] as? Double, width > 300,
           let number = window[kCGWindowNumber as String] as? Int
     else { continue }
     print(number)

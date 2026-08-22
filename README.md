@@ -97,6 +97,7 @@ a job that could not push.
 | ⌘0 | Go home |
 | ⇧⌘N | Ingest a paper |
 | ⇧⌘J | Show the jobs window |
+| ⌘, | Settings |
 
 ## Make targets
 

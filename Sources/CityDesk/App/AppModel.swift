@@ -16,6 +16,10 @@ final class AppModel {
 
     let paths: AppPaths
     private(set) var tools = ToolLocator()
+    private(set) var toolOverrides: [ToolLocator.Tool: String] = [:]
+    private(set) var isGitHubAuthenticated = false
+    private(set) var canPushToRemote = false
+    private(set) var vendorManifest: String?
 
     // MARK: Library
 
@@ -77,6 +81,13 @@ final class AppModel {
         case succeeded(String)
         case failed(String)
 
+        /// A network outage is not a fault: the reader works entirely from the
+        /// clone, so it earns a quiet icon rather than a warning triangle.
+        var isOffline: Bool {
+            if case .failed(let message) = self { return message.hasPrefix("Offline") }
+            return false
+        }
+
         var isRunning: Bool {
             if case .running = self { return true }
             return false
@@ -122,6 +133,13 @@ final class AppModel {
 
     func requestJobsWindow() { jobsWindowRequests += 1 }
 
+    /// Same pattern for Settings. `openSettings` is an environment action, and
+    /// the `showSettingsWindow:` selector that worked before macOS 13 does
+    /// nothing for a SwiftUI `Settings` scene (SWIFTUI-RULES §6.4).
+    private(set) var settingsRequests = 0
+
+    func requestSettings() { settingsRequests += 1 }
+
     var activeJobCount: Int { jobs.filter { $0.state.isActive }.count }
 
     // MARK: Reader
@@ -147,7 +165,12 @@ final class AppModel {
         self.webController = WebController(paths: paths, macros: macros)
 
         try? paths.createDirectories()
+        toolOverrides = CityDeskSettings.toolOverrides()
+        tools = ToolLocator(overrides: toolOverrides)
         tools.locateAll()
+        isGitHubAuthenticated = GitHubAuth.isAuthenticated(tools: tools)
+        vendorManifest = try? String(
+            contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
         webController.onNavigate = { [weak self] destination, _ in
             self?.navigate(to: destination)
@@ -204,6 +227,17 @@ final class AppModel {
             }
         }
 
+        await refreshPushCapability()
+        // A crash or force-quit mid-job leaves a worktree behind, and
+        // `git worktree add` will refuse to reuse the path. Finding them at
+        // launch is cheaper than making the user learn `git worktree prune`.
+        await refreshOrphanedWorktrees()
+        if !orphanedWorktrees.isEmpty {
+            warnings.append(
+                "\(orphanedWorktrees.count) worktree(s) left over from an interrupted job. "
+                + "Open the jobs window (⇧⌘J) to prune them.")
+        }
+
         // Re-render whatever is on screen, since the file may have changed.
         webController.invalidate()
         if case .empty = location { openHome() } else { renderCurrent() }
@@ -235,6 +269,12 @@ final class AppModel {
                 Task { @MainActor [weak self] in self?.appendSyncLine(line) }
             }
             switch outcome {
+            case .offline:
+                // Reading is unaffected — the whole point of a local clone —
+                // so this is a note, not an alarm. Still reload, in case this
+                // is the first launch after a manual pull.
+                await loadLibrary()
+                syncState = .failed(outcome.summary)
             case .failed(let message):
                 syncState = .failed(message)
                 warnings.append(message)
@@ -417,6 +457,57 @@ final class AppModel {
     func pageTree() -> [PageTreeNode] {
         guard let index else { return [] }
         return PageTreeNode.build(pages: index.allPages)
+    }
+
+    // MARK: Settings
+
+    func setToolOverride(_ path: String?, for tool: ToolLocator.Tool) {
+        CityDeskSettings.setToolOverride(path, for: tool)
+        toolOverrides = CityDeskSettings.toolOverrides()
+        tools = ToolLocator(overrides: toolOverrides)
+        tools.locateAll()
+        recheckGitHubAuth()
+        warnings.removeAll { $0.contains("was not found") }
+        if let missing = tools.missingForReading.first {
+            warnings.append(
+                "\(missing.rawValue) was not found. CityDesk needs it for \(missing.purpose).")
+        }
+    }
+
+    func recheckGitHubAuth() {
+        GitHubAuth.invalidate()
+        isGitHubAuthenticated = GitHubAuth.isAuthenticated(tools: tools)
+        Task { @MainActor in await refreshPushCapability() }
+    }
+
+    private func refreshPushCapability() async {
+        guard let git = gitService else {
+            canPushToRemote = false
+            return
+        }
+        if let gh = tools.path(for: .gh) {
+            await git.configureCredentialHelper(clone: paths.clone, ghPath: gh)
+        }
+        canPushToRemote = await git.canAuthenticatePush(clone: paths.clone)
+    }
+
+    /// Bytes on disk, for the Settings row. The index is derived, so the only
+    /// interesting thing about it is how much space it is using.
+    var searchIndexSize: String {
+        let attributes = try? FileManager.default.attributesOfItem(
+            atPath: paths.searchDatabase.path(percentEncoded: false))
+        guard let bytes = attributes?[.size] as? Int64 else { return "not built" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    func rebuildSearchIndex() {
+        guard let index else { return }
+        let pages = index.allPages
+        let searchIndex = self.searchIndex
+        Task.detached(priority: .userInitiated) {
+            await searchIndex.reset()
+            try? await searchIndex.rebuild(pages: pages)
+        }
     }
 
     // MARK: Ingestion

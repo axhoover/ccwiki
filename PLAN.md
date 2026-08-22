@@ -90,6 +90,9 @@ redesign, not a refactor.
   release pipeline, and why the app is not sandboxed.
 - [plans/design-system.md](plans/design-system.md) — the two type systems (app
   chrome vs document), the macOS idioms applied, and the visual gate.
+- [plans/roadmap.md](plans/roadmap.md) — what we deliberately deferred and how
+  we would build it: a human review step before the PR, a better ingestion
+  pipeline, and page corrections from the reader.
 - [PROGRESS.md](PROGRESS.md) — running log, newest first.
 - [PROBLEMS.md](PROBLEMS.md) — things that bit us.
 - [SWIFTUI-RULES.md](SWIFTUI-RULES.md) — hard-won SwiftUI rules; the code here

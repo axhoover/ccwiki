@@ -16,11 +16,18 @@ struct GitService: Sendable {
         case cloned
         case updated(from: String, to: String)
         case alreadyCurrent(at: String)
+        /// The network is unreachable. Distinguished from `failed` because it
+        /// is not a problem with anything the user did, and because reading
+        /// continues to work perfectly — the right response is a quiet note,
+        /// not an alarm.
+        case offline
         case failed(String)
 
         var isSuccess: Bool {
-            if case .failed = self { return false }
-            return true
+            switch self {
+            case .cloned, .updated, .alreadyCurrent: true
+            case .offline, .failed: false
+            }
         }
 
         var summary: String {
@@ -28,9 +35,20 @@ struct GitService: Sendable {
             case .cloned: "Cloned the wiki."
             case .updated(let from, let to): "Updated \(from.prefix(7)) → \(to.prefix(7))."
             case .alreadyCurrent(let at): "Already up to date at \(at.prefix(7))."
+            case .offline: "Offline — reading from the last pull."
             case .failed(let message): message
             }
         }
+    }
+
+    /// git's vocabulary for "there is no network". Matched on the message
+    /// rather than the exit code because git reports all of these as 128.
+    static func isNetworkFailure(_ output: String) -> Bool {
+        let lowered = output.lowercased()
+        return ["could not resolve host", "could not resolve proxy",
+                "failed to connect", "connection refused", "network is unreachable",
+                "operation timed out", "temporary failure in name resolution",
+                "no route to host", "unable to access"].contains { lowered.contains($0) }
     }
 
     // MARK: Sync
@@ -48,10 +66,18 @@ struct GitService: Sendable {
         if !exists {
             try? FileManager.default.createDirectory(
                 at: clone.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let status = await stream(
+            let clone = await stream(
                 ["clone", "--progress", remote, clone.path(percentEncoded: false)],
                 in: nil, onLine: onLine)
-            guard status == 0 else { return .failed("git clone failed (exit \(status)).") }
+            let (status, transcript) = (clone.status, clone.transcript)
+            guard status == 0 else {
+                // With no clone there is nothing to read, so this one *is* an
+                // alarm however it failed.
+                return .failed(Self.isNetworkFailure(transcript)
+                    ? "Could not reach GitHub to clone the wiki. Check your connection "
+                        + "and sync again."
+                    : "git clone failed (exit \(status)). See the sync log.")
+            }
             return .cloned
         }
 
@@ -59,13 +85,16 @@ struct GitService: Sendable {
         let fetch = await stream(
             ["-C", clone.path(percentEncoded: false), "fetch", "--progress", "--prune", "origin"],
             in: nil, onLine: onLine)
-        guard fetch == 0 else {
-            return .failed("git fetch failed (exit \(fetch)) — working offline from the last pull.")
+        guard fetch.status == 0 else {
+            // There is a clone on disk, so reading is unaffected either way.
+            return Self.isNetworkFailure(fetch.transcript)
+                ? .offline
+                : .failed("git fetch failed (exit \(fetch.status)). See the sync log.")
         }
 
         let merge = await stream(
             ["-C", clone.path(percentEncoded: false), "merge", "--ff-only", "@{u}"],
-            in: nil, onLine: onLine)
+            in: nil, onLine: onLine).status
         guard merge == 0 else {
             return .failed(
                 "Fast-forward failed. The reader's clone at \(clone.lastPathComponent) has "
@@ -190,7 +219,7 @@ struct GitService: Sendable {
         let status = await stream([
             "-C", clone.path(percentEncoded: false),
             "worktree", "add", path.path(percentEncoded: false), "-b", branch, baseRef,
-        ], in: nil, onLine: onLine)
+        ], in: nil, onLine: onLine).status
         return status == 0
     }
 
@@ -266,7 +295,7 @@ struct GitService: Sendable {
         let status = await stream([
             "-C", directory.path(percentEncoded: false),
             "submodule", "update", "--init", "--depth", "1", "--recursive",
-        ], in: nil, onLine: onLine)
+        ], in: nil, onLine: onLine).status
         return status == 0
     }
 
@@ -277,17 +306,25 @@ struct GitService: Sendable {
             executable: executable, arguments: arguments, environment: environment)
     }
 
+    /// Run git, forwarding each line to `onLine` and keeping a copy.
+    ///
+    /// The transcript is accumulated here rather than in the caller's closure
+    /// because that closure is `@Sendable` — it runs on the reader's dispatch
+    /// queue and cannot capture a mutable local.
+    @discardableResult
     private func stream(
         _ arguments: [String], in directory: URL?, onLine: @Sendable (ProcessLine) -> Void
-    ) async -> Int32 {
+    ) async -> (status: Int32, transcript: String) {
         var status: Int32 = -1
+        var transcript: [String] = []
         for await line in Subprocess.lines(
             executable: executable, arguments: arguments,
             currentDirectory: directory, environment: environment
         ) {
             if let exit = line.exitStatus { status = exit; continue }
+            transcript.append(line.text)
             onLine(line)
         }
-        return status
+        return (status, transcript.joined(separator: "\n"))
     }
 }

@@ -5,6 +5,52 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-08-22 — M3: polish
+
+The parts that only matter when something goes wrong. 68 unit tests.
+
+**Backlinks and status badges** shipped in M1, so M3 was error states, an icon,
+and the Settings window the pre-flight messages had been telling people to open
+without one existing.
+
+**Every failure now has a designed resting state**, documented in
+[plans/design-system.md](plans/design-system.md) §4b. The one worth calling out:
+**being offline is not a fault.** The reader works entirely from the clone, so
+it gets a `wifi.slash` in tertiary grey and "reading from the last pull", not a
+warning triangle. `GitService` tells an outage from a real problem by matching
+git's own vocabulary — "could not resolve host", "failed to connect" — because
+git reports every one of them as exit 128.
+
+**A worktree left behind by a crash** is now found at launch, not just after the
+next job finishes. Verified by making one by hand and relaunching: the app found
+it, warned, and offered to prune.
+
+**Settings** (⌘,) is deliberately small: tool paths with **Locate…**, GitHub
+auth and push-credential state, the storage locations, and the vendor manifest.
+Every row says what CityDesk currently believes, so the window doubles as the
+answer to "why isn't this working".
+
+**The icon** is a lowercase λ on the website's purple, standing among three
+blocks. λ is the wiki's own `\secpar` — precise to this audience, unlike
+anything else in a Dock, and still legible at 16 pt where the blocks are dropped
+as grit.
+
+**What surprised us.**
+
+- **`showSettingsWindow:` does nothing for a SwiftUI `Settings` scene.** It is
+  the macOS 13 selector and it silently no-ops, so the harness kept capturing
+  the reader. `SWIFTUI-RULES.md` §6.4 already said the macOS 14 idiom is
+  `@Environment(\.openSettings)` — which only a *view* can call, so the model
+  asks with a counter and `RootView` performs it, the same shape as the jobs
+  window.
+- **`NSApp.keyWindow` is not the frontmost window.** A freshly opened Settings
+  scene is in front without being key, so the capture fell through to the
+  reader. `NSApp.orderedWindows` is front-to-back and is the right question.
+- **macOS revoked the Screen Recording grant partway through.** It re-prompts
+  periodically. The harness already falls back to its own capture, which renders
+  everything except `NSVisualEffectView` backdrops — enough to verify a Form,
+  not enough to verify a sidebar.
+
 ## 2026-08-22 — M2: ingestion
 
 Drop a PDF on the reader, or paste an ePrint/arXiv/DOI/ECCC link (⇧⌘N), and

@@ -51,6 +51,10 @@ enum ScreenshotRunner {
         /// point of M2 is that this works end to end, so the harness that
         /// proves the reader works should be able to prove this too.
         case ingest(String)
+        case settings
+        /// Just show the jobs window — useful for checking the orphaned-worktree
+        /// recovery path without running a job.
+        case jobs
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -65,6 +69,8 @@ enum ScreenshotRunner {
             case "light": return .appearance(.aqua, label: "light")
             case "dark": return .appearance(.darkAqua, label: "dark")
             case "ingest": return parts.count > 1 ? .ingest(parts[1]) : nil
+            case "settings": return .settings
+            case "jobs": return .jobs
             default: return nil
             }
         }
@@ -82,6 +88,8 @@ enum ScreenshotRunner {
             case .inspector(let tab): "inspector-\(tab.rawValue.lowercased())"
             case .appearance(_, let label): label
             case .ingest: "ingest"
+            case .settings: "settings"
+            case .jobs: "jobs"
             }
         }
 
@@ -93,6 +101,7 @@ enum ScreenshotRunner {
             // An ingestion job is minutes, not milliseconds; `apply` waits for
             // a terminal state rather than guessing a duration.
             case .ingest: 1500
+            case .settings, .jobs: 1200
             default: 700
             }
         }
@@ -176,6 +185,26 @@ enum ScreenshotRunner {
             // reader's dark palette as well as the chrome's.
             NSApp.appearance = NSAppearance(named: name)
 
+        case .jobs:
+            model.requestJobsWindow()
+            try? await Task.sleep(for: .milliseconds(600))
+            NSApp.orderedWindows.first { $0.isVisible && $0.title == "Jobs" }?
+                .makeKeyAndOrderFront(nil)
+            FileHandle.standardError.write(Data(
+                "orphaned worktrees: \(model.orphanedWorktrees.count)\n".utf8))
+
+        case .settings:
+            model.requestSettings()
+            try? await Task.sleep(for: .milliseconds(600))
+            // Report what actually came up: a step that silently captures the
+            // wrong window is worse than one that says it could not find it.
+            NSApp.orderedWindows.first { $0.isVisible && $0 !== NSApp.mainWindow }?
+                .makeKeyAndOrderFront(nil)
+            let titles = NSApp.windows
+                .filter(\.isVisible)
+                .map { "\($0.title.isEmpty ? "(untitled)" : $0.title)\($0.isKeyWindow ? " [key]" : "")" }
+            FileHandle.standardError.write(Data("windows: \(titles)\n".utf8))
+
         case .ingest(let url):
             guard let source = IngestSubmission.Source.parse(url) else {
                 FileHandle.standardError.write(Data("unparseable ingest URL: \(url)\n".utf8))
@@ -210,6 +239,8 @@ enum ScreenshotRunner {
         case .search:
             model.searchPresented = false
             model.searchQuery = ""
+        case .settings:
+            NSApp.windows.first { $0.title == "Settings" || $0.title == "Preferences" }?.close()
         default:
             break
         }
@@ -225,8 +256,13 @@ enum ScreenshotRunner {
     /// either way — their blur happens in the window server, which is exactly
     /// what the Screen Recording permission gates access to.
     static func capture(to url: URL) async {
-        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
-              let base = snapshot(of: window)
+        // Front-to-back order, not `NSApp.windows` order — otherwise a step
+        // that opens Settings or the jobs window captures the reader behind it.
+        // `keyWindow` is not enough: a freshly opened Settings scene is
+        // frontmost without being key.
+        let window = NSApp.keyWindow
+            ?? NSApp.orderedWindows.first { $0.isVisible && $0.contentView != nil }
+        guard let window, window.contentView != nil, let base = snapshot(of: window)
         else { return }
 
         let size = base.size

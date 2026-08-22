@@ -94,7 +94,7 @@ if [ "$EXTERNAL" = "1" ]; then
 		fi
 		printf 'ok' > "$OUT/.go-$i"
 		rm -f "$OUT/.ready-$i"
-		echo "  ✓ $NAME"
+		echo "  ✓ $NAME (window $WID)"
 		i=$((i + 1))
 	done
 fi

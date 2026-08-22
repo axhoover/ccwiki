@@ -129,6 +129,54 @@ An **aborted** job gets an orange banner saying so is a good outcome, not a red
 one. The prompt asks the agent to abort rather than guess; punishing that
 visually would be teaching the wrong lesson.
 
+## 4b. Error states
+
+Every failure the app can hit has a designed resting state, because the
+alternative is a spinner that never stops.
+
+- **Offline.** A network outage is *not a fault*: the reader works entirely from
+  the clone. It gets a `wifi.slash` glyph in tertiary grey and the words
+  "Offline — reading from the last pull", not a warning triangle. `GitService`
+  classifies it by matching git's own vocabulary ("could not resolve host",
+  "failed to connect", …) rather than by exit code, because git reports all of
+  them as 128.
+- **A clone that will not fast-forward.** This one *is* alarming, because
+  CityDesk never writes to that checkout — so something else did. The message
+  says exactly that and offers the two real options: fix it by hand, or delete
+  the clone and let CityDesk re-clone.
+- **Missing tooling.** The reader needs only `git`; ingestion needs `gh`,
+  `claude` and `node`. Missing ones are listed in the status bar's warnings menu
+  and in Settings, each with what it is for and a **Locate…** button.
+- **`gh` not authenticated, or no push credentials.** Both are checked *before*
+  a job starts, not at the end after twenty minutes of work, and both are shown
+  in Settings with their current state.
+- **Macros that would not parse.** A banner above the page saying so, plus the
+  warnings menu. Math still renders; site-specific commands show as KaTeX
+  errors. The page is degraded, never blank.
+- **A worktree left behind by a crash.** Found at launch, surfaced in the
+  warnings menu and as a "Left Behind" section in the jobs window with a
+  **Prune** button — cheaper than making someone learn `git worktree prune`.
+
+The pattern throughout: say what happened, say what it means for what you were
+doing, and offer the action. A status bar that only ever shows a spinner and a
+red triangle is not error handling.
+
+## 4c. The app icon
+
+A lowercase **λ** on the website's purple, standing among three blocks on a
+ground line.
+
+λ is the wiki's own `\secpar` — the security parameter, and the most common
+symbol on the site. It means something precise to the one audience this app has,
+it is unlike anything else in a Dock, and it survives being shrunk to 16 pt,
+which a page-of-math glyph does not. The blocks are the "city" half of the name
+and read as a desk at small sizes; below 32 pt they are dropped entirely,
+because three pixels of skyline is grit.
+
+Drawn in `scripts/make-icon.swift` with pure CoreGraphics — two stroked paths
+for the λ, no font dependency, and the weight increased at small sizes so the
+mark keeps its colour when it is only a few pixels wide.
+
 ## 5. The visual gate
 
 SwiftUI's compile guarantees are weak; a passing build is not a passing app

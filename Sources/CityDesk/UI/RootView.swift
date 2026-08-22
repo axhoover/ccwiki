@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -50,6 +51,9 @@ struct RootView: View {
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in
             openWindow(id: CityDeskApp.jobsWindowID)
+        }
+        .onChange(of: model.settingsRequests) { _, _ in
+            openSettings()
         }
         .focusedSceneValue(\.appModel, model)
         .focusedSceneValue(\.searchAction, FindAction { model.searchPresented = true })
@@ -153,8 +157,10 @@ struct RootView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 case .failed(let message):
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                    Image(systemName: model.syncState.isOffline
+                        ? "wifi.slash" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(model.syncState.isOffline
+                            ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.orange))
                     Text(message)
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
