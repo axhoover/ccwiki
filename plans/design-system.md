@@ -57,11 +57,10 @@ brings sidebar vibrancy, the unified title bar, column resizing and keyboard
 navigation for free.
 
 - **Sidebar** (220–380 pt, ideal 268): the repo's directory tree, folders before
-  root pages, pages sorted by *title* rather than filename — which matters most
-  in `References/`, where the filename starts with a citation key. A status dot
-  per page; a page count per folder. Opening a page from anywhere expands its
-  folder and scrolls the row into view, so the sidebar never silently disagrees
-  with the reader.
+  root pages, pages sorted by *title* rather than filename. A status dot per
+  page; a page count per folder. Opening a page from anywhere expands its folder
+  and scrolls the row into view, so the sidebar never silently disagrees with
+  the reader. **References are not in the tree** — see §3a.
 - **Reader**: a document-info strip (folder · status · last change, plus the
   reference byline) and then the page. The strip deliberately does **not**
   repeat the title — the window title bar already carries it, and printing it
@@ -101,6 +100,42 @@ than the sidebar it replaces.
 `WKWebView.find` (macOS 11+). `WKFindResult` only reports whether anything
 matched — there is no "3 of 17" without counting in JavaScript — so the bar says
 found or not found, and says it explicitly rather than doing nothing.
+
+## 3a. References are not peers of the concept pages
+
+**200 of the wiki's 293 pages are references — 68%.** A directory tree that
+mirrors the repo is therefore two-thirds citation store, and following a
+citation used to expand `References/` and scroll you into an alphabetical wall
+of keys while the concept structure left the screen entirely. The sidebar was
+worst exactly when you most needed to know where you were.
+
+The fix rests on a structural fact: references are not peers of the concept
+pages. Primitives, Assumptions, Complexity, Glossary and Folklore are *what the
+wiki is about*; `References/` is the citation store those pages point into. The
+wiki's own front page says as much.
+
+So:
+
+- **The tree is the 93 concept pages.** All five folders and both root notes fit
+  on screen at once, which is what a navigable structure looks like.
+- **References collapse to one row** with a count and a chevron. Clicking it
+  opens the synthetic folder page in the *reading pane* — a 200-item sorted list
+  belongs in a 42 rem column, not a 268 pt one, and there it gets each paper's
+  real title next to its key.
+- **A "Cited by" section appears above the tree while you are reading a
+  reference**, listing the concept pages that link to it. That is the question
+  you actually have on arriving at a citation: what brought me here, and what
+  else uses this. On a concept page it is hidden, so the sidebar stays quiet
+  when the tree already answers the question.
+
+Nothing is lost: ⌘O fuzzy-matches every reference by key, alias or paper title,
+⇧⌘F searches their full text, and every citation in the wiki is a link. The
+sidebar was never the fast way to reach one.
+
+*Considered and rejected:* a two-mode sidebar with a filterable references list
+(a mode you have to remember you are in, for a list ⌘O already beats), and
+grouping references by year (structure the repo does not have, and not how
+anyone looks for a paper).
 
 ## 4a. The jobs window
 

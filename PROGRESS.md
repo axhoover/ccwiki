@@ -5,6 +5,32 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-08-22 — Renamed to CCwiki; the sidebar stops treating references as peers
+
+**Renamed** from the CityDesk working title. Target, bundle id, type names, the
+`ccwiki://` scheme, the `CCWIKI_*` environment variables, and the Application
+Support directory — which would have orphaned a 35 MB clone and the transcripts
+of jobs that already ran, so `AppPaths` moves the old directory to the new name
+on first launch.
+
+**The icon** is now the wiki's own logo reduced to what survives being an app
+icon: the purple, the concentric rings, the skyline, and CC in the middle. Two
+words of wordmark are unreadable at 32 pt, so it collapses to the initials and
+everything else steps back. The skyline keeps two towers and two spires, because
+an even row of blocks reads as a barcode; below 32 pt it is dropped entirely.
+
+**References left the sidebar tree.** 200 of 293 pages — 68% — are references,
+so the tree was two-thirds citation store, and following a citation expanded
+`References/` and scrolled the concept structure off screen. The tree is now the
+93 concept pages (all five folders visible at once), references are one row that
+opens the folder page in the reading pane, and a **"Cited by"** section appears
+above the tree while you read a reference. Reasoning and the rejected
+alternatives are in [plans/design-system.md](plans/design-system.md) §3a.
+
+The measurement that settled it: the sidebar was least useful exactly when you
+most needed it, because arriving at a reference is *always* by link, and the one
+question you have on arriving is what brought you here.
+
 ## 2026-08-22 — M3: polish
 
 The parts that only matter when something goes wrong. 68 unit tests.

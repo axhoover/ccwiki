@@ -533,3 +533,68 @@ struct WikilinkResolutionTests {
                         "syntax-1", "other-results"])
     }
 }
+
+/// The sidebar's shape. References are 68% of the wiki's pages, so leaving them
+/// out of the tree is the difference between a navigable structure and a wall
+/// of citation keys.
+struct PageTreeTests {
+
+    @Test("references are left out of the tree, everything else stays")
+    func excludesReferences() throws {
+        let (index, root) = try WikilinkResolutionTests.makeIndex()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let full = PageTreeNode.build(pages: index.allPages)
+        let sidebar = PageTreeNode.build(pages: index.allPages, excluding: [.reference])
+
+        #expect(full.contains { $0.name == "References" })
+        #expect(!sidebar.contains { $0.name == "References" },
+                "the tree should have no References folder at all")
+
+        // Everything else survives, root pages included.
+        for folder in ["Primitives", "Assumptions", "Complexity", "Glossary"] {
+            #expect(sidebar.contains { $0.name == folder }, "lost \(folder)")
+        }
+        #expect(sidebar.contains { $0.page?.path == "index.md" })
+
+        let referenceCount = index.allPages.count { $0.kind == .reference }
+        #expect(referenceCount > 0, "the fixture should have references to exclude")
+        #expect(sidebar.reduce(0) { $0 + $1.pageCount }
+            == full.reduce(0) { $0 + $1.pageCount } - referenceCount)
+    }
+
+    @Test("a reference has no ancestor to reveal, a primitive does")
+    func ancestors() {
+        #expect(PageTreeNode.ancestors(of: "Primitives/pseudorandom-function.md") == ["Primitives"])
+        #expect(PageTreeNode.ancestors(of: "index.md") == [])
+
+        // Nothing to expand for a page the tree does not contain — otherwise
+        // the expansion set fills with folder names that match no row.
+        #expect(PageTreeNode.ancestors(
+            of: "References/AKS83 - An 0(n log n) sorting network.md",
+            excluding: [.reference]) == [])
+        #expect(PageTreeNode.ancestors(
+            of: "Primitives/pseudorandom-function.md", excluding: [.reference]) == ["Primitives"])
+    }
+
+    @Test("folders sort before root pages, and pages sort by title")
+    func ordering() throws {
+        let (index, root) = try WikilinkResolutionTests.makeIndex()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let tree = PageTreeNode.build(pages: index.allPages, excluding: [.reference])
+        let folderCount = tree.prefix { $0.isFolder }.count
+        #expect(tree.dropFirst(folderCount).allSatisfy { !$0.isFolder },
+                "a root page appeared above a folder")
+
+        let folderNames = tree.prefix(folderCount).map(\.name)
+        #expect(folderNames == folderNames.sorted())
+
+        if let primitives = tree.first(where: { $0.name == "Primitives" }) {
+            let titles = primitives.children.map(\.name)
+            #expect(titles == titles.sorted {
+                $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+            })
+        }
+    }
+}

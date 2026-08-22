@@ -333,7 +333,8 @@ final class AppModel {
         switch location {
         case .page(let path, _):
             sidebarSelection = path
-            expandedFolders.formUnion(PageTreeNode.ancestors(of: path))
+            expandedFolders.formUnion(
+                PageTreeNode.ancestors(of: path, excluding: Self.kindsOutsideTree))
         case .folder(let slug):
             expandedFolders.insert(slug)
         case .empty:
@@ -453,10 +454,28 @@ final class AppModel {
 
     // MARK: Page tree
 
-    /// The sidebar's directory tree, mirroring the repo.
+    /// Kinds the sidebar tree leaves out. See `PageTreeNode.build`.
+    static let kindsOutsideTree: Set<PageKind> = [.reference]
+
+    /// The sidebar's directory tree, mirroring the repo minus the references.
     func pageTree() -> [PageTreeNode] {
         guard let index else { return [] }
-        return PageTreeNode.build(pages: index.allPages)
+        return PageTreeNode.build(pages: index.allPages, excluding: Self.kindsOutsideTree)
+    }
+
+    var referenceCount: Int {
+        index?.allPages.count { $0.kind == .reference } ?? 0
+    }
+
+    /// The pages that cite the page being read.
+    ///
+    /// Shown at the top of the sidebar for a reference, where the tree has
+    /// nothing to say: a citation is reached by following a link, and the
+    /// question you have on arriving is "what brought me here, and what else
+    /// uses this".
+    var citingPages: [WikiIndex.Backlink] {
+        guard let page = currentPage, page.kind == .reference else { return [] }
+        return currentBacklinks
     }
 
     // MARK: Settings

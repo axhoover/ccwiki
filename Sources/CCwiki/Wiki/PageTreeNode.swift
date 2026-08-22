@@ -23,11 +23,18 @@ struct PageTreeNode: Identifiable, Sendable {
         isFolder ? children.reduce(0) { $0 + $1.pageCount } : 1
     }
 
-    static func build(pages: [WikiPage]) -> [PageTreeNode] {
+    /// Build the tree, optionally leaving some kinds out.
+    ///
+    /// The sidebar leaves `.reference` out: 200 of the wiki's 293 pages are
+    /// references, so including them makes the tree two-thirds citation store
+    /// and pushes the concept structure off screen the moment you follow a
+    /// citation. They get a single row that opens the folder page instead —
+    /// a 200-item list belongs in the content pane, not a 268 pt sidebar.
+    static func build(pages: [WikiPage], excluding kinds: Set<PageKind> = []) -> [PageTreeNode] {
         var folders: [String: [WikiPage]] = [:]
         var roots: [WikiPage] = []
 
-        for page in pages {
+        for page in pages where !kinds.contains(page.kind) {
             if page.directory.isEmpty {
                 roots.append(page)
             } else {
@@ -56,8 +63,13 @@ struct PageTreeNode: Identifiable, Sendable {
 
     /// The chain of node ids from a root down to `path`, so the sidebar can
     /// expand to reveal a page opened from a link or the quick switcher.
-    static func ancestors(of path: String) -> [String] {
+    ///
+    /// Empty for a page the tree does not contain — a reference has no row to
+    /// reveal, and its context comes from the "Cited by" section instead.
+    static func ancestors(of path: String, excluding kinds: Set<PageKind> = []) -> [String] {
         let directory = (path as NSString).deletingLastPathComponent
-        return directory.isEmpty ? [] : [directory]
+        guard !directory.isEmpty else { return [] }
+        guard !kinds.contains(PageKind.forDirectory(directory)) else { return [] }
+        return [directory]
     }
 }

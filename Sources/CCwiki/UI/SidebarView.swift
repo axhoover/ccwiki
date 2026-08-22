@@ -13,20 +13,25 @@ struct SidebarView: View {
 
         ScrollViewReader { proxy in
             List(selection: $model.sidebarSelection) {
-                if let index = model.index {
+                if model.index != nil {
+                    // Only when the tree has nothing to say about where you
+                    // are — which is exactly when you are on a reference.
+                    if !model.citingPages.isEmpty {
+                        Section("Cited by") {
+                            ForEach(model.citingPages) { backlink in
+                                citingRow(backlink)
+                            }
+                        }
+                        .listSectionSeparator(.hidden)
+                    }
+
                     Section("Wiki") {
                         ForEach(model.pageTree()) { node in
                             nodeView(node)
                         }
+                        referencesRow
                     }
                     .listSectionSeparator(.hidden)
-
-                    Section {
-                        Label("\(index.pages.count) pages", systemImage: "doc.on.doc")
-                            .font(Theme.Fonts.meta)
-                            .foregroundStyle(.secondary)
-                            .selectionDisabled()
-                    }
                 }
             }
             // Opening a page from a link or the quick switcher expands its
@@ -64,6 +69,63 @@ struct SidebarView: View {
                 .padding(Theme.medium)
             }
         }
+    }
+
+    /// A page that cites the reference being read. Not part of the selection
+    /// binding — the tree owns selection, and these rows are a way back rather
+    /// than a place in the hierarchy.
+    private func citingRow(_ backlink: WikiIndex.Backlink) -> some View {
+        Button {
+            model.openPage(backlink.sourcePath)
+        } label: {
+            HStack(spacing: Theme.small) {
+                Image(systemName: "arrow.turn.up.left")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text(model.title(forPath: backlink.sourcePath))
+                    .font(Theme.Fonts.row)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(backlink.context)
+        .selectionDisabled()
+    }
+
+    /// The 200 references, as one row rather than 200.
+    ///
+    /// Opening it shows the folder page in the reading pane, which is a far
+    /// better home for a long sorted list than a 268 pt column — and ⌘O and
+    /// ⇧⌘F reach any single reference faster than scrolling ever would.
+    private var referencesRow: some View {
+        Button {
+            model.open(.folder(slug: "References"))
+        } label: {
+            HStack(spacing: Theme.small) {
+                Image(systemName: "text.book.closed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text("References")
+                    .font(Theme.Fonts.row)
+                Spacer(minLength: Theme.tight)
+                Text("\(model.referenceCount)")
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .selectionDisabled()
+        .help("Browse all \(model.referenceCount) reference pages")
     }
 
     @ViewBuilder
