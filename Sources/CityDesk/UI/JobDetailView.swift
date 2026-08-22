@@ -185,7 +185,12 @@ struct JobDetailView: View {
             }
             .onChange(of: job.log.count) { _, _ in
                 guard followsTail else { return }
-                proxy.scrollTo(Self.tailAnchor, anchor: .bottom)
+                // A hop, so the new row has been laid out before we scroll to
+                // the anchor beneath it — otherwise the newest line lands
+                // half-clipped behind the tail bar.
+                Task { @MainActor in
+                    proxy.scrollTo(Self.tailAnchor, anchor: .bottom)
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { tailBar }
         }

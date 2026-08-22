@@ -127,11 +127,26 @@ struct PromptComposer: Sendable {
     /// Scoped rather than `bypassPermissions`: a job that hits a denial fails
     /// visibly, with the denied call recorded in the result event, which is far
     /// better than one that quietly did something nobody asked for.
+    /// The allow-list matches on a command's **first word**, so `cd X && git …`
+    /// is denied however harmless it looks. The first real job hit seven
+    /// denials, every one of them a `cd`-prefixed or `ln` command — which is
+    /// why `prompts/ingest.md` now says plainly that the shell already starts
+    /// in the worktree and there is nothing to `cd` to.
+    ///
+    /// The entries below are read-only inspection tools plus the four binaries
+    /// the job genuinely drives. Nothing here can write outside a file tool,
+    /// which keeps the guarantee worth having: a job that wanders off fails
+    /// visibly, with the denied call named in the transcript.
     static let allowedTools = [
         "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite",
+        // The four the job actually drives.
         "Bash(git:*)", "Bash(gh:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)",
+        // Read-only inspection.
         "Bash(find:*)", "Bash(file:*)", "Bash(jq:*)", "Bash(cat:*)", "Bash(ls:*)",
         "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(rg:*)",
+        "Bash(echo:*)", "Bash(pwd)", "Bash(test:*)", "Bash(diff:*)",
+        "Bash(sort:*)", "Bash(uniq:*)", "Bash(cut:*)", "Bash(basename:*)",
+        "Bash(dirname:*)", "Bash(hexdump:*)", "Bash(xxd:*)", "Bash(od:*)",
         "WebFetch", "WebSearch",
     ]
 }

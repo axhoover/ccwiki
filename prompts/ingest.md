@@ -48,10 +48,15 @@ alone; nothing else is reading it.
 
 - Worktree: `{{WORKTREE}}` — this is your working directory. Do not touch any
   other checkout on this machine.
-- **That path contains a space.** Quote it in every shell command, and never
-  hand a percent-encoded form of it to a tool — `Application%20Support` is not a
-  directory, and node will fail with `ENOENT` on it. Prefer running commands
-  from the worktree rather than passing absolute paths around.
+- **Your shell already starts in that directory. Do not `cd`.** Tool permissions
+  match on a command's first word, so `cd X && git status` is denied while
+  `git status` is allowed — a previous run lost seven turns to exactly this.
+- **The path contains a space.** On the rare occasion you do need it, quote it,
+  and never hand a percent-encoded form to a tool: `Application%20Support` is
+  not a directory, and node fails with `ENOENT` on it. The repo's own
+  `scripts/*.mjs` read `import.meta.url.pathname` without decoding it, so if one
+  of them chokes on the path, symlink the worktree somewhere space-free and run
+  it from there.
 - Branch: `{{BRANCH}}`, already created for you off `origin/{{BASE_BRANCH}}`.
 - {{SKILL_NOTE}}
 
@@ -168,13 +173,20 @@ CI runs `npm run lint` and `npx quartz build`. Run both, plus the one CI does
 not, before you push. All three must exit 0.
 
 ```sh
-cd {{WORKTREE}}
-[ -d node_modules ] || npm ci
+# You are already in the worktree — no `cd`.
+npm ci                         # only if node_modules is absent
 git submodule update --init --depth 1 --recursive
 node scripts/lint.mjs          # the FULL lint — see below
 npx quartz build
+# Only if your page sets `cryptobib_key`:
 npm run sync-cryptobib         # CI does not run this; it is what catches a bad key
 ```
+
+**Run `sync-cryptobib` only when your new page actually sets a
+`cryptobib_key`.** Its whole job is to catch an invented one. If you used an
+inline `bibtex` block instead — which is the right answer for a paper too recent
+to be in CryptoBib — it has nothing of yours to check, and chasing it is a waste
+of a turn budget you may need for the lint.
 
 - Run the **whole** lint, never `node scripts/lint.mjs <one-file>`. Per-file mode
   filters the *output*, not the analysis: an alias collision your new page causes
