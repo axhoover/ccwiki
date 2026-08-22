@@ -35,6 +35,13 @@ good outcome", because the prompt asks the agent to decline rather than guess
 and punishing that visually would teach the wrong lesson; `failed` and
 `cancelled` keep the worktree and offer "Reveal in Terminal".
 
+**The first real run, end to end.** ePrint 2026/1769 → **draft PR
+[#36](https://github.com/axhoover/cryptology.city/pull/36)**: one new reference
+page and two bullets on `content/Primitives/secret-sharing.md`, +31/−0. The
+agent ran the full lint (294 pages, 0 errors), `npx quartz build` (clean) and
+`sync-cryptobib`, then pushed and opened the PR as a draft. 59 turns, 11m 15s,
+$5.46. The worktree pruned itself; the reader's clone stayed on `main`, clean.
+
 **What surprised us.**
 
 - **`gh auth login` does not imply `git push` works.** `gh auth status` was
@@ -49,6 +56,10 @@ and punishing that visually would teach the wrong lesson; `failed` and
   real run spent 54 turns before writing a single file, because our prompt adds
   four local validation steps that workflow does not have. Raised to 200; the
   real bound on a runaway is the Cancel button and the live cost readout.
+- **The allow-list matches on a command's first word.** Seven of the run's
+  denials were `cd X && git …` or `ln` — all harmless, all refused, all
+  costing turns. The child already starts in the worktree, so the fix was to
+  say so in the prompt rather than to widen the list toward uselessness.
 - **A dry-run mode paid for itself immediately.**
   `CITYDESK_INGEST_DRY_RUN=1` runs every mechanical step — worktree,
   submodules, pre-flight, composition — and stops before the agent, writing the
