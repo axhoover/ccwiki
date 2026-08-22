@@ -56,7 +56,7 @@ silently rendering garbage.
 pseudocode.js resolves its math backend from the global `katex` symbol and calls
 `renderToString` with **no options**, so macros arrive by monkey-patching —
 exactly as the site's own plugin does. Load order is therefore mandatory:
-`katex.min.js` → `pseudocode.js` → `citydesk.js`.
+`katex.min.js` → `pseudocode.js` → `ccwiki.js`.
 
 ### KaTeX fonts: the directory layout is load-bearing
 
@@ -71,7 +71,7 @@ them would add ~876 KB of formats WebKit never requests.
 
 ## 3. Reproducing the site's markdown semantics
 
-`citydesk.js` mirrors `quartz.config.ts`'s transformer chain rather than
+`ccwiki.js` mirrors `quartz.config.ts`'s transformer chain rather than
 inventing its own dialect.
 
 **Math** ports `micromark-extension-math@3.0.0`, which is what `remark-math@6`
@@ -93,16 +93,16 @@ script (§5), so markup coming out of the wiki cannot execute.
 
 **Not** reproduced, deliberately: popovers, the SPA router, the graph view, and
 the site's clipboard buttons. The last of those is replaced by a native
-right-click, which is strictly better — CityDesk has the markdown source and can
+right-click, which is strictly better — CCwiki has the markdown source and can
 copy the original TeX without a DOM round trip.
 
 ## 4. Serving content: a custom scheme, not `file://`
 
-`CityDeskSchemeHandler` serves `citydesk://wiki/…` from two roots:
+`CCwikiSchemeHandler` serves `ccwiki://wiki/…` from two roots:
 
 ```
-/_/…       → CityDesk.app/Contents/Resources/web/…      the shell and vendored libs
-/asset/…   → …/CityDesk/repo/content/…                  images and other files
+/_/…       → CCwiki.app/Contents/Resources/web/…      the shell and vendored libs
+/asset/…   → …/CCwiki/repo/content/…                  images and other files
 /page/…    → never served; the click handler intercepts these
 /folder/…  → never served; likewise
 ```
@@ -147,7 +147,7 @@ in wiki markdown cannot run.
 
 The corresponding win: a `WKUserScript` at `.atDocumentStart` **does** run under
 `script-src 'self'`, which is how the macro table is injected as
-`window.__CITYDESK__.macros` before any script sees it.
+`window.__CCWIKI__.macros` before any script sees it.
 
 **Honesty note.** The app is not sandboxed and does make network calls — `git`,
 `gh` and `claude` all need it. The guarantee here is about the *reader*: the web

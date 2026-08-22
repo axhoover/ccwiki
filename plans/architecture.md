@@ -2,7 +2,7 @@
 
 ## 1. The layers
 
-Five directories under `Sources/CityDesk/`, in dependency order. Nothing lower
+Five directories under `Sources/CCwiki/`, in dependency order. Nothing lower
 imports anything higher.
 
 | Layer | Isolation | Owns |
@@ -45,16 +45,16 @@ AppModel.loadLibrary()
 AppModel.open(.page(path:anchor:))
   ├─ reveal()                         select in the sidebar, expand its folder
   └─ PageRenderer.request(for:)        resolve every wikilink on the page → hrefs
-       └─ WebController.render(_:)     evaluateJavaScript("CityDesk.render({…})")
+       └─ WebController.render(_:)     evaluateJavaScript("CCwiki.render({…})")
 
-citydesk.js
+ccwiki.js
   ├─ markdown-it with math/wikilink/heading/callout rules
   ├─ katex.renderToString per math token
   ├─ pseudocode.renderElement per pre.pseudocode, then .game-group grouping
   └─ postMessage {type:"rendered", toc:[…]}  → the inspector's outline
 
 a click
-  └─ postMessage {type:"navigate", href:"citydesk://wiki/page/…"}
+  └─ postMessage {type:"navigate", href:"ccwiki://wiki/page/…"}
        └─ AppModel.navigate(to:)      → back to open()
 ```
 
@@ -78,10 +78,10 @@ Notably the markdown is **not** rewritten before it crosses. Splicing
 
 ## 5. Two clones' worth of safety, from one clone
 
-The reader's checkout at `…/CityDesk/repo` is pull-only: `--ff-only`, and a
+The reader's checkout at `…/CCwiki/repo` is pull-only: `--ff-only`, and a
 non-fast-forward is reported as "something else wrote here" rather than merged.
 
-Ingestion jobs get a **git worktree** at `…/CityDesk/worktrees/<job-id>` on a
+Ingestion jobs get a **git worktree** at `…/CCwiki/worktrees/<job-id>` on a
 fresh branch off `origin/<default>`. A worktree has its own working directory
 and shares only the object database, so a job can check out, edit, commit and
 push without the reader's files changing under the user's cursor — and several
@@ -103,7 +103,7 @@ Three details that are easy to get wrong and are commented in the source:
 Cancelling the consuming task sends `SIGTERM` to the child's whole process
 group and escalates to `SIGKILL` after three seconds. Foundation already gives
 the child its own group, so `kill(-pid, …)` reaches `git`'s helpers and
-`claude`'s node subprocesses with no risk of signalling CityDesk.
+`claude`'s node subprocesses with no risk of signalling CCwiki.
 
 `ToolLocator` exists because a Finder-launched app inherits launchd's `PATH`
 (`/usr/bin:/bin:/usr/sbin:/sbin`) — enough for `/usr/bin/git` and nothing else.

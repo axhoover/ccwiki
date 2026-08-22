@@ -6,9 +6,9 @@ provider (`swift`, `codesign`, `notarytool`, `stapler`).
 
 ## The pieces
 
-- **`Package.swift`** — one `executableTarget` (`CityDesk`) + one `testTarget`.
+- **`Package.swift`** — one `executableTarget` (`CCwiki`) + one `testTarget`.
   Swift 6 language mode. Zero third-party dependencies.
-- **`build.sh`** — `swift build` → assemble `build/CityDesk.app` (Info.plist
+- **`build.sh`** — `swift build` → assemble `build/CCwiki.app` (Info.plist
   with `__SHORT_VERSION__`/`__BUILD_VERSION__` substituted, `PkgInfo`, any
   dependency `*.bundle`s copied into `Contents/Resources`, the icon) → codesign.
   Falls back to ad-hoc signing (`-`) when no real identity is available, so
@@ -16,8 +16,8 @@ provider (`swift`, `codesign`, `notarytool`, `stapler`).
 - **`Makefile`** — the front door. `make help` lists everything.
 - **`Resources/Info.plist`** — bundle metadata. Version strings are
   placeholders filled at build time.
-- **`CityDesk/CityDesk.entitlements`** — App Sandbox **off**, deliberately. See
-  "The app is not sandboxed" below; the template's default was on, and CityDesk
+- **`CCwiki/CCwiki.entitlements`** — App Sandbox **off**, deliberately. See
+  "The app is not sandboxed" below; the template's default was on, and CCwiki
   cannot use it.
 
 ## Permissions & capabilities
@@ -45,7 +45,7 @@ doing it for you:
 | `make check`  | `swift build` only — fast compile gate for CI/agents      |
 | `make test`   | `swift test` (swift-testing)                              |
 | `make run`    | build the `.app`, ad-hoc sign, `open` it                 |
-| `make` / build| `build/CityDesk.app` (debug)                              |
+| `make` / build| `build/CCwiki.app` (debug)                              |
 | `make icon`   | regenerate `build/AppIcon.icns`                          |
 | `make clean`  | remove `build/ .build/ dist/`                            |
 
@@ -82,7 +82,7 @@ change must pass: also `make run` and look at it — see `SWIFTUI-RULES.md` §9.
 
 ---
 
-# CityDesk additions
+# CCwiki additions
 
 The sections above are the template's build system, and they still describe it
 accurately. Four things are specific to this app.
@@ -94,9 +94,9 @@ deliberately **not** a SwiftPM `resources:` declaration, and this is not a style
 preference:
 
 SwiftPM's generated accessor resolves `Bundle.module` against
-`Bundle.main.bundleURL`, which for an app is `CityDesk.app` — the bundle
+`Bundle.main.bundleURL`, which for an app is `CCwiki.app` — the bundle
 **root**, not `Contents/Resources`. So `Bundle.module` looks for
-`CityDesk.app/CityDesk_CityDesk.bundle`. It appears to work on the machine that
+`CCwiki.app/CCwiki_CCwiki.bundle`. It appears to work on the machine that
 built it only because the accessor falls back to a hardcoded absolute `.build`
 path; ship that to anyone else's Mac and the app hard-crashes on first resource
 access. Putting the bundle at the `.app` root does fix the lookup, and then
@@ -112,11 +112,11 @@ and `build.sh` prints a warning if the directory is missing.
 
 ## The app is not sandboxed
 
-`CityDesk/CityDesk.entitlements` has no `com.apple.security.app-sandbox` key at
+`CCwiki/CCwiki.entitlements` has no `com.apple.security.app-sandbox` key at
 all. The app's whole job is to drive developer tooling that lives outside any
 container — `git` against a clone in Application Support, and `claude` and `gh`
 inside git worktrees — and a sandboxed process cannot spawn arbitrary helper
-executables. CityDesk therefore ships outside the Mac App Store.
+executables. CCwiki therefore ships outside the Mac App Store.
 
 The two hardened-runtime exceptions (`disable-library-validation`, `allow-jit`)
 are no-ops for the ad-hoc `make run` build and are what a Developer ID +

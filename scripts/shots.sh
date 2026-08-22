@@ -28,7 +28,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/build/shots}"
 PLAN="${2:-home}"
-APP="$ROOT/build/CityDesk.app"
+APP="$ROOT/build/CCwiki.app"
 
 [ -d "$APP" ] || { echo "✗ $APP not found — run make first" >&2; exit 1; }
 
@@ -40,7 +40,7 @@ echo "→ $STEPS step(s): $PLAN"
 
 # Can this process capture the screen at all? Probe once, up front, so the
 # failure mode is one clear message rather than N blank PNGs.
-PROBE="$(mktemp -t citydesk-probe).png"
+PROBE="$(mktemp -t ccwiki-probe).png"
 if screencapture -x -o "$PROBE" 2>/dev/null && [ -s "$PROBE" ]; then
 	EXTERNAL=1
 else
@@ -50,10 +50,10 @@ else
 fi
 rm -f "$PROBE"
 
-CITYDESK_SHOTS="$OUT" \
-CITYDESK_SHOT_PLAN="$PLAN" \
-CITYDESK_SHOT_EXTERNAL="$EXTERNAL" \
-	"$APP/Contents/MacOS/CityDesk" >/dev/null 2>&1 &
+CCWIKI_SHOTS="$OUT" \
+CCWIKI_SHOT_PLAN="$PLAN" \
+CCWIKI_SHOT_EXTERNAL="$EXTERNAL" \
+	"$APP/Contents/MacOS/CCwiki" >/dev/null 2>&1 &
 APP_PID=$!
 trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
 
@@ -65,7 +65,7 @@ if [ ! -x "$HELPER" ] || [ "$ROOT/scripts/window-id.swift" -nt "$HELPER" ]; then
 	swiftc -O -o "$HELPER" "$ROOT/scripts/window-id.swift"
 fi
 
-window_id() { "$HELPER" CityDesk 2>/dev/null || true; }
+window_id() { "$HELPER" CCwiki 2>/dev/null || true; }
 
 if [ "$EXTERNAL" = "1" ]; then
 	i=1
@@ -90,7 +90,7 @@ if [ "$EXTERNAL" = "1" ]; then
 			screencapture -x -o -l "$WID" "$OUT/$NAME.png" 2>/dev/null \
 				|| echo "  ⚠️  capture failed for $NAME"
 		else
-			echo "  ⚠️  could not find the CityDesk window for $NAME"
+			echo "  ⚠️  could not find the CCwiki window for $NAME"
 		fi
 		printf 'ok' > "$OUT/.go-$i"
 		rm -f "$OUT/.ready-$i"

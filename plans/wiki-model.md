@@ -1,10 +1,10 @@
 # The wiki model
 
-`Sources/CityDesk/Wiki/` is pure, nonisolated, dependency-free Swift, and it is
+`Sources/CCwiki/Wiki/` is pure, nonisolated, dependency-free Swift, and it is
 where almost all of the app's correctness risk lives. Everything here is a port
 of behaviour that already exists in the wiki repo, so "what does Quartz do?" is
 always the right question, and "what would be nicer?" is almost always the wrong
-one — a divergence means CityDesk shows links the website does not, or hides
+one — a divergence means CCwiki shows links the website does not, or hides
 ones it does, and nobody notices until they click.
 
 ---
@@ -43,7 +43,7 @@ a port of `github-slugger@2.0.0`. Both carry the upstream quirks deliberately:
   `## Syntax` is `syntax-1`), but wikilink **anchors** come from the
   non-deduplicating one — so `[[page#Syntax]]` can only ever address the first
   one. That is a real Quartz limitation. We reproduce it rather than "fix" it,
-  because a link that works in CityDesk and not on the website is worse than one
+  because a link that works in CCwiki and not on the website is worse than one
   that works nowhere.
 
 ## 2. The resolution table

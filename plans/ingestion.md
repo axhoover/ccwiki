@@ -13,7 +13,7 @@ design turns on.
 `repository_dispatch` workflow, and it has produced five real merged `[paper]`
 commits.
 
-So CityDesk must not invent house style. `prompts/ingest.md` in this repo is an
+So CCwiki must not invent house style. `prompts/ingest.md` in this repo is an
 *envelope*: it states the job, points the agent at the repo's own instructions
 **read from the live worktree**, and adds the checks the server-side pipeline
 cannot run. Nothing about editorial style is compiled into the Swift binary,
@@ -113,7 +113,7 @@ Conflating these is the most likely metadata error:
   omit it and supply a verified inline `bibtex` block instead. The lint enforces
   exactly one of the two.
 
-## 7. What CityDesk never does
+## 7. What CCwiki never does
 
 `gh pr create --draft`, always. Never ready-for-review, never merged, never
 approved. The app's role ends at "draft PR opened, here is the diff" — it
@@ -126,7 +126,7 @@ submission that did not land.
 
 ## 8. PDFs
 
-Dropped PDFs are copied to `~/Library/Application Support/CityDesk/library/`,
+Dropped PDFs are copied to `~/Library/Application Support/CCwiki/library/`,
 which is deliberately outside the clone, and passed to the agent as an input
 path only. They never enter the repo; the References page points at
 eprint/arXiv/DOI.
@@ -136,9 +136,9 @@ eprint/arXiv/DOI.
 ## 9. How it is built
 
 ```
-Sources/CityDesk/Jobs/
+Sources/CCwiki/Jobs/
 ├── IngestSubmission.swift   the input: a recognized URL or a staged PDF
-├── Preflight.swift          what CityDesk checks before the agent starts
+├── Preflight.swift          what CCwiki checks before the agent starts
 ├── PromptComposer.swift     fills prompts/ingest.md — and nothing else
 ├── ClaudeStream.swift       stream-json → a readable transcript + the outcome
 ├── IngestJob.swift          @Observable state machine, transcript, log file
@@ -185,7 +185,7 @@ jobs the app knows about and offers to prune the residue of a crash.
 
 ### Two dev affordances worth keeping
 
-- `CITYDESK_INGEST_DRY_RUN=1` stops after composing the prompt and writes it
+- `CCWIKI_INGEST_DRY_RUN=1` stops after composing the prompt and writes it
   into the transcript. Every mechanical step still runs — worktree, submodules,
   pre-flight, composition — so iterating on `prompts/ingest.md` costs nothing.
 - `make shots PLAN='ingest:<url>'` submits a real job and blocks until it

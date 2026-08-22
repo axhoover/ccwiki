@@ -1,4 +1,4 @@
-CityDesk vendored web assets — regenerate with scripts/vendor-web.sh
+CCwiki vendored web assets — regenerate with scripts/vendor-web.sh
 Generated: 2026-08-22T02:55:34Z
 
 markdown-it            15.0.0   MIT   dist/browser/markdown-it.umd.min.js  -> window.markdownit

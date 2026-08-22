@@ -87,7 +87,7 @@ Cheap wins available now, before any restructuring:
 themselves or with the help of an LLM to point out errors. Just having an error
 button that allows for quick correction PRs (or issue opening)."*
 
-This is the feature that turns CityDesk from a reader into a tool you use while
+This is the feature that turns CCwiki from a reader into a tool you use while
 reading, and it is probably the highest-value item here: noticing an error is
 something that happens *during* reading, and the cost of acting on it right now
 is opening a browser, finding the repo, finding the file, and editing markdown
@@ -128,7 +128,7 @@ looks like a citation key, which is exactly when a reference should win.
 - **`DiffGuard`** — the mechanical half of §1, specified in
   [ingestion.md](ingestion.md) §4 and not yet built.
 - **Job history across launches.** Jobs live in memory today; the transcripts
-  are on disk in `…/CityDesk/logs/`, so the list could be rebuilt from them.
+  are on disk in `…/CCwiki/logs/`, so the list could be rebuilt from them.
 - **A second job kind needs a job *type*.** `IngestJob` is currently named for
   the only kind there is. §3 is the moment to generalize it.
 - **Reference PDFs.** The library holds what you drop; it could also cache the

@@ -141,9 +141,9 @@ alternative is a spinner that never stops.
   "failed to connect", …) rather than by exit code, because git reports all of
   them as 128.
 - **A clone that will not fast-forward.** This one *is* alarming, because
-  CityDesk never writes to that checkout — so something else did. The message
+  CCwiki never writes to that checkout — so something else did. The message
   says exactly that and offers the two real options: fix it by hand, or delete
-  the clone and let CityDesk re-clone.
+  the clone and let CCwiki re-clone.
 - **Missing tooling.** The reader needs only `git`; ingestion needs `gh`,
   `claude` and `node`. Missing ones are listed in the status bar's warnings menu
   and in Settings, each with what it is for and a **Locate…** button.
@@ -188,7 +188,7 @@ make shots
 make shots PLAN='page:Primitives/pseudorandom-function.md,dark'
 ```
 
-`ScreenshotRunner` (compiled in, inert unless `CITYDESK_SHOTS` is set) applies
+`ScreenshotRunner` (compiled in, inert unless `CCWIKI_SHOTS` is set) applies
 each step, waits for it to settle, writes a `.ready-N` marker and blocks;
 `scripts/shots.sh` captures the window with `screencapture -l` and answers with
 `.go-N`. Plan steps: `home`, `page:<path>`, `folder:<slug>`, `switcher:<query>`,

@@ -1,7 +1,7 @@
-# Paper ingestion — CityDesk job prompt
+# Paper ingestion — CCwiki job prompt
 
 <!--
-This file is a TEMPLATE. CityDesk fills the `{{...}}` placeholders and pipes the
+This file is a TEMPLATE. CCwiki fills the `{{...}}` placeholders and pipes the
 result to `claude -p` inside the job's git worktree.
 
 The most important design rule here: **this file does not contain house style,
@@ -18,17 +18,17 @@ So this template does three things and nothing else:
   1. states the job (this paper, this worktree, this branch);
   2. hands the agent the repo's OWN instructions, read from the live worktree;
   3. adds the checks the server-side pipeline cannot run — the local lint, the
-     local build, and the diff ceiling CityDesk enforces before it will let a
+     local build, and the diff ceiling CCwiki enforces before it will let a
      PR open.
 
-Placeholders CityDesk substitutes:
+Placeholders CCwiki substitutes:
 
   {{WORKTREE}}       absolute path of the job's git worktree
   {{BRANCH}}         the branch created for this job, off origin/<default>
   {{BASE_BRANCH}}    the default branch this job forked from
   {{SUBMISSION}}     a JSON object: {type, url, source_url, notes, submitted_at}
   {{PAPER_LOCATION}} either a local PDF path or the URL plus canonicalization hints
-  {{PREFLIGHT}}      what CityDesk already checked (key collisions, host page, tooling)
+  {{PREFLIGHT}}      what CCwiki already checked (key collisions, host page, tooling)
   {{SKILL_NOTE}}     whether .claude/skills/city-style is present in the worktree
 -->
 
@@ -60,7 +60,7 @@ alone; nothing else is reading it.
 - Branch: `{{BRANCH}}`, already created for you off `origin/{{BASE_BRANCH}}`.
 - {{SKILL_NOTE}}
 
-CityDesk already ran these checks; the results are below, and you should trust
+CCwiki already ran these checks; the results are below, and you should trust
 them rather than repeating the work:
 
 {{PREFLIGHT}}
@@ -73,7 +73,7 @@ anything. They are the contract; this prompt is only the envelope.
 1. `.github/prompts/paper-submission.md` — the paper-ingestion contract:
    scope limits, what requires human approval, abort semantics, and the PR body
    template. **Follow it exactly.** Where it and this prompt disagree, it wins,
-   except for the mechanical limits in Step 4, which CityDesk enforces on the
+   except for the mechanical limits in Step 4, which CCwiki enforces on the
    diff whatever the prompt says.
 2. `CONTRIBUTING.md` — the frontmatter schema and the worked example per page
    type. This is what `scripts/lint.mjs` enforces.
@@ -138,7 +138,7 @@ single concrete result you can point at in the paper:
 - <claim> — [[CITATIONKEY - Full Title|CITATIONKEY]]
 ```
 
-Mechanical rules CityDesk checks on the diff and will reject:
+Mechanical rules CCwiki checks on the diff and will reject:
 
 - The separator is an **em dash** (U+2014) with a single space either side.
   Not `--`, not an en dash.
@@ -223,7 +223,7 @@ every claim you assert, and say which pages you touched and why each one.
 The style rules in `CLAUDE.md` apply to the **PR description** as well as to the
 wiki content: no marketing adjectives, no throat-clearing, no closing recap.
 
-Print the PR URL on its own line as the last thing you do. CityDesk reads it
+Print the PR URL on its own line as the last thing you do. CCwiki reads it
 from your output.
 
 ## Step 7 — Aborting

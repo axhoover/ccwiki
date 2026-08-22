@@ -1,4 +1,4 @@
-# CityDesk
+# CCwiki
 
 **A native macOS reader for the [cryptology.city](https://cryptology.city) wiki,
 and a launcher for headless agent jobs that ingest papers and open PRs against
@@ -12,7 +12,7 @@ This file is the index. Depth lives in [plans/](plans/); the running log lives i
 
 ## 1. What it is, in one paragraph
 
-CityDesk is a *client* of `axhoover/cryptology.city`. The GitHub repo is the only
+CCwiki is a *client* of `axhoover/cryptology.city`. The GitHub repo is the only
 canonical store; the app owns no content. It keeps a pull-only git clone in
 Application Support, renders pages offline with a vendored Markdown + KaTeX +
 pseudocode.js pipeline in a `WKWebView`, and resolves `[[wikilinks]]` by porting
@@ -29,7 +29,7 @@ make help      # everything else
 ```
 
 First launch clones the wiki (~35 MB) into
-`~/Library/Application Support/CityDesk/repo` and builds the search index. After
+`~/Library/Application Support/CCwiki/repo` and builds the search index. After
 that, reading needs no network. Setup details are in [README.md](README.md).
 
 ## 3. The non-negotiables
@@ -61,16 +61,16 @@ redesign, not a refactor.
 │   └── make-icon.swift      generates build/AppIcon.icns
 ├── Resources/
 │   ├── Info.plist
-│   └── web/                 the reader: index.html, app.css, citydesk.js, vendor/
-├── CityDesk/                CityDesk.entitlements (NOT sandboxed — see §5)
-├── Sources/CityDesk/
-│   ├── App/                 CityDeskApp, AppModel, AppPaths, Theme, ScreenshotRunner
+│   └── web/                 the reader: index.html, app.css, ccwiki.js, vendor/
+├── CCwiki/                CCwiki.entitlements (NOT sandboxed — see §5)
+├── Sources/CCwiki/
+│   ├── App/                 CCwikiApp, AppModel, AppPaths, Theme, ScreenshotRunner
 │   ├── Wiki/                pure, testable: slugs, wikilinks, frontmatter, macros, index
 │   ├── Reader/              the WKWebView, its scheme handler, and the render request
 │   ├── Search/              SQLite FTS5 and the fuzzy quick-switcher matcher
 │   ├── Jobs/                subprocess plumbing, tool discovery, git, ingestion
 │   └── UI/                  the SwiftUI views
-└── Tests/CityDeskTests/     61 tests; see §6
+└── Tests/CCwikiTests/     61 tests; see §6
 ```
 
 ## 5. Documentation index
@@ -81,11 +81,11 @@ redesign, not a refactor.
   resolution, the frontmatter subset, and the macro table. **The fiddliest code
   in the app and the most heavily tested.**
 - [plans/render-pipeline.md](plans/render-pipeline.md) — the vendored JS, why
-  each package, the `citydesk://` scheme handler, and the CSP.
+  each package, the `ccwiki://` scheme handler, and the CSP.
 - [plans/search.md](plans/search.md) — the FTS5 schema, tokenizer choices,
   query escaping, and the ranking backlog.
 - [plans/ingestion.md](plans/ingestion.md) — the worktree lifecycle, the prompt
-  composition rule, and what CityDesk checks before and after the agent runs.
+  composition rule, and what CCwiki checks before and after the agent runs.
 - [plans/build-system.md](plans/build-system.md) — `make` / `build.sh`, the
   release pipeline, and why the app is not sandboxed.
 - [plans/design-system.md](plans/design-system.md) — the two type systems (app
@@ -118,7 +118,7 @@ are the ones that are exactly reproducible and silently wrong when they drift:
   a PR URL, a deliberate abort, an error, and a non-JSON line.
 - **`PromptCompositionTests`** — every placeholder is filled, and the template
   still defers to the wiki's own contract rather than restating it.
-- **`CorpusTests`** — runs only when `CITYDESK_WIKI` points at a real clone
+- **`CorpusTests`** — runs only when `CCWIKI_WIKI` points at a real clone
   (`make test-corpus`). Resolves all ~673 wikilinks in ~300 pages, validates the
   whole frontmatter schema, and parses the live macro table.
 

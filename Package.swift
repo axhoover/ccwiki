@@ -3,16 +3,16 @@ import PackageDescription
 
 // A clean SwiftUI macOS app template. One executable target, one test
 // target, zero third-party dependencies — add your own under `dependencies`
-// and wire them into the `CityDesk` target as you grow the app.
+// and wire them into the `CCwiki` target as you grow the app.
 let package = Package(
-    name: "CityDesk",
+    name: "CCwiki",
     platforms: [
         .macOS(.v14),
     ],
     targets: [
         .executableTarget(
-            name: "CityDesk",
-            path: "Sources/CityDesk",
+            name: "CCwiki",
+            path: "Sources/CCwiki",
             swiftSettings: [
                 // Swift 6 strict concurrency from day one — cheaper to start
                 // here than to retrofit it later.
@@ -20,9 +20,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "CityDeskTests",
-            dependencies: ["CityDesk"],
-            path: "Tests/CityDeskTests"
+            name: "CCwikiTests",
+            dependencies: ["CCwiki"],
+            path: "Tests/CCwikiTests"
         ),
     ]
 )

@@ -7,7 +7,7 @@
 import CoreGraphics
 import Foundation
 
-let owner = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "CityDesk"
+let owner = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "CCwiki"
 let windows = CGWindowListCopyWindowInfo(
     [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 

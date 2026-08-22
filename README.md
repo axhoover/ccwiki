@@ -1,10 +1,10 @@
-# CityDesk
+# CCwiki
 
 A native macOS reader for the [cryptology.city](https://cryptology.city) wiki,
 and a launcher for headless agent jobs that ingest papers and open pull requests
 against it.
 
-CityDesk is a **client** of `axhoover/cryptology.city`. The GitHub repo is the
+CCwiki is a **client** of `axhoover/cryptology.city`. The GitHub repo is the
 only canonical store; the app owns no content and never merges anything.
 
 - **Read offline.** A pull-only git clone, rendered in a `WKWebView` with a
@@ -15,7 +15,7 @@ only canonical store; the app owns no content and never merges anything.
 - **Find things.** ⌘O fuzzy quick-switcher over titles, aliases and paper
   titles; ⇧⌘F full-text search over everything, backed by SQLite FTS5.
 - **Ingest papers.** Drop a PDF on the reader, or paste an ePrint, arXiv, DOI or
-  ECCC link (⇧⌘N). CityDesk runs `claude` in a throwaway git worktree, streams
+  ECCC link (⇧⌘N). CCwiki runs `claude` in a throwaway git worktree, streams
   the transcript into a jobs window (⇧⌘J), and ends at a **draft** PR — it never
   merges, and never marks one ready for review. See
   [plans/ingestion.md](plans/ingestion.md).
@@ -30,14 +30,14 @@ only canonical store; the app owns no content and never merges anything.
 
 A Finder-launched app inherits launchd's `PATH`, which is
 `/usr/bin:/bin:/usr/sbin:/sbin` — enough for `/usr/bin/git` and nothing else.
-CityDesk searches Homebrew's directories and `~/.local/bin` as well, and falls
+CCwiki searches Homebrew's directories and `~/.local/bin` as well, and falls
 back to asking a login shell, so a normal Homebrew or npm install is found
 automatically.
 
 ## Setup
 
 ```sh
-git clone <this repo> citydesk && cd citydesk
+git clone <this repo> ccwiki && cd ccwiki
 
 ./scripts/vendor-web.sh    # fetch the offline render pipeline (once, needs network)
 make check                 # compile + unit tests
@@ -51,12 +51,12 @@ Re-verify an existing tree with `./scripts/vendor-web.sh --check`.
 
 ### First launch
 
-CityDesk clones the wiki (~35 MB) into
-`~/Library/Application Support/CityDesk/repo` and builds a search index. After
+CCwiki clones the wiki (~35 MB) into
+`~/Library/Application Support/CCwiki/repo` and builds a search index. After
 that, reading needs no network — ⌘R fast-forwards when you want an update.
 
 ```
-~/Library/Application Support/CityDesk/
+~/Library/Application Support/CCwiki/
 ├── repo/          the pull-only clone: the reader's copy, never written to
 ├── worktrees/     one git worktree per ingestion job
 ├── library/       PDFs you drop on the app (deliberately outside the repo)
@@ -65,7 +65,7 @@ that, reading needs no network — ⌘R fast-forwards when you want an update.
 ```
 
 Delete `index/` any time you like; it rebuilds in about a tenth of a second.
-Delete `repo/` and CityDesk re-clones on the next sync.
+Delete `repo/` and CCwiki re-clones on the next sync.
 
 ### For ingestion jobs
 
@@ -80,7 +80,7 @@ node --version                      # the wiki's lint is a node script
 
 Note that `gh auth login` alone does not always make `git push` work: if your
 `git_protocol` is `ssh`, `gh` installs no HTTPS credential helper, and the push
-fails at the very end of a job. CityDesk configures one on **its own clone**
+fails at the very end of a job. CCwiki configures one on **its own clone**
 (local config only — your global git config is untouched) and refuses to start
 a job that could not push.
 

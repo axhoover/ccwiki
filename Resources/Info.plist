@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>CityDesk</string>
+	<string>CCwiki</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.axhoover.citydesk</string>
+	<string>com.axhoover.ccwiki</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>CityDesk</string>
+	<string>CCwiki</string>
 	<key>CFBundleDisplayName</key>
-	<string>CityDesk</string>
+	<string>CCwiki</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

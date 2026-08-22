@@ -1,20 +1,23 @@
 #!/usr/bin/env swift
 //
-// make-icon.swift — render the CityDesk app icon at every macOS size.
+// make-icon.swift — render the CCwiki app icon at every macOS size.
 //
-// The mark is a lowercase lambda over a skyline.
+// The mark is the wiki's own logo reduced to what survives being an app icon:
+// the purple, the concentric rings, the skyline, and **CC** in the middle.
 //
-// λ is the wiki's own `\secpar` — the security parameter, and the single most
-// common symbol on the site. It means something precise to the one audience
-// this app has, it is unlike any other icon in a Dock, and it survives being
-// shrunk to 16 pt, which a page-of-math glyph does not. The three blocks
-// beneath it are the "city" half of the name and read as a desk at small sizes.
-// The palette is the website's purple, so the app and the site look related.
+// The full logo (content/Files/cc-full.png) sets CRYPTOLOGY over CITY inside
+// the rings with the skyline above the wordmark. Two words at that size are
+// unreadable at 32 pt and gone at 16, so the wordmark collapses to its initials
+// and everything else steps back: the rings sit near the rim, and the skyline
+// becomes a band of texture behind the letters rather than a subject. What is
+// left is the same object seen from further away, which is what an icon is.
 //
-// Pure CoreGraphics: no assets, no dependencies, runs under plain `swift`.
-// `make icon` runs `iconutil -c icns build/AppIcon.iconset` on what this writes.
+// Pure CoreGraphics and Core Text: no assets, no dependencies, runs under plain
+// `swift`. `make icon` runs `iconutil -c icns build/AppIcon.iconset` on the PNGs
+// this writes.
 
 import AppKit
+import CoreText
 
 let iconsetDir = "build/AppIcon.iconset"
 try? FileManager.default.createDirectory(
@@ -34,138 +37,147 @@ let variants: [(String, Int)] = [
     ("icon_512x512@2x.png", 1024),
 ]
 
+// The logo's palette.
+let deepPurple = CGColor(red: 0.13, green: 0.07, blue: 0.22, alpha: 1)
+let midPurple = CGColor(red: 0.31, green: 0.19, blue: 0.48, alpha: 1)
+let ringPurple = CGColor(red: 0.60, green: 0.44, blue: 0.80, alpha: 1)
+
 func draw(into ctx: CGContext, size s: CGFloat) {
-    // macOS icons sit in a rounded tile inset from the canvas, with the corner
-    // radius Apple uses (~22% of the tile).
     let inset = s * 0.06
     let tile = CGRect(x: inset, y: inset, width: s - 2 * inset, height: s - 2 * inset)
     let corner = tile.width * 0.225
     let tilePath = CGPath(
         roundedRect: tile, cornerWidth: corner, cornerHeight: corner, transform: nil)
 
-    let colorSpace = CGColorSpaceCreateDeviceRGB()
-    // The website's purple: #7a30b8 → #3a1060, lit from the top-left the way
-    // macOS icons are.
-    let gradient = CGGradient(
-        colorsSpace: colorSpace,
-        colors: [
-            CGColor(red: 0.55, green: 0.24, blue: 0.78, alpha: 1),
-            CGColor(red: 0.23, green: 0.06, blue: 0.38, alpha: 1),
-        ] as CFArray,
-        locations: [0, 1])!
-
     ctx.saveGState()
     ctx.addPath(tilePath)
     ctx.clip()
+
+    // Background: lit from the top-left, the way macOS icons are.
+    let gradient = CGGradient(
+        colorsSpace: CGColorSpaceCreateDeviceRGB(),
+        colors: [midPurple, deepPurple] as CFArray,
+        locations: [0, 1])!
     ctx.drawLinearGradient(
         gradient,
         start: CGPoint(x: tile.minX, y: tile.maxY),
         end: CGPoint(x: tile.maxX, y: tile.minY),
         options: [])
 
-    // A soft highlight across the top, which is what stops a flat gradient
-    // looking like a web button.
-    let highlight = CGGradient(
-        colorsSpace: colorSpace,
-        colors: [
-            CGColor(red: 1, green: 1, blue: 1, alpha: 0.18),
-            CGColor(red: 1, green: 1, blue: 1, alpha: 0),
-        ] as CFArray,
-        locations: [0, 1])!
-    ctx.drawLinearGradient(
-        highlight,
-        start: CGPoint(x: tile.midX, y: tile.maxY),
-        end: CGPoint(x: tile.midX, y: tile.midY),
-        options: [])
+    drawSkyline(into: ctx, tile: tile, size: s)
+    drawRings(into: ctx, tile: tile, size: s)
     ctx.restoreGState()
 
-    // A hairline rim, the detail that makes a tile look placed rather than
-    // pasted. Skipped below 32 pt, where it just muddies the edge.
+    // A hairline rim. Below 32 pt it just muddies the edge.
     if s >= 32 {
         ctx.saveGState()
         ctx.addPath(tilePath)
-        ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.16))
+        ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.14))
         ctx.setLineWidth(max(1, s * 0.004))
         ctx.strokePath()
         ctx.restoreGState()
     }
 
-    drawSkyline(into: ctx, tile: tile, size: s)
-    drawLambda(into: ctx, tile: tile, size: s)
+    drawInitials(into: ctx, tile: tile, size: s)
 }
 
-/// Blocks flanking the lambda, standing on a common ground line.
-///
-/// They sit *beside* the mark rather than behind it: overlapping the legs made
-/// the λ read as a stray glyph on top of noise instead of as one building among
-/// several.
-func drawSkyline(into ctx: CGContext, tile: CGRect, size s: CGFloat) {
-    // At 16 pt these are two or three pixels tall and read as grit.
+/// The two concentric rings from the logo, near the rim.
+func drawRings(into ctx: CGContext, tile: CGRect, size s: CGFloat) {
     guard s >= 32 else { return }
-
-    let baseline = tile.minY + tile.height * 0.170
     let unit = tile.width
-    // (x, width, height) in fractions of the tile, left to right.
-    let blocks: [(CGFloat, CGFloat, CGFloat)] = [
-        (0.150, 0.100, 0.170),
-        (0.262, 0.070, 0.115),
-        (0.668, 0.070, 0.135),
-        (0.750, 0.100, 0.205),
+    let centre = CGPoint(x: tile.midX, y: tile.midY)
+
+    // (radius, line width, alpha) — a heavy outer ring and a light inner one,
+    // with the dark gap between them that the logo has.
+    let rings: [(CGFloat, CGFloat, CGFloat)] = [
+        (0.442, 0.028, 0.92),
+        (0.384, 0.013, 0.70),
     ]
-
     ctx.saveGState()
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.26))
-    for (x, width, height) in blocks {
-        let rect = CGRect(
-            x: tile.minX + unit * x, y: baseline,
-            width: unit * width, height: unit * height)
-        let radius = unit * 0.018
-        ctx.addPath(CGPath(
-            roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil))
+    for (radius, width, alpha) in rings {
+        ctx.setStrokeColor(ringPurple.copy(alpha: alpha)!)
+        ctx.setLineWidth(unit * width)
+        ctx.addEllipse(in: CGRect(
+            x: centre.x - unit * radius, y: centre.y - unit * radius,
+            width: unit * radius * 2, height: unit * radius * 2))
+        ctx.strokePath()
     }
-    ctx.fillPath()
-
-    // The ground line the blocks stand on.
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.42))
-    let rule = CGRect(
-        x: tile.minX + unit * 0.140, y: baseline - unit * 0.030,
-        width: unit * 0.720, height: unit * 0.028)
-    ctx.addPath(CGPath(
-        roundedRect: rule, cornerWidth: rule.height / 2, cornerHeight: rule.height / 2,
-        transform: nil))
-    ctx.fillPath()
     ctx.restoreGState()
 }
 
-/// A lowercase lambda, drawn as two stroked paths rather than set in a font —
-/// no font dependency, and full control of the weight at every size.
-func drawLambda(into ctx: CGContext, tile: CGRect, size s: CGFloat) {
+/// A skyline across the middle band, clipped inside the rings.
+///
+/// Background, not subject: it sits *behind* the initials at low contrast so it
+/// reads as texture. At 32 pt and below it is dropped — a few pixels of skyline
+/// is grit, not a city.
+func drawSkyline(into ctx: CGContext, tile: CGRect, size s: CGFloat) {
+    guard s > 32 else { return }
     let unit = tile.width
-    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-        CGPoint(x: tile.minX + unit * x, y: tile.minY + unit * y)
-    }
-
-    // Heavier at small sizes, so the mark keeps its colour when it is only a
-    // few pixels wide.
-    let weight = unit * (s <= 32 ? 0.125 : 0.105)
+    let centre = CGPoint(x: tile.midX, y: tile.midY)
+    let innerRadius = unit * 0.372
 
     ctx.saveGState()
-    ctx.setLineCap(.round)
-    ctx.setLineJoin(.round)
-    ctx.setLineWidth(weight)
-    ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    ctx.addEllipse(in: CGRect(
+        x: centre.x - innerRadius, y: centre.y - innerRadius,
+        width: innerRadius * 2, height: innerRadius * 2))
+    ctx.clip()
 
-    // The descending stroke: a short hook at the top left, then down to the
-    // bottom right, landing on the ground line the blocks stand on.
-    ctx.move(to: point(0.360, 0.815))
-    ctx.addQuadCurve(to: point(0.487, 0.735), control: point(0.442, 0.820))
-    ctx.addLine(to: point(0.648, 0.215))
-    ctx.strokePath()
+    // Buildings standing on a line just below centre, so the skyline crowns the
+    // initials the way it crowns the wordmark in the logo.
+    let baseline = tile.minY + unit * 0.505
+    // (x, width, height), left to right, in fractions of the tile. Heights vary
+    // widely on purpose: an even row of blocks reads as a barcode, not a city.
+    // Two towers carry the silhouette and the rest fall away from them.
+    let blocks: [(CGFloat, CGFloat, CGFloat)] = [
+        (0.070, 0.070, 0.070), (0.145, 0.048, 0.130), (0.198, 0.088, 0.098),
+        (0.292, 0.026, 0.255), (0.300, 0.062, 0.200),  // a spire on a low block
+        (0.368, 0.048, 0.128), (0.424, 0.092, 0.310),  // the tall tower
+        (0.522, 0.040, 0.155), (0.568, 0.074, 0.245),  // its shorter neighbour
+        (0.648, 0.030, 0.290), (0.654, 0.056, 0.170),  // a second spire
+        (0.716, 0.070, 0.120), (0.792, 0.050, 0.190), (0.848, 0.078, 0.088),
+    ]
 
-    // The left leg, branching below the apex.
-    ctx.move(to: point(0.547, 0.540))
-    ctx.addLine(to: point(0.392, 0.215))
-    ctx.strokePath()
+    ctx.setFillColor(CGColor(red: 0.04, green: 0.01, blue: 0.09, alpha: 0.72))
+    for (x, width, height) in blocks {
+        ctx.fill(CGRect(
+            x: tile.minX + unit * x, y: baseline,
+            width: unit * width, height: unit * height))
+    }
+    // The ground the city stands on.
+    ctx.fill(CGRect(x: tile.minX, y: tile.minY, width: unit, height: baseline - tile.minY))
+    ctx.restoreGState()
+}
+
+/// **CC**, set in the heaviest system weight and centred on its cap height.
+///
+/// Core Text rather than `NSAttributedString.draw(at:)` because the latter
+/// positions a line fragment, not a baseline — and a mark two characters wide
+/// has no margin for a few points of vertical drift.
+func drawInitials(into ctx: CGContext, tile: CGRect, size s: CGFloat) {
+    let font = NSFont.systemFont(ofSize: tile.height * 0.360, weight: .black)
+    let attributed = NSAttributedString(string: "CC", attributes: [
+        .font: font,
+        .foregroundColor: NSColor.white,
+        // The logo's letterforms are tight; the system font is not.
+        .kern: -font.pointSize * 0.055,
+    ])
+    let line = CTLineCreateWithAttributedString(attributed)
+    let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+
+    ctx.saveGState()
+    // A soft shadow lifts the letters off the skyline behind them, which is the
+    // whole reason the skyline can stay as dark as it is.
+    if s >= 64 {
+        ctx.setShadow(
+            offset: .zero, blur: tile.width * 0.032,
+            color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.50))
+    }
+    // Sat in the dark ground below the skyline, where the wordmark sits in the
+    // logo — not dead centre, which would put the buildings behind the letters.
+    ctx.textPosition = CGPoint(
+        x: tile.midX - bounds.width / 2 - bounds.origin.x,
+        y: tile.minY + tile.width * 0.272 - font.capHeight / 2)
+    CTLineDraw(line, ctx)
     ctx.restoreGState()
 }
 

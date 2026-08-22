@@ -38,13 +38,13 @@ See `plans/search.md` §5.
 
 ## A directory URL's path ends in a slash, and path containment must allow for it
 
-`CityDeskSchemeHandler` refused every resource with `not found: index.html`,
+`CCwikiSchemeHandler` refused every resource with `not found: index.html`,
 while the file was demonstrably there. `Bundle.main.resourceURL.appending(path:
 "web")` yields a path ending in `/`, so the containment check
 `file.hasPrefix(root + "/")` was testing for `…/web//index.html`.
 
 **Rule:** normalize *both* sides before comparing paths — trim trailing slashes,
-then test `==` or `hasPrefix(root + "/")`. `CityDeskSchemeHandler.isContained`
+then test `==` or `hasPrefix(root + "/")`. `CCwikiSchemeHandler.isContained`
 does exactly this and is the only place that comparison lives.
 
 ## Double hyphens in an entitlements comment break codesign
@@ -54,7 +54,7 @@ at a `<!-- ... -->` comment that mentioned `--options runtime`. AMFI parses
 entitlements with a strict XML parser, and `--` inside a comment is illegal XML.
 `plutil -lint` accepts the file, so it does not catch this.
 
-**Rule:** no double hyphens anywhere in `CityDesk.entitlements`, comments
+**Rule:** no double hyphens anywhere in `CCwiki.entitlements`, comments
 included. The file says so at the top.
 
 ## A "nearly matches optional requirement" warning is an error here
@@ -81,7 +81,7 @@ build, and has nothing left to do but push.
 
 **Fix, two halves.** `GitService.configureCredentialHelper` sets
 `credential.https://github.com.helper` to `!gh auth git-credential` on
-CityDesk's **own clone**, using `--local` — the clone is the app's artifact, and
+CCwiki's **own clone**, using `--local` — the clone is the app's artifact, and
 reaching into the user's global git config to solve our problem would be rude.
 `Preflight` then refuses to start a job when neither a helper nor an SSH remote
 is configured, so the failure lands in ten seconds instead of ten minutes.
@@ -97,20 +97,20 @@ before writing a single file** — reading the five contract documents, fetching
 the paper, modelling its output on a recent reference page, and checking the
 lint's macro and bullet rules.
 
-That is not the agent being wasteful. CityDesk's prompt deliberately adds what
+That is not the agent being wasteful. CCwiki's prompt deliberately adds what
 the server pipeline lacks: `npm ci`, `node scripts/lint.mjs`, `npx quartz
 build`, and `npm run sync-cryptobib`, each with a fix cycle behind it. A budget
 copied from a workflow that runs none of those is a budget for a different job.
 
-The cap is now 200, overridable with `CITYDESK_MAX_TURNS`. **The real bound on a
+The cap is now 200, overridable with `CCWIKI_MAX_TURNS`. **The real bound on a
 runaway job is the user's Cancel button and the live cost readout**, both of
 which the jobs panel already has — not a number chosen in advance by someone who
 has not watched the job run.
 
 ## The worktree path contains a space, and that costs agent turns
 
-`~/Library/Application Support/CityDesk/worktrees/<id>` is the conventionally
-correct place for it, and CityDesk's own subprocess calls are safe — arguments
+`~/Library/Application Support/CCwiki/worktrees/<id>` is the conventionally
+correct place for it, and CCwiki's own subprocess calls are safe — arguments
 go through `Process.arguments`, never a shell. But an *agent* composing its own
 shell commands has to quote it every time, and the first real ingestion job lost
 turns to `ENOENT: no such file or directory, scandir

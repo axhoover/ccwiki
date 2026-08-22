@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CityDesk — vendor the offline rendering pipeline into CityDesk/Resources/web/
+# CCwiki — vendor the offline rendering pipeline into CCwiki/Resources/web/
 #
 #   ./scripts/vendor-web.sh            # fetch + verify + install
 #   ./scripts/vendor-web.sh --check    # verify what's already installed, fetch nothing
@@ -147,7 +147,7 @@ grep -q 'algname' "$VENDOR/pseudocode/pseudocode.js" || die "vendored pseudocode
 
 # ---------------------------------------------------------------- manifest
 cat > "$VENDOR/VENDOR.txt" <<EOF
-CityDesk vendored web assets — regenerate with scripts/vendor-web.sh
+CCwiki vendored web assets — regenerate with scripts/vendor-web.sh
 Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 markdown-it            ${MARKDOWN_IT_VER}   MIT   dist/browser/markdown-it.umd.min.js  -> window.markdownit

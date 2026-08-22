@@ -1,7 +1,7 @@
-# CityDesk — an offline reader for cryptology.city, and an agent job launcher
+# CCwiki — an offline reader for cryptology.city, and an agent job launcher
 #
 # Quick start:
-#   make           # debug-builds via SwiftPM into ./build/CityDesk.app
+#   make           # debug-builds via SwiftPM into ./build/CCwiki.app
 #   make run       # build + launch
 #   make check     # compile + unit tests — the gate after every change
 #   make shots     # drive the app and capture screenshots (the visual gate)
@@ -19,13 +19,13 @@
 # Resources/web/. Run once after cloning; the app never fetches at runtime.
 
 CONFIG       := debug
-APP          := build/CityDesk.app
+APP          := build/CCwiki.app
 LSREGISTER   := /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister
 MIN_MACOS    := 14
 MIN_SWIFT    := 6.0
 
-APP_NAME      := CityDesk
-ENTITLEMENTS  := CityDesk/CityDesk.entitlements
+APP_NAME      := CCwiki
+ENTITLEMENTS  := CCwiki/CCwiki.entitlements
 
 # ---------------------------------------------------------------------------
 # Release variables
@@ -163,7 +163,7 @@ test: deps
 # in ~300 pages, the whole frontmatter schema, and the live macro table. Skipped
 # by `make test` because it needs the clone to exist.
 test-corpus: deps
-	CITYDESK_WIKI="$(HOME)/Library/Application Support/CityDesk/repo" swift test
+	CCWIKI_WIKI="$(HOME)/Library/Application Support/CCwiki/repo" swift test
 	@echo "✓ tests pass against the real corpus"
 
 print-version:
@@ -310,7 +310,7 @@ github-release:
 # SwiftUI's compile guarantees are weak — a passing build is not a passing app
 # (SWIFTUI-RULES.md §9.3). `make shots` drives the real .app through a scripted
 # plan and writes PNGs, with no Screen Recording permission required: the app
-# draws its own views (see Sources/CityDesk/App/ScreenshotRunner.swift).
+# draws its own views (see Sources/CCwiki/App/ScreenshotRunner.swift).
 #
 #   make shots                       # the default plan
 #   make shots PLAN='page:index.md'  # one specific view

@@ -12,7 +12,7 @@ Two different problems, two different mechanisms, deliberately not merged:
 
 ## 1. The index is derived, never authoritative
 
-`~/Library/Application Support/CityDesk/index/search.sqlite3` can be deleted at
+`~/Library/Application Support/CCwiki/index/search.sqlite3` can be deleted at
 any moment with no consequence beyond a brief rebuild. `SearchIndex.reset()` is
 a legitimate response to any problem — corruption, a schema change, a version
 skew — and the rebuild path takes it automatically if opening fails.

@@ -27,7 +27,7 @@ it, warned, and offered to prune.
 
 **Settings** (⌘,) is deliberately small: tool paths with **Locate…**, GitHub
 auth and push-credential state, the storage locations, and the vendor manifest.
-Every row says what CityDesk currently believes, so the window doubles as the
+Every row says what CCwiki currently believes, so the window doubles as the
 answer to "why isn't this working".
 
 **The icon** is a lowercase λ on the website's purple, standing among three
@@ -54,7 +54,7 @@ as grit.
 ## 2026-08-22 — M2: ingestion
 
 Drop a PDF on the reader, or paste an ePrint/arXiv/DOI/ECCC link (⇧⌘N), and
-CityDesk runs `claude` in a throwaway git worktree, streams the transcript into
+CCwiki runs `claude` in a throwaway git worktree, streams the transcript into
 a jobs window (⇧⌘J), and ends at a **draft** PR. 61 unit tests.
 
 **The design decision everything follows from.** The wiki already has an
@@ -93,7 +93,7 @@ $5.46. The worktree pruned itself; the reader's clone stayed on `main`, clean.
 - **`gh auth login` does not imply `git push` works.** `gh auth status` was
   healthy and `git ls-remote` succeeded, but the account's `git_protocol` is
   `ssh`, so no HTTPS credential helper existed and the push would have failed at
-  the very end of a twenty-minute job. CityDesk now configures one on its **own
+  the very end of a twenty-minute job. CCwiki now configures one on its **own
   clone** (`--local`, never the user's global config) and pre-flight refuses to
   start a job that could not push. The rule: anything a job needs at the end
   gets checked at the beginning.
@@ -107,14 +107,14 @@ $5.46. The worktree pruned itself; the reader's clone stayed on `main`, clean.
   costing turns. The child already starts in the worktree, so the fix was to
   say so in the prompt rather than to widen the list toward uselessness.
 - **A dry-run mode paid for itself immediately.**
-  `CITYDESK_INGEST_DRY_RUN=1` runs every mechanical step — worktree,
+  `CCWIKI_INGEST_DRY_RUN=1` runs every mechanical step — worktree,
   submodules, pre-flight, composition — and stops before the agent, writing the
   composed prompt into the transcript. It caught the credential gap and the
   prompt substitution bugs for free.
 
 ## 2026-08-22 — M1: the reader
 
-CityDesk reads the wiki offline. `make check` (47 tests) and `make shots` both
+CCwiki reads the wiki offline. `make check` (47 tests) and `make shots` both
 pass; screenshots are in `build/shots/`.
 
 **Recon first.** Seven parallel agents read the wiki repo and the platform
@@ -139,7 +139,7 @@ before any code was written, and three findings changed the design:
 
 **Built.** The Quartz slug port (`path.ts` line by line, plus github-slugger),
 the wikilink resolver, a YAML-subset frontmatter parser, the `macros.ts`
-tokenizer, the page index with backlinks, the `citydesk://` scheme handler and
+tokenizer, the page index with backlinks, the `ccwiki://` scheme handler and
 web controller, the vendored render pipeline, SQLite FTS5 search, the fuzzy
 quick-switcher, git sync, and the three-pane UI. Nine hundred lines of it are
 ports; the value is in matching Quartz exactly rather than approximately.
@@ -199,7 +199,7 @@ deleted the copy. Where each landed:
 Appended §11/§12 rather than renumbering so the existing §9/§10 cross-references
 in `PLAN.md` / `PROGRESS.md` stay valid.
 
-## 2026-06-28 — Template scaffold (the "CityDesk" baseline)
+## 2026-06-28 — Template scaffold (the "CCwiki" baseline)
 
 Built the template this repo ships as:
 
@@ -207,7 +207,7 @@ Built the template this repo ships as:
   generalized: `Package.swift` (one exe + one test target, Swift 6 mode, no
   deps), `build.sh` (swift build → `.app` → codesign, ad-hoc fallback),
   `Makefile` (build/check/test/run/install + sign→notarize→staple→zip `dist`
-  pipeline), `Resources/Info.plist`, sandboxed `CityDesk.entitlements`,
+  pipeline), `Resources/Info.plist`, sandboxed `CCwiki.entitlements`,
   `scripts/make-icon.swift` (pure-CoreGraphics doc-and-table glyph).
 - **App**: `NavigationSplitView` with a `SidebarSection` enum driving a lorem
   reading column (`ReadingView`, measure-capped) and a native sortable `Table`

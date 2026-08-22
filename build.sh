@@ -17,7 +17,7 @@
 set -euo pipefail
 
 CONFIG="${1:-debug}"
-APP_NAME="CityDesk"
+APP_NAME="CCwiki"
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
