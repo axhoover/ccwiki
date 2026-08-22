@@ -129,3 +129,14 @@ except vibrancy backdrops.
 
 [PLAN.md](PLAN.md) is the index to everything: architecture, the Quartz slug
 port, the render pipeline, search, ingestion, and the design system.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
+
+The vendored assets under `Resources/web/vendor/` keep their own licences, all
+included alongside them: markdown-it, markdown-it-footnote, markdown-it-mark,
+github-slugger, KaTeX and pseudocode.js are MIT; markdown-it-anchor is
+Unlicense. `pseudocode.js` is the patched fork from the wiki repo, pinned by
+sha256 in `scripts/vendor-web.sh` — see
+[plans/render-pipeline.md](plans/render-pipeline.md) §2.
