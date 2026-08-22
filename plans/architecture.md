@@ -111,6 +111,27 @@ It probes the inherited `PATH`, then the usual Homebrew and `~/.local/bin`
 locations, then asks a login shell as a last resort with a three-second
 deadline.
 
+## 6a. From a dropped PDF to a draft PR
+
+```
+IngestSheet / a drop on the reader
+  └─ AppModel.stagePDF(from:)          copy into library/, OUTSIDE the clone
+  └─ AppModel.submitIngestion(...)     → IngestJob, jobs window opens
+       └─ IngestJobRunner.run(job)
+            ├─ Preflight.run(...)      tooling, gh auth, push creds, duplicate page
+            ├─ git worktree add        …/worktrees/<id> on ingest/<slug>
+            ├─ git submodule update    cryptobib, for citation-key lookup
+            ├─ PromptComposer.compose  fills prompts/ingest.md placeholders only
+            ├─ claude -p … --output-format stream-json
+            │    └─ ClaudeStreamParser → JobLogEntry per step → the jobs panel
+            └─ outcome: opened(url) | aborted(reason) | failed | cancelled
+                 └─ worktree pruned ONLY on success
+```
+
+The runner is `@MainActor` and `await`s throughout, so the job's observable
+state and its transcript are mutated from one place with no locking. The work
+itself is in child processes, which is where the time goes.
+
 ## 7. Concurrency notes
 
 - `AppModel` and everything in `UI/` are `@MainActor`.

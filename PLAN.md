@@ -44,7 +44,8 @@ redesign, not a refactor.
 | Rendering is **fully offline** | Reading must work on a plane | Vendored into `Resources/web/`; a CSP header and a scheme handler make it structural, not aspirational |
 | The **search index is derived** | Never authoritative, safe to delete at any time | `SearchIndex.reset()` is a legitimate answer to any problem |
 | **PDFs never enter the repo** | They are job inputs; References pages point at eprint/arXiv/DOI | `AppPaths.library` sits outside the clone |
-| **Never merge a PR** | The app's job ends at "draft PR opened" | `prompts/ingest.md`, Step 6 |
+| **Never merge a PR** | The app's job ends at "draft PR opened" | `prompts/ingest.md` Step 6; `IngestJobRunner` only ever reads the URL |
+| **House style is never compiled in** | The wiki maintains its own ingestion contract, and a snapshot of it in a Mac app goes stale immediately | `PromptComposer` fills placeholders only; the rules are read from the worktree |
 
 ## 4. Where things live
 
@@ -67,9 +68,9 @@ redesign, not a refactor.
 │   ├── Wiki/                pure, testable: slugs, wikilinks, frontmatter, macros, index
 │   ├── Reader/              the WKWebView, its scheme handler, and the render request
 │   ├── Search/              SQLite FTS5 and the fuzzy quick-switcher matcher
-│   ├── Jobs/                subprocess plumbing, tool discovery, git
+│   ├── Jobs/                subprocess plumbing, tool discovery, git, ingestion
 │   └── UI/                  the SwiftUI views
-└── Tests/CityDeskTests/     47 tests; see §6
+└── Tests/CityDeskTests/     61 tests; see §6
 ```
 
 ## 5. Documentation index
@@ -81,8 +82,8 @@ redesign, not a refactor.
   in the app and the most heavily tested.**
 - [plans/render-pipeline.md](plans/render-pipeline.md) — the vendored JS, why
   each package, the `citydesk://` scheme handler, and the CSP.
-- [plans/search.md](plans/search.md) — the FTS5 schema, tokenizer choices, and
-  query escaping.
+- [plans/search.md](plans/search.md) — the FTS5 schema, tokenizer choices,
+  query escaping, and the ranking backlog.
 - [plans/ingestion.md](plans/ingestion.md) — the worktree lifecycle, the prompt
   composition rule, and what CityDesk checks before and after the agent runs.
 - [plans/build-system.md](plans/build-system.md) — `make` / `build.sh`, the
@@ -96,8 +97,8 @@ redesign, not a refactor.
 
 ## 6. Testing
 
-`make check` compiles and runs the suite. Two components carry the weight, both
-because they are exactly reproducible and silently wrong when they drift:
+`make check` compiles and runs the suite. The components that carry the weight
+are the ones that are exactly reproducible and silently wrong when they drift:
 
 - **`QuartzSlugTests` / `GithubSluggerTests`** — a port of the wiki's own
   `quartz/util/path.test.ts`, assertion for assertion, plus the two slugifiers'
@@ -108,6 +109,12 @@ because they are exactly reproducible and silently wrong when they drift:
   case-mismatched alias, a `KEY - Title.md` filename with `&` and `(`, a folder
   with no index note, an asset embed, and wikilinks inside code fences.
 - **`FuzzyMatcherTests` / `QuickSwitcherRankingTests`** — the ⌘O ranking.
+- **`SubmissionSourceTests`** — the ePrint/arXiv/DOI/ECCC URL shapes people
+  actually paste, and that a slug is safe as both a branch and a directory name.
+- **`ClaudeStreamTests`** — `stream-json` → transcript, and the four outcomes:
+  a PR URL, a deliberate abort, an error, and a non-JSON line.
+- **`PromptCompositionTests`** — every placeholder is filled, and the template
+  still defers to the wiki's own contract rather than restating it.
 - **`CorpusTests`** — runs only when `CITYDESK_WIKI` points at a real clone
   (`make test-corpus`). Resolves all ~673 wikilinks in ~300 pages, validates the
   whole frontmatter schema, and parses the live macro table.

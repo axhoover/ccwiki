@@ -14,9 +14,11 @@ only canonical store; the app owns no content and never merges anything.
   suite and against all ~673 links in the live corpus.
 - **Find things.** ⌘O fuzzy quick-switcher over titles, aliases and paper
   titles; ⇧⌘F full-text search over everything, backed by SQLite FTS5.
-- **Ingest papers.** Drop a PDF or paste an eprint/arXiv/DOI URL; CityDesk runs
-  `claude` in a throwaway git worktree and it opens a **draft** PR. *(M2 — see
-  [plans/ingestion.md](plans/ingestion.md).)*
+- **Ingest papers.** Drop a PDF on the reader, or paste an ePrint, arXiv, DOI or
+  ECCC link (⇧⌘N). CityDesk runs `claude` in a throwaway git worktree, streams
+  the transcript into a jobs window (⇧⌘J), and ends at a **draft** PR — it never
+  merges, and never marks one ready for review. See
+  [plans/ingestion.md](plans/ingestion.md).
 
 ## Requirements
 
@@ -74,8 +76,13 @@ node --version                      # the wiki's lint is a node script
 ```
 
 `gh` must be authenticated as an account that can push a branch to
-`axhoover/cryptology.city`. CityDesk opens **draft** PRs and never marks one
-ready for review.
+`axhoover/cryptology.city`.
+
+Note that `gh auth login` alone does not always make `git push` work: if your
+`git_protocol` is `ssh`, `gh` installs no HTTPS credential helper, and the push
+fails at the very end of a job. CityDesk configures one on **its own clone**
+(local config only — your global git config is untouched) and refuses to start
+a job that could not push.
 
 ## Keyboard
 
@@ -88,6 +95,8 @@ ready for review.
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
 | ⌘0 | Go home |
+| ⇧⌘N | Ingest a paper |
+| ⇧⌘J | Show the jobs window |
 
 ## Make targets
 

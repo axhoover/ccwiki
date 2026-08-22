@@ -48,6 +48,10 @@ alone; nothing else is reading it.
 
 - Worktree: `{{WORKTREE}}` — this is your working directory. Do not touch any
   other checkout on this machine.
+- **That path contains a space.** Quote it in every shell command, and never
+  hand a percent-encoded form of it to a tool — `Application%20Support` is not a
+  directory, and node will fail with `ENOENT` on it. Prefer running commands
+  from the worktree rather than passing absolute paths around.
 - Branch: `{{BRANCH}}`, already created for you off `origin/{{BASE_BRANCH}}`.
 - {{SKILL_NOTE}}
 

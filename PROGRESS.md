@@ -5,6 +5,56 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-08-22 — M2: ingestion
+
+Drop a PDF on the reader, or paste an ePrint/arXiv/DOI/ECCC link (⇧⌘N), and
+CityDesk runs `claude` in a throwaway git worktree, streams the transcript into
+a jobs window (⇧⌘J), and ends at a **draft** PR. 61 unit tests.
+
+**The design decision everything follows from.** The wiki already has an
+ingestion contract — `.github/prompts/paper-submission.md`, 238 lines, with five
+merged `[paper]` commits behind it. So `prompts/ingest.md` is an *envelope*: it
+states the job, points the agent at that contract **read from the live
+worktree**, and adds only what the server-side pipeline cannot run — `npm ci`,
+the full lint, `npx quartz build`, `npm run sync-cryptobib`, and the diff
+ceiling. `PromptComposer` fills placeholders and nothing else. If it ever grows
+a paraphrase of the wiki's rules, delete it: the app would be teaching agents a
+snapshot that goes stale the day the wiki's own prompt changes.
+
+**Driving the CLI.** `--output-format stream-json` is what makes the jobs panel
+a log rather than a wall of text: every event is a structured step, so the
+transcript renders `Bash  npm run lint` with its result indented beneath, and
+the terminal `result` event carries the turn count, the cost, and any
+`permission_denials`. `--permission-mode acceptEdits` plus a **scoped**
+allow-list, never `bypassPermissions` — edits inside a throwaway worktree are
+safe to auto-accept, shell commands are not.
+
+**Four terminal states, and they are not all failures.** `opened(url)` prunes
+the worktree; `aborted(reason)` keeps it and is shown in orange with "that is a
+good outcome", because the prompt asks the agent to decline rather than guess
+and punishing that visually would teach the wrong lesson; `failed` and
+`cancelled` keep the worktree and offer "Reveal in Terminal".
+
+**What surprised us.**
+
+- **`gh auth login` does not imply `git push` works.** `gh auth status` was
+  healthy and `git ls-remote` succeeded, but the account's `git_protocol` is
+  `ssh`, so no HTTPS credential helper existed and the push would have failed at
+  the very end of a twenty-minute job. CityDesk now configures one on its **own
+  clone** (`--local`, never the user's global config) and pre-flight refuses to
+  start a job that could not push. The rule: anything a job needs at the end
+  gets checked at the beginning.
+- **The turn budget has to match the workflow.** `--max-turns 60`, copied in
+  spirit from the wiki's workflow (which uses 40), was badly wrong: the first
+  real run spent 54 turns before writing a single file, because our prompt adds
+  four local validation steps that workflow does not have. Raised to 200; the
+  real bound on a runaway is the Cancel button and the live cost readout.
+- **A dry-run mode paid for itself immediately.**
+  `CITYDESK_INGEST_DRY_RUN=1` runs every mechanical step — worktree,
+  submodules, pre-flight, composition — and stops before the agent, writing the
+  composed prompt into the transcript. It caught the credential gap and the
+  prompt substitution bugs for free.
+
 ## 2026-08-22 — M1: the reader
 
 CityDesk reads the wiki offline. `make check` (47 tests) and `make shots` both

@@ -1,8 +1,8 @@
 # Ingestion
 
-**Status: designed, not yet built.** M1 (the reader) is complete; this document
-is the plan M2 implements, and it is grounded in what the wiki repo actually
-does today rather than in what would be convenient.
+**Status: built (M2).** Grounded in what the wiki repo actually does today
+rather than in what would be convenient — see §1, which is the finding the whole
+design turns on.
 
 ---
 
@@ -130,3 +130,64 @@ Dropped PDFs are copied to `~/Library/Application Support/CityDesk/library/`,
 which is deliberately outside the clone, and passed to the agent as an input
 path only. They never enter the repo; the References page points at
 eprint/arXiv/DOI.
+
+---
+
+## 9. How it is built
+
+```
+Sources/CityDesk/Jobs/
+├── IngestSubmission.swift   the input: a recognized URL or a staged PDF
+├── Preflight.swift          what CityDesk checks before the agent starts
+├── PromptComposer.swift     fills prompts/ingest.md — and nothing else
+├── ClaudeStream.swift       stream-json → a readable transcript + the outcome
+├── IngestJob.swift          @Observable state machine, transcript, log file
+└── IngestJobRunner.swift    worktree → submodules → claude → PR → prune
+```
+
+### Driving `claude`
+
+```
+claude -p "<prompt>"
+  --output-format stream-json --verbose
+  --permission-mode acceptEdits
+  --allowedTools Read,Write,Edit,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(npm:*),…
+  --max-turns 60
+```
+
+`stream-json` is what makes the jobs panel a *log* rather than a wall of text:
+each event is a structured step, so the transcript shows `Bash  npm run lint`
+with its result underneath, and the terminal `result` event carries the turn
+count, the cost, and any `permission_denials`.
+
+`acceptEdits` plus a **scoped** tool allow-list, not `bypassPermissions`. Edits
+inside a throwaway worktree are safe to auto-accept; shell commands are not.
+The allow-list mirrors the one the wiki's own GitHub workflow grants, plus the
+`npm`/`npx`/`node` the *local* lint needs. A job that wanders outside it fails
+visibly, with the denied call named in the transcript, which is much better than
+one that quietly did something nobody asked for.
+
+### Outcomes
+
+The runner distinguishes four terminal states, and they are not all failures:
+
+| State | Meaning | Worktree |
+|---|---|---|
+| `opened(url)` | A draft PR exists. The URL comes from the agent's own closing message, not from watching `gh` — it may retry or script the command, but it is asked to make its final statement authoritative. | pruned |
+| `aborted(reason)` | The agent declined on purpose. **A good outcome.** | kept |
+| `failed(message)` | Something broke, or the agent finished without a PR and without aborting. | kept |
+| `cancelled` | The user stopped it. | kept |
+
+The worktree is kept for everything except success, and the panel offers
+"Reveal Worktree in Terminal" — a job you cannot inspect is a job you cannot
+debug. On launch, `orphanedWorktrees` reconciles what git knows against the
+jobs the app knows about and offers to prune the residue of a crash.
+
+### Two dev affordances worth keeping
+
+- `CITYDESK_INGEST_DRY_RUN=1` stops after composing the prompt and writes it
+  into the transcript. Every mechanical step still runs — worktree, submodules,
+  pre-flight, composition — so iterating on `prompts/ingest.md` costs nothing.
+- `make shots PLAN='ingest:<url>'` submits a real job and blocks until it
+  reaches a terminal state, reporting progress to stderr. The same harness that
+  gates the reader gates this.

@@ -19,7 +19,19 @@ struct CityDeskApp: App {
             height: Theme.windowDefaultHeight)
         .windowResizability(.contentMinSize)
         .commands { CityDeskCommands() }
+
+        // Jobs get their own window rather than a fourth pane: the thing you
+        // actually want is to watch a job run while reading the page it is
+        // going to edit.
+        Window("Jobs", id: CityDeskApp.jobsWindowID) {
+            JobsView()
+                .environment(model)
+        }
+        .defaultSize(width: 1000, height: 640)
+        .keyboardShortcut("j", modifiers: [.command, .shift])
     }
+
+    static let jobsWindowID = "citydesk.jobs"
 }
 
 /// Menu-bar commands.
@@ -31,6 +43,7 @@ struct CityDeskCommands: Commands {
     @FocusedValue(\.appModel) private var model
     @FocusedValue(\.findAction) private var findAction
     @FocusedValue(\.searchAction) private var searchAction
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
@@ -52,6 +65,10 @@ struct CityDeskCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Quick Switcher…") { model?.presentQuickSwitcher() }
                 .keyboardShortcut("o", modifiers: .command)
+                .disabled(model == nil)
+
+            Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
         }
 
@@ -88,6 +105,15 @@ struct CityDeskCommands: Commands {
                 NSWorkspace.shared.activateFileViewerSelecting([model.paths.clone])
             }
             .disabled(model == nil)
+        }
+
+        CommandMenu("Jobs") {
+            Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(model == nil)
+
+            Button("Show Jobs") { openWindow(id: CityDeskApp.jobsWindowID) }
+                .keyboardShortcut("j", modifiers: [.command, .shift])
         }
     }
 }

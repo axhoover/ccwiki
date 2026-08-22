@@ -102,6 +102,33 @@ than the sidebar it replaces.
 matched — there is no "3 of 17" without counting in JavaScript — so the bar says
 found or not found, and says it explicitly rather than doing nothing.
 
+## 4a. The jobs window
+
+Jobs live in a **separate window** (⇧⌘J), not a fourth pane. Two reasons: the
+thing you actually want is to watch a job run *while reading the page it is
+going to edit*, and a queue plus a live log has no honest home in a three-column
+reader without displacing the page.
+
+The main window keeps a compact affordance — a spinner and a count in the status
+bar, which opens the window — so a running job is never invisible.
+
+Inside, the same two-column shape as the reader: the queue on the left with a
+state glyph per job, the transcript on the right under an outcome banner. Three
+details that make the log readable rather than merely present:
+
+- `stream-json` means each row is a *step*, so a tool call renders as a small
+  labelled chip plus its command, and its result is indented beneath it. A raw
+  text stream would be a wall.
+- The transcript follows the tail by default, with a checkbox to stop — because
+  the moment you want to read something is the moment it scrolls away.
+- The scroll target is a zero-height anchor at the bottom, not the last row: the
+  last row changes identity as events arrive, and scrolling to a moving target
+  stutters.
+
+An **aborted** job gets an orange banner saying so is a good outcome, not a red
+one. The prompt asks the agent to abort rather than guess; punishing that
+visually would be teaching the wrong lesson.
+
 ## 5. The visual gate
 
 SwiftUI's compile guarantees are weak; a passing build is not a passing app

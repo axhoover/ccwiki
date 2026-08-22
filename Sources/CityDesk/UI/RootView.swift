@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The window's root: sidebar → reader → inspector.
 ///
@@ -7,6 +8,8 @@ import SwiftUI
 /// unified title bar, and column resizing without any of it being hand-built.
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+    @State private var isDropTargeted = false
 
     var body: some View {
         @Bindable var model = model
@@ -28,12 +31,25 @@ struct RootView: View {
         .sheet(isPresented: $model.searchPresented) {
             SearchView()
         }
+        .sheet(isPresented: $model.ingestSheetPresented) {
+            IngestSheet()
+        }
+        // The whole reader is a drop target: when you have the paper open, the
+        // natural gesture is to drag it onto the wiki, not to go looking for a
+        // form.
+        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+            acceptDroppedPDF(providers)
+        }
+        .overlay { if isDropTargeted { dropOverlay } }
         .task {
             // Read what is already on disk before touching the network, so the
             // app is usable instantly and offline.
             await model.loadLibrary()
             if model.index == nil { model.sync() }
             ScreenshotRunner.run(model: model)
+        }
+        .onChange(of: model.jobsWindowRequests) { _, _ in
+            openWindow(id: CityDeskApp.jobsWindowID)
         }
         .focusedSceneValue(\.appModel, model)
         .focusedSceneValue(\.searchAction, FindAction { model.searchPresented = true })
@@ -85,6 +101,41 @@ struct RootView: View {
         }
     }
 
+    // MARK: Drop
+
+    private var dropOverlay: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            VStack(spacing: Theme.small) {
+                Image(systemName: "doc.badge.plus")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.tint)
+                Text("Ingest this paper")
+                    .font(Theme.Fonts.emptyTitle)
+                Text("CityDesk will run an agent in a worktree and open a draft PR.")
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .transition(.opacity)
+        .animation(.easeOut(duration: 0.15), value: isDropTargeted)
+        .allowsHitTesting(false)
+    }
+
+    private func acceptDroppedPDF(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url, url.pathExtension.lowercased() == "pdf" else { return }
+            Task { @MainActor in
+                guard let staged = try? model.stagePDF(from: url) else { return }
+                model.pendingDroppedPDF = staged
+                model.ingestSheetPresented = true
+                openWindow(id: CityDeskApp.jobsWindowID)
+            }
+        }
+        return true
+    }
+
     // MARK: Status bar
 
     /// The quiet strip macOS apps keep at the bottom: what just happened, and
@@ -133,6 +184,19 @@ struct RootView: View {
                         .foregroundStyle(.orange)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                }
+                if model.activeJobCount > 0 {
+                    Button {
+                        openWindow(id: CityDeskApp.jobsWindowID)
+                    } label: {
+                        HStack(spacing: Theme.tight) {
+                            ProgressView().controlSize(.small).scaleEffect(0.6)
+                            Text("\(model.activeJobCount) job\(model.activeJobCount == 1 ? "" : "s")")
+                                .font(Theme.Fonts.meta)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show the jobs window (⇧⌘J)")
                 }
                 if !model.warnings.isEmpty {
                     Menu {

@@ -77,6 +77,48 @@ struct GitService: Sendable {
         return before == after ? .alreadyCurrent(at: after) : .updated(from: before, to: after)
     }
 
+    /// Teach *this clone* to authenticate HTTPS pushes through `gh`.
+    ///
+    /// `gh auth login` does not necessarily configure git: a user whose
+    /// preferred protocol is SSH has a working `gh` and no HTTPS credential
+    /// helper at all, so `git push` over HTTPS fails with "could not read
+    /// Username" — at the very end of a long ingestion job, after the agent has
+    /// done all the work.
+    ///
+    /// Written to the clone's **local** config, never `--global`: this clone is
+    /// CityDesk's own artifact, and reaching into the user's global git config
+    /// to fix our problem would be rude.
+    func configureCredentialHelper(clone: URL, ghPath: String) async {
+        let key = "credential.https://github.com.helper"
+        let existing = await run([
+            "-C", clone.path(percentEncoded: false), "config", "--local", "--get", key,
+        ])
+        guard !existing.succeeded
+            || existing.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+
+        _ = await run([
+            "-C", clone.path(percentEncoded: false),
+            "config", "--local", key, "!\(ghPath) auth git-credential",
+        ])
+    }
+
+    /// Is the clone able to push? Cheap proxy: a credential helper is
+    /// configured, or the remote is SSH (where the agent's own keys apply).
+    func canAuthenticatePush(clone: URL) async -> Bool {
+        let remote = await run([
+            "-C", clone.path(percentEncoded: false), "remote", "get-url", "origin",
+        ])
+        if remote.succeeded, remote.stdout.contains("git@") { return true }
+
+        let helper = await run([
+            "-C", clone.path(percentEncoded: false),
+            "config", "--get-urlmatch", "credential.helper", "https://github.com",
+        ])
+        return helper.succeeded
+            && !helper.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     // MARK: Queries
 
     func head(in clone: URL) async -> String? {
@@ -150,6 +192,30 @@ struct GitService: Sendable {
             "worktree", "add", path.path(percentEncoded: false), "-b", branch, baseRef,
         ], in: nil, onLine: onLine)
         return status == 0
+    }
+
+    /// `preferred`, or `preferred-2`, `preferred-3`… — the first name no local
+    /// or remote branch already claims.
+    func availableBranchName(clone: URL, preferred: String) async -> String {
+        func exists(_ name: String) async -> Bool {
+            let result = await run([
+                "-C", clone.path(percentEncoded: false),
+                "rev-parse", "--verify", "--quiet", "refs/heads/\(name)",
+            ])
+            if result.succeeded { return true }
+            let remote = await run([
+                "-C", clone.path(percentEncoded: false),
+                "rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(name)",
+            ])
+            return remote.succeeded
+        }
+
+        guard await exists(preferred) else { return preferred }
+        for suffix in 2...99 {
+            let candidate = "\(preferred)-\(suffix)"
+            if await !exists(candidate) { return candidate }
+        }
+        return "\(preferred)-\(UUID().uuidString.prefix(8))"
     }
 
     func removeWorktree(clone: URL, at path: URL, force: Bool) async -> Bool {

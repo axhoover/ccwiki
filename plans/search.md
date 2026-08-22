@@ -123,3 +123,40 @@ into a `ForEach`.** Both palettes now hold a `String?` id and derive the index
 when they need one. `QuickSwitcherRankingTests` locks the ranking down so the
 model half can never regress silently again; the view half is covered by
 `make shots`.
+
+---
+
+## 6. Backlog: ranking by page kind
+
+**Requested 2026-08-22, deferred until the architecture is done.**
+
+Full-text results should favour the pages you are usually looking for. Two
+changes, in order of value:
+
+1. **Weight fields harder.** `bm25(doc_fts, 14.0, 10.0, 4.0, 1.0)` already puts
+   title above aliases above headings above body, but the spread is modest and
+   a long body can still outrank a title hit. Worth measuring against real
+   queries rather than guessing at bigger numbers.
+2. **Boost by page kind.** A `primitive` or `assumption` page is almost always
+   a better answer than a `reference` — the concept page is what you want, and
+   the paper is one click away through it. The exception is when the query
+   *is* a citation key or an author code, which is exactly when a reference
+   should win.
+
+   The `doc` table already stores `kind`, so this is a multiplier over the bm25
+   score rather than a schema change:
+
+   ```sql
+   ORDER BY bm25(...) * CASE d.kind
+              WHEN 'primitive'  THEN 0.75      -- bm25 is negative, so < 1 promotes
+              WHEN 'assumption' THEN 0.75
+              WHEN 'reference'  THEN 1.0
+              ELSE 0.9 END
+   ```
+
+   with the multiplier suppressed when the query matches the citation-key regex
+   `^[A-Za-z][A-Za-z+]*\d{2}[a-z]?$`, so `AGGM06` still finds AGGM06 first.
+
+Do this with a fixture of real queries and expected first results, so the
+weights are tuned rather than asserted — the same shape as
+`QuickSwitcherRankingTests`.

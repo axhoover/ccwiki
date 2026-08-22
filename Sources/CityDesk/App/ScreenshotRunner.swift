@@ -47,6 +47,10 @@ enum ScreenshotRunner {
         case search(String)
         case inspector(AppModel.InspectorTab)
         case appearance(NSAppearance.Name, label: String)
+        /// Submit a real ingestion job and wait for it to finish. The whole
+        /// point of M2 is that this works end to end, so the harness that
+        /// proves the reader works should be able to prove this too.
+        case ingest(String)
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -60,6 +64,7 @@ enum ScreenshotRunner {
             case "outline": return .inspector(.outline)
             case "light": return .appearance(.aqua, label: "light")
             case "dark": return .appearance(.darkAqua, label: "dark")
+            case "ingest": return parts.count > 1 ? .ingest(parts[1]) : nil
             default: return nil
             }
         }
@@ -76,6 +81,7 @@ enum ScreenshotRunner {
             case .search(let query): "search-\(query.replacingOccurrences(of: " ", with: "-"))"
             case .inspector(let tab): "inspector-\(tab.rawValue.lowercased())"
             case .appearance(_, let label): label
+            case .ingest: "ingest"
             }
         }
 
@@ -84,6 +90,9 @@ enum ScreenshotRunner {
             switch self {
             case .page, .folder, .home: 1500
             case .search: 900
+            // An ingestion job is minutes, not milliseconds; `apply` waits for
+            // a terminal state rather than guessing a duration.
+            case .ingest: 1500
             default: 700
             }
         }
@@ -166,6 +175,31 @@ enum ScreenshotRunner {
             // The web view follows `NSAppearance`, so this exercises the
             // reader's dark palette as well as the chrome's.
             NSApp.appearance = NSAppearance(named: name)
+
+        case .ingest(let url):
+            guard let source = IngestSubmission.Source.parse(url) else {
+                FileHandle.standardError.write(Data("unparseable ingest URL: \(url)\n".utf8))
+                return
+            }
+            model.submitIngestion(source: source, pdf: nil, notes: "")
+            await waitForJob(model: model)
+        }
+    }
+
+    /// Block until the newest job reaches a terminal state, reporting progress
+    /// to stderr so a terminal running `make ingest` can see it happening.
+    private static func waitForJob(model: AppModel) async {
+        var lastReport = ""
+        // A real ingestion is minutes; 40 of them would be pathological.
+        for _ in 0..<2_400 {
+            guard let job = model.jobs.first else { break }
+            let report = "\(job.state.label) · \(job.log.count) events"
+            if report != lastReport {
+                FileHandle.standardError.write(Data((report + "\n").utf8))
+                lastReport = report
+            }
+            if job.state.isTerminal { return }
+            try? await Task.sleep(for: .seconds(1))
         }
     }
 

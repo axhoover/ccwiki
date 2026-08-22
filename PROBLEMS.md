@@ -67,3 +67,58 @@ does nothing. The required spelling is
 
 **Rule:** treat that warning as an error in this codebase.
 
+## `gh auth login` does not imply `git push` works
+
+`gh auth status` reported a healthy login, and `git ls-remote` over HTTPS
+succeeded — but `git push` failed with `could not read Username for
+'https://github.com'`. The account's configured `git_protocol` is **ssh**, so
+`gh` had never installed an HTTPS credential helper, and the global
+`credential.helper = store` had no GitHub entry.
+
+The bad part is *when* it surfaces: at the very end of a long ingestion job,
+after the agent has fetched the paper, written the page, run the lint and the
+build, and has nothing left to do but push.
+
+**Fix, two halves.** `GitService.configureCredentialHelper` sets
+`credential.https://github.com.helper` to `!gh auth git-credential` on
+CityDesk's **own clone**, using `--local` — the clone is the app's artifact, and
+reaching into the user's global git config to solve our problem would be rude.
+`Preflight` then refuses to start a job when neither a helper nor an SSH remote
+is configured, so the failure lands in ten seconds instead of ten minutes.
+
+**Rule:** any credential a job needs at the *end* gets checked at the
+*beginning*.
+
+## An agent turn budget has to match the *workflow*, not a remembered number
+
+The first real ingestion job was launched with `--max-turns 60`, copied in
+spirit from the wiki's own GitHub workflow, which uses 40. It spent **54 turns
+before writing a single file** — reading the five contract documents, fetching
+the paper, modelling its output on a recent reference page, and checking the
+lint's macro and bullet rules.
+
+That is not the agent being wasteful. CityDesk's prompt deliberately adds what
+the server pipeline lacks: `npm ci`, `node scripts/lint.mjs`, `npx quartz
+build`, and `npm run sync-cryptobib`, each with a fix cycle behind it. A budget
+copied from a workflow that runs none of those is a budget for a different job.
+
+The cap is now 200, overridable with `CITYDESK_MAX_TURNS`. **The real bound on a
+runaway job is the user's Cancel button and the live cost readout**, both of
+which the jobs panel already has — not a number chosen in advance by someone who
+has not watched the job run.
+
+## The worktree path contains a space, and that costs agent turns
+
+`~/Library/Application Support/CityDesk/worktrees/<id>` is the conventionally
+correct place for it, and CityDesk's own subprocess calls are safe — arguments
+go through `Process.arguments`, never a shell. But an *agent* composing its own
+shell commands has to quote it every time, and the first real ingestion job lost
+turns to `ENOENT: no such file or directory, scandir
+'/Users/…/Application%20Support/…/content'` — a percent-encoded path handed to
+node.
+
+`prompts/ingest.md` now says so explicitly and tells the agent to run from the
+worktree rather than pass absolute paths around. Moving the directory somewhere
+space-free was considered and rejected: Application Support is where this
+belongs, and a warning is cheaper than a non-standard location.
+

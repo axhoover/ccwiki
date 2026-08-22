@@ -107,6 +107,23 @@ final class AppModel {
     }
     private(set) var quickSwitcherResults: [QuickSwitchItem] = []
 
+    // MARK: Jobs
+
+    private(set) var jobs: [IngestJob] = []
+    /// Worktrees git still knows about that no live job owns — the residue of
+    /// a crash or a force-quit mid-job.
+    private(set) var orphanedWorktrees: [String] = []
+    var ingestSheetPresented = false
+    /// A PDF dropped on the reader, waiting for the sheet to pick it up.
+    var pendingDroppedPDF: URL?
+    /// Bumped to ask the root view to open the jobs window. `openWindow` is an
+    /// environment action, so only a view can call it; the model can only ask.
+    private(set) var jobsWindowRequests = 0
+
+    func requestJobsWindow() { jobsWindowRequests += 1 }
+
+    var activeJobCount: Int { jobs.filter { $0.state.isActive }.count }
+
     // MARK: Reader
 
     let webController: WebController
@@ -169,6 +186,9 @@ final class AppModel {
         if let git {
             modifiedDates = await git.modifiedDates(in: paths.clone)
             headRevision = await git.head(in: paths.clone)
+            if let gh = tools.path(for: .gh) {
+                await git.configureCredentialHelper(clone: paths.clone, ghPath: gh)
+            }
         }
 
         let pages = loaded.0.allPages
@@ -397,5 +417,91 @@ final class AppModel {
     func pageTree() -> [PageTreeNode] {
         guard let index else { return [] }
         return PageTreeNode.build(pages: index.allPages)
+    }
+
+    // MARK: Ingestion
+
+    /// Copy a dropped PDF into the library.
+    ///
+    /// Deliberately outside the clone: a PDF is a job *input*, and the
+    /// reference page the job produces cites eprint/arXiv/DOI. Nothing here
+    /// ever enters the repo.
+    func stagePDF(from source: URL) throws -> URL {
+        try FileManager.default.createDirectory(at: paths.library, withIntermediateDirectories: true)
+        var destination = paths.library.appending(path: source.lastPathComponent)
+
+        // Never silently overwrite a paper someone already staged.
+        if FileManager.default.fileExists(atPath: destination.path(percentEncoded: false)) {
+            let stem = source.deletingPathExtension().lastPathComponent
+            let ext = source.pathExtension
+            var counter = 2
+            repeat {
+                destination = paths.library.appending(path: "\(stem)-\(counter).\(ext)")
+                counter += 1
+            } while FileManager.default.fileExists(atPath: destination.path(percentEncoded: false))
+        }
+
+        let accessed = source.startAccessingSecurityScopedResource()
+        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
+        try FileManager.default.copyItem(at: source, to: destination)
+        return destination
+    }
+
+    func submitIngestion(source: IngestSubmission.Source?, pdf: URL?, notes: String) {
+        let submission = IngestSubmission(
+            kind: pdf != nil ? .pdf : .url,
+            source: source,
+            localPDF: pdf,
+            notes: notes,
+            submittedAt: Date())
+
+        let job = IngestJob(submission: submission, paths: paths)
+        jobs.insert(job, at: 0)
+        requestJobsWindow()
+        start(job)
+    }
+
+    private func start(_ job: IngestJob) {
+        guard let git = gitService else {
+            job.setState(.failed("git was not found."))
+            return
+        }
+        let runner = IngestJobRunner(paths: paths, tools: tools, git: git, index: index)
+        job.task = Task { @MainActor in
+            await runner.run(job)
+            // A job that changed the wiki has changed nothing locally — the PR
+            // lives on GitHub — but the branch and worktree bookkeeping moved,
+            // so refresh what we know about strays.
+            await refreshOrphanedWorktrees()
+        }
+    }
+
+    func refreshOrphanedWorktrees() async {
+        guard let git = gitService else { return }
+        let runner = IngestJobRunner(paths: paths, tools: tools, git: git, index: index)
+        let known = Set(jobs.filter { !$0.state.isTerminal }.map(\.id))
+        orphanedWorktrees = await runner.orphanedWorktrees(knownJobIDs: known).map(\.path)
+    }
+
+    func pruneOrphan(_ path: String) {
+        guard let git = gitService else { return }
+        let runner = IngestJobRunner(paths: paths, tools: tools, git: git, index: index)
+        Task { @MainActor in
+            await runner.prune(worktreeAt: path)
+            await refreshOrphanedWorktrees()
+        }
+    }
+
+    /// Open a worktree in Terminal — the escape hatch for a failed job.
+    ///
+    /// `NSWorkspace.open(_:withApplicationAt:)` rather than an `osascript`
+    /// shim, because UI scripting Terminal would need the Accessibility
+    /// permission and this needs none.
+    func openInTerminal(_ directory: URL) {
+        let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open(
+            [directory], withApplicationAt: terminal, configuration: configuration)
     }
 }

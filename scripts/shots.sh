@@ -75,7 +75,9 @@ if [ "$EXTERNAL" = "1" ]; then
 		while [ ! -f "$OUT/.ready-$i" ]; do
 			sleep 0.2
 			waited=$((waited + 1))
-			if [ "$waited" -gt 600 ]; then
+			# Generous: an `ingest:` step waits for a real agent job, which is
+			# minutes, not seconds.
+			if [ "$waited" -gt 12000 ]; then
 				echo "✗ timed out waiting for step $i" >&2
 				exit 1
 			fi
