@@ -12,8 +12,16 @@ enum PageKind: String, CaseIterable, Sendable {
     case folklore
     case reference
     case note
+    /// One hyperedge, as a page: `content/Reductions/owf-to-prg.md`. There are
+    /// 343 of them, and they arrived with the wiki's reductions migration —
+    /// before it, relationships lived in prose on the endpoint pages.
     case reduction
-    case separation
+    /// A statement that some class of reduction cannot exist, 37 of them in
+    /// `content/Barriers/`. The wiki calls these barriers rather than
+    /// separations, because one type covers both a black-box separation and the
+    /// Impagliazzo–Rudich shape where the consequence is `P ≠ NP` instead of a
+    /// contradiction.
+    case barrier
 
     /// The `content/` subdirectory this kind lives in; `note` lives at the root.
     var directory: String? {
@@ -24,7 +32,9 @@ enum PageKind: String, CaseIterable, Sendable {
         case .glossary: "Glossary"
         case .folklore: "Folklore"
         case .reference: "References"
-        case .note, .reduction, .separation: nil
+        case .reduction: "Reductions"
+        case .barrier: "Barriers"
+        case .note: nil
         }
     }
 
@@ -40,7 +50,9 @@ enum PageKind: String, CaseIterable, Sendable {
         case .glossary: "character.book.closed"
         case .folklore: "quote.bubble"
         case .reference: "doc.text"
-        case .note, .reduction, .separation: "note.text"
+        case .reduction: "arrow.right"
+        case .barrier: "nosign"
+        case .note: "note.text"
         }
     }
 }

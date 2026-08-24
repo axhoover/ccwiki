@@ -38,6 +38,17 @@ final class AppModel {
     private(set) var index: WikiIndex?
     private(set) var macros = MacroTable.empty
     private(set) var backlinks: [String: [WikiIndex.Backlink]] = [:]
+    /// The wiki's relationship hypergraph, read from `.reductions/relations.json`
+    /// in the clone. Empty until the first load, and empty *after* it whenever
+    /// the clone predates the reductions migration — see `RelationsManifest`.
+    private(set) var relations = RelationsManifest.empty
+    /// Display names for manifest nodes, which need the parsed wiki: every
+    /// variant's `title` is just its id, so its name comes from the host page's
+    /// heading.
+    private(set) var relationLabels = RelationLabels.empty
+    /// Pages the manifest marks `unlisted`. Real nodes — they take part in
+    /// relations and in the closure — kept out of browse and navigation only.
+    private(set) var unlistedPaths: Set<String> = []
     private(set) var modifiedDates: [String: Date] = [:]
     private(set) var headRevision: String?
 
@@ -74,12 +85,21 @@ final class AppModel {
     enum InspectorTab: String, CaseIterable, Identifiable {
         case outline = "Outline"
         case backlinks = "Backlinks"
+        /// The typed relationships from `relations.json`.
+        ///
+        /// Its own tab rather than a section under the page, because the wiki
+        /// now generates a `## Participates in` block into the markdown itself
+        /// — the reader already renders that. Repeating it inline would be
+        /// duplication; the tab earns its place by carrying what the generated
+        /// block does not: kind, class, model, status and source.
+        case relations = "Relations"
         var id: Self { self }
 
         var systemImage: String {
             switch self {
             case .outline: "list.bullet.indent"
             case .backlinks: "arrow.turn.up.left"
+            case .relations: "arrow.triangle.branch"
             }
         }
     }
@@ -207,14 +227,32 @@ final class AppModel {
             atPath: paths.content.path(percentEncoded: false)) else { return }
 
         let contentRoot = paths.content
+        let cloneRoot = paths.clone
         let loaded = await Task.detached(priority: .userInitiated) {
             let index = WikiIndex.build(contentRoot: contentRoot)
-            return (index, index.backlinkMap())
+            // 303 KB of JSON, and the labels need every hosting page's
+            // headings — both cheap, but neither belongs on the main actor.
+            let manifest = RelationsManifest.load(cloneRoot: cloneRoot)
+            return (
+                index,
+                index.backlinkMap(),
+                manifest,
+                RelationLabels(manifest: manifest, index: index))
         }.value
 
         index = loaded.0
         backlinks = loaded.1
+        relations = loaded.2
+        relationLabels = loaded.3
+        unlistedPaths = loaded.2.unlistedPaths
         macros = MacroTable.load(cloneRoot: paths.clone)
+
+        // Replaced rather than appended: `loadLibrary` runs after every pull,
+        // and a warning that stacks up once per sync is noise.
+        warnings.removeAll { $0.hasPrefix(Self.relationsWarningPrefix) }
+        if let diagnostic = relations.diagnostic {
+            warnings.append(Self.relationsWarningPrefix + diagnostic.message)
+        }
 
         let git = gitService
         if let git {
@@ -392,7 +430,7 @@ final class AppModel {
 
     private func renderCurrent() {
         guard let index else { return }
-        let renderer = PageRenderer(index: index)
+        let renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
         var notices: [RenderRequest.Notice] = []
         if macros.isEmpty {
             notices.append(RenderRequest.Notice(
@@ -423,6 +461,25 @@ final class AppModel {
     var currentBacklinks: [WikiIndex.Backlink] {
         guard let path = location.path else { return [] }
         return backlinks[path] ?? []
+    }
+
+    /// What the Relations inspector shows for the page being read.
+    ///
+    /// Computed rather than cached: the busiest node in the corpus has 32
+    /// relations, so this is trivial work, and a cache holding a snapshot of
+    /// the manifest is exactly the shape `SWIFTUI-RULES.md` §3.1 warns about.
+    var currentRelations: PageRelations {
+        guard let path = location.path else { return .empty }
+        return PageRelations(path: path, manifest: relations)
+    }
+
+    /// Navigate to a manifest node. A variant is a *section*, so this resolves
+    /// to its host page plus an anchor rather than to a page of its own.
+    func openRelationObject(_ objectID: String) {
+        guard let destination = relationLabels.destination(objectID),
+              index?.pages[destination.path] != nil
+        else { return }
+        openPage(destination.path, anchor: destination.anchor)
     }
 
     func title(forPath path: String) -> String {
@@ -461,7 +518,8 @@ final class AppModel {
             quickSwitcherResults = []
             return
         }
-        quickSwitcherResults = index.quickSwitch(quickSwitcherQuery)
+        quickSwitcherResults = index.quickSwitch(
+            quickSwitcherQuery, excluding: unlistedPaths)
     }
 
     func presentQuickSwitcher() {
@@ -472,22 +530,45 @@ final class AppModel {
 
     // MARK: Page tree
 
-    /// Kinds the sidebar tree leaves out. See `PageTreeNode.build`.
-    static let kindsOutsideTree: Set<PageKind> = [.reference]
+    /// Kinds the sidebar tree leaves out. Each collapses to a single row that
+    /// opens its folder listing in the reading pane instead.
+    ///
+    /// `.reference` for the reason in `plans/design-system.md` §3a. `.reduction`
+    /// for the same reason and more sharply: there are 343 of them, they
+    /// arrived in one migration, and a reduction is not somewhere you *browse*
+    /// to — you reach one from the relation it states, on the page of one of
+    /// its endpoints, which is what the Relations inspector is for. `Barriers/`
+    /// stays an ordinary folder: 37 rows is a folder, not a wall.
+    static let kindsOutsideTree: Set<PageKind> = [.reference, .reduction]
 
-    /// The sidebar's directory tree, mirroring the repo minus the references.
+    /// Marks the warnings this feature owns, so a reload replaces them instead
+    /// of stacking a fresh copy once per sync.
+    static let relationsWarningPrefix = "Relationships: "
+
+    /// The sidebar's directory tree.
     func pageTree() -> [PageTreeNode] {
         guard let index else { return [] }
         return PageTreeNode.build(
-            pages: index.allPages.filter { !hidesStubs || $0.status != .stub },
+            pages: index.allPages.filter(isBrowsable),
             excluding: Self.kindsOutsideTree)
     }
 
-    var referenceCount: Int {
-        index?.allPages.count {
-            $0.kind == .reference && (!hidesStubs || $0.status != .stub)
-        } ?? 0
+    /// Should this page appear in browse and navigation?
+    ///
+    /// Two independent filters that happen to compose. `hidesStubs` is the
+    /// reader's preference; `unlisted` is the *wiki's* statement that a node is
+    /// real — it takes part in reductions and in the closure — but is not
+    /// somewhere to navigate to. Nothing here removes a node from the graph.
+    func isBrowsable(_ page: WikiPage) -> Bool {
+        (!hidesStubs || page.status != .stub) && !unlistedPaths.contains(page.path)
     }
+
+    func count(ofKind kind: PageKind) -> Int {
+        index?.allPages.count { $0.kind == kind && isBrowsable($0) } ?? 0
+    }
+
+    var referenceCount: Int { count(ofKind: .reference) }
+    var reductionCount: Int { count(ofKind: .reduction) }
 
     /// Stubs currently being hidden, so the UI can say so rather than quietly
     /// showing a shorter list than the repo has.

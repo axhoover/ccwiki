@@ -29,7 +29,16 @@ struct SidebarView: View {
                         ForEach(model.pageTree()) { node in
                             nodeView(node)
                         }
-                        referencesRow
+                        collapsedFolderRow(
+                            "Reductions",
+                            systemImage: "arrow.right",
+                            count: model.reductionCount,
+                            help: "Browse all \(model.reductionCount) reduction pages")
+                        collapsedFolderRow(
+                            "References",
+                            systemImage: "text.book.closed",
+                            count: model.referenceCount,
+                            help: "Browse all \(model.referenceCount) reference pages")
                     }
                     .listSectionSeparator(.hidden)
                 }
@@ -96,24 +105,35 @@ struct SidebarView: View {
         .selectionDisabled()
     }
 
-    /// The 200 references, as one row rather than 200.
+    /// A folder that is too big to be a branch of the tree, as one row.
     ///
-    /// Opening it shows the folder page in the reading pane, which is a far
-    /// better home for a long sorted list than a 268 pt column — and ⌘O and
-    /// ⇧⌘F reach any single reference faster than scrolling ever would.
-    private var referencesRow: some View {
+    /// Two of them now. References (200 pages) for the reason in
+    /// `plans/design-system.md` §3a, and Reductions (343) for that reason and a
+    /// sharper one: a reduction page is not somewhere you browse *to*. You
+    /// arrive at one from the relation it states, on an endpoint's page — which
+    /// is what the Relations inspector is for. Putting 343 of them in the tree
+    /// would bury the 93 concept pages the wiki is actually about.
+    ///
+    /// Opening the row shows the folder listing in the reading pane, where a
+    /// long sorted list belongs; ⌘O and ⇧⌘F reach any single page faster than
+    /// scrolling ever would.
+    private func collapsedFolderRow(
+        _ name: String, systemImage: String, count: Int, help: String
+    ) -> some View {
         Button {
-            model.open(.folder(slug: "References"))
+            model.open(.folder(slug: name))
         } label: {
             HStack(spacing: Theme.small) {
-                Image(systemName: "text.book.closed")
+                Image(systemName: systemImage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
-                Text("References")
+                Text(name)
                     .font(Theme.Fonts.row)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: Theme.tight)
-                Text("\(model.referenceCount)")
+                Text("\(count)")
                     .font(Theme.Fonts.meta)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
@@ -125,7 +145,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .selectionDisabled()
-        .help("Browse all \(model.referenceCount) reference pages")
+        .help(help)
     }
 
     @ViewBuilder
