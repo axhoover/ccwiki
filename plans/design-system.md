@@ -68,11 +68,17 @@ navigation for free.
   web page in a frame. The wiki's own `**Authors:** …` byline paragraph is
   hidden in the rendered page for the same reason: the strip carries it and
   stays visible while you scroll.
-- **Inspector**: outline or backlinks, switched by a segmented control. Both
-  answer "where am I in this, and what points here?"; neither earns a permanent
-  column. Backlinks show the *line* that mentions the page, reduced to prose —
-  a backlinks pane that shows `[[markup]]` is unreadable, and the point of the
-  pane is why another page links here.
+- **Inspector** (240–400 pt, ideal 280): outline, backlinks or relations,
+  switched by a segmented control. None earns a permanent column. Backlinks show
+  the *line* that mentions the page, reduced to prose — a backlinks pane that
+  shows `[[markup]]` is unreadable, and the point of the pane is why another
+  page links here. Relations show the typed hypergraph from `relations.json`;
+  see [relations.md](relations.md) §9 and §3b below.
+
+  The switch is **text-only**. Two segments fitted comfortably with icons and
+  titles; three do not, and a truncated word is worse than a missing glyph when
+  the names are the whole affordance. The minimum column width went 220 → 240
+  at the same time so nothing truncates even at the narrowest drag.
 - **Status bar**: sync state, the current revision, and a warnings menu. Quiet,
   26 pt, and it never interrupts reading.
 
@@ -103,7 +109,7 @@ found or not found, and says it explicitly rather than doing nothing.
 
 ## 3a. References are not peers of the concept pages
 
-**200 of the wiki's 293 pages are references — 68%.** A directory tree that
+**200 of the wiki's 293 pages were references — 68%.** A directory tree that
 mirrors the repo is therefore two-thirds citation store, and following a
 citation used to expand `References/` and scroll you into an alphabetical wall
 of keys while the concept structure left the screen entirely. The sidebar was
@@ -118,6 +124,9 @@ So:
 
 - **The tree is the 93 concept pages.** All five folders and both root notes fit
   on screen at once, which is what a navigable structure looks like.
+  (The corpus is 712 pages now. The tree holds 167 of them — the five concept
+  folders, the two root notes, and `Barriers/` — against 545 collapsed into two
+  rows. The argument only got stronger; see §3b.)
 - **References collapse to one row** with a count and a chevron. Clicking it
   opens the synthetic folder page in the *reading pane* — a 200-item sorted list
   belongs in a 42 rem column, not a 268 pt one, and there it gets each paper's
@@ -155,6 +164,26 @@ site's version does not:
 (a mode you have to remember you are in, for a list ⌘O already beats), and
 grouping references by year (structure the repo does not have, and not how
 anyone looks for a paper).
+
+## 3b. Reductions get the same treatment; Barriers does not
+
+The reductions migration added **343 `Reductions/` pages and 37 `Barriers/`
+pages** in one commit — more than the rest of the wiki put together. The §3a
+argument applies to `Reductions/` twice over:
+
+- 343 rows would bury the 93 concept pages exactly the way References did.
+- **A reduction page is not somewhere you browse to.** You arrive at one from
+  the relation it states, on the page of one of its endpoints — which is what
+  the Relations inspector now provides. The tree was never the route.
+
+So `Reductions/` collapses to one row with a count and a chevron, next to
+References, both drawn by the same function. `Barriers/` stays an ordinary
+folder: 37 rows is a folder, not a wall.
+
+A third filter now applies alongside "hide stubs": the manifest marks 30 objects
+`unlisted`, and those leave the tree, the folder listings and the quick
+switcher. They are still real nodes — they appear in relation rows and in ⇧⌘F —
+which is precisely what `unlisted` means. See [relations.md](relations.md) §7.
 
 ## 4a. The jobs window
 

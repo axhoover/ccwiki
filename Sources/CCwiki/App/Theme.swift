@@ -32,7 +32,10 @@ enum Theme {
 
     // MARK: Inspector
 
-    static let inspectorMinWidth: CGFloat = 220
+    /// 240 rather than 220 so the inspector's three-segment switch —
+    /// Outline / Backlinks / Relations — fits without truncating at the
+    /// narrowest the column can be dragged to.
+    static let inspectorMinWidth: CGFloat = 240
     static let inspectorIdealWidth: CGFloat = 280
     static let inspectorMaxWidth: CGFloat = 400
 

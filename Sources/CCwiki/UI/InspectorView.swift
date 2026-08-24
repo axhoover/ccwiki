@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// The right column: the page's outline, or what links to it.
+/// The right column: the page's outline, what links to it, or what it relates
+/// to.
 ///
-/// One pane with a segmented switch rather than two panes, because both
-/// answer the same question — "where am I in this, and what points here?" —
-/// and neither is worth a permanent column of its own.
+/// One pane with a segmented switch rather than three panes. The first two
+/// answer the same question — "where am I in this, and what points here?" — and
+/// Relations answers the one the wiki's own data now makes answerable: what
+/// this object implies and what implies it. None is worth a permanent column.
 struct InspectorView: View {
     @Environment(AppModel.self) private var model
 
@@ -12,11 +14,13 @@ struct InspectorView: View {
         @Bindable var model = model
 
         VStack(spacing: 0) {
+            // Titles without icons. Two segments fitted comfortably with both;
+            // three do not, and a truncated word is worse than no glyph — the
+            // names are the affordance here, and macOS segmented controls are
+            // routinely text-only.
             Picker("", selection: $model.inspectorTab) {
                 ForEach(AppModel.InspectorTab.allCases) { tab in
-                    Label(tab.rawValue, systemImage: tab.systemImage)
-                        .labelStyle(.titleAndIcon)
-                        .tag(tab)
+                    Text(tab.rawValue).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
@@ -28,6 +32,7 @@ struct InspectorView: View {
             switch model.inspectorTab {
             case .outline: outline
             case .backlinks: backlinks
+            case .relations: RelationsView()
             }
         }
         .navigationSplitViewColumnWidth(

@@ -7,7 +7,7 @@ imports anything higher.
 
 | Layer | Isolation | Owns |
 |---|---|---|
-| `Wiki/` | none — pure value types | Slugs, wikilinks, frontmatter, macros, the page index. Fully unit-tested; see [wiki-model.md](wiki-model.md). |
+| `Wiki/` | none — pure value types | Slugs, wikilinks, frontmatter, macros, the page index, and the relationship manifest. Fully unit-tested; see [wiki-model.md](wiki-model.md) and [relations.md](relations.md). |
 | `Search/` | `actor SearchIndex` | The derived FTS5 index and the fuzzy matcher. See [search.md](search.md). |
 | `Jobs/` | none — async free functions | Subprocess streaming, tool discovery, every `git` call. |
 | `Reader/` | `@MainActor` | The one `WKWebView`, its scheme handler, and the request that drives it. See [render-pipeline.md](render-pipeline.md). |
@@ -16,9 +16,9 @@ imports anything higher.
 ## 2. One model, one web view
 
 `AppModel` is a single `@Observable @MainActor` class. The expensive work —
-walking the clone, parsing ~300 files, rebuilding the search index — happens off
-the main actor and lands as one assignment, so the UI never sees a half-built
-library.
+walking the clone, parsing ~700 files, decoding `relations.json`, rebuilding the
+search index — happens off the main actor and lands as one assignment, so the UI
+never sees a half-built library.
 
 `WebController` owns the app's only `WKWebView` and outlives the SwiftUI struct
 that shows it. `WebPane.makeNSView` returns the existing instance and

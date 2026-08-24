@@ -124,8 +124,14 @@ extension WikiIndex {
     /// Every page contributes several candidate strings, and the best-scoring
     /// one wins — which is how `AGGM06` and `one-way functions on NP-hardness`
     /// both find the same reference page.
-    func quickSwitch(_ query: String, limit: Int = 40) -> [QuickSwitchItem] {
-        let pages = pages.values
+    /// `excluding` holds the paths of pages the manifest marks `unlisted`. The
+    /// quick switcher is navigation, and an unlisted node is deliberately not
+    /// somewhere to navigate to — but it stays fully findable in ⇧⌘F, which is
+    /// search rather than browse.
+    func quickSwitch(
+        _ query: String, limit: Int = 40, excluding hidden: Set<String> = []
+    ) -> [QuickSwitchItem] {
+        let pages = pages.values.filter { !hidden.contains($0.path) }
 
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             return pages

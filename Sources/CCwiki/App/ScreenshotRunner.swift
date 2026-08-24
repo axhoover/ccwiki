@@ -66,6 +66,7 @@ enum ScreenshotRunner {
             case "search": return parts.count > 1 ? .search(parts[1]) : nil
             case "backlinks": return .inspector(.backlinks)
             case "outline": return .inspector(.outline)
+            case "relations": return .inspector(.relations)
             case "light": return .appearance(.aqua, label: "light")
             case "dark": return .appearance(.darkAqua, label: "dark")
             case "ingest": return parts.count > 1 ? .ingest(parts[1]) : nil

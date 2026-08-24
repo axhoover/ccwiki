@@ -58,7 +58,12 @@ prompt so the agent does not repeat the work:
 - Does `content/References/<KEY> - *.md` already exist, or does any page's alias
   already claim `slugify(KEY)`? (Alias collisions are a hard lint error and
   they are attributed to the *pre-existing* page, which makes them confusing.)
-- Does the candidate host page contain `/^#+\s*Other results/mi`?
+- Does every endpoint the paper's results name already resolve to an object id
+  in `relations.json`? A relation whose endpoint does not exist needs a new
+  object page, and that needs human approval — so it is worth knowing *before*
+  the agent spends turns on it. (Specified, not built. It replaces an older
+  check for `/^#+\s*Other results/mi` on a candidate host page, which was also
+  never built and which the reductions migration made wrong — see §4.)
 - Does the proposed key match `^[A-Za-z][A-Za-z+]*\d{2}[a-z]?$`?
 - Is `vendor/cryptobib/crypto.bib` present?
 - Are `git`, `gh`, `claude` and `node` all resolvable? (`ToolLocator`.)
@@ -70,24 +75,39 @@ previous run put a secret-key PIR result on `doubly-efficient-pir` and a human
 moved it to `single-server-private-information-retrieval` the next day, because
 the result was not doubly efficient. The sentence was fine; the page was wrong.
 
-So the review step shows the target page's own definition next to the proposed
-bullet, and `DiffGuard` rejects or flags a diff that:
+So the review step shows the endpoint pages' own definitions next to the
+proposed relation, and `DiffGuard` rejects or flags a diff that:
 
-- adds more than one new page, or a new page outside `content/References/`;
+- adds more than one new page outside `content/Reductions/` and
+  `content/Barriers/`, or any new page under `content/Primitives/`,
+  `content/Assumptions/`, `content/Complexity/` or `content/Glossary/` —
+  **creating an object page requires human approval**;
 - touches more than one existing page, or changes more than ~5 lines on it;
-- inserts a bullet mid-list rather than appending, or reorders/rewords an
-  existing one;
-- uses anything but ` — ` (em dash, U+2014) as the claim/citation separator, or
-  ends the bullet with a period;
-- puts the citation wikilink anywhere but last on its line —
-  `scripts/microcrypt-sync.mjs` treats earlier wikilinks as *endpoints*, so this
-  corrupts its index;
+- **adds a prose relationship bullet** to a `# Other results` or
+  `# Known relationships` list, or **adds a relation field** (`hypotheses`,
+  `conclusion`, `class`, …) to an object page's frontmatter;
+- **touches anything between `<!-- BEGIN GENERATED participates-in … -->` and
+  `<!-- END GENERATED participates-in -->`** — the region is checksummed and
+  derived from the reduction pages;
+- names a hypothesis or conclusion that does not already resolve to an object
+  id;
 - puts a `$` inside a wikilink's display text — Quartz's link renderer does not
   process math there and the link breaks (learned from commit `1e98dc6`, and
   documented nowhere in the repo's prose);
-- edits `macros.ts`, `quartz/`, `public/`, `.orchestrator/`, `.fact-check/` or
-  any `TODO_*` file;
+- edits `macros.ts`, `schema/`, `.reductions/`, `quartz/`, `public/`,
+  `.orchestrator/`, `.fact-check/` or any `TODO_*` file;
 - renames anything under `content/References/` — **filenames are live URLs**.
+
+> **Rewritten 2026-08-24.** The first four bullets used to describe appending a
+> prose result bullet to a `# Other results` list, with rules about em-dash
+> separators and putting the citation wikilink last (for
+> `scripts/microcrypt-sync.mjs`, which treated earlier wikilinks as endpoints).
+> The wiki's reductions migration moved relationship data out of prose into
+> reduction and barrier pages, and now forbids the prose form outright. See
+> [relations.md](relations.md) and `PROGRESS.md` 2026-08-24. Anything the repo
+> still enforces about bullet formatting lives in
+> `.github/prompts/paper-submission.md`, which is where the prompt now sends the
+> agent rather than restating it.
 
 ## 5. Local validation the server pipeline does not do
 

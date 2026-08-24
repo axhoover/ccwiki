@@ -5,6 +5,96 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-08-24 — The wiki's relationships become data, and the ingestion prompt stops undoing them
+
+The wiki migrated its relationship claims out of prose and into first-class
+reduction and barrier pages, plus a generated manifest at
+`.reductions/relations.json`. CCwiki now consumes it. Depth in
+[plans/relations.md](plans/relations.md).
+
+**The most urgent thing was not the manifest.** Surveying for existing
+relationship derivation turned up almost none — `WikiIndex.backlinkMap()` and
+nothing else; no prose scraping, no hardcoded lists — but it did turn up
+`prompts/ingest.md` Step 4, which *instructed the agent to append prose
+relationship bullets to `# Other results`*. That is precisely the form the
+migration removed, and upstream had already deleted the same instruction from
+their own prompt, saying: "Left alone, every accepted submission would have
+undone that migration a bullet at a time." Every ingestion job CCwiki launched
+would now open a PR that fails `npm run lint`. Fixed first, before any manifest
+work, by deferring to `.github/prompts/paper-submission.md` instead of
+restating it — which is what the file's own design rule said to do all along,
+and the rule it had quietly broken.
+
+Two false claims went with it: the prompt asserted that CCwiki "enforces on the
+diff" mechanical limits that `DiffGuard` would enforce, and `DiffGuard` has
+never been built. `plans/ingestion.md` §4 still specified it in terms of bullet
+formatting, so that spec was rewritten too.
+
+**Reading the manifest from the clone, not over HTTP.** The wiki serves it at a
+static URL, but `GitService.sync` already does a full clone, so the file is on
+disk at the *same commit as the pages it describes*. That makes version skew
+impossible rather than merely unlikely, keeps reading offline, and means there
+is no refetch policy to get wrong. Same contract `MacroTable` has with
+`macros.ts`.
+
+**One row is one hyperedge.** 42 of the 343 reductions have more than one
+hypothesis, and `hypotheses` is a conjunction. The guard is structural rather
+than careful: no query in `RelationsManifest` returns a `(from, to)` pair, so
+nothing downstream can flatten what it never receives. A corpus test asserts row
+counts track edges rather than endpoint pairs.
+
+**The class order is the part that is silently wrong if you get it backwards.**
+`implies` points narrower → broader, and a barrier against class B bites a
+reduction of class C iff `C implies* B`. The regression test uses a live pair —
+`red-oihf-to-ot-bh26` is `free`, `bar-oihf-to-ot-bh26` is `fully-black-box`,
+same hyperedge — where the correct answer is *no conflict*. Inverted, that pair
+reports a contradiction. Worth knowing: **five hyperedges are shared by a
+reduction and a barrier and zero conflicts fire today**, so the conflict
+indicator is implemented and tested but appears nowhere. That is the honest
+state.
+
+**`make shots` earned its keep again.** The first Relations pane was
+model-correct and unreadable: every row led with the object named in the section
+header above it, spending two of three lines restating context and truncating
+the conclusion. Rows now lead with the end of the edge you are *not* on, with
+any other hypothesis named underneath as "also needs …" — the conjunction in
+words. A second pass fixed section headers that folded the object name in
+front of the role, so "Bounded-Error Probabilistic Polynomial-Time is contained
+in" truncated to leave "contained in" and "contains" indistinguishable. Neither
+bug was visible to a unit test.
+
+**Surprises worth recording.**
+
+- **Every one of the 131 variants has `title` equal to its own `id`.** So the
+  manifest cannot name them, and the label has to come from the host page's
+  heading text — which works because `WikiPage.headings()` already computes
+  Quartz-identical ids.
+- **The migration rewrote the host pages' prose**, pointing `# Other results`
+  bullets at reduction pages rather than at endpoint pages. Page URLs did not
+  change, but the backlink graph changed shape underneath: corpus links went
+  from 673 to 3,277, and a primitive's Backlinks pane is now largely reduction
+  slugs. That is the pane getting *worse* exactly where Relations makes it
+  better — which is the argument for the new tab, not against backlinks.
+- **The wiki now generates a `## Participates in` block into the markdown
+  itself.** The reader renders it for free, which is why Relations is an
+  inspector tab rather than an inline section: the tab carries what the
+  generated block does not — kind, class, model, status, source.
+- One dangling reference upstream (`bar-oihf-to-ot-bh26` names a reduction
+  *slug* where an id belongs) and four propositions with empty titles. Both
+  degrade rather than throw.
+- `https://cryptology.city/docs/relations-json` — the manifest's own `schema`
+  URL — **404s**. Only the GitHub source resolves.
+
+**The clone gained 380 pages**, so browse had to absorb them: `Reductions/`
+collapses to one row beside References (a reduction is not somewhere you browse
+*to*), `Barriers/` stays an ordinary folder at 37, and `PageKind` learned both
+directories — it had a dead `.reduction` case with no directory and a
+`.separation` case the wiki never used.
+
+101 tests, all green against the real corpus.
+
+---
+
 ## 2026-08-22 — Folder listings grow up; the ingestion path stops fighting itself
 
 **Folder pages** now carry sticky alphabetical dividers and a **Hide stubs**

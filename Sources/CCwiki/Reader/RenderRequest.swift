@@ -72,6 +72,10 @@ struct RenderRequest: Sendable {
 struct PageRenderer: Sendable {
 
     let index: WikiIndex
+    /// Pages the manifest marks `unlisted`. They are real nodes and stay
+    /// reachable by link, by search and from a relation row — they are only
+    /// kept off the folder listings, which is what "unlisted" means.
+    var hiddenPaths: Set<String> = []
 
     /// Image extensions the reader inlines for `![[…]]` embeds.
     private static let imageExtensions: Set<String> = [
@@ -146,7 +150,9 @@ struct PageRenderer: Sendable {
     func folderRequest(
         slug: String, hidingStubs: Bool = false, notices: [RenderRequest.Notice] = []
     ) -> RenderRequest {
-        let all = index.pages.values.filter { $0.slug.hasPrefix(slug + "/") }
+        let all = index.pages.values.filter {
+            $0.slug.hasPrefix(slug + "/") && !hiddenPaths.contains($0.path)
+        }
         let hidden = hidingStubs ? all.count { $0.status == .stub } : 0
         let children = all
             .filter { !hidingStubs || $0.status != .stub }
