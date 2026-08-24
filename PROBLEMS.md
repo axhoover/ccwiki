@@ -21,6 +21,53 @@ again, change all four together.
 
 ---
 
+## A compiled-in house-style rule is a time bomb, and one went off
+
+`prompts/ingest.md` opens by saying, at length, that it must never contain house
+style — the wiki owns its own contract, and a paraphrase in a Mac app goes stale
+the moment the wiki changes. Step 4 then contained about forty lines of house
+style: append one to three bullets to `# Other results`, em-dash separator, no
+trailing period, citation wikilink last.
+
+The wiki then migrated relationship claims out of prose into reduction pages and
+forbade the prose form. Upstream noticed and deleted the same instruction from
+their own prompt with the right diagnosis: *"Left alone, every accepted
+submission would have undone that migration a bullet at a time."* CCwiki's copy
+sat there silently telling agents to do the forbidden thing.
+
+Two lessons, and the second is the sharper one:
+
+1. **A file that states a rule about itself is not obeying it.** The rule was
+   written down, prominently, at the top of the very file that broke it. Prose
+   does not enforce anything; the only real enforcement was that Step 4 could
+   have said "read `.github/prompts/paper-submission.md`" and did not.
+2. **The prompt also claimed CCwiki enforced those limits "on the diff whatever
+   the prompt says".** It never did — `DiffGuard` is specified in
+   `plans/ingestion.md` §4 and has never been built. A claim about a guard that
+   does not exist is worse than no guard, because it stops anyone looking. Both
+   the claim and the stale spec were fixed together.
+
+---
+
+## A stale `ModuleCache` survives a directory rename
+
+After the CityDesk → CCwiki rename, `swift build` failed on every file with:
+
+```
+error: missing required module 'SwiftShims'
+error: precompiled file '…/CCwiki/.build/…/ModuleCache/…/SwiftShims-….pcm' was
+compiled with module cache path '…/citydesk/.build/…/ModuleCache/…'
+```
+
+The `.pcm` files record the absolute path of the cache that produced them, so
+moving or renaming the checkout invalidates every one of them and the compiler
+refuses rather than rebuilding. `rm -rf .build/*/debug/ModuleCache` fixes it;
+the whole `.build` works too and is gitignored either way. Worth knowing because
+the error names `SwiftShims` and looks like a broken toolchain, which is a much
+more alarming thing to go debugging.
+
+---
+
 ## `ForEach(Array(collection.enumerated()))` breaks row updates
 
 Both command palettes rendered with

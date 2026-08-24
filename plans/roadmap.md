@@ -78,8 +78,10 @@ Cheap wins available now, before any restructuring:
   or two every single time; a shared, gitignored install linked into the
   worktree would remove it.
 - Skip `sync-cryptobib` when the page carries no `cryptobib_key` (**done**).
-- Feed the agent the host page's `# Other results` section directly in the
-  prompt, instead of making it go and find the file.
+- Feed the agent each candidate endpoint's own definition directly in the
+  prompt, instead of making it go and find the file. (This used to say "the host
+  page's `# Other results` section"; the reductions migration removed that form
+  — see [relations.md](relations.md).)
 
 ## 3. Correcting a page
 
@@ -122,6 +124,28 @@ Deferred with a concrete plan; see [search.md](search.md) §6. Short version:
 weight the fields harder, and multiply the bm25 score by a per-kind factor so a
 `primitive` or `assumption` page outranks a `reference` — except when the query
 looks like a citation key, which is exactly when a reference should win.
+
+## 4a. A graph view of the relationship hypergraph
+
+**Deferred 2026-08-24**, deliberately and with the data already in hand.
+[relations.md](relations.md) built the model and the Relations inspector; a
+canvas was considered at the same time and judged not worth it yet.
+
+The list answers the question people actually have — *what does this imply, and
+what implies it* — from the page they are already reading. A canvas answers
+"what does the neighbourhood look like", which is a rarer question, and the
+wiki's own site already renders one.
+
+If it is ever built, the constraint is not negotiable and is the reason this
+note exists: **the graph is bipartite.** Nodes are objects *and* reductions;
+edges run object → reduction → object. Drawing an object-to-object edge would
+turn each of the 42 multi-hypothesis reductions into several independent
+implications the wiki does not claim. Barriers attach to the reduction node,
+never to an edge between two objects. `RelationsManifest` is already shaped so
+this is the path of least resistance: nothing it returns is a pair.
+
+Worth having first, whoever picks this up: a reason to believe a canvas beats
+the list for a real reading task. "The data is a graph" is not one.
 
 ## 5. Smaller things
 

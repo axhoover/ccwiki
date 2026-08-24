@@ -137,7 +137,7 @@ auto-links `/usr/lib/libsqlite3.dylib` because the SDK's module map carries
 ## Make targets specific to this app
 
 ```
-make check         compile + 47 unit tests — the gate after every change
+make check         compile + 101 unit tests — the gate after every change
 make test-corpus   …and validate against the real cloned wiki
 make shots         drive the app and capture screenshots (the visual gate)
 ```
