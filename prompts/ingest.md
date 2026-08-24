@@ -17,9 +17,8 @@ So this template does three things and nothing else:
 
   1. states the job (this paper, this worktree, this branch);
   2. hands the agent the repo's OWN instructions, read from the live worktree;
-  3. adds the checks the server-side pipeline cannot run — the local lint, the
-     local build, and the diff ceiling CCwiki enforces before it will let a
-     PR open.
+  3. adds the checks the server-side pipeline cannot run — the local lint and
+     the local build, both of which must pass before the agent pushes.
 
 Placeholders CCwiki substitutes:
 
@@ -72,9 +71,9 @@ anything. They are the contract; this prompt is only the envelope.
 
 1. `.github/prompts/paper-submission.md` — the paper-ingestion contract:
    scope limits, what requires human approval, abort semantics, and the PR body
-   template. **Follow it exactly.** Where it and this prompt disagree, it wins,
-   except for the mechanical limits in Step 4, which CCwiki enforces on the
-   diff whatever the prompt says.
+   template. **Follow it exactly.** Where it and this prompt disagree, it
+   wins — without exception. This template is the envelope; the contract is
+   the letter.
 2. `CONTRIBUTING.md` — the frontmatter schema and the worked example per page
    type. This is what `scripts/lint.mjs` enforces.
 3. `CLAUDE.md` — the full style guide: voice, the anti-pattern list, section
@@ -124,48 +123,40 @@ own goes under a separate `# Notes` heading, never inside the abstract.
 
 This is the part that gets reverted when it goes wrong, so keep it small.
 
-Append **at most one to three bullets** to the `# Other results` section of
-**one** existing primitive or assumption page. Locate the section with
-`/^#+\s*Other results/mi` and append to the end of that list; if the paper's
-result is about a named variant that has its own narrower `### Known results`
-list, prefer that list. Do not renumber, reorder, reword or reflow anything that
-is already there.
+**The wiki's relationship data lives in reduction and barrier pages, not in
+prose.** `.github/prompts/paper-submission.md` is the contract for this step,
+and it is specific: it states the four rules that decide whether a hyperedge is
+right, the frontmatter each page type needs, and what requires human approval.
+Read it and follow it exactly. Nothing is restated here, for the reason at the
+top of this file.
 
-Each bullet is one sentence, in the wiki's voice, and must correspond to a
-single concrete result you can point at in the paper:
+Three things worth calling out, because getting them wrong is silent — the edit
+looks reasonable and passes review by eye:
 
-```
-- <claim> — [[CITATIONKEY - Full Title|CITATIONKEY]]
-```
+- **Never add a prose relationship bullet** to `# Other results`, `# Known
+  relationships`, or any similar list. That is exactly the form the wiki's
+  reductions migration removed. Re-adding it undoes that migration a bullet at
+  a time, and putting relation fields on an object page is a hard lint error.
+- **Never hand-edit anything between `<!-- BEGIN GENERATED participates-in ...
+  -->` and `<!-- END GENERATED participates-in -->`.** That region carries a
+  checksum and the lint will reject the edit. It is derived from the reduction
+  pages — change those, and it follows.
+- **Never invent an endpoint.** Every hypothesis and conclusion must already
+  resolve to an existing object id. A relation that needs a new object page is
+  a request for human approval, not something to create on the way past.
 
-Mechanical rules CCwiki checks on the diff and will reject:
-
-- The separator is an **em dash** (U+2014) with a single space either side.
-  Not `--`, not an en dash.
-- **No trailing period.**
-- The citation wikilink is the **last** wikilink on the line.
-  `scripts/microcrypt-sync.mjs` treats every earlier wikilink on a result bullet
-  as an *endpoint* (the primitives and assumptions the result relates), so a
-  citation that is not last corrupts its index.
-- **No `$` anywhere inside a wikilink's display text.** Quartz's link renderer
-  does not process math there and the link breaks. Write
-  `[[k-lin|k-LIN]]`, never `[[k-lin|$k$-LIN]]`.
-- Wikilink the objects the claim names: `[[decisional-diffie-hellman|DDH]]`,
-  `[[public-key-encryption|PKE]]`.
-- Use the macros: `\secpar`, `\poly`, `\negl`, `\calA`, `\bits`. Not `\lambda`,
-  not `\mathrm{poly}`, not a raw `\mathsf{...}` where a macro exists.
-
-**Choosing the right host page is the failure mode that actually happens.** A
+**Choosing the right endpoints is the failure mode that actually happens.** A
 previous run put a secret-key PIR result on `doubly-efficient-pir` and a human
 moved it to `single-server-private-information-retrieval` the next day, because
-the result was not doubly efficient. Before you write the bullet, read the host
-page's own definition and justify the choice against it in one sentence in the
-PR body. If two pages are plausible, say so under "Things a human should
-verify".
+the result was not doubly efficient. Before you write a relation, read each
+endpoint page's own definition and justify the choice against it in one
+sentence in the PR body. If two endpoints are plausible, say so under "Things a
+human should verify".
 
 New pages you create are `status: stub` or `status: draft`. **Never
 `status: complete`** — that is a human judgement and it makes the lint demand a
 full section contract.
+
 
 ## Step 5 — Validate locally
 
