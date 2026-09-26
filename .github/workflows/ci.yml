@@ -1,0 +1,44 @@
+# Compile and run the unit tests on every push and pull request.
+#
+# This is `make check` on a macOS runner: the same gate a contributor runs
+# locally. It does not run `make shots` (no display, no Screen Recording
+# grant) and it does not run `make test-corpus` (no clone), so a green run is
+# "compiles and the 101 unit tests pass", nothing more. See
+# plans/build-system.md, "CI gate".
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: make check
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Vendored render pipeline is intact
+        run: ./scripts/vendor-web.sh --check
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+
+      - name: make check
+        run: make check
