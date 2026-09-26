@@ -34,7 +34,15 @@ struct JobsView: View {
         .navigationTitle("Jobs")
         .frame(minWidth: 860, minHeight: 520)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    model.clearFinishedJobs()
+                } label: {
+                    Label("Clear Finished", systemImage: "xmark.bin")
+                }
+                .help("Remove finished jobs from the list. Transcripts are kept.")
+                .disabled(!model.hasFinishedJobs)
+
                 Button {
                     model.ingestSheetPresented = true
                 } label: {
@@ -108,6 +116,8 @@ struct JobsView: View {
         .contextMenu {
             if !job.state.isTerminal {
                 Button("Cancel Job") { job.cancel() }
+            } else {
+                Button("Run Again") { model.runAgain(job) }
             }
             Button("Reveal Worktree in Terminal") { model.openInTerminal(job.worktree) }
                 .disabled(!FileManager.default.fileExists(

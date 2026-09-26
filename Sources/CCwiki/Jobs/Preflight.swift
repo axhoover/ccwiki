@@ -40,7 +40,8 @@ enum Preflight {
         paths: AppPaths,
         tools: ToolLocator,
         isGitHubAuthenticated: Bool,
-        canPush: Bool = true
+        canPush: Bool = true,
+        hasPushRights: Bool? = nil
     ) -> [PreflightFinding] {
         var findings: [PreflightFinding] = []
 
@@ -72,6 +73,17 @@ enum Preflight {
                 title: "The clone cannot authenticate a push",
                 detail: "Run `gh auth setup-git`, or let CCwiki configure a credential "
                     + "helper on its own clone by syncing again (⌘R)."))
+        }
+
+        // 3b. Push *rights*, asked of GitHub. A helper that exists is not a
+        //     helper that works, and an account without write access finds
+        //     out at the very end of the job otherwise.
+        if hasPushRights == false {
+            findings.append(PreflightFinding(
+                level: .blocking,
+                title: "The signed-in account cannot push to \(AppPaths.repositorySlug)",
+                detail: "The job pushes a branch to the wiki itself, so a fork is not enough. "
+                    + "Ask for write access, or sign in to gh as an account that has it."))
         }
 
         // 4. The submodules the wiki's lint reads.
@@ -192,6 +204,18 @@ enum GitHubAuth {
             lock.withLock { cached = answer }
         }
         return answer ?? false
+    }
+
+    /// Whether the signed-in account may push to `repository`, asked of
+    /// GitHub itself. `nil` when it could not be asked — no `gh`, no network.
+    static func canPush(tools: ToolLocator, repository: String) async -> Bool? {
+        guard let gh = tools.path(for: .gh) else { return nil }
+        let result = await Subprocess.run(
+            executable: gh,
+            arguments: ["api", "repos/\(repository)", "--jq", ".permissions.push"],
+            environment: tools.childEnvironment())
+        guard result.succeeded else { return nil }
+        return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
     }
 
     /// Call after the user has been told to run `gh auth login`.

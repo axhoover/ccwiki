@@ -39,7 +39,8 @@ final class AppModel {
         didSet {
             guard hidesStubs != oldValue else { return }
             CCwikiSettings.hidesStubs = hidesStubs
-            // The tree recomputes on read; the rendered folder page does not.
+            rebuildBrowseState()
+            // The rendered folder page does not follow the preference by itself.
             webController.invalidate()
             renderCurrent(preservingScroll: true)
         }
@@ -395,6 +396,7 @@ final class AppModel {
         relations = loaded.2
         relationLabels = loaded.3
         unlistedPaths = loaded.2.unlistedPaths
+        rebuildBrowseState()
         macros = MacroTable.load(cloneRoot: paths.clone)
         refreshMacrosWarning()
 
@@ -761,12 +763,33 @@ final class AppModel {
     /// of stacking a fresh copy once per sync.
     static let relationsWarningPrefix = "Relationships: "
 
-    /// The sidebar's directory tree.
-    func pageTree() -> [PageTreeNode] {
-        guard let index else { return [] }
-        return PageTreeNode.build(
-            pages: index.allPages.filter(isBrowsable),
-            excluding: Self.kindsOutsideTree)
+    /// The sidebar's directory tree, and the counts beside it.
+    ///
+    /// Stored, not computed: the sidebar's `body` reads these on every
+    /// navigation, and building the tree walks and sorts every page. They
+    /// change only when the index or a browse preference does, which is
+    /// where `rebuildBrowseState` is called.
+    private(set) var pageTree: [PageTreeNode] = []
+    private(set) var referenceCount = 0
+    private(set) var reductionCount = 0
+    /// Stubs currently being hidden, so the UI can say so rather than quietly
+    /// showing a shorter list than the repo has.
+    private(set) var hiddenStubCount = 0
+
+    private func rebuildBrowseState() {
+        guard let index else {
+            pageTree = []
+            referenceCount = 0
+            reductionCount = 0
+            hiddenStubCount = 0
+            return
+        }
+        let pages = index.allPages
+        let browsable = pages.filter(isBrowsable)
+        pageTree = PageTreeNode.build(pages: browsable, excluding: Self.kindsOutsideTree)
+        referenceCount = browsable.count { $0.kind == .reference }
+        reductionCount = browsable.count { $0.kind == .reduction }
+        hiddenStubCount = hidesStubs ? pages.count { $0.status == .stub } : 0
     }
 
     /// Should this page appear in browse and navigation?
@@ -777,20 +800,6 @@ final class AppModel {
     /// somewhere to navigate to. Nothing here removes a node from the graph.
     func isBrowsable(_ page: WikiPage) -> Bool {
         (!hidesStubs || page.status != .stub) && !unlistedPaths.contains(page.path)
-    }
-
-    func count(ofKind kind: PageKind) -> Int {
-        index?.allPages.count { $0.kind == kind && isBrowsable($0) } ?? 0
-    }
-
-    var referenceCount: Int { count(ofKind: .reference) }
-    var reductionCount: Int { count(ofKind: .reduction) }
-
-    /// Stubs currently being hidden, so the UI can say so rather than quietly
-    /// showing a shorter list than the repo has.
-    var hiddenStubCount: Int {
-        guard hidesStubs, let index else { return 0 }
-        return index.allPages.count { $0.status == .stub }
     }
 
     /// The pages that cite the page being read.
@@ -892,6 +901,49 @@ final class AppModel {
         jobs.insert(job, at: 0)
         requestJobsWindow()
         start(job)
+    }
+
+    /// Jobs from earlier launches, from the records beside their transcripts.
+    ///
+    /// A job that was running when the app last quit comes back as failed
+    /// and says why; its worktree, if any, shows up under "Left Behind".
+    func loadJobHistory() {
+        let manager = FileManager.default
+        guard let files = try? manager.contentsOfDirectory(
+            at: paths.logs, includingPropertiesForKeys: nil)
+        else { return }
+        let decoder = JSONDecoder()
+        let known = Set(jobs.map(\.id))
+        var restored: [IngestJob] = []
+        for file in files where file.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: file),
+                  let record = try? decoder.decode(JobRecord.self, from: data),
+                  !known.contains(record.id)
+            else { continue }
+            restored.append(IngestJob(restoring: record, paths: paths))
+        }
+        restored.sort { $0.submission.submittedAt > $1.submission.submittedAt }
+        jobs.append(contentsOf: restored)
+    }
+
+    /// Forget the finished jobs. Their transcripts stay on disk; only the
+    /// records that bring them back at launch go.
+    func clearFinishedJobs() {
+        for job in jobs where job.state.isTerminal {
+            try? FileManager.default.removeItem(at: job.recordFile)
+        }
+        jobs.removeAll { $0.state.isTerminal }
+    }
+
+    var hasFinishedJobs: Bool { jobs.contains { $0.state.isTerminal } }
+
+    /// The same submission again, as a new job. The common case after a
+    /// failure that was the machine's fault rather than the paper's.
+    func runAgain(_ job: IngestJob) {
+        submitIngestion(
+            source: job.submission.source,
+            pdf: job.submission.localPDF,
+            notes: job.submission.notes)
     }
 
     private func start(_ job: IngestJob) {

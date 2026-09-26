@@ -16,6 +16,8 @@ import Foundation
 struct AppPaths: Sendable {
 
     static let remoteURL = "https://github.com/axhoover/cryptology.city"
+    /// The same repository as `gh` names it.
+    static let repositorySlug = "axhoover/cryptology.city"
     static let defaultBranch = "main"
     /// The published site. A page's URL there is its Quartz slug, so the
     /// reader can point at the same page it is showing.
@@ -141,4 +143,6 @@ struct AppPaths: Sendable {
 
     func worktree(forJob id: String) -> URL { worktrees.appending(path: id) }
     func log(forJob id: String) -> URL { logs.appending(path: "\(id).log") }
+    /// The small JSON record that brings a job back after a relaunch.
+    func record(forJob id: String) -> URL { logs.appending(path: "\(id).json") }
 }

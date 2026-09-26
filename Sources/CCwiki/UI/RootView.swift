@@ -56,6 +56,7 @@ struct RootView: View {
             // touch the network — so the app is usable instantly and offline.
             // The ingestion tools are looked for in the background.
             await model.discoverTools()
+            model.loadJobHistory()
             await model.loadLibrary()
             // A launch fetch keeps the wiki current for someone who never
             // presses ⌘R. Not under the screenshot harness, whose captures

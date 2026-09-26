@@ -26,7 +26,7 @@ struct SidebarView: View {
                     }
 
                     Section("Wiki") {
-                        ForEach(model.pageTree()) { node in
+                        ForEach(model.pageTree) { node in
                             nodeView(node)
                         }
                         collapsedFolderRow(

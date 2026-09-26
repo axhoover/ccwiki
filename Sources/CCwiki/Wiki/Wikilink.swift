@@ -86,8 +86,12 @@ enum WikilinkParser {
 /// character offsets never have to line up between two representations.
 enum CodeMask {
 
+    /// `%%[\s\S]*?%%` — Quartz's own pattern (`ofm.ts`), applied to the whole
+    /// source before anything else reads it, so a comment can span lines.
+    private static let commentRegex = try! NSRegularExpression(pattern: "%%[\\s\\S]*?%%")
+
     static func inertRanges(in text: String) -> [Range<String.Index>] {
-        var ranges: [Range<String.Index>] = []
+        var ranges = commentRanges(in: text)
 
         var inFence = false
         var fenceMarker: Character = "`"
@@ -131,7 +135,16 @@ enum CodeMask {
         return ranges
     }
 
-    /// Inline code spans and `%%comments%%` within one line.
+    /// Every `%% … %%` in the text, across lines. Done on the whole text
+    /// rather than per line: a comment that opens on one line and closes on
+    /// another used to leave its wikilinks live, and the site never shows them.
+    private static func commentRanges(in text: String) -> [Range<String.Index>] {
+        let ns = text as NSString
+        return commentRegex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+            .compactMap { Range($0.range, in: text) }
+    }
+
+    /// Inline code spans within one line. (Comments are handled above.)
     private static func inlineInertRanges(
         in text: String, line: Range<String.Index>
     ) -> [Range<String.Index>] {
@@ -165,25 +178,6 @@ enum CodeMask {
                 }
                 if !closed { ranges.append(start..<i) }
                 continue
-            }
-
-            if c == "%", text.index(after: i) < line.upperBound,
-               text[text.index(after: i)] == "%" {
-                var j = text.index(i, offsetBy: 2)
-                var end: String.Index?
-                while j < line.upperBound {
-                    let next = text.index(after: j)
-                    if text[j] == "%", next < line.upperBound, text[next] == "%" {
-                        end = text.index(after: next)
-                        break
-                    }
-                    j = next
-                }
-                if let end {
-                    ranges.append(i..<end)
-                    i = end
-                    continue
-                }
             }
 
             i = text.index(after: i)

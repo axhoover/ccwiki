@@ -32,9 +32,12 @@ struct IngestJobRunner {
 
         let canPush = await git.canAuthenticatePush(clone: paths.clone)
         let authenticated = await GitHubAuth.isAuthenticated(tools: tools)
+        let pushRights = authenticated
+            ? await GitHubAuth.canPush(tools: tools, repository: AppPaths.repositorySlug)
+            : nil
         let findings = Preflight.run(
             submission: job.submission, index: index, paths: paths, tools: tools,
-            isGitHubAuthenticated: authenticated, canPush: canPush)
+            isGitHubAuthenticated: authenticated, canPush: canPush, hasPushRights: pushRights)
         job.setPreflight(findings)
         for finding in findings {
             job.append(JobLogEntry(
@@ -199,6 +202,17 @@ struct IngestJobRunner {
             job.append(JobLogEntry(.assistant, outcome.result))
         }
 
+        // What the agent says is prose; what GitHub says is fact. A final
+        // message that quotes the abort protocol or mentions an older PR
+        // used to be misread — this asks `gh` before believing either.
+        if let url = await confirmedPullRequest(job) {
+            job.append(JobLogEntry(.system,
+                "GitHub confirms a pull request for \(job.branch): \(url.absoluteString)"))
+            await cleanUp(job, keep: false)
+            job.setState(.opened(url: url))
+            return
+        }
+
         if let reason = outcome.abortReason {
             // Aborting is a good outcome, and the prompt says so: a wrong page
             // in the wiki costs a maintainer more than a submission that did
@@ -225,6 +239,21 @@ struct IngestJobRunner {
         job.setState(.failed(
             "The agent finished without opening a pull request and without aborting. "
             + "The worktree has been kept so you can see what it did."))
+    }
+
+    /// The PR for the job's branch, if GitHub has one.
+    private func confirmedPullRequest(_ job: IngestJob) async -> URL? {
+        guard let gh = tools.path(for: .gh) else { return nil }
+        let result = await Subprocess.run(
+            executable: gh,
+            arguments: ["pr", "view", job.branch, "--repo", AppPaths.repositorySlug,
+                        "--json", "url", "--jq", ".url"],
+            currentDirectory: job.worktree,
+            environment: tools.childEnvironment())
+        guard result.succeeded else { return nil }
+        let text = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("https://") else { return nil }
+        return URL(string: text)
     }
 
     /// `cleanUp`, from a task that has been cancelled.

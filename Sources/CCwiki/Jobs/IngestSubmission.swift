@@ -6,7 +6,7 @@ import Foundation
 /// are copied into `…/CCwiki/library/` — deliberately *outside* the clone,
 /// because a PDF must never enter the repo; the References page it produces
 /// points at eprint, arXiv or a DOI instead.
-struct IngestSubmission: Sendable, Equatable {
+struct IngestSubmission: Sendable, Equatable, Codable {
 
     enum Kind: String, Sendable, Codable {
         case url
@@ -15,7 +15,7 @@ struct IngestSubmission: Sendable, Equatable {
 
     /// The preprint servers the wiki actually cites, in the `source`
     /// preference order the repo's lint documents.
-    enum Source: Sendable, Equatable {
+    enum Source: Sendable, Equatable, Codable {
         case eprint(year: String, number: String)
         case arXiv(id: String)
         case doi(String)

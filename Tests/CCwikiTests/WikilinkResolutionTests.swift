@@ -452,6 +452,20 @@ struct WikilinkResolutionTests {
                 "the backticked copy must not be counted")
     }
 
+    @Test("a comment hides its wikilinks, on one line or across several")
+    func commentsAreNotLinked() {
+        let text = """
+            See [[visible]] and %%[[hidden-inline]]%% here.
+            %%
+            A note to self: compare with [[hidden-multiline]]
+            and [[also-hidden]] before publishing.
+            %%
+            Then [[visible-again]].
+            """
+        let targets = WikilinkParser.links(in: text).map(\.target)
+        #expect(targets == ["visible", "visible-again"])
+    }
+
     @Test("every wikilink form parses")
     func parsing() throws {
         func parse(_ s: String) throws -> Wikilink {
