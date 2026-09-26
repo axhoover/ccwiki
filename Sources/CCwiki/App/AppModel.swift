@@ -29,6 +29,11 @@ final class AppModel {
     private(set) var canPushToRemote = false
     private(set) var vendorManifest: String?
 
+    /// Fast-forward the clone at launch. Persisted; see `CCwikiSettings`.
+    var syncsAtLaunch: Bool = CCwikiSettings.syncsAtLaunch {
+        didSet { CCwikiSettings.syncsAtLaunch = syncsAtLaunch }
+    }
+
     /// Hide stub pages in the sidebar and on folder listings. Persisted.
     var hidesStubs: Bool = CCwikiSettings.hidesStubs {
         didSet {
@@ -36,7 +41,7 @@ final class AppModel {
             CCwikiSettings.hidesStubs = hidesStubs
             // The tree recomputes on read; the rendered folder page does not.
             webController.invalidate()
-            renderCurrent()
+            renderCurrent(preservingScroll: true)
         }
     }
 
@@ -59,6 +64,8 @@ final class AppModel {
     private(set) var unlistedPaths: Set<String> = []
     private(set) var modifiedDates: [String: Date] = [:]
     private(set) var headRevision: String?
+    /// When the checked-out commit was made: "the wiki as of".
+    private(set) var headDate: Date?
 
     // MARK: Navigation
 
@@ -242,6 +249,9 @@ final class AppModel {
         webController.onNavigate = { [weak self] destination, _ in
             self?.navigate(to: destination)
         }
+        webController.onReady = { [weak self] in
+            self?.renderCurrent()
+        }
 
         refreshMacrosWarning()
     }
@@ -386,6 +396,7 @@ final class AppModel {
         if let git {
             modifiedDates = await git.modifiedDates(in: paths.clone)
             headRevision = await git.head(in: paths.clone)
+            headDate = await git.headDate(in: paths.clone)
             if let gh = tools.path(for: .gh) {
                 await git.configureCredentialHelper(clone: paths.clone, ghPath: gh)
             }
@@ -419,9 +430,10 @@ final class AppModel {
                 + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
         }
 
-        // Re-render whatever is on screen, since the file may have changed.
+        // Re-render whatever is on screen, since the file may have changed —
+        // keeping the reader's place, since it usually has not.
         webController.invalidate()
-        if case .empty = location { openHome() } else { renderCurrent() }
+        if case .empty = location { openHome() } else { renderCurrent(preservingScroll: true) }
         refreshQuickSwitcher()
     }
 
@@ -466,8 +478,19 @@ final class AppModel {
                 await loadLibrary()
                 syncState = .succeeded(outcome.summary)
                 warnings.removeAll { $0.contains("Fast-forward failed") }
+                scheduleStatusReset()
             }
             syncTask = nil
+        }
+    }
+
+    /// "Already up to date" has been read after a few seconds; the resting
+    /// state — the wiki as of when — is the more useful thing to leave up.
+    private func scheduleStatusReset() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard let self, case .succeeded = self.syncState else { return }
+            self.syncState = .idle
         }
     }
 
@@ -556,7 +579,7 @@ final class AppModel {
         renderCurrent()
     }
 
-    private func renderCurrent() {
+    private func renderCurrent(preservingScroll: Bool = false) {
         guard let index else { return }
         let renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
         var notices: [RenderRequest.Notice] = []
@@ -582,7 +605,53 @@ final class AppModel {
         // after launch, or a pull that changed `macros.ts`, takes effect on
         // the next page rather than the next launch.
         request.macros = macros.macros
+        request.preservesScroll = preservingScroll
         webController.render(request)
+    }
+
+    // MARK: Text size
+
+    func makeTextBigger() {
+        webController.setPageZoom(webController.pageZoom * WebController.zoomStep)
+    }
+
+    func makeTextSmaller() {
+        webController.setPageZoom(webController.pageZoom / WebController.zoomStep)
+    }
+
+    func resetTextSize() {
+        webController.setPageZoom(1)
+    }
+
+    // MARK: The published site
+
+    /// The same page on cryptology.city, for "Open on the website" and
+    /// "Copy Link". A Quartz page's URL is its simplified slug.
+    nonisolated static func siteURL(slug: String, anchor: String? = nil) -> URL? {
+        let simple = QuartzSlug.simplifySlug(slug)
+        let path = simple == "/" ? "" : simple
+        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              var components = URLComponents(string: AppPaths.siteURL + "/" + encoded)
+        else { return nil }
+        components.fragment = anchor
+        return components.url
+    }
+
+    var currentSiteURL: URL? {
+        switch location {
+        case .page(let path, let anchor):
+            guard let page = index?.pages[path] else { return nil }
+            return Self.siteURL(slug: page.slug, anchor: anchor)
+        case .folder(let slug):
+            return Self.siteURL(slug: slug + "/")
+        case .empty:
+            return nil
+        }
+    }
+
+    func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     // MARK: Current page accessors

@@ -215,16 +215,20 @@ struct SidebarView: View {
         .tag(node.id)
         .contextMenu {
             if let page = node.page {
-                Button("Reveal in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting(
-                        [model.paths.content.appending(path: page.path)])
+                if let url = AppModel.siteURL(slug: page.slug) {
+                    Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
+                    Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
                 }
                 Button("Copy Wikilink") {
                     let link = page.kind == .reference
                         ? "[[\(page.stem)|\(page.title)]]"
                         : "[[\(page.slug.components(separatedBy: "/").last ?? page.stem)]]"
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(link, forType: .string)
+                    model.copyToPasteboard(link)
+                }
+                Divider()
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting(
+                        [model.paths.content.appending(path: page.path)])
                 }
             }
         }

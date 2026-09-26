@@ -141,6 +141,20 @@ struct SettingsView: View {
     private var readingTab: some View {
         Form {
             Section {
+                Toggle("Check for wiki updates at launch", isOn: Binding(
+                    get: { model.syncsAtLaunch },
+                    set: { model.syncsAtLaunch = $0 }))
+            } header: {
+                Text("Staying current")
+            } footer: {
+                Text("A fast-forward of the clone when CCwiki opens. Reading never waits "
+                    + "on it, and offline it is a quiet note in the status bar. ⌘R at any "
+                    + "time does the same.")
+                .font(Theme.Fonts.meta)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Hide stub pages", isOn: Binding(
                     get: { model.hidesStubs },
                     set: { model.hidesStubs = $0 }))

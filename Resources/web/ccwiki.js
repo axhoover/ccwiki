@@ -487,6 +487,8 @@
     var page = document.getElementById("page");
     var env = { links: payload.links || {} };
     var toc = [];
+    var keepY = payload.preserveScroll ? window.scrollY : null;
+    lastReportedHeading = undefined;
 
     try {
       var markdown = ensureMarkdown(payload.macros);
@@ -511,7 +513,9 @@
     }
     markByline(page);
 
-    if (payload.anchor) {
+    if (keepY !== null) {
+      window.scrollTo(0, keepY);
+    } else if (payload.anchor) {
       if (!scrollToAnchor(payload.anchor)) window.scrollTo(0, 0);
     } else {
       window.scrollTo(0, 0);
@@ -524,6 +528,7 @@
       pseudocodeErrors: pseudo.errors,
       ms: Date.now() - started,
     });
+    reportScroll();
   }
 
   function scrollToAnchor(anchor) {
@@ -571,8 +576,26 @@
     post({ type: "navigate", href: href, modified: event.metaKey || event.shiftKey });
   }, true);
 
+  // One report per frame, and only when the answer changed: a scroll event
+  // fires many times per frame, and every message crosses the bridge and
+  // re-evaluates the Outline pane on the Swift side.
+  var lastReportedHeading;
+  var scrollReportScheduled = false;
+
+  function reportScroll() {
+    var heading = currentHeading();
+    if (heading === lastReportedHeading) return;
+    lastReportedHeading = heading;
+    post({ type: "scrolled", heading: heading });
+  }
+
   document.addEventListener("scroll", function () {
-    post({ type: "scrolled", heading: currentHeading() });
+    if (scrollReportScheduled) return;
+    scrollReportScheduled = true;
+    window.requestAnimationFrame(function () {
+      scrollReportScheduled = false;
+      reportScroll();
+    });
   }, { passive: true });
 
   global.CCwiki = {

@@ -67,6 +67,23 @@ struct SyncOutcomeTests {
     }
 }
 
+/// A page's address on the published site is its simplified Quartz slug.
+struct SiteURLTests {
+
+    @Test("pages, folders, the root and anchors map onto cryptology.city")
+    func siteURLs() {
+        #expect(AppModel.siteURL(slug: "Primitives/pseudorandom-function")?.absoluteString
+            == "https://cryptology.city/Primitives/pseudorandom-function")
+        #expect(AppModel.siteURL(slug: "index")?.absoluteString == "https://cryptology.city/")
+        #expect(AppModel.siteURL(slug: "Primitives/")?.absoluteString
+            == "https://cryptology.city/Primitives/")
+        #expect(AppModel.siteURL(slug: "Primitives/index")?.absoluteString
+            == "https://cryptology.city/Primitives/")
+        #expect(AppModel.siteURL(slug: "Assumptions/learning-with-errors", anchor: "syntax")?
+            .absoluteString == "https://cryptology.city/Assumptions/learning-with-errors#syntax")
+    }
+}
+
 struct SettingsTests {
 
     @Test("a tool override round-trips and can be cleared")

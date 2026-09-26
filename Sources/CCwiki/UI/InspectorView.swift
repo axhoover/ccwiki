@@ -115,6 +115,14 @@ struct InspectorView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.plain)
+                        .listRowSeparator(.hidden)
+                        .contextMenu {
+                            if let page = model.index?.pages[link.sourcePath],
+                               let url = AppModel.siteURL(slug: page.slug) {
+                                Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
+                                Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
+                            }
+                        }
                     }
                 }
                 .listStyle(.inset)

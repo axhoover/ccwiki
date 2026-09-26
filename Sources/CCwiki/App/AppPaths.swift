@@ -17,6 +17,9 @@ struct AppPaths: Sendable {
 
     static let remoteURL = "https://github.com/axhoover/cryptology.city"
     static let defaultBranch = "main"
+    /// The published site. A page's URL there is its Quartz slug, so the
+    /// reader can point at the same page it is showing.
+    static let siteURL = "https://cryptology.city"
 
     let support: URL
     /// Space-free scratch space. See `worktrees`.

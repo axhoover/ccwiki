@@ -94,6 +94,20 @@ struct CCwikiCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
+            Button("Make Text Bigger") { model?.makeTextBigger() }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(model == nil)
+
+            Button("Make Text Smaller") { model?.makeTextSmaller() }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(model == nil)
+
+            Button("Actual Size") { model?.resetTextSize() }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(model == nil || model?.webController.pageZoom == 1)
+
+            Divider()
+
             Button("Toggle Inspector") { model?.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.option, .command])
                 .disabled(model == nil)
@@ -124,6 +138,14 @@ struct CCwikiCommands: Commands {
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(findAction == nil)
 
+            Button("Find Next") { findAction?.next?() }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled(findAction?.next == nil)
+
+            Button("Find Previous") { findAction?.previous?() }
+                .keyboardShortcut("g", modifiers: [.shift, .command])
+                .disabled(findAction?.previous == nil)
+
             Button("Search All Pages…") { searchAction?.perform() }
                 .keyboardShortcut("f", modifiers: [.shift, .command])
                 .disabled(searchAction == nil)
@@ -134,12 +156,27 @@ struct CCwikiCommands: Commands {
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(model?.syncState.isRunning ?? true)
 
+            // ⇧⌘H, as in Safari. ⌘0 is "Actual Size" everywhere else on the Mac.
             Button("Go Home") { model?.openHome() }
-                .keyboardShortcut("0", modifiers: .command)
+                .keyboardShortcut("h", modifiers: [.shift, .command])
                 .disabled(model == nil)
 
             Button("Show Sync Log…") { model?.syncLogPresented = true }
                 .disabled(model == nil)
+
+            Divider()
+
+            Button("Open on cryptology.city") {
+                guard let url = model?.currentSiteURL else { return }
+                NSWorkspace.shared.open(url)
+            }
+            .disabled(model?.currentSiteURL == nil)
+
+            Button("Copy Link") {
+                guard let model, let url = model.currentSiteURL else { return }
+                model.copyToPasteboard(url.absoluteString)
+            }
+            .disabled(model?.currentSiteURL == nil)
 
             Divider()
 

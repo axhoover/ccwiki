@@ -11,6 +11,28 @@ struct CCwikiSettings: Sendable {
 
     private static let toolOverrideKey = "ccwiki.toolOverrides"
     private static let hidesStubsKey = "ccwiki.hidesStubs"
+    private static let syncsAtLaunchKey = "ccwiki.syncsAtLaunch"
+    private static let pageZoomKey = "ccwiki.pageZoom"
+
+    /// Fast-forward the clone when the app opens, so the wiki does not go
+    /// quietly stale for someone who never presses ⌘R. On by default; the
+    /// reader never waits on it, and offline it is a quiet note.
+    static var syncsAtLaunch: Bool {
+        get {
+            UserDefaults.standard.object(forKey: syncsAtLaunchKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: syncsAtLaunchKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: syncsAtLaunchKey) }
+    }
+
+    /// The reader's text size, as `WKWebView.pageZoom`. 1 is the CSS size.
+    static var pageZoom: Double {
+        get {
+            let stored = UserDefaults.standard.double(forKey: pageZoomKey)
+            return stored > 0 ? stored : 1
+        }
+        set { UserDefaults.standard.set(newValue, forKey: pageZoomKey) }
+    }
 
     /// Hide `status: stub` pages in the sidebar and on folder listings.
     ///

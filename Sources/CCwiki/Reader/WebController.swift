@@ -18,9 +18,16 @@ final class WebController: NSObject {
     private(set) var activeHeadingID: String?
     private(set) var lastRenderError: String?
     private(set) var isReady = false
+    /// The reader's text size. Mirrors `WKWebView.pageZoom`, which is not
+    /// observable, and is persisted.
+    private(set) var pageZoom: Double = CCwikiSettings.pageZoom
 
     /// Set by the owner to act on a link click.
     var onNavigate: ((CCwikiURL.Destination, _ modified: Bool) -> Void)?
+    /// Called when the shell has (re)loaded and there is nothing queued: the
+    /// owner should render whatever it is showing again. That is how the
+    /// reader comes back from a WebContent crash or a stray Reload.
+    var onReady: (() -> Void)?
 
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private var pendingRequest: RenderRequest?
@@ -42,7 +49,7 @@ final class WebController: NSObject {
         let controller = WKUserContentController()
         configuration.userContentController = controller
 
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = ReaderWebView(frame: .zero, configuration: configuration)
         super.init()
 
         controller.add(Bridge(controller: self), name: "ccwiki")
@@ -52,6 +59,7 @@ final class WebController: NSObject {
         // first frame, which reads as a flash on every navigation in dark mode.
         webView.underPageBackgroundColor = .textBackgroundColor
         webView.allowsMagnification = true
+        webView.pageZoom = pageZoom
         webView.allowsBackForwardNavigationGestures = false
         if #available(macOS 13.3, *) { webView.isInspectable = true }
 
@@ -79,6 +87,18 @@ final class WebController: NSObject {
 
     /// Force a re-render of the current page (after a pull changed it).
     func invalidate() { loadedPath = nil }
+
+    // MARK: Text size
+
+    static let zoomRange = 0.6...2.4
+    static let zoomStep = 1.1
+
+    func setPageZoom(_ zoom: Double) {
+        let clamped = min(max(zoom, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        pageZoom = clamped
+        webView.pageZoom = clamped
+        CCwikiSettings.pageZoom = clamped
+    }
 
     func scrollTo(anchor: String) {
         let escaped = anchor.replacingOccurrences(of: "\\", with: "\\\\")
@@ -124,10 +144,14 @@ final class WebController: NSObject {
     private func handle(_ message: [String: Any]) {
         switch message["type"] as? String {
         case "ready":
+            // A fresh document, whether the first or a reload: nothing is on it.
             isReady = true
+            loadedPath = nil
             if let pending = pendingRequest {
                 pendingRequest = nil
                 render(pending)
+            } else {
+                onReady?()
             }
 
         case "rendered":
@@ -148,7 +172,9 @@ final class WebController: NSObject {
             }
 
         case "scrolled":
-            activeHeadingID = message["heading"] as? String
+            // `@Observable` notifies on every assignment, changed or not.
+            let heading = message["heading"] as? String
+            if heading != activeHeadingID { activeHeadingID = heading }
 
         case "navigate":
             guard let href = message["href"] as? String,
@@ -173,6 +199,18 @@ final class WebController: NSObject {
 // MARK: - Navigation
 
 extension WebController: WKNavigationDelegate {
+
+    /// WebKit jettisoned the content process. Without this the view stays
+    /// blank: `isReady` would still be true and every render would be
+    /// evaluated on a dead page.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        isReady = false
+        loadedPath = nil
+        outline = []
+        activeHeadingID = nil
+        lastRenderError = "The page renderer stopped and was restarted."
+        webView.load(URLRequest(url: CCwikiURL.shell))
+    }
 
     /// The decision handler's type has to be spelled out in full.
     ///
@@ -223,6 +261,40 @@ extension WebController: WKUIDelegate {
             NSWorkspace.shared.open(url)
         }
         return nil
+    }
+}
+
+// MARK: - The view
+
+/// `WKWebView` with the parts of its default context menu that make no sense
+/// for a page the app renders itself taken out: Back, Forward and Reload act
+/// on the shell document, not the wiki page, and Reload used to leave the
+/// reader blank. Copy, Look Up and the rest stay.
+final class ReaderWebView: WKWebView {
+
+    private static let removedIdentifiers: Set<String> = [
+        "WKMenuItemIdentifierGoBack",
+        "WKMenuItemIdentifierGoForward",
+        "WKMenuItemIdentifierReload",
+        "WKMenuItemIdentifierOpenLinkInNewWindow",
+        "WKMenuItemIdentifierOpenImageInNewWindow",
+        "WKMenuItemIdentifierDownloadLinkedFile",
+        "WKMenuItemIdentifierDownloadImage",
+    ]
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        menu.items.removeAll { item in
+            item.identifier.map { Self.removedIdentifiers.contains($0.rawValue) } ?? false
+        }
+        // No leading, trailing or doubled separators once the items are gone.
+        var cleaned: [NSMenuItem] = []
+        for item in menu.items {
+            if item.isSeparatorItem, cleaned.last?.isSeparatorItem ?? true { continue }
+            cleaned.append(item)
+        }
+        if cleaned.last?.isSeparatorItem == true { cleaned.removeLast() }
+        menu.items = cleaned
     }
 }
 

@@ -160,6 +160,18 @@ struct GitService: Sendable {
         return result.succeeded ? result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
     }
 
+    /// When the checked-out commit was made — "the wiki as of", for the
+    /// status bar, which is more use to a reader than a hash.
+    func headDate(in clone: URL) async -> Date? {
+        let result = await run([
+            "-C", clone.path(percentEncoded: false), "log", "-1", "--format=%ct",
+        ])
+        guard result.succeeded,
+              let seconds = TimeInterval(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
     func defaultBranch(in clone: URL) async -> String {
         let result = await run([
             "-C", clone.path(percentEncoded: false),

@@ -25,9 +25,16 @@ struct ReaderView: View {
         }
         .navigationTitle(documentTitle)
         .navigationSubtitle(subtitle)
-        .focusedSceneValue(\.findAction, FindAction {
-            findPresented = true
-        })
+        .focusedSceneValue(\.findAction, FindAction(
+            perform: { findPresented = true },
+            next: {
+                findPresented = true
+                Task { await find(backwards: false) }
+            },
+            previous: {
+                findPresented = true
+                Task { await find(backwards: true) }
+            }))
     }
 
     // MARK: Title bar
@@ -278,9 +285,20 @@ struct ReaderView: View {
 /// without the command needing a reference to the view.
 struct FindAction: Equatable {
     let perform: () -> Void
+    /// Find Next / Find Previous (⌘G / ⇧⌘G). Only the reader offers them.
+    let next: (() -> Void)?
+    let previous: (() -> Void)?
     private let id = UUID()
 
-    init(perform: @escaping () -> Void) { self.perform = perform }
+    init(
+        perform: @escaping () -> Void,
+        next: (() -> Void)? = nil,
+        previous: (() -> Void)? = nil
+    ) {
+        self.perform = perform
+        self.next = next
+        self.previous = previous
+    }
 
     static func == (lhs: FindAction, rhs: FindAction) -> Bool { lhs.id == rhs.id }
 }

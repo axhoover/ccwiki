@@ -102,7 +102,8 @@ a job that could not push.
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
-| ⌘0 | Go home |
+| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
+| ⇧⌘H | Go home |
 | ⇧⌘N | Ingest a paper |
 | ⇧⌘J | Show the jobs window |
 | ⌘, | Settings |

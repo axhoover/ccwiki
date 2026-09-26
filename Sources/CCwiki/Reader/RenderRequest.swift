@@ -38,6 +38,10 @@ struct RenderRequest: Sendable {
     /// request rather than once at startup, because on a fresh install the
     /// clone — and so `macros.ts` — does not exist until after the first sync.
     var macros: [String: String] = [:]
+    /// Keep the reader's scroll position across the render. For a re-render
+    /// of the page already showing — after a pull, or a listing toggle —
+    /// where jumping to the top would lose the reader's place.
+    var preservesScroll = false
 
     struct Notice: Sendable {
         let level: String  // "info" | "warning"
@@ -62,6 +66,7 @@ struct RenderRequest: Sendable {
             "links": linkObject,
             "notices": notices.map { ["level": $0.level, "text": $0.text] },
             "macros": macros,
+            "preserveScroll": preservesScroll,
         ]
         if let html { payload["html"] = html }
         if let anchor { payload["anchor"] = anchor }

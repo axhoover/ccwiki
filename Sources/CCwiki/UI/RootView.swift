@@ -51,7 +51,11 @@ struct RootView: View {
             // The ingestion tools are looked for in the background.
             await model.discoverTools()
             await model.loadLibrary()
-            if model.index == nil { model.sync() }
+            // A launch fetch keeps the wiki current for someone who never
+            // presses ⌘R. Not under the screenshot harness, whose captures
+            // must not depend on the network.
+            let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
+            if model.index == nil || launchFetch { model.sync() }
             ScreenshotRunner.run(model: model)
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in
@@ -186,7 +190,17 @@ struct RootView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 case .idle:
-                    if let revision = model.headRevision {
+                    // The resting state says how current the wiki is, which
+                    // a reader can act on; the hash is in the tooltip.
+                    if let date = model.headDate {
+                        Image(systemName: "clock")
+                            .foregroundStyle(.tertiary)
+                        (Text("Wiki as of ") + Text(date, format: .relative(presentation: .named)))
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .help(model.headRevision.map { "Commit \($0.prefix(12))" } ?? "")
+                    } else if let revision = model.headRevision {
                         Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                             .foregroundStyle(.tertiary)
                         Text(revision.prefix(7))
