@@ -156,8 +156,10 @@ the list for a real reading task. "The data is a graph" is not one.
 
 - **`DiffGuard`** — the mechanical half of §1, specified in
   [ingestion.md](ingestion.md) §4 and not yet built.
-- **Job history across launches.** Jobs live in memory today; the transcripts
-  are on disk in `…/CCwiki/logs/`, so the list could be rebuilt from them.
+- **Job history across launches.** **Done 2026-09-26:** a `JobRecord` is
+  written beside each transcript on every state change and the list is
+  rebuilt from them at launch. The transcript itself is not re-parsed into
+  the log pane; that is the remaining half.
 - **A second job kind needs a job *type*.** `IngestJob` is currently named for
   the only kind there is. §3 is the moment to generalize it.
 - **Reference PDFs.** The library holds what you drop; it could also cache the

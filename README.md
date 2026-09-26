@@ -126,6 +126,8 @@ except vibrancy backdrops.
 
 `make run` ad-hoc signs, so it works on a bare machine with no certificates.
 
+Every push runs `make check` on a macOS runner (`.github/workflows/ci.yml`).
+
 ## Where to read next
 
 [PLAN.md](PLAN.md) is the index to everything: architecture, the Quartz slug

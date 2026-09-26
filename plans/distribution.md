@@ -91,6 +91,10 @@ complicated pipeline, and it is optional.
 
 ### Tier 1: the app knows when it is out of date
 
+**Built 2026-09-26** (`UpdateChecker`, Check for Updates… in the app menu,
+Settings > About). It is inert until there is a release to find, and on a
+`0.0.0` development build it does nothing at all.
+
 One `URLSession` call to
 `https://api.github.com/repos/axhoover/ccwiki/releases/latest`, at most
 once a day, compare `tag_name` (minus the `v`) numerically against

@@ -5,6 +5,74 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-26 — Block A and most of Block B, verified by a new CI workflow
+
+The audit's fixes, in five batches on `claude/amazing-curie-swfkbd`. The
+table in [plans/audit-2026-09.md](plans/audit-2026-09.md) §6 says which item
+each batch closed; what follows is what was learned doing it.
+
+**The review machine had no Swift toolchain, so CI became the compiler.**
+`.github/workflows/ci.yml` runs `make check` on a `macos-15` runner in about
+half a minute, and every batch was pushed, read back from the runner's log,
+and fixed before the next. Three things it caught that reading did not:
+
+- swift-testing's `#expect` evaluates a call inside a closure over an
+  *immutable* copy, so `#expect(history.visit(x))` on a mutating method does
+  not compile. Hoist the call into a `let` first.
+- `NSLock.lock()` is unavailable from an async context. `withLock` is the
+  form Swift 6 accepts there.
+- An off-by-one in a bounded-history test: the first visit records nothing.
+
+**The visual gate has not run.** Every UI change here — the sync log sheet,
+the Command Line Tools state, the blockers list in the ingest sheet, the
+Updates section, the trimmed context menu — compiles and is reasoned about,
+and none has been looked at. `make shots` on a Mac is the next step before
+trusting any of them.
+
+**Decisions worth recording.**
+
+- **Macros travel with every render** rather than being re-injected as a user
+  script. The JS compares a canonical key of the table and rebuilds
+  markdown-it only when it differs, so the cost in the common case is a sort
+  of 122 keys. This removed the "must be known before the web view is built"
+  constraint entirely.
+- **The git stub is detected with `xcode-select -p`, never with `git
+  --version`.** On a Mac without the Command Line Tools the latter pops the
+  system installer, and a check that runs at every launch would pop it at
+  every launch.
+- **Tool discovery is two phases.** `git` is one `stat` and is all the reader
+  needs, so the launch task awaits it and goes on; the ingestion tools, which
+  may each cost a login shell, are found afterwards. A generation counter
+  keeps a re-discovery started from Settings from being overwritten by a
+  slower one that started earlier.
+- **`NavigationHistory` is its own type** so the rule that was wrong — asking
+  for the current page without an anchor is not a visit — has a test that
+  needs no web view. The sidebar observer was left as it was; the model
+  simply no longer treats its re-selection as a move.
+- **The update check is tier 1 and nothing more.** One request, a numeric
+  comparison, a link. It is inert until a release exists, and a `0.0.0`
+  build never asks. The decision not to build Sparkle is in
+  [plans/distribution.md](plans/distribution.md) §3 with its cost.
+- **Job records are written on every state change**, not at the end, so a
+  crash mid-run comes back as "Interrupted" rather than vanishing. The
+  transcript file is pointed at, not re-parsed; that half is still open.
+- **Indented code blocks are still not inert for the wikilink parser**,
+  deliberately: a nested list item is indented four spaces too, and hiding
+  its links would be worse than the bug.
+
+**What surprised me.**
+
+- `AppKit`'s default `WKWebView` context menu carries Back, Forward and
+  Reload, and Reload blanked the reader for good. Overriding
+  `willOpenMenu(_:with:)` on a subclass and dropping the items by their
+  `WKMenuItemIdentifier…` identifiers is the whole fix; the crash-recovery
+  path (`webViewWebContentProcessDidTerminate` plus an `onReady` re-render)
+  makes a stray Reload survivable anyway.
+- Quartz strips `%% comments %%` over the whole source before anything else
+  reads it, fences included. The per-line masking here was subtly different
+  in two ways; the fix was to use its regex on the whole text and delete the
+  per-line logic rather than reconcile them.
+
 ## 2026-09-26 — Audit for a public download; the distribution plan
 
 No app code changed. Two plans and one Makefile fix.
