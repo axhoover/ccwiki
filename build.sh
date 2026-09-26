@@ -30,22 +30,38 @@ INFO_PLIST_SRC="Resources/Info.plist"
 BUILD_NUMBER="$(date +%Y%m%d%H%M 2>/dev/null || echo 1)"
 
 # A release is built for both architectures: a download has to run on an
-# Intel Mac and an Apple silicon one. Debug builds stay native, since they
-# are for the machine that made them. (The `${ARCH[@]+…}` form is for the
-# bash 3.2 macOS ships, where an empty array trips `set -u`.)
-ARCH=()
+# Intel Mac and an Apple silicon one. One `swift build` per architecture and
+# `lipo -create`, rather than one build with two `--arch` flags: the latter
+# fails with "duplicate output file" on current toolchains. Debug builds
+# stay native, since they are for the machine that made them.
 if [ "$CONFIG" = "release" ]; then
-	ARCH=(--arch arm64 --arch x86_64)
-fi
-
-echo "→ swift build -c $CONFIG ${ARCH[*]+${ARCH[*]}}"
-swift build -c "$CONFIG" ${ARCH[@]+"${ARCH[@]}"}
-
-BIN_PATH="$(swift build -c "$CONFIG" ${ARCH[@]+"${ARCH[@]}"} --show-bin-path)"
-EXECUTABLE="$BIN_PATH/$APP_NAME"
-if [ ! -x "$EXECUTABLE" ]; then
-	echo "✗ executable not found at $EXECUTABLE" >&2
-	exit 1
+	UNIVERSAL_DIR="$BUILD_DIR/universal"
+	mkdir -p "$UNIVERSAL_DIR"
+	SLICES=()
+	for arch in arm64 x86_64; do
+		echo "→ swift build -c release --arch $arch"
+		swift build -c release --arch "$arch"
+		slice="$(swift build -c release --arch "$arch" --show-bin-path)/$APP_NAME"
+		if [ ! -x "$slice" ]; then
+			echo "✗ executable not found at $slice" >&2
+			exit 1
+		fi
+		SLICES+=("$slice")
+	done
+	EXECUTABLE="$UNIVERSAL_DIR/$APP_NAME"
+	lipo -create "${SLICES[@]}" -output "$EXECUTABLE"
+	# Resource bundles, if any dependency ever ships one, are per-arch
+	# identical; take them from the first slice's directory.
+	BIN_PATH="$(dirname "${SLICES[0]}")"
+else
+	echo "→ swift build -c $CONFIG"
+	swift build -c "$CONFIG"
+	BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)"
+	EXECUTABLE="$BIN_PATH/$APP_NAME"
+	if [ ! -x "$EXECUTABLE" ]; then
+		echo "✗ executable not found at $EXECUTABLE" >&2
+		exit 1
+	fi
 fi
 
 # ---------------------------------------------------------------------------
