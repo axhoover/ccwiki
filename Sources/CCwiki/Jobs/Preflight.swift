@@ -166,10 +166,7 @@ enum GitHubAuth {
     static let deadline: Duration = .seconds(15)
 
     static func isAuthenticated(tools: ToolLocator) async -> Bool {
-        lock.lock()
-        let known = cached
-        lock.unlock()
-        if let known { return known }
+        if let known = lock.withLock({ cached }) { return known }
 
         // Not cached: `gh` may turn up later in discovery.
         guard let gh = tools.path(for: .gh) else { return false }
@@ -192,9 +189,7 @@ enum GitHubAuth {
 
         // A timeout is not an answer, so it is not cached either.
         if let answer {
-            lock.lock()
-            cached = answer
-            lock.unlock()
+            lock.withLock { cached = answer }
         }
         return answer ?? false
     }
