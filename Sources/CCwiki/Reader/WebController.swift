@@ -26,7 +26,7 @@ final class WebController: NSObject {
     @ObservationIgnored private var pendingRequest: RenderRequest?
     @ObservationIgnored private var loadedPath: String?
 
-    init(paths: AppPaths, macros: MacroTable) {
+    init(paths: AppPaths) {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(
             CCwikiSchemeHandler(bundleRoot: paths.webRoot, contentRoot: paths.content),
@@ -36,14 +36,10 @@ final class WebController: NSObject {
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
+        // The macro table used to be injected here as a documentStart user
+        // script, which froze whatever `macros.ts` said at launch — nothing on
+        // a fresh install. It now arrives with each `RenderRequest`.
         let controller = WKUserContentController()
-        // The macro table has to exist before any script runs. A user script at
-        // documentStart is also the only way to inject it under
-        // `script-src 'self'` — an inline <script> would be blocked.
-        controller.addUserScript(WKUserScript(
-            source: "window.__CCWIKI__ = { macros: \(macros.katexJSON()) };",
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true))
         configuration.userContentController = controller
 
         webView = WKWebView(frame: .zero, configuration: configuration)

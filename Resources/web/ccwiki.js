@@ -344,12 +344,13 @@
   /** pseudocode.js resolves its math backend from the global `katex` symbol
    *  and calls `renderToString` with no options, so macros have to arrive by
    *  patching — which is exactly what quartz/plugins/.../pseudocode.ts does. */
-  function installKatexMacros(macros) {
+  function installKatexMacros() {
     if (global.katex.__cityDeskPatched) return;
     var original = global.katex.renderToString.bind(global.katex);
     global.katex.renderToString = function (expr, options) {
+      // Read at call time, not captured: the table can change between renders.
       return original(expr, Object.assign(
-        { macros: macros, throwOnError: false, strict: "ignore" }, options || {}));
+        { macros: currentMacros || {}, throwOnError: false, strict: "ignore" }, options || {}));
     };
     global.katex.__cityDeskPatched = true;
   }
@@ -437,14 +438,35 @@
   // ================================================================= API ===
 
   var currentMacros = null;
+  var currentMacrosKey = null;
   var md = null;
 
-  function ensureMarkdown() {
-    if (md) return md;
-    var boot = global.__CCWIKI__ || {};
-    currentMacros = boot.macros || {};
-    installKatexMacros(currentMacros);
-    md = createMarkdown(currentMacros);
+  /** A canonical string for a macro table, so two tables compare by content
+   *  whatever order their keys arrived in. */
+  function macrosKey(macros) {
+    return Object.keys(macros).sort().map(function (k) {
+      return k + "=" + macros[k];
+    }).join("\u0001");
+  }
+
+  /**
+   * The markdown-it instance for a macro table.
+   *
+   * The table comes with every render payload rather than once at startup:
+   * on a fresh install the clone — and so `macros.ts` — does not exist until
+   * after the first sync, and a pull can change it. Rebuilding markdown-it
+   * is cheap; rendering a page with a stale table is every `\calA` in red.
+   */
+  function ensureMarkdown(macros) {
+    if (macros === undefined || macros === null) {
+      macros = ((global.__CCWIKI__ || {}).macros) || {};
+    }
+    var key = macrosKey(macros);
+    if (md && key === currentMacrosKey) return md;
+    currentMacros = macros;
+    currentMacrosKey = key;
+    installKatexMacros();
+    md = createMarkdown(macros);
     return md;
   }
 
@@ -454,6 +476,8 @@
    * payload = {
    *   markdown : string,           body with frontmatter already stripped
    *   links    : { "[[raw]]": {href, kind, external} },
+   *   macros   : { "\\calA": "\\mathcal{A}" },   KaTeX macros, current as of
+   *                                this render
    *   html     : string            (optional) pre-built HTML, used for
    *                                synthetic folder pages
    * }
@@ -465,11 +489,12 @@
     var toc = [];
 
     try {
+      var markdown = ensureMarkdown(payload.macros);
       var prefix = noticeHTML(payload.notices);
       if (payload.html !== undefined && payload.html !== null) {
         page.innerHTML = prefix + payload.html;
       } else {
-        page.innerHTML = prefix + ensureMarkdown().render(payload.markdown || "", env);
+        page.innerHTML = prefix + markdown.render(payload.markdown || "", env);
         toc = env.toc || [];
       }
     } catch (e) {

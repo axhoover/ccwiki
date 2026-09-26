@@ -43,12 +43,17 @@ struct GitService: Sendable {
 
     /// git's vocabulary for "there is no network". Matched on the message
     /// rather than the exit code because git reports all of these as 128.
+    ///
+    /// Deliberately *not* on "unable to access": git prefixes every HTTP
+    /// failure with it — a 403, a certificate problem, a proxy refusing —
+    /// and those are faults to show, not outages to sit through quietly.
     static func isNetworkFailure(_ output: String) -> Bool {
         let lowered = output.lowercased()
         return ["could not resolve host", "could not resolve proxy",
                 "failed to connect", "connection refused", "network is unreachable",
                 "operation timed out", "temporary failure in name resolution",
-                "no route to host", "unable to access"].contains { lowered.contains($0) }
+                "no route to host", "connection reset by peer", "network is down",
+        ].contains { lowered.contains($0) }
     }
 
     // MARK: Sync

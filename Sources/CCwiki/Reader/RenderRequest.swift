@@ -34,6 +34,10 @@ struct RenderRequest: Sendable {
     let anchor: String?
     /// Shown above the page — a macro-parse failure, a broken-link count.
     let notices: [Notice]
+    /// KaTeX's `macros` option, `\calA` → `\mathcal{A}`. Sent with every
+    /// request rather than once at startup, because on a fresh install the
+    /// clone — and so `macros.ts` — does not exist until after the first sync.
+    var macros: [String: String] = [:]
 
     struct Notice: Sendable {
         let level: String  // "info" | "warning"
@@ -57,6 +61,7 @@ struct RenderRequest: Sendable {
             "markdown": markdown,
             "links": linkObject,
             "notices": notices.map { ["level": $0.level, "text": $0.text] },
+            "macros": macros,
         ]
         if let html { payload["html"] = html }
         if let anchor { payload["anchor"] = anchor }

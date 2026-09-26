@@ -35,6 +35,9 @@ struct RootView: View {
         .sheet(isPresented: $model.ingestSheetPresented) {
             IngestSheet()
         }
+        .sheet(isPresented: $model.syncLogPresented) {
+            SyncLogView()
+        }
         // The whole reader is a drop target: when you have the paper open, the
         // natural gesture is to drag it onto the wiki, not to go looking for a
         // form.
@@ -166,12 +169,20 @@ struct RootView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if !model.syncLog.isEmpty {
+                        Button("Details…") { model.syncLogPresented = true }
+                            .buttonStyle(.link)
+                            .font(Theme.Fonts.meta)
+                            .fixedSize()
+                    }
                 case .succeeded(let message):
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                     Text(message)
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 case .idle:
                     if let revision = model.headRevision {
                         Image(systemName: "point.3.filled.connected.trianglepath.dotted")
@@ -205,10 +216,14 @@ struct RootView: View {
                     .help("Show the jobs window (⇧⌘J)")
                 }
                 if !model.warnings.isEmpty {
+                    // Warnings are unique (`AppModel.warn`), so the text is a
+                    // stable identity — and a row, once read, can be put away.
                     Menu {
-                        ForEach(Array(model.warnings.enumerated()), id: \.offset) { _, warning in
-                            Text(warning)
+                        ForEach(model.warnings, id: \.self) { warning in
+                            Button(warning) { model.dismissWarning(warning) }
                         }
+                        Divider()
+                        Button("Dismiss All") { model.dismissAllWarnings() }
                     } label: {
                         Label("\(model.warnings.count)", systemImage: "exclamationmark.triangle")
                             .font(Theme.Fonts.meta)
@@ -216,6 +231,7 @@ struct RootView: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                     .foregroundStyle(.orange)
+                    .help("Choose a warning to dismiss it")
                 }
             }
             .padding(.horizontal, Theme.medium)

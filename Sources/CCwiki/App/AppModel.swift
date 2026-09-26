@@ -66,12 +66,13 @@ final class AppModel {
         }
     }
 
-    private(set) var location: Location = .empty
-    private var back: [Location] = []
-    private var forward: [Location] = []
+    /// Where the reader is and how it got there. The rules live in
+    /// `NavigationHistory` so they can be tested without a web view.
+    private var history = NavigationHistory()
 
-    var canGoBack: Bool { !back.isEmpty }
-    var canGoForward: Bool { !forward.isEmpty }
+    var location: Location { history.current }
+    var canGoBack: Bool { history.canGoBack }
+    var canGoForward: Bool { history.canGoForward }
 
     /// The directory the sidebar has expanded to, so selection survives a reload.
     var sidebarSelection: String?
@@ -128,6 +129,9 @@ final class AppModel {
     private(set) var syncState: SyncState = .idle
     private(set) var syncLog: [String] = []
     private var syncTask: Task<Void, Never>?
+    /// The sync log sheet. Every failure message ends "see the sync log", so
+    /// there has to be somewhere to see it.
+    var syncLogPresented = false
 
     // MARK: Search
 
@@ -183,17 +187,38 @@ final class AppModel {
     /// a failed pull, a macro table that would not parse, missing tooling.
     private(set) var warnings: [String] = []
 
+    /// Append once. A warning that repeats on every sync is noise, and a
+    /// duplicate could not be dismissed on its own.
+    private func warn(_ message: String) {
+        guard !warnings.contains(message) else { return }
+        warnings.append(message)
+    }
+
+    func dismissWarning(_ message: String) {
+        warnings.removeAll { $0 == message }
+    }
+
+    func dismissAllWarnings() {
+        warnings.removeAll()
+    }
+
+    /// Marks the macro warning so a reload replaces it. On a fresh install it
+    /// is raised before the clone exists and has to go away once it does.
+    static let macrosWarningPrefix = "Custom LaTeX macros unavailable — "
+    /// Same for the leftover-worktree count, which changes as they are pruned.
+    static let orphansWarningPrefix = "Leftover worktrees: "
+
     // MARK: Init
 
     init(paths: AppPaths = .standard()) {
         self.paths = paths
         self.searchIndex = SearchIndex(path: paths.searchDatabase)
-        // The macro table has to be known before the web view is built: the
-        // macros go in as a documentStart user script, which cannot be changed
-        // afterwards without recreating the configuration.
+        // On a fresh install this is empty: the clone does not exist yet. The
+        // table travels with every render request, so the web view picks up
+        // the real one as soon as the clone lands.
         let macros = MacroTable.load(cloneRoot: paths.clone)
         self.macros = macros
-        self.webController = WebController(paths: paths, macros: macros)
+        self.webController = WebController(paths: paths)
 
         try? paths.createDirectories()
         toolOverrides = CCwikiSettings.toolOverrides()
@@ -208,12 +233,17 @@ final class AppModel {
         }
 
         if let missing = tools.missingForReading.first {
-            warnings.append(
-                "\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
+            warn("\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
         }
+        refreshMacrosWarning()
+    }
+
+    /// Replace the macro warning with whatever is true now.
+    private func refreshMacrosWarning() {
+        warnings.removeAll { $0.hasPrefix(Self.macrosWarningPrefix) }
         if macros.isEmpty, let diagnostic = macros.diagnostic {
-            warnings.append("Custom LaTeX macros unavailable — \(diagnostic.message) "
-                + "Math will render, but site-specific commands will show as errors.")
+            warn(Self.macrosWarningPrefix + diagnostic.message
+                + " Math will render, but site-specific commands will show as errors.")
         }
     }
 
@@ -246,12 +276,13 @@ final class AppModel {
         relationLabels = loaded.3
         unlistedPaths = loaded.2.unlistedPaths
         macros = MacroTable.load(cloneRoot: paths.clone)
+        refreshMacrosWarning()
 
         // Replaced rather than appended: `loadLibrary` runs after every pull,
         // and a warning that stacks up once per sync is noise.
         warnings.removeAll { $0.hasPrefix(Self.relationsWarningPrefix) }
         if let diagnostic = relations.diagnostic {
-            warnings.append(Self.relationsWarningPrefix + diagnostic.message)
+            warn(Self.relationsWarningPrefix + diagnostic.message)
         }
 
         let git = gitService
@@ -270,8 +301,7 @@ final class AppModel {
                 try await searchIndex.rebuild(pages: pages)
             } catch {
                 await MainActor.run {
-                    self.warnings.append(
-                        "Search index could not be rebuilt: \(error.localizedDescription)")
+                    self.warn("Search index could not be rebuilt: \(error.localizedDescription)")
                 }
             }
         }
@@ -284,10 +314,12 @@ final class AppModel {
         // `git worktree add` will refuse to reuse the path. Finding them at
         // launch is cheaper than making the user learn `git worktree prune`.
         await refreshOrphanedWorktrees()
+        warnings.removeAll { $0.hasPrefix(Self.orphansWarningPrefix) }
         if !orphanedWorktrees.isEmpty {
-            warnings.append(
-                "\(orphanedWorktrees.count) worktree(s) left over from an interrupted job. "
-                + "Open the jobs window (⇧⌘J) to prune them.")
+            let count = orphanedWorktrees.count
+            warn(Self.orphansWarningPrefix
+                + "\(count) left over from an interrupted job. "
+                + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
         }
 
         // Re-render whatever is on screen, since the file may have changed.
@@ -329,7 +361,7 @@ final class AppModel {
                 syncState = .failed(outcome.summary)
             case .failed(let message):
                 syncState = .failed(message)
-                warnings.append(message)
+                warn(message)
             default:
                 syncState = .running("Indexing…")
                 await loadLibrary()
@@ -364,18 +396,19 @@ final class AppModel {
     }
 
     func open(_ newLocation: Location, recordHistory: Bool = true) {
-        guard newLocation != location else {
-            if case .page(_, let anchor) = newLocation, let anchor {
+        // A page the clone does not have is not somewhere the reader can be.
+        // Without this the chrome moved — title, selection, history — while
+        // the web view kept the previous page.
+        if case .page(let path, _) = newLocation, index?.pages[path] == nil { return }
+
+        guard history.visit(newLocation, recording: recordHistory) else {
+            // Not a move. The one case worth acting on: the same page, same
+            // anchor, asked for again — jump back to the anchor.
+            if newLocation == location, case .page(_, let anchor) = newLocation, let anchor {
                 webController.scrollTo(anchor: anchor)
             }
             return
         }
-        if recordHistory, location != .empty {
-            back.append(location)
-            forward.removeAll()
-            if back.count > 100 { back.removeFirst() }
-        }
-        location = newLocation
         reveal(newLocation)
         renderCurrent()
     }
@@ -413,17 +446,13 @@ final class AppModel {
     }
 
     func goBack() {
-        guard let previous = back.popLast() else { return }
-        forward.append(location)
-        location = previous
+        guard let previous = history.goBack() else { return }
         reveal(previous)
         renderCurrent()
     }
 
     func goForward() {
-        guard let next = forward.popLast() else { return }
-        back.append(location)
-        location = next
+        guard let next = history.goForward() else { return }
         reveal(next)
         renderCurrent()
     }
@@ -439,16 +468,22 @@ final class AppModel {
                     + "such as \\calA will not render."))
         }
 
+        var request: RenderRequest
         switch location {
         case .page(let path, let anchor):
             guard let page = index.pages[path] else { return }
-            webController.render(renderer.request(for: page, anchor: anchor, notices: notices))
+            request = renderer.request(for: page, anchor: anchor, notices: notices)
         case .folder(let slug):
-            webController.render(renderer.folderRequest(
-                slug: slug, hidingStubs: hidesStubs, notices: notices))
+            request = renderer.folderRequest(
+                slug: slug, hidingStubs: hidesStubs, notices: notices)
         case .empty:
-            break
+            return
         }
+        // The table rides along on every render, so a clone that arrived
+        // after launch, or a pull that changed `macros.ts`, takes effect on
+        // the next page rather than the next launch.
+        request.macros = macros.macros
+        webController.render(request)
     }
 
     // MARK: Current page accessors
@@ -598,8 +633,7 @@ final class AppModel {
         recheckGitHubAuth()
         warnings.removeAll { $0.contains("was not found") }
         if let missing = tools.missingForReading.first {
-            warnings.append(
-                "\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
+            warn("\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
         }
     }
 
@@ -694,6 +728,14 @@ final class AppModel {
             // so refresh what we know about strays.
             await refreshOrphanedWorktrees()
         }
+    }
+
+    /// Stop every job that has not finished. Called on quit, so no agent
+    /// outlives the window it was reporting to: left alone it would keep
+    /// working in the worktree and could open a PR nobody is watching.
+    func cancelActiveJobs() {
+        for job in jobs where !job.state.isTerminal { job.cancel() }
+        Subprocess.terminateAll()
     }
 
     func refreshOrphanedWorktrees() async {

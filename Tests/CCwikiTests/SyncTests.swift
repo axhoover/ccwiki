@@ -29,6 +29,14 @@ struct SyncOutcomeTests {
     func realFailures() {
         let messages = [
             "fatal: Authentication failed for 'https://github.com/axhoover/cryptology.city/'",
+            // git puts "unable to access" in front of every HTTP failure; none
+            // of these is an outage.
+            "fatal: unable to access 'https://github.com/axhoover/cryptology.city/': "
+                + "The requested URL returned error: 403",
+            "fatal: unable to access 'https://github.com/axhoover/cryptology.city/': "
+                + "SSL certificate problem: unable to get local issuer certificate",
+            "fatal: unable to access 'https://github.com/axhoover/cryptology.city/': "
+                + "Received HTTP code 407 from proxy after CONNECT",
             "error: Your local changes to the following files would be overwritten by merge",
             "fatal: Not possible to fast-forward, aborting.",
             "remote: Permission to axhoover/cryptology.city.git denied",
