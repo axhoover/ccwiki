@@ -31,9 +31,10 @@ struct IngestJobRunner {
         job.setState(.preparing("Checking…"))
 
         let canPush = await git.canAuthenticatePush(clone: paths.clone)
+        let authenticated = await GitHubAuth.isAuthenticated(tools: tools)
         let findings = Preflight.run(
             submission: job.submission, index: index, paths: paths, tools: tools,
-            canPush: canPush)
+            isGitHubAuthenticated: authenticated, canPush: canPush)
         job.setPreflight(findings)
         for finding in findings {
             job.append(JobLogEntry(
@@ -70,6 +71,12 @@ struct IngestJobRunner {
         ) { line in
             Task { @MainActor in job.append(JobLogEntry(.system, line.text)) }
         }
+        // Cancelled during `worktree add`: `job.cancel()` has set the state,
+        // and a failed add is not a failure to report over it.
+        if Task.isCancelled {
+            if created { await cleanUpDespiteCancellation(job, keep: false) }
+            return
+        }
         guard created else {
             job.setState(.failed(
                 "Could not create the worktree at \(job.worktree.lastPathComponent). "
@@ -77,14 +84,13 @@ struct IngestJobRunner {
             return
         }
 
-        if Task.isCancelled { await cleanUp(job, keep: false); return }
-
         // MARK: Submodules
 
         job.setState(.preparing("Checking out submodules…"))
         let submodules = await git.updateSubmodules(in: job.worktree) { line in
             Task { @MainActor in job.append(JobLogEntry(.system, line.text)) }
         }
+        if Task.isCancelled { await cleanUpDespiteCancellation(job, keep: true); return }
         if !submodules {
             job.append(JobLogEntry(.error,
                 "Submodules did not check out. The agent cannot look up a cryptobib_key "
@@ -219,6 +225,16 @@ struct IngestJobRunner {
         job.setState(.failed(
             "The agent finished without opening a pull request and without aborting. "
             + "The worktree has been kept so you can see what it did."))
+    }
+
+    /// `cleanUp`, from a task that has been cancelled.
+    ///
+    /// A `git worktree remove` started from a cancelled task is killed the
+    /// moment it starts (`Subprocess.lines` honours cancellation). An
+    /// unstructured task does not inherit the cancellation, so the removal
+    /// actually runs.
+    private func cleanUpDespiteCancellation(_ job: IngestJob, keep: Bool) async {
+        await Task { @MainActor in await cleanUp(job, keep: keep) }.value
     }
 
     /// Remove the worktree, unless there is something in it worth looking at.

@@ -25,8 +25,13 @@ struct IngestSheet: View {
         IngestSubmission.Source.parse(link)
     }
 
+    /// The job's pre-flight would refuse for any of these; say so here, before
+    /// the jobs window opens on a failure with terminal instructions in it.
+    private var blockers: [String] { model.ingestionBlockers }
+
     private var canSubmit: Bool {
-        droppedPDF != nil || parsedSource != nil
+        (droppedPDF != nil || parsedSource != nil)
+            && !model.isDiscoveringTools && blockers.isEmpty
     }
 
     var body: some View {
@@ -68,6 +73,14 @@ struct IngestSheet: View {
                     .foregroundStyle(.tertiary)
             }
 
+            if model.isDiscoveringTools {
+                Label("Looking for the tools a job needs…", systemImage: "hourglass")
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.secondary)
+            } else if !blockers.isEmpty {
+                blockerList
+            }
+
             Spacer(minLength: 0)
 
             HStack {
@@ -86,7 +99,7 @@ struct IngestSheet: View {
             }
         }
         .padding(Theme.section)
-        .frame(width: 560, height: 520)
+        .frame(width: 560, height: blockers.isEmpty ? 520 : 600)
         .onAppear {
             // A PDF dropped on the reader opens this sheet already holding it.
             if let pending = model.pendingDroppedPDF {
@@ -157,6 +170,25 @@ struct IngestSheet: View {
             }
         }
         return true
+    }
+
+    // MARK: Blockers
+
+    private var blockerList: some View {
+        VStack(alignment: .leading, spacing: Theme.tight) {
+            Text("Before a job can start")
+                .font(Theme.Fonts.sectionHeader)
+                .foregroundStyle(.secondary)
+            ForEach(blockers, id: \.self) { blocker in
+                Label(blocker, systemImage: "exclamationmark.triangle")
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+            Button("Open Settings…") { model.requestSettings() }
+                .buttonStyle(.link)
+                .font(Theme.Fonts.meta)
+        }
     }
 
     // MARK: Link feedback

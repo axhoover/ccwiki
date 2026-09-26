@@ -46,7 +46,11 @@ struct SettingsView: View {
             Section("GitHub") {
                 LabeledContent("Authentication") {
                     HStack(spacing: Theme.small) {
-                        if model.isGitHubAuthenticated {
+                        if model.isDiscoveringTools {
+                            Label("Checking…", systemImage: "hourglass")
+                                .foregroundStyle(.secondary)
+                                .font(Theme.Fonts.row)
+                        } else if model.isGitHubAuthenticated {
                             Label("Signed in", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                                 .font(Theme.Fonts.row)
@@ -57,9 +61,10 @@ struct SettingsView: View {
                         }
                         Button("Re-check") { model.recheckGitHubAuth() }
                             .controlSize(.small)
+                            .disabled(model.isDiscoveringTools)
                     }
                 }
-                if !model.isGitHubAuthenticated {
+                if !model.isDiscoveringTools, !model.isGitHubAuthenticated {
                     Text("Run `gh auth login` in a terminal, then re-check. Ingestion jobs "
                         + "need an account that can push a branch to the wiki.")
                         .font(Theme.Fonts.meta)
@@ -89,12 +94,25 @@ struct SettingsView: View {
                         .truncationMode(.head)
                         .textSelection(.enabled)
                         .help(path)
+                } else if tool == .git, model.needsDeveloperTools {
+                    Label("Needs Apple's Command Line Tools", systemImage: "exclamationmark.triangle")
+                        .font(Theme.Fonts.meta)
+                        .foregroundStyle(Color.red)
+                        .help("/usr/bin/git is only a stub until the Command Line Tools are installed")
+                } else if model.isDiscoveringTools {
+                    Label("Looking…", systemImage: "hourglass")
+                        .font(Theme.Fonts.meta)
+                        .foregroundStyle(.secondary)
                 } else {
                     Label("Not found", systemImage: "exclamationmark.triangle")
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(tool.requiredForReading ? Color.red : Color.orange)
                 }
                 Spacer(minLength: Theme.small)
+                if tool == .git, model.needsDeveloperTools {
+                    Button("Install…") { model.installDeveloperTools() }
+                        .controlSize(.small)
+                }
                 if model.toolOverrides[tool] != nil {
                     Button("Reset") { model.setToolOverride(nil, for: tool) }
                         .controlSize(.small)

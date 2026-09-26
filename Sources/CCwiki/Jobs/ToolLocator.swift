@@ -49,12 +49,54 @@ struct ToolLocator: Sendable {
     }
 
     mutating func locateAll() {
-        for tool in Tool.allCases {
+        locate(Tool.allCases)
+    }
+
+    /// Locate a subset. The reader needs only `git`, and the login-shell
+    /// fallback can cost seconds per missing tool, so `AppModel` finds the
+    /// reading tools first and the rest after the first frame.
+    mutating func locate(_ tools: [Tool]) {
+        for tool in tools {
             paths[tool] = Self.locate(tool, override: overrides[tool])
         }
     }
 
+    /// Treat a located tool as absent — for `/usr/bin/git` when it is only
+    /// Apple's stub (see `developerToolsInstalled`).
+    mutating func forget(_ tool: Tool) {
+        paths[tool] = nil
+    }
+
     func path(for tool: Tool) -> String? { paths[tool] }
+
+    // MARK: Apple's Command Line Tools
+
+    /// `/usr/bin/git` exists on every Mac. Until the Command Line Tools are
+    /// installed it is a stub that pops the installer dialog and exits 1 —
+    /// which `isExecutableFile` cannot tell from the real thing.
+    static func isAppleStub(_ path: String) -> Bool {
+        path.hasPrefix("/usr/bin/")
+    }
+
+    /// Whether the stubs in `/usr/bin` have something behind them.
+    ///
+    /// Asked of `xcode-select -p`, which answers quietly, rather than of
+    /// `git --version`, which on a Mac without the tools pops the system
+    /// installer — at every launch, if it were the check.
+    static func developerToolsInstalled() -> Bool {
+        let selector = "/usr/bin/xcode-select"
+        guard isExecutable(selector) else { return true }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: selector)
+        process.arguments = ["-p"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        do { try process.run() } catch { return true }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
 
     var missingForReading: [Tool] {
         Tool.allCases.filter { $0.requiredForReading && paths[$0] == nil }
@@ -111,6 +153,7 @@ struct ToolLocator: Sendable {
         }
         if process.isRunning {
             process.terminate()
+            process.waitUntilExit()
             return nil
         }
 

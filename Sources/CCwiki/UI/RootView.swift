@@ -46,8 +46,10 @@ struct RootView: View {
         }
         .overlay { if isDropTargeted { dropOverlay } }
         .task {
-            // Read what is already on disk before touching the network, so the
-            // app is usable instantly and offline.
+            // Find git (one stat), read what is already on disk, and only then
+            // touch the network — so the app is usable instantly and offline.
+            // The ingestion tools are looked for in the background.
+            await model.discoverTools()
             await model.loadLibrary()
             if model.index == nil { model.sync() }
             ScreenshotRunner.run(model: model)

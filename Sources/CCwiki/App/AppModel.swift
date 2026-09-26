@@ -17,6 +17,14 @@ final class AppModel {
     let paths: AppPaths
     private(set) var tools = ToolLocator()
     private(set) var toolOverrides: [ToolLocator.Tool: String] = [:]
+    /// True until the ingestion tools have been looked for. Reading never
+    /// waits on this; Settings and the ingest sheet say "looking" meanwhile.
+    private(set) var isDiscoveringTools = true
+    /// `/usr/bin/git` is on every Mac, but is only Apple's install-the-tools
+    /// stub until the Command Line Tools are there. When this is set, `git`
+    /// counts as missing and the reader's empty state says what to install.
+    private(set) var needsDeveloperTools = false
+    private var discoveryGeneration = 0
     private(set) var isGitHubAuthenticated = false
     private(set) var canPushToRemote = false
     private(set) var vendorManifest: String?
@@ -207,6 +215,8 @@ final class AppModel {
     static let macrosWarningPrefix = "Custom LaTeX macros unavailable — "
     /// Same for the leftover-worktree count, which changes as they are pruned.
     static let orphansWarningPrefix = "Leftover worktrees: "
+    /// And for the missing-tool warning, which discovery re-derives.
+    static let toolsWarningPrefix = "Tools: "
 
     // MARK: Init
 
@@ -221,10 +231,11 @@ final class AppModel {
         self.webController = WebController(paths: paths)
 
         try? paths.createDirectories()
+        // Tools are looked for in `discoverTools()`, after the first frame:
+        // the login-shell fallback costs up to three seconds per tool that is
+        // not installed, and `init` runs on the main thread before any window.
         toolOverrides = CCwikiSettings.toolOverrides()
         tools = ToolLocator(overrides: toolOverrides)
-        tools.locateAll()
-        isGitHubAuthenticated = GitHubAuth.isAuthenticated(tools: tools)
         vendorManifest = try? String(
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
@@ -232,10 +243,96 @@ final class AppModel {
             self?.navigate(to: destination)
         }
 
-        if let missing = tools.missingForReading.first {
-            warn("\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
-        }
         refreshMacrosWarning()
+    }
+
+    // MARK: Tools
+
+    /// Find `git`, then everything else.
+    ///
+    /// Two phases because they cost differently. `git` is one `stat` in the
+    /// common case and is all the reader needs, so the caller can `await` it
+    /// and go on to load the library. The ingestion tools may each fall
+    /// through to a login shell; they are found in the background and nothing
+    /// the reader does waits on them.
+    func discoverTools() async {
+        discoveryGeneration += 1
+        let generation = discoveryGeneration
+        isDiscoveringTools = true
+        let overrides = toolOverrides
+
+        let reading = await Task.detached(priority: .userInitiated) { () -> (ToolLocator, Bool) in
+            var located = ToolLocator(overrides: overrides)
+            located.locate([.git])
+            let stub = located.path(for: .git).map(ToolLocator.isAppleStub) ?? false
+            let needsTools = stub && !ToolLocator.developerToolsInstalled()
+            if needsTools { located.forget(.git) }
+            return (located, needsTools)
+        }.value
+        guard generation == discoveryGeneration else { return }
+        tools = reading.0
+        needsDeveloperTools = reading.1
+        refreshToolWarnings()
+
+        Task { await discoverIngestionTools(generation: generation, from: reading.0) }
+    }
+
+    private func discoverIngestionTools(generation: Int, from base: ToolLocator) async {
+        let all = await Task.detached(priority: .utility) { () -> ToolLocator in
+            var located = base
+            located.locate([.gh, .claude, .node])
+            return located
+        }.value
+        guard generation == discoveryGeneration else { return }
+        tools = all
+        isDiscoveringTools = false
+        isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: all)
+        guard generation == discoveryGeneration else { return }
+        await refreshPushCapability()
+    }
+
+    private func refreshToolWarnings() {
+        warnings.removeAll { $0.hasPrefix(Self.toolsWarningPrefix) }
+        if needsDeveloperTools {
+            warn(Self.toolsWarningPrefix
+                + "git needs Apple's Command Line Tools. Install them to fetch the wiki.")
+        } else if let missing = tools.missingForReading.first {
+            warn(Self.toolsWarningPrefix
+                + "\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
+        }
+    }
+
+    /// Ask macOS to install the Command Line Tools. `xcode-select --install`
+    /// only opens the system's own installer dialog and returns; the download
+    /// and the licence are the OS's, not ours.
+    func installDeveloperTools() {
+        Task.detached(priority: .userInitiated) {
+            _ = await Subprocess.run(
+                executable: "/usr/bin/xcode-select", arguments: ["--install"],
+                environment: ProcessInfo.processInfo.environment)
+        }
+    }
+
+    /// Why a job could not start right now, in the order the sheet shows them.
+    /// Empty means the pre-flight checks that concern tooling would pass.
+    var ingestionBlockers: [String] {
+        var blockers: [String] = []
+        if index == nil {
+            blockers.append("The wiki has not been cloned yet. Sync first (⌘R).")
+        }
+        if needsDeveloperTools {
+            blockers.append("git needs Apple's Command Line Tools.")
+        }
+        for tool in tools.missingForIngestion where !(tool == .git && needsDeveloperTools) {
+            blockers.append("\(tool.rawValue) was not found. It is needed for \(tool.purpose).")
+        }
+        if tools.path(for: .gh) != nil, !isGitHubAuthenticated {
+            blockers.append("The GitHub CLI is not signed in. Run `gh auth login` in Terminal.")
+        }
+        if tools.path(for: .gh) != nil, isGitHubAuthenticated, !canPushToRemote {
+            blockers.append("CCwiki's clone cannot authenticate a push. Sync again (⌘R) to configure it.")
+        }
+        return blockers
     }
 
     /// Replace the macro warning with whatever is true now.
@@ -340,7 +437,9 @@ final class AppModel {
     func sync() {
         guard syncTask == nil else { return }
         guard let git = gitService else {
-            syncState = .failed("git was not found — see Settings.")
+            syncState = .failed(needsDeveloperTools
+                ? "git needs Apple's Command Line Tools — install them, then sync again."
+                : "git was not found — see Settings.")
             return
         }
 
@@ -628,19 +727,17 @@ final class AppModel {
     func setToolOverride(_ path: String?, for tool: ToolLocator.Tool) {
         CCwikiSettings.setToolOverride(path, for: tool)
         toolOverrides = CCwikiSettings.toolOverrides()
-        tools = ToolLocator(overrides: toolOverrides)
-        tools.locateAll()
-        recheckGitHubAuth()
-        warnings.removeAll { $0.contains("was not found") }
-        if let missing = tools.missingForReading.first {
-            warn("\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
-        }
+        GitHubAuth.invalidate()
+        Task { await discoverTools() }
     }
 
     func recheckGitHubAuth() {
         GitHubAuth.invalidate()
-        isGitHubAuthenticated = GitHubAuth.isAuthenticated(tools: tools)
-        Task { @MainActor in await refreshPushCapability() }
+        let tools = tools
+        Task { @MainActor in
+            isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: tools)
+            await refreshPushCapability()
+        }
     }
 
     private func refreshPushCapability() async {
@@ -725,8 +822,10 @@ final class AppModel {
             await runner.run(job)
             // A job that changed the wiki has changed nothing locally — the PR
             // lives on GitHub — but the branch and worktree bookkeeping moved,
-            // so refresh what we know about strays.
-            await refreshOrphanedWorktrees()
+            // so refresh what we know about strays. In a fresh task: a
+            // cancelled job's task would kill the `git worktree list` it
+            // needs and report no strays at all.
+            await Task { @MainActor in await self.refreshOrphanedWorktrees() }.value
         }
     }
 

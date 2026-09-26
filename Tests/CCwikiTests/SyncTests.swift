@@ -90,6 +90,14 @@ struct SettingsTests {
         #expect(resolved != "/nonexistent/git")
     }
 
+    @Test("only /usr/bin tools can be Apple's install-the-tools stubs")
+    func appleStub() {
+        #expect(ToolLocator.isAppleStub("/usr/bin/git"))
+        #expect(!ToolLocator.isAppleStub("/opt/homebrew/bin/git"))
+        #expect(!ToolLocator.isAppleStub("/usr/local/bin/git"))
+        #expect(!ToolLocator.isAppleStub(NSHomeDirectory() + "/.local/bin/claude"))
+    }
+
     @Test("the child environment widens PATH without losing what we inherited")
     func childEnvironment() {
         var locator = ToolLocator()

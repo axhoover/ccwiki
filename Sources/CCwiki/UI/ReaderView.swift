@@ -219,7 +219,41 @@ struct ReaderView: View {
 
     // MARK: Empty state
 
+    @ViewBuilder
     private var emptyState: some View {
+        if model.needsDeveloperTools {
+            developerToolsState
+        } else {
+            syncPrompt
+        }
+    }
+
+    /// A Mac without Apple's Command Line Tools has a `/usr/bin/git` that is
+    /// only a stub. This is the one thing a reader has to install, so it gets
+    /// a state of its own rather than a git-flavoured error.
+    private var developerToolsState: some View {
+        ContentUnavailableView {
+            Label("Command Line Tools needed", systemImage: "terminal")
+        } description: {
+            Text("CCwiki fetches the wiki with git, which on a Mac comes with Apple's "
+                + "Command Line Tools. Installing them is a system download of a few "
+                + "hundred megabytes; no Apple account is needed.")
+        } actions: {
+            Button {
+                model.installDeveloperTools()
+            } label: {
+                Label("Install Command Line Tools…", systemImage: "arrow.down.circle")
+            }
+            Button("Check Again") {
+                Task {
+                    await model.discoverTools()
+                    if !model.needsDeveloperTools { model.sync() }
+                }
+            }
+        }
+    }
+
+    private var syncPrompt: some View {
         ContentUnavailableView {
             Label("CCwiki", systemImage: "building.columns")
         } description: {
