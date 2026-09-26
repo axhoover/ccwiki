@@ -165,6 +165,57 @@ Because the app is not sandboxed, Sparkle needs no XPC services, which
 removes the worst of the setup. Do it only if Tier 1 plus Tier 2 leaves
 people on old versions; there is no evidence of that until there are users.
 
+### Tier 2b: automatic updates with no Developer ID at all
+
+**Written 2026-09-26, after the question "do we really have to pay for
+this?"** The answer is no, with one honest limit.
+
+Gatekeeper assesses only files carrying the quarantine attribute, which
+browsers add to what they download. A zip the app fetches itself with
+`URLSession` is not quarantined (the app does not opt in to
+`LSFileQuarantineEnabled`), the bundle extracted from it is not quarantined,
+and a non-quarantined ad-hoc-signed app launches without a prompt on Intel
+and Apple silicon alike. That is why `make install` works today. So:
+
+1. **The first install carries friction, once.** On macOS 15 an
+   un-notarized download can be opened only through System Settings →
+   Privacy & Security → Open Anyway, or by installing from Terminal, since
+   `curl` does not quarantine:
+
+   ```sh
+   curl -L -o /tmp/CCwiki.zip https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-macos.zip
+   ditto -x -k /tmp/CCwiki.zip /Applications
+   ```
+
+   Acceptable for an audience that lives in a terminal; not for a general
+   one. That is the whole of what the membership buys.
+2. **Every later update is automatic and silent.** Tier 1's check finds the
+   release; an installer step downloads the zip to a temporary directory,
+   verifies it, extracts it with `ditto -x -k`, swaps the bundle in place
+   (a running bundle can be moved; its mapped files stay valid), and
+   relaunches with `NSWorkspace.OpenConfiguration.createsNewApplicationInstance`
+   before terminating. No dialogs, because nothing is quarantined.
+
+**Verification, done properly and for free.** Sign each release zip with an
+Ed25519 key kept by the maintainer; embed the public key in the app; refuse
+any update whose signature does not verify. `CryptoKit`'s
+`Curve25519.Signing` does this with no dependency. TLS to github.com protects
+the transport; the signature protects against a compromised GitHub account,
+which the `.sha256` beside the zip does not. Key custody is the one decision
+only the maintainer can make: the private key lives on one Mac (or as a CI
+secret if the release workflow signs), and losing it means shipping a new
+public key by hand once. A `scripts/release-keys.swift` generates the pair
+and a `scripts/sign-release.swift` signs a zip; both are plain `swift`
+scripts, like `make-icon.swift`.
+
+Caveats: Homebrew fits worse without notarization (`brew install --cask`
+quarantines, so users would need `--no-quarantine`); ad-hoc signatures change
+per build, so a TCC grant tied to the app (Screen Recording for `make shots`)
+resets after an update; and if the membership is ever bought, none of this
+is wasted, since the same updater runs and the first-launch friction simply
+disappears. Sparkle would also work without a Developer ID, by the same
+EdDSA idea, at the framework-embedding cost in tier 3.
+
 ## 4. Two `Info.plist` additions that make the download feel like an app
 
 - **`CFBundleDocumentTypes` for PDF** with `LSHandlerRank Alternate`, plus
