@@ -22,6 +22,10 @@ and fixed before the next. Three things it caught that reading did not:
 - `NSLock.lock()` is unavailable from an async context. `withLock` is the
   form Swift 6 accepts there.
 - An off-by-one in a bounded-history test: the first visit records nothing.
+- `swift build --arch arm64 --arch x86_64` fails with "duplicate output
+  file" on the runner's toolchain. One build per architecture and
+  `lipo -create` is what `build.sh` does now, and CI assembles the universal
+  `.app` on every push and uploads it as a 14-day artifact.
 
 **The visual gate has not run.** Every UI change here — the sync log sheet,
 the Command Line Tools state, the blockers list in the ingest sheet, the
