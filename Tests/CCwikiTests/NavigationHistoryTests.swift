@@ -139,7 +139,9 @@ struct NavigationHistoryTests {
         for i in 0...(NavigationHistory.capacity + 10) {
             history.visit(.page(path: "\(i).md", anchor: nil))
         }
+        // 111 visits; the first records nothing, so pages 0…109 were pushed
+        // and the oldest ten fell off.
         #expect(history.back.count == NavigationHistory.capacity)
-        #expect(history.back.first == .page(path: "11.md", anchor: nil))
+        #expect(history.back.first == .page(path: "10.md", anchor: nil))
     }
 }
