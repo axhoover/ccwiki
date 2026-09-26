@@ -92,6 +92,8 @@ struct QuickSwitcherView: View {
                                 highlightedID = item.id
                                 openHighlighted()
                             }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(.isButton)
                     }
                 }
             }

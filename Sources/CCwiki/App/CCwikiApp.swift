@@ -93,6 +93,11 @@ struct CCwikiCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { model?.checkForUpdates() }
+                .disabled(model == nil || model?.isCheckingForUpdates == true)
+        }
+
         CommandGroup(after: .toolbar) {
             Button("Make Text Bigger") { model?.makeTextBigger() }
                 .keyboardShortcut("+", modifiers: .command)

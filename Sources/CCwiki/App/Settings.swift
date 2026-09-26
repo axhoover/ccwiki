@@ -13,6 +13,23 @@ struct CCwikiSettings: Sendable {
     private static let hidesStubsKey = "ccwiki.hidesStubs"
     private static let syncsAtLaunchKey = "ccwiki.syncsAtLaunch"
     private static let pageZoomKey = "ccwiki.pageZoom"
+    private static let checksForUpdatesKey = "ccwiki.checksForUpdates"
+    private static let lastUpdateCheckKey = "ccwiki.lastUpdateCheck"
+
+    /// Ask GitHub once a day whether there is a newer release. On by default;
+    /// off is honoured absolutely — no request is made at all.
+    static var checksForUpdates: Bool {
+        get {
+            UserDefaults.standard.object(forKey: checksForUpdatesKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: checksForUpdatesKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: checksForUpdatesKey) }
+    }
+
+    static var lastUpdateCheck: Date? {
+        get { UserDefaults.standard.object(forKey: lastUpdateCheckKey) as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: lastUpdateCheckKey) }
+    }
 
     /// Fast-forward the clone when the app opens, so the wiki does not go
     /// quietly stale for someone who never presses ⌘R. On by default; the

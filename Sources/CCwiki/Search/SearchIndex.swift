@@ -86,14 +86,31 @@ actor SearchIndex {
         END;
         """
 
+    /// Bump when the tables, tokenizer or weights change. `IF NOT EXISTS`
+    /// would otherwise keep an old index behind the same file name. The
+    /// index is derived, so a mismatch is answered by throwing it away.
+    static let schemaVersion = 2
+
     private func open() throws -> SQLiteDatabase {
         if let database { return database }
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let opened = try SQLiteDatabase(path: path.path(percentEncoded: false))
+        let file = path.path(percentEncoded: false)
+        var opened = try SQLiteDatabase(path: file)
+        if try Self.userVersion(of: opened) != Self.schemaVersion {
+            reset()
+            opened = try SQLiteDatabase(path: file)
+            try opened.execute("PRAGMA user_version = \(Self.schemaVersion)")
+        }
         try opened.execute(Self.schema)
         database = opened
         return opened
+    }
+
+    private static func userVersion(of database: SQLiteDatabase) throws -> Int {
+        let statement = try database.prepare("PRAGMA user_version")
+        guard try statement.step() else { return 0 }
+        return statement.int(0)
     }
 
     /// Throw the index away and start over. The index is derived, so this is
@@ -161,6 +178,19 @@ actor SearchIndex {
         text = text.replacingOccurrences(of: "$", with: " ")
         text = text.replacingOccurrences(of: "`", with: " ")
         text = text.replacingOccurrences(of: "\u{00A0}", with: " ")
+        // Block markers and emphasis, which otherwise turn up in snippets as
+        // `## Syntax` and `**key**`. Underscores inside identifiers stay:
+        // an emphasis delimiter has a non-word character on one side.
+        text = text.replacingOccurrences(
+            of: #"(?m)^[ \t]*#{1,6}[ \t]+"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(
+            of: #"(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(
+            of: #"(?m)^[ \t]*>[ \t]?"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "**", with: "")
+        text = text.replacingOccurrences(of: "__", with: "")
+        text = text.replacingOccurrences(
+            of: #"(?<!\w)[*_](?=\S)|(?<=\S)[*_](?!\w)"#, with: "", options: .regularExpression)
         return text.precomposedStringWithCanonicalMapping
     }
 
@@ -172,7 +202,7 @@ actor SearchIndex {
 
         let statement = try database.prepare("""
             SELECT d.path, d.slug, d.title, d.kind, d.status,
-                   snippet(doc_fts, 3, '«', '»', '…', 14),
+                   snippet(doc_fts, -1, '«', '»', '…', 14),
                    bm25(doc_fts, 14.0, 10.0, 4.0, 1.0)
             FROM doc_fts
             JOIN doc d ON d.id = doc_fts.rowid

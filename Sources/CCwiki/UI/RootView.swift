@@ -44,7 +44,13 @@ struct RootView: View {
         .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
             acceptDroppedPDF(providers)
         }
-        .overlay { if isDropTargeted { dropOverlay } }
+        // Mounted permanently and faded, not inserted: a transition on a view
+        // inserted inside a NavigationSplitView is SWIFTUI-RULES §1.1.
+        .overlay {
+            dropOverlay
+                .opacity(isDropTargeted ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: isDropTargeted)
+        }
         .task {
             // Find git (one stat), read what is already on disk, and only then
             // touch the network — so the app is usable instantly and offline.
@@ -57,6 +63,7 @@ struct RootView: View {
             let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
             if model.index == nil || launchFetch { model.sync() }
             ScreenshotRunner.run(model: model)
+            if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in
             openWindow(id: CCwikiApp.jobsWindowID)
@@ -78,12 +85,14 @@ struct RootView: View {
             }
             .disabled(!model.canGoBack)
             .help("Back (⌘[)")
+            .accessibilityLabel("Back")
 
             Button { model.goForward() } label: {
                 Image(systemName: "chevron.right")
             }
             .disabled(!model.canGoForward)
             .help("Forward (⌘])")
+            .accessibilityLabel("Forward")
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
@@ -91,11 +100,13 @@ struct RootView: View {
                 Image(systemName: "magnifyingglass")
             }
             .help("Quick switcher (⌘O)")
+            .accessibilityLabel("Quick Switcher")
 
             Button { model.searchPresented = true } label: {
                 Image(systemName: "text.magnifyingglass")
             }
             .help("Search all pages (⇧⌘F)")
+            .accessibilityLabel("Search All Pages")
 
             Button { model.sync() } label: {
                 if model.syncState.isRunning {
@@ -106,11 +117,13 @@ struct RootView: View {
             }
             .disabled(model.syncState.isRunning)
             .help("Sync with GitHub (⌘R)")
+            .accessibilityLabel("Sync with GitHub")
 
             Button { model.showInspector.toggle() } label: {
                 Image(systemName: "sidebar.right")
             }
             .help("Toggle inspector (⌥⌘I)")
+            .accessibilityLabel("Toggle Inspector")
         }
     }
 
@@ -121,7 +134,8 @@ struct RootView: View {
             Rectangle().fill(.ultraThinMaterial)
             VStack(spacing: Theme.small) {
                 Image(systemName: "doc.badge.plus")
-                    .font(.system(size: 48))
+                    .font(.largeTitle)
+                    .imageScale(.large)
                     .foregroundStyle(.tint)
                 Text("Ingest this paper")
                     .font(Theme.Fonts.emptyTitle)
@@ -130,8 +144,6 @@ struct RootView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .transition(.opacity)
-        .animation(.easeOut(duration: 0.15), value: isDropTargeted)
         .allowsHitTesting(false)
     }
 

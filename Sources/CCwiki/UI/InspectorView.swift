@@ -18,7 +18,7 @@ struct InspectorView: View {
             // three do not, and a truncated word is worse than no glyph — the
             // names are the affordance here, and macOS segmented controls are
             // routinely text-only.
-            Picker("", selection: $model.inspectorTab) {
+            Picker("Inspector", selection: $model.inspectorTab) {
                 ForEach(AppModel.InspectorTab.allCases) { tab in
                     Text(tab.rawValue).tag(tab)
                 }

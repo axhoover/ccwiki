@@ -192,6 +192,19 @@ final class AppModel {
 
     var activeJobCount: Int { jobs.filter { $0.state.isActive }.count }
 
+    // MARK: Updates
+
+    var checksForUpdates: Bool = CCwikiSettings.checksForUpdates {
+        didSet { CCwikiSettings.checksForUpdates = checksForUpdates }
+    }
+    private(set) var availableUpdate: ReleaseInfo?
+    private(set) var lastUpdateCheck: Date? = CCwikiSettings.lastUpdateCheck
+    private(set) var isCheckingForUpdates = false
+    static let updateInterval: TimeInterval = 24 * 60 * 60
+    static let updateWarningPrefix = "Update: "
+
+    var appVersion: String { Bundle.main.shortVersion }
+
     // MARK: Reader
 
     let webController: WebController
@@ -895,6 +908,92 @@ final class AppModel {
             // cancelled job's task would kill the `git worktree list` it
             // needs and report no strays at all.
             await Task { @MainActor in await self.refreshOrphanedWorktrees() }.value
+        }
+    }
+
+    // MARK: Update check
+
+    /// The daily check, from the launch task. Silent whatever happens: an
+    /// update is a note in the status bar, and a failure is nothing at all.
+    func checkForUpdatesIfDue() async {
+        guard checksForUpdates, !UpdateChecker.isDevelopmentVersion(appVersion) else { return }
+        if let last = lastUpdateCheck, Date().timeIntervalSince(last) < Self.updateInterval {
+            return
+        }
+        _ = await performUpdateCheck()
+    }
+
+    /// `nil` when GitHub could not be reached or understood. The time of the
+    /// check is recorded only when an answer came back.
+    private func performUpdateCheck() async -> UpdateChecker.Outcome? {
+        guard !isCheckingForUpdates else { return nil }
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+
+        guard let outcome = try? await UpdateChecker.check(currentVersion: appVersion) else {
+            return nil
+        }
+        lastUpdateCheck = Date()
+        CCwikiSettings.lastUpdateCheck = lastUpdateCheck
+        warnings.removeAll { $0.hasPrefix(Self.updateWarningPrefix) }
+        if case .available(let release) = outcome {
+            availableUpdate = release
+            warn(Self.updateWarningPrefix + "CCwiki \(release.version) is available. "
+                + "Choose CCwiki > Check for Updates… to get it.")
+        } else {
+            availableUpdate = nil
+        }
+        return outcome
+    }
+
+    /// The menu item and the Settings button. The person asked, so this one
+    /// answers with an alert either way.
+    func checkForUpdates() {
+        Task { @MainActor in
+            let alert = NSAlert()
+            let version = appVersion
+
+            if UpdateChecker.isDevelopmentVersion(version) {
+                alert.messageText = "This is a development build."
+                alert.informativeText = "Version \(version) was not made by make dist, so there "
+                    + "is no release to compare it against."
+                alert.runModal()
+                return
+            }
+
+            guard let outcome = await performUpdateCheck() else {
+                alert.messageText = "CCwiki could not check for updates."
+                alert.informativeText = "GitHub could not be reached. Try again later, or look "
+                    + "at the releases page directly."
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Open Releases Page")
+                if alert.runModal() == .alertSecondButtonReturn,
+                   let url = URL(string: UpdateChecker.releasesPage) {
+                    NSWorkspace.shared.open(url)
+                }
+                return
+            }
+
+            switch outcome {
+            case .available(let release):
+                alert.messageText = "CCwiki \(release.version) is available."
+                alert.informativeText = "You have \(version). The download is on the release "
+                    + "page; replace the app in your Applications folder with the new one."
+                alert.addButton(withTitle: "Open Release Page")
+                alert.addButton(withTitle: "Later")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NSWorkspace.shared.open(release.url)
+                }
+            case .upToDate:
+                alert.messageText = "You're up to date."
+                alert.informativeText = "CCwiki \(version) is the newest release."
+                alert.runModal()
+            case .noReleases:
+                alert.messageText = "No releases yet."
+                alert.informativeText = "Nothing has been published on GitHub to compare "
+                    + "\(version) against."
+                alert.runModal()
+            }
         }
     }
 

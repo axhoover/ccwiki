@@ -255,6 +255,35 @@ struct SettingsView: View {
                 LabeledContent("Wiki", value: "axhoover/cryptology.city")
             }
             Section {
+                Toggle("Check for updates daily", isOn: Binding(
+                    get: { model.checksForUpdates },
+                    set: { model.checksForUpdates = $0 }))
+                LabeledContent("Status") {
+                    HStack(spacing: Theme.small) {
+                        updateStatus
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: Theme.small)
+                        Button("Check Now") { model.checkForUpdates() }
+                            .controlSize(.small)
+                            .disabled(model.isCheckingForUpdates)
+                    }
+                }
+                if let update = model.availableUpdate {
+                    HStack {
+                        Spacer()
+                        Button("Get CCwiki \(update.version)…") { NSWorkspace.shared.open(update.url) }
+                    }
+                }
+            } header: {
+                Text("Updates")
+            } footer: {
+                Text("One request a day to GitHub's releases API. CCwiki only tells you; the "
+                    + "download is on the release page, and nothing is installed for you.")
+                .font(Theme.Fonts.meta)
+                .foregroundStyle(.secondary)
+            }
+            Section {
                 LabeledContent("LaTeX macros") {
                     Text(model.macros.isEmpty
                         ? "unavailable" : "\(model.macros.macros.count) parsed from macros.ts")
@@ -278,6 +307,21 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+extension SettingsView {
+    fileprivate var updateStatus: Text {
+        if let update = model.availableUpdate {
+            return Text("CCwiki \(update.version) is available")
+        }
+        if UpdateChecker.isDevelopmentVersion(model.appVersion) {
+            return Text("Development build — not checked")
+        }
+        if let last = model.lastUpdateCheck {
+            return Text("Up to date as of ") + Text(last, format: .relative(presentation: .named))
+        }
+        return Text("Not checked yet")
     }
 }
 

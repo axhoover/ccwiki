@@ -97,7 +97,9 @@ final class IngestJob: Identifiable {
 
     private static let stampFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        // Milliseconds, because two submissions of the same paper within a
+        // second would share a worktree path and the second would fail.
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         return formatter
