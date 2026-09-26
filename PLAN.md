@@ -98,6 +98,13 @@ redesign, not a refactor.
 - [plans/roadmap.md](plans/roadmap.md) — what we deliberately deferred and how
   we would build it: a human review step before the PR, a better ingestion
   pipeline, and page corrections from the reader.
+- [plans/audit-2026-09.md](plans/audit-2026-09.md) — a full read-through
+  aimed at "what happens when a stranger downloads this": eight first-launch
+  breakers, the correctness tail, reader usability gaps, performance, and a
+  suggested order of work. **Start here for the next batch of fixes.**
+- [plans/distribution.md](plans/distribution.md) — signing and notarization,
+  a release workflow, and three tiers of update mechanism (an in-app check,
+  a Homebrew cask, Sparkle) with what each costs in this codebase.
 - [PROGRESS.md](PROGRESS.md) — running log, newest first.
 - [PROBLEMS.md](PROBLEMS.md) — things that bit us.
 - [SWIFTUI-RULES.md](SWIFTUI-RULES.md) — hard-won SwiftUI rules; the code here

@@ -47,13 +47,16 @@ RELEASE_ZIP   := $(DIST_DIR)/$(APP_NAME)-$(VERSION)-macos.zip
 DEV_IDENTITY  ?= -
 
 # Distribution signing. Developer ID + hardened runtime + notarization.
-# Fill TEAM_ID / CERT_NAME in before the first `make dist`.
-TEAM_ID       ?=
-CERT_NAME     ?= $(if $(TEAM_ID),Developer ID Application: Thomas Ptacek ($(TEAM_ID)),)
+# Set TEAM_ID (and DEVELOPER_NAME if the certificate's common name differs
+# from the default) before the first `make dist`, or pass CERT_NAME whole.
+# Check the exact name with: security find-identity -v -p codesigning
+TEAM_ID        ?=
+DEVELOPER_NAME ?= Alex Hoover
+CERT_NAME      ?= $(if $(TEAM_ID),Developer ID Application: $(DEVELOPER_NAME) ($(TEAM_ID)),)
 
 # Notarization credentials profile name. Populate once with
 # `make notary-setup` (interactive; never puts the password on the cmdline).
-NOTARY_PROFILE ?= starter-notary
+NOTARY_PROFILE ?= ccwiki-notary
 
 PROVISION_PROFILE ?=
 NOTES_FILE       ?=

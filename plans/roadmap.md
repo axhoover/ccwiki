@@ -5,6 +5,11 @@ mean re-deciding it. Nothing here is started.
 
 Ordered by how much they change the app's shape, not by priority.
 
+> **2026-09-26.** The fixes that come *before* any of this, and the plan for
+> shipping a download, are in [audit-2026-09.md](audit-2026-09.md) §6 and
+> [distribution.md](distribution.md). Several "smaller things" below (job
+> history across launches, `DiffGuard`) reappear there with line references.
+
 ---
 
 ## 1. A human step between the agent and GitHub

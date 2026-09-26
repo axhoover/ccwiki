@@ -5,6 +5,64 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-26 — Audit for a public download; the distribution plan
+
+No app code changed. Two plans and one Makefile fix.
+
+**The question was "what would we work on next to turn this into something
+people download".** Answered by reading every source file against that
+scenario rather than against the developer who has been using it. The result
+is [plans/audit-2026-09.md](plans/audit-2026-09.md): eight things that break
+a stranger's first launch, a correctness tail, reader usability gaps, the
+performance items that scale with the corpus, and an ordered list of PR-sized
+work. [plans/distribution.md](plans/distribution.md) covers signing,
+notarization, a release workflow, and three tiers of update mechanism.
+
+**The three findings that matter most**, because they hit the exact path a
+non-developer takes (launch → auto-clone → read):
+
+- **Reading requires git, and a fresh Mac's `/usr/bin/git` is Apple's
+  install-the-developer-tools stub.** It passes `isExecutableFile`, so the
+  app raises no warning and the clone fails with "exit 1, see the sync log",
+  and the sync log is shown nowhere. The short fix is to detect the stub and
+  offer `xcode-select --install`; the real one is to fetch a tarball of
+  `main` with `/usr/bin/tar`, which is base-OS, so the reader needs no
+  developer tools at all.
+- **First launch renders every page with broken macros and never says so.**
+  `macros.ts` is read before the clone exists and baked into a
+  `documentStart` script that is never rebuilt. After the clone, the model
+  has 122 macros and drops its warning; the web view still has none.
+- **The Makefile's release identity was the template author's.** `make dist`
+  would have failed at `sign` on its first run. Fixed on this branch:
+  `CERT_NAME` derives from `DEVELOPER_NAME` and the notary profile is
+  `ccwiki-notary`. The entitlements also carry two hardened-runtime
+  exceptions justified by "we spawn git and claude", which is not what those
+  entitlements govern; the plan says to drop them and verify on a notarized
+  build.
+
+**On updates.** The worry was a complicated pipeline. The recommendation is
+the opposite: a daily call to the GitHub releases API with an "update
+available" line in About, and a Homebrew cask so `brew upgrade` does the
+rest. Sparkle is written up with its real cost here (a framework in a
+hand-assembled bundle, inside-out signing, an appcast) and deferred until
+there is evidence people stay on old versions.
+
+**What surprised me.**
+
+- Following any `[[page#heading]]` link across pages corrupts back/forward:
+  the sidebar's selection observer re-opens the page without the anchor,
+  which counts as a new location, so the anchored entry is pushed twice and
+  Forward is wiped. Thirteen corpus links and every Relations-pane variant
+  take that path. No history test exists.
+- Launch does up to nine seconds of main-thread busy-waiting on a Mac
+  without `gh`, `claude` and `node`, which is every non-developer's Mac,
+  plus a blocking `gh auth status` network call before the first frame.
+- `"unable to access"` in the offline detector matches every HTTP error git
+  reports, so a 403 or a certificate problem shows the calm wifi-slash.
+- The review machine had no Swift toolchain, so every line reference was
+  read, not run. `make check` and `make shots` on a Mac are the next step
+  before any of the fixes land.
+
 ## 2026-08-24 — The wiki's relationships become data, and the ingestion prompt stops undoing them
 
 The wiki migrated its relationship claims out of prose and into first-class
