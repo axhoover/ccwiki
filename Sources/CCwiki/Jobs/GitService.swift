@@ -69,19 +69,36 @@ struct GitService: Sendable {
             atPath: clone.appending(path: ".git").path(percentEncoded: false))
 
         if !exists {
-            try? FileManager.default.createDirectory(
-                at: clone.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let clone = await stream(
-                ["clone", "--progress", remote, clone.path(percentEncoded: false)],
+            // Clone beside the destination and move it into place. git
+            // creates `.git` first, so a clone interrupted midway used to
+            // look like a clone, and the next sync tried to fast-forward a
+            // repository with no HEAD and blamed the user for it.
+            let manager = FileManager.default
+            let parent = clone.deletingLastPathComponent()
+            let partial = parent.appending(path: clone.lastPathComponent + ".partial")
+            try? manager.createDirectory(at: parent, withIntermediateDirectories: true)
+            try? manager.removeItem(at: partial)
+
+            let result = await stream(
+                ["clone", "--progress", remote, partial.path(percentEncoded: false)],
                 in: nil, onLine: onLine)
-            let (status, transcript) = (clone.status, clone.transcript)
+            let (status, transcript) = (result.status, result.transcript)
             guard status == 0 else {
+                try? manager.removeItem(at: partial)
                 // With no clone there is nothing to read, so this one *is* an
                 // alarm however it failed.
                 return .failed(Self.isNetworkFailure(transcript)
                     ? "Could not reach GitHub to clone the wiki. Check your connection "
                         + "and sync again."
                     : "git clone failed (exit \(status)). See the sync log.")
+            }
+            // Whatever is at the destination has no `.git`, so it is not a clone.
+            try? manager.removeItem(at: clone)
+            do {
+                try manager.moveItem(at: partial, to: clone)
+            } catch {
+                return .failed("The clone finished but could not be moved into place: "
+                    + error.localizedDescription)
             }
             return .cloned
         }
@@ -104,7 +121,7 @@ struct GitService: Sendable {
             return .failed(
                 "Fast-forward failed. The reader's clone at \(clone.lastPathComponent) has "
                 + "diverged from origin — CCwiki never writes there, so something else did. "
-                + "Resolve it by hand, or delete the clone and let CCwiki re-clone.")
+                + "Resolve it by hand, or use Reset Clone in Settings > Storage.")
         }
 
         let after = await head(in: clone) ?? ""

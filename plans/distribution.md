@@ -45,10 +45,11 @@ which `make dist` already implements (`Makefile:225-292`). What it needs:
    for nothing and are the kind of thing notarization reviewers flag. Remove
    them, build a notarized copy, and run one ingestion job end to end to
    confirm; the review that produced this document could not run anything.
-4. **Build universal.** `swift build` emits the host architecture only. For
-   a download that runs on Intel and Apple silicon, `build.sh` should pass
-   `--arch arm64 --arch x86_64` in the release configuration (SwiftPM
-   produces a fat binary) and `lipo -info` it in `verify-release`.
+4. **Build universal.** **Done 2026-09-26:** `build.sh` passes
+   `--arch arm64 --arch x86_64` for the release configuration and prints
+   `lipo -info`. CI runs `make release` on every push and uploads the
+   ad-hoc-signed `.app` as a workflow artifact, which is a build to try, not
+   a build to ship.
 5. **Tag before `dist`.** `check-version` refuses to run without an exact
    `vX.Y.Z` tag at HEAD (`Makefile:209-221`). The first release is
    `git tag v0.1.0 && make dist && make github-release`.

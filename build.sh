@@ -29,10 +29,19 @@ INFO_PLIST_SRC="Resources/Info.plist"
 # Build number: monotonic-ish from the date so re-signs differ. Falls back to 1.
 BUILD_NUMBER="$(date +%Y%m%d%H%M 2>/dev/null || echo 1)"
 
-echo "→ swift build -c $CONFIG"
-swift build -c "$CONFIG"
+# A release is built for both architectures: a download has to run on an
+# Intel Mac and an Apple silicon one. Debug builds stay native, since they
+# are for the machine that made them. (The `${ARCH[@]+…}` form is for the
+# bash 3.2 macOS ships, where an empty array trips `set -u`.)
+ARCH=()
+if [ "$CONFIG" = "release" ]; then
+	ARCH=(--arch arm64 --arch x86_64)
+fi
 
-BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)"
+echo "→ swift build -c $CONFIG ${ARCH[*]+${ARCH[*]}}"
+swift build -c "$CONFIG" ${ARCH[@]+"${ARCH[@]}"}
+
+BIN_PATH="$(swift build -c "$CONFIG" ${ARCH[@]+"${ARCH[@]}"} --show-bin-path)"
 EXECUTABLE="$BIN_PATH/$APP_NAME"
 if [ ! -x "$EXECUTABLE" ]; then
 	echo "✗ executable not found at $EXECUTABLE" >&2
@@ -115,4 +124,7 @@ if ! codesign "${sign_args[@]}" "$APP" 2>/dev/null; then
 fi
 
 codesign --verify --verbose=1 "$APP"
+if [ "$CONFIG" = "release" ]; then
+	echo "  $(lipo -info "$APP/Contents/MacOS/$APP_NAME")"
+fi
 echo "✓ built $APP"

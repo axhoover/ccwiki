@@ -15,6 +15,20 @@ struct CCwikiSettings: Sendable {
     private static let pageZoomKey = "ccwiki.pageZoom"
     private static let checksForUpdatesKey = "ccwiki.checksForUpdates"
     private static let lastUpdateCheckKey = "ccwiki.lastUpdateCheck"
+    private static let lastPageKey = "ccwiki.lastPage"
+    private static let expandedFoldersKey = "ccwiki.expandedFolders"
+
+    /// The page showing when the app last quit, by `content/`-relative path.
+    static var lastPage: String? {
+        get { UserDefaults.standard.string(forKey: lastPageKey) }
+        set { UserDefaults.standard.set(newValue, forKey: lastPageKey) }
+    }
+
+    /// The sidebar folders left open.
+    static var expandedFolders: [String] {
+        get { UserDefaults.standard.stringArray(forKey: expandedFoldersKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: expandedFoldersKey) }
+    }
 
     /// Ask GitHub once a day whether there is a newer release. On by default;
     /// off is honoured absolutely — no request is made at all.

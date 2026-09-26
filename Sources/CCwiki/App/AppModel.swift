@@ -95,7 +95,12 @@ final class AppModel {
     /// Which sidebar folders are open. Opening a page from a link, the quick
     /// switcher or search reveals its folder, so the sidebar always shows where
     /// you are rather than silently disagreeing with the reader.
-    var expandedFolders: Set<String> = []
+    var expandedFolders: Set<String> = Set(CCwikiSettings.expandedFolders) {
+        didSet {
+            guard expandedFolders != oldValue else { return }
+            CCwikiSettings.expandedFolders = expandedFolders.sorted()
+        }
+    }
     var inspectorTab: InspectorTab = .outline
     var showInspector = true
 
@@ -448,7 +453,7 @@ final class AppModel {
         // Re-render whatever is on screen, since the file may have changed —
         // keeping the reader's place, since it usually has not.
         webController.invalidate()
-        if case .empty = location { openHome() } else { renderCurrent(preservingScroll: true) }
+        if case .empty = location { openInitialPage() } else { renderCurrent(preservingScroll: true) }
         refreshQuickSwitcher()
     }
 
@@ -509,6 +514,17 @@ final class AppModel {
         }
     }
 
+    /// Delete the clone and fetch it again. The clone is the app's own
+    /// artifact and CCwiki never writes into it, so nothing of the user's
+    /// is lost; the loaded index stays on screen until the new clone lands.
+    func resetClone() {
+        guard syncTask == nil else { return }
+        try? FileManager.default.removeItem(at: paths.clone)
+        headRevision = nil
+        headDate = nil
+        sync()
+    }
+
     private func appendSyncLine(_ line: ProcessLine) {
         if line.isProgress, !syncLog.isEmpty, syncLog[syncLog.count - 1].hasSuffix("%") {
             syncLog[syncLog.count - 1] = line.text
@@ -522,6 +538,17 @@ final class AppModel {
     }
 
     // MARK: Navigation
+
+    /// Cold start: the page from last time, if it still exists, else home.
+    /// Not under the screenshot harness, whose plan starts where it says.
+    private func openInitialPage() {
+        if ScreenshotRunner.directory == nil,
+           let last = CCwikiSettings.lastPage, index?.pages[last] != nil {
+            open(.page(path: last, anchor: nil))
+        } else {
+            openHome()
+        }
+    }
 
     func openHome() {
         guard let index else { return }
@@ -546,6 +573,7 @@ final class AppModel {
             }
             return
         }
+        if case .page(let path, _) = newLocation { CCwikiSettings.lastPage = path }
         reveal(newLocation)
         renderCurrent()
     }

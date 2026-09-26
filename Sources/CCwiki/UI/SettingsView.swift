@@ -199,6 +199,9 @@ struct SettingsView: View {
                 }
                 HStack {
                     Spacer()
+                    Button("Reset Clone…") { confirmResetClone() }
+                        .disabled(model.syncState.isRunning)
+                        .help("Delete the clone and download the wiki again")
                     Button("Sync Now") { model.sync() }
                         .disabled(model.syncState.isRunning)
                 }
@@ -229,6 +232,19 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func confirmResetClone() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete the clone and download the wiki again?"
+        alert.informativeText = "About 35 MB. Nothing of yours is in it — CCwiki never writes "
+            + "there — and job worktrees are not affected. Use this when a sync reports "
+            + "that the clone has diverged or an interrupted download left it broken."
+        alert.addButton(withTitle: "Reset and Download")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        model.resetClone()
     }
 
     private func pathRow(_ url: URL) -> some View {

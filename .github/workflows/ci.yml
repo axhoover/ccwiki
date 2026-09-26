@@ -42,3 +42,23 @@ jobs:
 
       - name: make check
         run: make check
+
+      # The other half of build.sh: the icon, the bundle, the universal
+      # binary, ad-hoc signing. Uploaded so a build of any commit can be
+      # tried without a toolchain. It is NOT a release: ad-hoc signed, so
+      # Gatekeeper refuses it on any Mac but one that strips the quarantine
+      # attribute — see plans/distribution.md for the real thing.
+      - name: make release
+        run: make release
+
+      - name: Package the app
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent build/CCwiki.app dist/CCwiki-dev.zip
+          shasum -a 256 dist/CCwiki-dev.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CCwiki-dev-${{ github.sha }}
+          path: dist/CCwiki-dev.zip
+          retention-days: 14
