@@ -50,7 +50,9 @@ struct ReferenceSearchView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if let citedBy = hit.citedBy {
-                    Label("Cited by \(citedBy)", systemImage: "arrow.turn.down.right")
+                    Label(
+                        hit.citedVia.map { "Cited for \($0), on \(citedBy)" } ?? "Cited by \(citedBy)",
+                        systemImage: "arrow.turn.down.right")
                         .foregroundStyle(.secondary)
                         .labelStyle(.titleAndIcon)
                 } else if hit.field == .text, !hit.snippet.isEmpty {

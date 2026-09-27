@@ -93,6 +93,21 @@ struct ReferenceRankerTests {
         #expect(Self.keys(ranker.rank("oded regev", textScores: [:])) == ["Reg05"])
         #expect(Self.keys(ranker.rank("Dottling", textScores: [:])) == ["DGI+19"])
         #expect(ranker.rank("goldreich micali", textScores: [:]).first?.field == .author)
+        #expect(ranker.rank("regev", textScores: [:]).first?.field == .firstAuthor)
+    }
+
+    @Test("the paper someone wrote first comes before one they co-wrote")
+    func firstAuthor() {
+        let gmr = Self.reference(
+            "GMR88", "A Digital Signature Scheme", authors: "Shafi Goldwasser, Silvio Micali, Ron Rivest",
+            year: "1988")
+        let bgw = Self.reference(
+            "BGW88", "Completeness Theorems", authors: "Michael Ben-Or, Shafi Goldwasser, Avi Wigderson",
+            year: "1988")
+        let ranker = ReferenceRanker(pages: [bgw, gmr], backlinks: [:])
+        let ranked = ranker.rank("goldwasser 1988", textScores: [:])
+        #expect(Self.keys(ranked) == ["GMR88", "BGW88"])
+        #expect(ranked.map(\.field) == [.firstAuthor, .author])
     }
 
     @Test("a year narrows, and alone lists the year")
@@ -120,6 +135,30 @@ struct ReferenceRankerTests {
         #expect(Self.keys(ranked) == ["GGM86"])
         #expect(ranked.first?.field == .citedBy)
         #expect(ranked.first?.citer?.title == "Pseudorandom function")
+    }
+
+    @Test("a paper cited by a reduction counts for the concept pages linking to it")
+    func citedThroughReduction() {
+        let kil = Self.reference(
+            "Kil88", "Founding Cryptography on Oblivious Transfer",
+            authors: "Joe Kilian", year: "1988")
+        let edge = WikiPage(
+            path: "Reductions/com-to-ot-kil88.md",
+            text: "---\ntitle: \"COM ⇒ OT\"\n---\n\nFrom [[Kil88]].\n")
+        let com = WikiPage(
+            path: "Primitives/commitment-scheme.md",
+            text: "---\ntitle: Commitment scheme\n---\n\nSee [[com-to-ot-kil88]].\n")
+        let ranker = ReferenceRanker(pages: [kil, edge, com], backlinks: [
+            kil.path: [WikiIndex.Backlink(sourcePath: edge.path, context: "")],
+            edge.path: [WikiIndex.Backlink(sourcePath: com.path, context: "")],
+        ])
+        #expect(ranker.entries.first?.citers.map(\.title) == ["COM ⇒ OT", "Commitment scheme"])
+
+        let ranked = ranker.rank("commitment", textScores: [:])
+        #expect(Self.keys(ranked) == ["Kil88"])
+        #expect(ranked.first?.field == .citedBy)
+        #expect(ranked.first?.citer?.title == "Commitment scheme")
+        #expect(ranked.first?.citer?.via == "COM ⇒ OT")
     }
 
     @Test("the text comes last, and only what it matched")

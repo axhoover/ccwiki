@@ -5,7 +5,7 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
-## 2026-09-27 — Search v2: measured, then ⌘S made a concept search
+## 2026-09-27 — Search v2: measured, ⌘S made a concept search, ⇧⌘R for papers
 
 On `claude/search-v2`, cut from the QoL branch. The maintainer's decisions
 and the design are in [plans/search-v2.md](plans/search-v2.md) §6.
@@ -29,6 +29,12 @@ reduction or a paper whose text repeats a concept's acronym. Section
 headings repeat as page templates ("Participates in" on 117 pages), so a
 heading only counts as a name when it is on fewer than three pages. The
 README's shortcut table said "⌘S (or ⌘S)"; fixed.
+
+**⇧⌘R, the references**, the same way: prototype and judgments first
+(every paper by key, by title, by first author and year), then
+`ReferenceRanker`: key → authors → title → all three → cited by a concept
+page → abstract, with a year as a filter. ⌘S and ⇧⌘R now share one
+`SearchPalette` view.
 
 ## 2026-09-27 — Welcome, What's New, and a round of quality of life
 

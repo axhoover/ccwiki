@@ -30,8 +30,10 @@ struct ReferenceHit: Identifiable, Sendable {
     let year: Int?
     let status: PageStatus
     let field: ReferenceRanker.Field
-    /// For a paper found through a page that cites it: that page's title.
+    /// For a paper found through a page that cites it: that page's title,
+    /// and the reduction or barrier it cites the paper through, if any.
     let citedBy: String?
+    let citedVia: String?
     /// The matching passage, marked as `SearchHit.snippet` is.
     let snippet: String
 
@@ -265,6 +267,7 @@ actor SearchIndex {
                 authors: entry.authors, venue: entry.venue, year: entry.year,
                 status: entry.status, field: ranked.field,
                 citedBy: ranked.citer?.title,
+                citedVia: ranked.citer?.via,
                 snippet: snippets[entry.path] ?? "")
         }
     }

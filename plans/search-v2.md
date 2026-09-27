@@ -217,7 +217,7 @@ re-read while writing this.
 2. **⌘S as concept search**: references out, tiered ranking, heading hits
    open at the heading, Porter stemming if the numbers say it helps.
    *Done; §6.4.*
-3. **⇧⌘R reference search.**
+3. **⇧⌘R reference search.** *Done; §6.5.*
 4. **⇧⌘F literal search.**
 5. Then "Did you mean …?" (option B), if the zero-result rate warrants it.
 
@@ -291,6 +291,44 @@ the one before left:
   BM25's order. That is a few hundred rows at most.
 - **The quick switcher is unchanged.** ⌘O is "I know the page"; ⌘S is now
   "which pages are about this".
+
+### 6.5 Step 3, built: ⇧⌘R reference search
+
+**The corpus** (2026-09-27): 202 references. Every one has `authors`,
+`venue`, `published` (a year, or a date) and its key as an alias; 158 have
+a `cryptobib_key`, 191 an `## Abstract`. 151 are linked from some other
+page's text, and the frontmatter `source:` links on reductions add none
+that the text does not already have, so the backlink map is the cited-by
+field.
+
+**The rules** (`Search/ReferenceRanker.swift`): key (the key, aliases,
+cryptobib key, or a prefix of one) → first author → any author (every
+query word a word of the name, accents folded) → title → authors, title and
+venue words together → cited by a page whose name matches → text. Within a
+field: the finer match, BM25, then the newer paper. A four-digit word from
+1900 to 2099 is a year filter, and a year alone lists that year.
+
+**Measured** (202 references): first by key 100%, first by title 100%; by
+first author's surname and year, 93.1% first and 100% in the top three
+before the first-author tier, every miss a co-authored paper of the same
+year ahead of the one the person wrote first. The corpus suite reports all
+three on every push.
+
+**What was decided along the way:**
+
+- **Cited-by goes through reductions.** Since the reductions migration a
+  concept page cites few papers itself; it links its reductions, which
+  cite the papers (the OT page → `COM ⇒ OT` → Kil88). So a paper cited by
+  a reduction or barrier also counts for the concept pages linking to it,
+  and the row says so: "Cited for COM ⇒ OT, on Commitment scheme". With
+  one hop, `oblivious transfer` found only the papers with it in the
+  title; with two, it also finds YZ16, GMW87 and Yao82 before any
+  abstract match. References never count as citers.
+- **No typo tolerance yet.** `Laszlo` does not find the wiki's `Lázló`
+  (a misspelling of László in the source); folding handles accents, not
+  spelling. That is step 5's "Did you mean", if the numbers ask for it.
+- **One palette view for both searches.** `SearchPalette` owns the field,
+  the list, the arrow keys and Return; ⌘S and ⇧⌘R supply their rows.
 
 ## References
 

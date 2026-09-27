@@ -7,14 +7,18 @@ import Foundation
 ///
 /// 1. **A citation key**: the page's key, its aliases, its cryptobib key.
 ///    `GGM86`, `STOC:AGGM06`, or the start of one.
-/// 2. **Authors**: every query word is a word of some author's name,
-///    accents folded, so `goldreich micali` finds the paper they wrote
-///    together and `Dottling` finds Döttling.
+/// 2. **Authors**: every query word is a word of the first author's name,
+///    then of any author's, accents folded. `goldwasser 1988` is GMR88
+///    before BGW88, `goldreich micali` finds the paper they wrote together,
+///    and `Dottling` finds Döttling.
 /// 3. **The paper's title**, whole or in part.
 /// 4. **Authors, title and venue together**: `goldreich random functions`.
-/// 5. **Cited by**: a concept page whose name matches cites the paper, so
+/// 5. **Cited by**: a page whose name matches cites the paper, so
 ///    `oblivious transfer` also finds the papers the OT page is built on,
-///    whatever their titles say.
+///    whatever their titles say. Since the reductions migration a concept
+///    page cites its papers mostly *through* its reductions (the OT page
+///    links `COM ⇒ OT`, which cites Kil88), so a reduction's or barrier's
+///    citation also counts for the concept pages linking to it.
 /// 6. **Text**, the abstract most of all, by BM25.
 ///
 /// A four-digit year in the query (`regev 2005`) is a filter, not a word.
@@ -22,7 +26,7 @@ import Foundation
 struct ReferenceRanker: Sendable {
 
     enum Field: Int, Comparable, Sendable {
-        case key, author, title, mixed, citedBy, text
+        case key, firstAuthor, author, title, mixed, citedBy, text
 
         static func < (lhs: Field, rhs: Field) -> Bool { lhs.rawValue < rhs.rawValue }
     }
@@ -42,6 +46,7 @@ struct ReferenceRanker: Sendable {
         let year: Int?
         let keys: [Name]
         let titleName: Name
+        let firstAuthorWords: Set<String>
         let authorWords: Set<String>
         let otherWords: Set<String>
         /// The concept pages that link here, with their names.
@@ -52,6 +57,9 @@ struct ReferenceRanker: Sendable {
         let path: String
         let title: String
         let names: [Name]
+        /// The reduction or barrier that cites the paper, when this page
+        /// links to it rather than to the paper; plain text, for display.
+        let via: String?
     }
 
     struct Ranked: Sendable {
@@ -69,8 +77,8 @@ struct ReferenceRanker: Sendable {
     static let empty = ReferenceRanker(pages: [], backlinks: [:])
 
     /// `backlinks` is `WikiIndex.backlinkMap()`: target path → the pages
-    /// linking to it. Only concept pages count as citers here; a reference
-    /// citing a reference says nothing about what the reader searched for.
+    /// linking to it. References never count as citers: a paper citing a
+    /// paper says nothing about what the reader searched for.
     init(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]]) {
         let byPath = Dictionary(pages.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         entries = pages.filter { $0.kind == .reference }.map { page in
@@ -78,15 +86,10 @@ struct ReferenceRanker: Sendable {
             let venue = page.frontmatter.string("venue")
             let keys = [page.title] + page.aliases + [page.frontmatter.string("cryptobib_key")]
                 .compactMap { $0 }
-            let citers = (backlinks[page.path] ?? []).compactMap { link -> Citer? in
-                guard let source = byPath[link.sourcePath], source.kind != .reference
-                else { return nil }
-                return Citer(
-                    path: source.path, title: source.title,
-                    names: ([source.title] + source.aliases).map(Name.init))
-            }
+            let citers = Self.citers(of: page.path, byPath: byPath, backlinks: backlinks)
             let titleName = Name(page.displayTitle)
-            let authorWords = Set(Self.authorNames(authors).flatMap { Name($0).words })
+            let authorNames = Self.authorNames(authors)
+            let authorWords = Set(authorNames.flatMap { Name($0).words })
             return Entry(
                 path: page.path,
                 key: page.title,
@@ -97,12 +100,46 @@ struct ReferenceRanker: Sendable {
                 year: Self.year(page.frontmatter.string("published")),
                 keys: keys.map(Name.init),
                 titleName: titleName,
+                firstAuthorWords: Set(authorNames.first.map { Name($0).words } ?? []),
                 authorWords: authorWords,
                 otherWords: authorWords
                     .union(titleName.words)
                     .union(Name(venue ?? "").words),
                 citers: citers)
         }
+    }
+
+    /// The pages citing `path`: every non-reference page linking to it, and
+    /// for each reduction or barrier among them, the concept pages linking
+    /// to that.
+    static func citers(
+        of path: String, byPath: [String: WikiPage], backlinks: [String: [WikiIndex.Backlink]]
+    ) -> [Citer] {
+        func isEdge(_ kind: PageKind) -> Bool { kind == .reduction || kind == .barrier }
+        func citer(_ page: WikiPage, via: WikiPage?) -> Citer {
+            Citer(
+                path: page.path, title: page.title,
+                names: ([page.title] + page.aliases).map(Name.init),
+                via: via.map { RelationText.plain($0.title) })
+        }
+
+        var result: [Citer] = []
+        var seen: Set<String> = []
+        for link in backlinks[path] ?? [] {
+            guard let source = byPath[link.sourcePath], source.kind != .reference,
+                  seen.insert(source.path).inserted
+            else { continue }
+            result.append(citer(source, via: nil))
+            guard isEdge(source.kind) else { continue }
+            for hop in backlinks[source.path] ?? [] {
+                guard let concept = byPath[hop.sourcePath],
+                      concept.kind != .reference, !isEdge(concept.kind),
+                      seen.insert(concept.path + "\u{0}" + source.path).inserted
+                else { continue }
+                result.append(citer(concept, via: source))
+            }
+        }
+        return result
     }
 
     /// `Alice, Bob, and Carol` or `Alice and Bob`: one name per author.
@@ -191,18 +228,22 @@ struct ReferenceRanker: Sendable {
         let keyMatch = entry.keys.compactMap { ConceptRanker.match(name, $0) }
             .filter { $0 <= .prefix }.min()
         if let keyMatch { return (.key, keyMatch, nil) }
+        if allWords(name.words, in: entry.firstAuthorWords) { return (.firstAuthor, .allWords, nil) }
         if allWords(name.words, in: entry.authorWords) { return (.author, .allWords, nil) }
         if let titleMatch = ConceptRanker.match(name, entry.titleName) {
             return (.title, titleMatch, nil)
         }
         if allWords(name.words, in: entry.otherWords) { return (.mixed, .allWords, nil) }
 
+        // The best-matching citer; a direct citation over one through a
+        // reduction when they match equally well.
         var best: (match: ConceptRanker.Match, citer: Citer)?
         for citer in entry.citers {
             for citerName in citer.names {
-                guard let match = ConceptRanker.match(name, citerName),
-                      best.map({ match < $0.match }) ?? true
-                else { continue }
+                guard let match = ConceptRanker.match(name, citerName) else { continue }
+                if let current = best,
+                   (match, citer.via == nil ? 0 : 1) >= (current.match, current.citer.via == nil ? 0 : 1)
+                { continue }
                 best = (match, citer)
             }
         }

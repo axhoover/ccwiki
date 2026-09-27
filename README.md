@@ -14,7 +14,8 @@ only canonical store; the app owns no content and never merges anything.
   suite and against all ~673 links in the live corpus.
 - **Find things.** ⌘O fuzzy quick-switcher over titles, aliases and paper
   titles; ⌘S concept search — names first, then headings, then text,
-  references left out — backed by SQLite FTS5.
+  references left out; ⇧⌘R reference search by key, author, title, year,
+  the pages that cite a paper, and its abstract. Backed by SQLite FTS5.
 - **Ingest papers.** Drop a PDF on the reader, or paste an ePrint, arXiv, DOI or
   ECCC link (⇧⌘N). CCwiki runs `claude` in a throwaway git worktree, streams
   the transcript into a jobs window (⇧⌘J), and ends at a **draft** PR — it never
@@ -127,6 +128,7 @@ a job that could not push.
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page / next / previous |
 | ⌘S | Search the wiki (⇧⌘F also works) |
+| ⇧⌘R | Search references: key, author, title, topic |
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
