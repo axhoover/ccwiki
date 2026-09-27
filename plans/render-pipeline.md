@@ -93,8 +93,12 @@ script (§5), so markup coming out of the wiki cannot execute.
 
 **Not** reproduced, deliberately: popovers, the SPA router, the graph view, and
 the site's clipboard buttons. The last of those is replaced by a native
-right-click, which is strictly better — CCwiki has the markdown source and can
-copy the original TeX without a DOM round trip.
+right-click (built 2026-09-27): every formula carries its source in
+`data-tex`, a capturing `contextmenu` listener reports what is under the
+pointer, and `ReaderWebView.willOpenMenu` adds **Copy TeX** when it was a
+formula. The report travels on the same WebKit connection as, and ahead of,
+the menu request, which is why it is there in time; if that ordering ever
+changes, the item simply does not appear.
 
 ## 4. Serving content: a custom scheme, not `file://`
 

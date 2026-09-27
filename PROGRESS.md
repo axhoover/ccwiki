@@ -5,6 +5,40 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — The first update arrived by the updater; what went into the next one
+
+**v0.1.1 installed itself.** The maintainer downloaded v0.1.0, ran Check for
+Updates…, and the app downloaded 0.1.1, verified its signature, replaced
+itself and relaunched. The one hitch was not the updater's: the copy they
+first opened was an old `make install` build, which also called itself
+0.1.0 because the `VERSION` file said so, and had no updater in it at all.
+
+**So local builds now say they are local.** Anything not built from an exact
+`vX.Y.Z` tag is stamped with the latest tag plus `-dev`, and About shows the
+build number under the version. A `-dev` build never checks on its own and
+is never replaced. The rule: *a build that is not a release must not be able
+to look like one.*
+
+**Then the reader and the jobs window**, in three batches, each through CI:
+
+- **⌘O remembers.** With nothing typed, the twelve most recent pages come
+  first under a Recent heading, the one on screen left out, so ⌘O then
+  Return goes back. First draft keyed the rows by index to place the
+  headings — the exact stale-rows bug in `PROBLEMS.md` — and was rewritten
+  to key by page and place the headings by id before it was pushed.
+- **Copy TeX** on a right-clicked formula, and Open Page on cryptology.city
+  and Copy Link to Page on every page's menu. See
+  [plans/render-pipeline.md](plans/render-pipeline.md) §3 for why the
+  formula under the pointer is known in time.
+- **Settings opens on Reading**; Tools became Ingestion and says reading
+  needs none of it. Install and Relaunch no longer asks twice.
+- **The transcript left the main actor**: file writes on a serial queue,
+  view updates batched to one per 100 ms and never later than that. Large
+  wiki assets are read off the main thread, with WebKit's `stop` honoured;
+  barrier pages stopped sweeping every barrier for every reduction.
+
+None of the UI has been looked at yet; the release is the visual gate now.
+
 ## 2026-09-27 — v0.1.0 shipped; ⌘S searches the wiki
 
 **v0.1.0 is the first release**, published by `release.yml` from the merged

@@ -335,7 +335,9 @@ final class ReaderWebView: WKWebView {
     }
 }
 
-/// A menu item that runs a closure, for menus built in code.
+/// A menu item that runs a closure, for menus built in code. Menus are
+/// main-thread objects, so the item and its action are main-actor isolated.
+@MainActor
 final class ClosureMenuItem: NSMenuItem {
     private let handler: @MainActor () -> Void
 
