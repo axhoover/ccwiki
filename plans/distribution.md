@@ -167,8 +167,38 @@ people on old versions; there is no evidence of that until there are users.
 
 ### Tier 2b: automatic updates with no Developer ID at all
 
-**Written 2026-09-26, after the question "do we really have to pay for
-this?"** The answer is no, with one honest limit.
+**Built 2026-09-27.** Written the day before, after the question "do we
+really have to pay for this?" The answer is no, with one honest limit.
+
+What exists: `scripts/release-sign.swift` (keygen, sign, verify; pure
+CryptoKit), `Sources/CCwiki/App/ReleaseKey.swift` (the embedded public key),
+`UpdateInstaller` (download, verify, unpack, check, swap, relaunch),
+`make package` and `make github-release`, and
+`.github/workflows/release.yml`, which does both on a `vX.Y.Z` tag.
+
+**The maintainer's one-time setup, on a Mac:**
+
+```sh
+make release-keys          # writes ~/.config/ccwiki/release-key (0600), embeds the
+                           # public key in ReleaseKey.swift — commit that change
+```
+
+Then either release from the laptop (`git tag v0.2.0 && make package &&
+make github-release`) or let the workflow do it: put the contents of
+`~/.config/ccwiki/release-key` in the repository secret
+`CCWIKI_RELEASE_KEY` and push the tag. Back the key file up somewhere
+private. Losing it does not break installed apps; it means the next release
+has to be installed by hand once, carrying a new public key.
+
+**What an installed app does.** Once a day it asks GitHub for the latest
+release. If there is a newer one with a signed zip attached, and "Install
+them automatically" is on (the default), it downloads the zip and its
+`.sig`, verifies the signature against the embedded key, unpacks with
+`ditto`, checks the bundle identifier, the version and the code signature,
+moves the running bundle aside, moves the new one in, and puts the old one
+in the Trash. It then says so in the status bar and waits: CCwiki > Relaunch
+to Update. It never relaunches on its own, never installs while a job is
+running, and never installs anything whose signature does not verify.
 
 Gatekeeper assesses only files carrying the quarantine attribute, which
 browsers add to what they download. A zip the app fetches itself with

@@ -5,6 +5,54 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — The app updates itself, and no Developer ID is involved
+
+**The question that changed the plan.** The distribution plan said a
+Developer ID was the price of admission. Asked whether it really was, the
+honest answer turned out to be: only for a frictionless *first*
+double-click. Gatekeeper assesses only files carrying the quarantine
+attribute, which browsers add and an app's own `URLSession` download does
+not (CCwiki does not opt in to `LSFileQuarantineEnabled`). A bundle the app
+fetches and unpacks itself is ad-hoc signed and unquarantined, and launches
+exactly like the one `make install` put there. So the first install costs
+one trip to Privacy & Security, and every update after it costs nothing.
+The maintainer chose that trade.
+
+**What stands in for Apple's signature** is an Ed25519 signature over the
+release zip, made with a key only the maintainer holds and checked against
+the public half built into the app (`ReleaseKey.swift`). CryptoKit does it
+with no dependency. TLS to github.com protects the transport; the signature
+protects against a compromised GitHub account, which a `.sha256` beside the
+zip never did. `make release-keys` makes the pair once and embeds the public
+key; it refuses to run twice, because replacing the key orphans every
+installed copy.
+
+**The installer's order is the safety argument.** Download both files to a
+temporary directory; verify before unpacking; unpack with `ditto`; check the
+bundle identifier, the version the release promised, and `codesign
+--verify --deep --strict`; only then move the running bundle aside, the new
+one in, and the old one to the Trash, undoing the first move if the second
+fails. Relaunch is a separate, user-initiated step
+(`NSWorkspace.OpenConfiguration.createsNewApplicationInstance`, then
+terminate). It never installs while a job is running.
+
+**Two release paths share one artifact.** `make package` (ad-hoc, universal,
+Ed25519-signed) and `make dist` (Developer ID, notarized, and now also
+Ed25519-signed) both produce `CCwiki-<v>-macos.zip` plus `.sha256` and
+`.sig`; `make github-release` uploads all three, and refuses without the
+`.sig`, since the app installs nothing without it. `release.yml` runs the
+package path on a tag push with the key as a repository secret.
+
+**Not verified here:** the download, unpack and swap need a real release
+and a real Mac. The signature check, the `.sig` format, bundle inspection
+and asset selection have unit tests. The first real release is the test of
+the rest, and the plan says to do it from the laptop once before trusting
+the workflow.
+
+**What surprised me.** `ReleaseInfo` needed to become partly mutable
+(`var archiveURL: URL? = nil`) to keep its memberwise initializer usable
+with and without assets; a `let` with a default is excluded from it.
+
 ## 2026-09-26 — Block A and most of Block B, verified by a new CI workflow
 
 The audit's fixes, in five batches on `claude/amazing-curie-swfkbd`. The

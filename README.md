@@ -34,7 +34,30 @@ CCwiki searches Homebrew's directories and `~/.local/bin` as well, and falls
 back to asking a login shell, so a normal Homebrew or npm install is found
 automatically.
 
-## Setup
+## Installing a release
+
+Download `CCwiki-<version>-macos.zip` from the
+[releases page](https://github.com/axhoover/ccwiki/releases), unzip it, and
+drag `CCwiki.app` to Applications. The app is not notarized (there is no
+Apple Developer ID behind it), so the **first** launch needs one extra step:
+open it, let macOS refuse, then go to System Settings → Privacy & Security
+and click **Open Anyway**. Once.
+
+Or, from Terminal, which skips that dialog because `curl` does not mark
+downloads for Gatekeeper:
+
+```sh
+curl -L -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip"
+ditto -x -k /tmp/CCwiki.zip /Applications
+```
+
+After that, CCwiki keeps itself current: once a day it checks for a newer
+release, verifies its Ed25519 signature against a key built into the app,
+installs it in place, and asks before relaunching. Settings → About has the
+switches. See [plans/distribution.md](plans/distribution.md) for how that
+works without a Developer ID.
+
+## Building from source
 
 ```sh
 git clone <this repo> ccwiki && cd ccwiki
@@ -115,7 +138,9 @@ make check         compile + unit tests — the gate after every change
 make run           build and launch
 make shots         drive the app and capture screenshots (the visual gate)
 make test-corpus   validate the resolver against the real cloned wiki
-make dist          signed + notarized release zip
+make release-keys  once: the Ed25519 key that signs releases
+make package       universal, ad-hoc-signed, Ed25519-signed release zip
+make dist          the same with a Developer ID + notarization
 make help          everything else
 ```
 
