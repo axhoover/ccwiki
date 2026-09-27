@@ -220,8 +220,10 @@ struct SettingsView: View {
                 HStack {
                     Spacer()
                     Button("Reset Clone…") { confirmResetClone() }
-                        .disabled(model.syncState.isRunning)
-                        .help("Delete the clone and download the wiki again")
+                        .disabled(model.syncState.isRunning || model.activeJobCount > 0)
+                        .help(model.activeJobCount > 0
+                            ? "Not while a job is running: its worktree belongs to the clone"
+                            : "Delete the clone and download the wiki again")
                     Button("Sync Now") { model.sync() }
                         .disabled(model.syncState.isRunning)
                 }
@@ -267,8 +269,9 @@ struct SettingsView: View {
         alert.alertStyle = .warning
         alert.messageText = "Delete the clone and download the wiki again?"
         alert.informativeText = "About 35 MB. Nothing of yours is in it — CCwiki never writes "
-            + "there — and job worktrees are not affected. Use this when a sync reports "
-            + "that the clone has diverged or an interrupted download left it broken."
+            + "there. Worktrees kept from earlier jobs stay on disk but are no longer "
+            + "tracked. Use this when a sync reports that the clone has diverged or an "
+            + "interrupted download left it broken."
         alert.addButton(withTitle: "Reset and Download")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }

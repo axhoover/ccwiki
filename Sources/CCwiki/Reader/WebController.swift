@@ -33,10 +33,10 @@ final class WebController: NSObject {
     @ObservationIgnored private var pendingRequest: RenderRequest?
     @ObservationIgnored private var loadedPath: String?
 
-    init(paths: AppPaths) {
+    init(paths: AppPaths, webRoot: URL? = nil) {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(
-            CCwikiSchemeHandler(bundleRoot: paths.webRoot, contentRoot: paths.content),
+            CCwikiSchemeHandler(bundleRoot: webRoot ?? paths.webRoot, contentRoot: paths.content),
             forURLScheme: CCwikiURL.scheme)
         // An offline reader has nothing worth persisting, and a non-persistent
         // store means nothing about the wiki lands in a WebKit cache directory.

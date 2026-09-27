@@ -241,19 +241,40 @@ struct IngestJobRunner {
             + "The worktree has been kept so you can see what it did."))
     }
 
-    /// The PR for the job's branch, if GitHub has one.
+    /// The PR *this job* opened, if GitHub has one: open, on the job's
+    /// branch, and created after the job started. A branch name is reused
+    /// once its earlier PR has merged and the branch is gone, and `gh pr
+    /// view <branch>` happily returns that merged PR; this does not.
     private func confirmedPullRequest(_ job: IngestJob) async -> URL? {
         guard let gh = tools.path(for: .gh) else { return nil }
         let result = await Subprocess.run(
             executable: gh,
-            arguments: ["pr", "view", job.branch, "--repo", AppPaths.repositorySlug,
-                        "--json", "url", "--jq", ".url"],
+            arguments: ["pr", "list", "--repo", AppPaths.repositorySlug,
+                        "--head", job.branch, "--state", "open",
+                        "--json", "url,createdAt",
+                        "--jq", #".[] | "\(.createdAt) \(.url)""#],
             currentDirectory: job.worktree,
             environment: tools.childEnvironment())
         guard result.succeeded else { return nil }
-        let text = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.hasPrefix("https://") else { return nil }
-        return URL(string: text)
+        let notBefore = (job.startedAt ?? job.submission.submittedAt).addingTimeInterval(-60)
+        return Self.pullRequest(createdAfter: notBefore, in: result.stdout)
+    }
+
+    /// `<ISO8601 createdAt> <url>` lines → the newest URL created after `date`.
+    nonisolated static func pullRequest(createdAfter date: Date, in listing: String) -> URL? {
+        let formatter = ISO8601DateFormatter()
+        var best: (Date, URL)?
+        for line in listing.components(separatedBy: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2,
+                  let created = formatter.date(from: parts[0]),
+                  created >= date,
+                  parts[1].hasPrefix("https://"),
+                  let url = URL(string: parts[1])
+            else { continue }
+            if best == nil || created > best!.0 { best = (created, url) }
+        }
+        return best?.1
     }
 
     /// `cleanUp`, from a task that has been cancelled.

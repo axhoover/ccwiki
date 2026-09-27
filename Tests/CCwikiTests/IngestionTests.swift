@@ -291,3 +291,26 @@ struct PromptCompositionTests {
         #expect(!tools.contains("Bash"), "an unscoped Bash grant defeats the point")
     }
 }
+
+/// The runner believes GitHub over the agent's prose — but only about a PR
+/// this job could have opened.
+struct PullRequestConfirmationTests {
+
+    @Test("only an open PR created after the job started counts, and the newest wins")
+    func createdAfter() throws {
+        let started = ISO8601DateFormatter().date(from: "2026-09-27T10:00:00Z")!
+        let listing = """
+            2026-09-20T09:00:00Z https://github.com/axhoover/cryptology.city/pull/36
+            2026-09-27T10:05:00Z https://github.com/axhoover/cryptology.city/pull/41
+            2026-09-27T10:02:00Z https://github.com/axhoover/cryptology.city/pull/40
+            garbage line
+            """
+        let url = IngestJobRunner.pullRequest(createdAfter: started, in: listing)
+        #expect(url?.absoluteString == "https://github.com/axhoover/cryptology.city/pull/41")
+        #expect(IngestJobRunner.pullRequest(createdAfter: started, in: "") == nil)
+        #expect(IngestJobRunner.pullRequest(
+            createdAfter: started,
+            in: "2026-09-20T09:00:00Z https://github.com/axhoover/cryptology.city/pull/36") == nil,
+            "a PR from an earlier job on the same branch name is not this job's")
+    }
+}

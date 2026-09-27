@@ -50,12 +50,7 @@ enum UpdateChecker {
 
     static func check(currentVersion: String, session: URLSession = .shared) async throws -> Outcome {
         guard let url = URL(string: endpoint) else { throw Failure.badURL }
-        var request = URLRequest(url: url, timeoutInterval: 15)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("CCwiki/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-
-        let (data, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await GitHubHTTP.get(url, timeout: 15, session: session)
         if status == 404 { return .noReleases }
         guard status == 200 else { throw Failure.badStatus(status) }
         guard let release = try parse(data) else { return .noReleases }

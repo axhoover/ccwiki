@@ -72,11 +72,7 @@ struct SnapshotService: Sendable {
     func remoteHead() async throws -> Head {
         guard let url = URL(string: "https://api.github.com/repos/\(repository)/branches/\(branch)")
         else { throw Failure.badURL }
-        var request = URLRequest(url: url, timeoutInterval: 20)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("CCwiki", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await GitHubHTTP.get(url, timeout: 20, session: session)
         guard status == 200 else { throw Failure.badStatus(status) }
         return try Self.head(from: data)
     }
@@ -179,17 +175,7 @@ struct SnapshotService: Sendable {
     private func download(sha: String, to destination: URL) async throws -> URL {
         guard let url = URL(string: "https://codeload.github.com/\(repository)/tar.gz/\(sha)")
         else { throw Failure.badURL }
-        var request = URLRequest(url: url, timeoutInterval: 300)
-        request.setValue("CCwiki", forHTTPHeaderField: "User-Agent")
-        let (temporary, response) = try await session.download(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
-            try? FileManager.default.removeItem(at: temporary)
-            throw Failure.badStatus(status)
-        }
-        try? FileManager.default.removeItem(at: destination)
-        try FileManager.default.moveItem(at: temporary, to: destination)
-        return destination
+        return try await GitHubHTTP.download(url, to: destination, timeout: 300, session: session)
     }
 
     /// GitHub's tarballs hold one directory, `<repo>-<sha>/`. That is the

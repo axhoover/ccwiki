@@ -18,6 +18,7 @@ import Foundation
 enum UpdateInstaller {
 
     enum Failure: LocalizedError, Equatable {
+        case installInProgress
         case keyNotConfigured
         case noArchive
         case noSignature
@@ -33,6 +34,8 @@ enum UpdateInstaller {
 
         var errorDescription: String? {
             switch self {
+            case .installInProgress:
+                "An update is already being installed. The status bar shows its progress."
             case .keyNotConfigured:
                 "This build has no release key, so it cannot verify a download. "
                     + "Install the update from the release page instead."
@@ -212,36 +215,25 @@ enum UpdateInstaller {
 
     private static func download(_ url: URL, to destination: URL,
                                  session: URLSession) async throws -> URL {
-        var request = URLRequest(url: url, timeoutInterval: 120)
-        request.setValue("CCwiki", forHTTPHeaderField: "User-Agent")
-        let (temporary, response): (URL, URLResponse)
         do {
-            (temporary, response) = try await session.download(for: request)
+            return try await GitHubHTTP.download(url, to: destination, timeout: 120, session: session)
         } catch {
             throw Failure.download(error.localizedDescription)
         }
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
-            try? FileManager.default.removeItem(at: temporary)
-            throw Failure.download("GitHub answered \(status) for \(url.lastPathComponent).")
-        }
-        try? FileManager.default.removeItem(at: destination)
-        try FileManager.default.moveItem(at: temporary, to: destination)
-        return destination
     }
 
     // MARK: Relaunch
 
-    /// Start the bundle at `url` as a new process, then quit this one. The
-    /// new instance is a different executable, so `NSWorkspace` needs to be
-    /// told not to just activate the running one.
+    /// Start the bundle at `url` as a new process. The new instance is a
+    /// different executable, so `NSWorkspace` needs to be told not to just
+    /// activate the running one. Throws if it did not start; the caller
+    /// quits this instance only on success, so a launch failure never
+    /// leaves the user with no app at all.
     @MainActor
-    static func relaunch(_ url: URL) {
+    static func relaunch(_ url: URL) async throws {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in
-            Task { @MainActor in NSApp.terminate(nil) }
-        }
+        _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
 }

@@ -227,6 +227,9 @@ enum Subprocess {
             do {
                 try process.run()
                 running.insert(process.processIdentifier)
+                // A child that already exited had its termination handler run
+                // before the insert; do not keep a pid that may be reused.
+                if !process.isRunning { running.remove(process.processIdentifier) }
             } catch {
                 outPipe.fileHandleForReading.readabilityHandler = nil
                 errPipe.fileHandleForReading.readabilityHandler = nil

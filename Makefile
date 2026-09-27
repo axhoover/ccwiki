@@ -230,7 +230,19 @@ clean:
 #   git tag v0.1.0 && make dist
 # ---------------------------------------------------------------------------
 
-dist: check-version clean release sign zip-notary notarize staple zip-release checksum sign-package verify-release verify-package
+# The steps run as sub-makes, in this order, so `make -j` cannot reorder
+# them: several have no file prerequisites of their own.
+dist: check-version clean
+	$(MAKE) release
+	$(MAKE) sign
+	$(MAKE) zip-notary
+	$(MAKE) notarize
+	$(MAKE) staple
+	$(MAKE) zip-release
+	$(MAKE) checksum
+	$(MAKE) sign-package
+	$(MAKE) verify-release
+	$(MAKE) verify-package
 	@echo "✓ release artifact ready: $(RELEASE_ZIP)"
 	@echo "  next: make github-release   (or upload $(RELEASE_ZIP) manually)"
 
@@ -258,7 +270,12 @@ release-keys:
 	sed -i '' "s|publicKeyBase64 = \"\"|publicKeyBase64 = \"$$key\"|" "$(RELEASE_KEY_SOURCE)"; \
 	echo "✓ embedded the public key in $(RELEASE_KEY_SOURCE) — commit it"
 
-package: check-version clean release zip-package checksum sign-package verify-package
+package: check-version clean
+	$(MAKE) release
+	$(MAKE) zip-package
+	$(MAKE) checksum
+	$(MAKE) sign-package
+	$(MAKE) verify-package
 	@echo "✓ package ready: $(RELEASE_ZIP), .sha256, .sig"
 	@echo "  next: make github-release"
 
@@ -315,7 +332,8 @@ notary-setup:
 	  $(if $(APPLE_ID),--apple-id "$(APPLE_ID)",)
 	@echo "✓ stored. 'make dist' / 'make notarize' will use profile '$(NOTARY_PROFILE)'."
 
-sign: release
+# Run via `make dist`, which sequences these; each assumes the step before it.
+sign:
 	@if [ -z "$(CERT_NAME)" ]; then echo "✗ CERT_NAME required (set TEAM_ID, or pass CERT_NAME=...)"; exit 1; fi
 	@echo "→ signing $(APP) as $(CERT_NAME)"
 	codesign --force --options runtime --timestamp \
@@ -323,13 +341,13 @@ sign: release
 	  --sign "$(CERT_NAME)" "$(APP)"
 	codesign --verify --strict --verbose=2 "$(APP)"
 
-zip-notary: sign
+zip-notary:
 	@mkdir -p "$(DIST_DIR)"
 	rm -f "$(NOTARY_ZIP)"
 	ditto -c -k --keepParent "$(APP)" "$(NOTARY_ZIP)"
 	@echo "✓ wrote $(NOTARY_ZIP)"
 
-notarize: zip-notary
+notarize:
 	@if [ -z "$(NOTARY_PROFILE)" ]; then \
 	  echo "✗ NOTARY_PROFILE is empty. Run 'make notary-setup' once first."; \
 	  exit 1; \
@@ -339,11 +357,11 @@ notarize: zip-notary
 	  --keychain-profile "$(NOTARY_PROFILE)" \
 	  --wait
 
-staple: notarize
+staple:
 	xcrun stapler staple "$(APP)"
 	xcrun stapler validate "$(APP)"
 
-zip-release: staple
+zip-release:
 	rm -f "$(RELEASE_ZIP)"
 	ditto -c -k --keepParent "$(APP)" "$(RELEASE_ZIP)"
 	@echo "✓ wrote $(RELEASE_ZIP)"
@@ -354,7 +372,7 @@ checksum:
 	cd "$(DIST_DIR)" && shasum -a 256 "$$(basename $(RELEASE_ZIP))" > "$$(basename $(RELEASE_ZIP)).sha256"
 	@echo "✓ wrote $(RELEASE_ZIP).sha256"
 
-verify-release: zip-release
+verify-release:
 	spctl --assess --type execute --verbose "$(APP)"
 	codesign --verify --deep --strict --verbose=2 "$(APP)"
 

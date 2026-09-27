@@ -227,7 +227,10 @@ final class AppModel {
     /// Whether this build can verify a download at all. See `ReleaseKey`.
     var canInstallUpdates: Bool { ReleaseKey.isConfigured }
     static let updateInterval: TimeInterval = 24 * 60 * 60
+    /// "X is available": replaced on every check.
     static let updateWarningPrefix = "Update: "
+    /// "X is installed, relaunch": survives checks; cleared by the relaunch.
+    static let updateInstalledPrefix = "Update installed: "
 
     var appVersion: String { Bundle.main.shortVersion }
 
@@ -274,7 +277,11 @@ final class AppModel {
         // the real one as soon as the clone lands.
         let macros = MacroTable.load(cloneRoot: paths.clone)
         self.macros = macros
-        self.webController = WebController(paths: paths)
+        // The render pipeline is served from a per-build copy in Caches, not
+        // from the bundle: the updater swaps the bundle under the running
+        // app, and a WebContent restart after that must not load the new
+        // release's JavaScript against this release's Swift.
+        self.webController = WebController(paths: paths, webRoot: paths.stagedWebRoot())
 
         try? paths.createDirectories()
         // Tools are looked for in `discoverTools()`, after the first frame:
@@ -568,7 +575,10 @@ final class AppModel {
     /// artifact and CCwiki never writes into it, so nothing of the user's
     /// is lost; the loaded index stays on screen until the new clone lands.
     func resetClone() {
-        guard syncTask == nil else { return }
+        // A job's worktree keeps its metadata inside the clone's `.git`, so
+        // deleting the clone under a running job breaks every git step it
+        // has left. Settings disables the button; this is the backstop.
+        guard syncTask == nil, activeJobCount == 0 else { return }
         try? FileManager.default.removeItem(at: paths.clone)
         headRevision = nil
         headDate = nil
@@ -1096,7 +1106,7 @@ final class AppModel {
     /// Download, verify, unpack, check and swap. `nil` on success, in which
     /// case `installedUpdate` is set and a relaunch is all that is left.
     private func installUpdate(_ release: ReleaseInfo) async -> Error? {
-        guard !isInstallingUpdate else { return nil }
+        guard !isInstallingUpdate else { return UpdateInstaller.Failure.installInProgress }
         isInstallingUpdate = true
         defer {
             isInstallingUpdate = false
@@ -1121,15 +1131,51 @@ final class AppModel {
         }
         installedUpdate = release
         availableUpdate = nil
-        warnings.removeAll { $0.hasPrefix(Self.updateWarningPrefix) }
-        warn(Self.updateWarningPrefix + "CCwiki \(release.version) is installed. "
+        warnings.removeAll {
+            $0.hasPrefix(Self.updateWarningPrefix) || $0.hasPrefix(Self.updateInstalledPrefix)
+        }
+        warn(Self.updateInstalledPrefix + "CCwiki \(release.version) is installed. "
             + "Choose CCwiki > Relaunch to Update when convenient.")
         return nil
     }
 
     /// Quit and start the bundle that is now at this app's path.
+    ///
+    /// Jobs first: the new instance must not be started until it is settled
+    /// that this one will quit, or "Don't Quit" would leave two copies of
+    /// the app on one clone and one search index. And the quit comes only
+    /// after the launch succeeded, so a bundle that will not start leaves
+    /// this window where it is.
     func relaunchToUpdate() {
-        UpdateInstaller.relaunch(Bundle.main.bundleURL)
+        Task { @MainActor in
+            let running = activeJobCount
+            if running > 0 {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = running == 1
+                    ? "Stop the running job and relaunch?"
+                    : "Stop \(running) running jobs and relaunch?"
+                alert.informativeText = "The agent will be stopped before it opens a pull "
+                    + "request. Its worktree and transcript are kept."
+                alert.addButton(withTitle: running == 1 ? "Stop Job and Relaunch" : "Stop Jobs and Relaunch")
+                alert.addButton(withTitle: "Don't Relaunch")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                cancelActiveJobs()
+            }
+            do {
+                try await UpdateInstaller.relaunch(Bundle.main.bundleURL)
+            } catch {
+                let alert = NSAlert()
+                alert.alertStyle = .critical
+                alert.messageText = "The new version could not be started."
+                alert.informativeText = "\(error.localizedDescription) This window keeps "
+                    + "running the version you have. The previous copy is in the Trash as "
+                    + "CCwiki.app.previous, should the new one turn out to be broken."
+                alert.runModal()
+                return
+            }
+            NSApp.terminate(nil)
+        }
     }
 
     /// The menu item and the Settings button. The person asked, so this one

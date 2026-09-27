@@ -65,6 +65,42 @@ struct AppPaths: Sendable {
                 .appending(path: "Resources/web")
     }
 
+    /// A copy of `webRoot` in Caches, one directory per build number.
+    ///
+    /// The updater replaces the bundle while the app runs; the process keeps
+    /// its mapped code, but anything read from disk afterwards — the shell,
+    /// `ccwiki.js`, KaTeX — would come from the *new* release. A reload
+    /// after a WebContent crash would then pair the new JavaScript with the
+    /// old Swift. Serving from a copy made at launch keeps them together.
+    /// Falls back to the bundle if the copy cannot be made.
+    func stagedWebRoot() -> URL {
+        let source = webRoot
+        let build = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "dev"
+        let root = cacheRoot.appending(path: "web")
+        let staged = root.appending(path: build)
+        let manager = FileManager.default
+        if manager.fileExists(
+            atPath: staged.appending(path: "index.html").path(percentEncoded: false)) {
+            return staged
+        }
+        do {
+            try manager.createDirectory(at: root, withIntermediateDirectories: true)
+            // Copies for other builds are just cache.
+            let stale = (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+            for entry in stale where entry.lastPathComponent != build {
+                try? manager.removeItem(at: entry)
+            }
+            let partial = root.appending(path: build + ".partial")
+            try? manager.removeItem(at: partial)
+            try manager.copyItem(at: source, to: partial)
+            try manager.moveItem(at: partial, to: staged)
+            return staged
+        } catch {
+            return source
+        }
+    }
+
     init(support: URL, cacheRoot: URL) {
         self.support = support
         self.cacheRoot = cacheRoot
