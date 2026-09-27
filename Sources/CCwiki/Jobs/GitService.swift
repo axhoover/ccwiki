@@ -177,6 +177,35 @@ struct GitService: Sendable {
         return result.succeeded ? result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
     }
 
+    /// The wiki pages a pull changed: `content/…/*.md` paths that differ
+    /// between two commits, relative to `content/`.
+    func changedPages(in clone: URL, from before: String, to after: String) async -> [String] {
+        let result = await run([
+            "-C", clone.path(percentEncoded: false),
+            "diff", "--name-only", before, after, "--", "content",
+        ])
+        guard result.succeeded else { return [] }
+        return Self.pagePaths(fromDiff: result.stdout)
+    }
+
+    /// `git diff --name-only` output → the `.md` pages under `content/`.
+    static func pagePaths(fromDiff output: String) -> [String] {
+        output.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("content/") && $0.hasSuffix(".md") }
+            .map { String($0.dropFirst("content/".count)) }
+    }
+
+    /// "Wiki updated: 4 pages changed." — what a reader wants to know about a
+    /// pull, in place of two commit hashes.
+    static func updateSummary(changedPages count: Int) -> String {
+        switch count {
+        case 0: "Wiki updated."
+        case 1: "Wiki updated: 1 page changed."
+        default: "Wiki updated: \(count) pages changed."
+        }
+    }
+
     /// When the checked-out commit was made — "the wiki as of", for the
     /// status bar, which is more use to a reader than a hash.
     func headDate(in clone: URL) async -> Date? {

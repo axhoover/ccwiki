@@ -48,6 +48,24 @@ struct SyncOutcomeTests {
         }
     }
 
+    @Test("a pull is summarized by the wiki pages it changed")
+    func updateSummary() {
+        let diff = """
+            content/Primitives/prf.md
+            content/Files/logo.png
+            quartz.config.ts
+            content/References/AGGM06 - On basing one-way functions on NP-hardness.md
+
+            """
+        #expect(GitService.pagePaths(fromDiff: diff) == [
+            "Primitives/prf.md",
+            "References/AGGM06 - On basing one-way functions on NP-hardness.md",
+        ])
+        #expect(GitService.updateSummary(changedPages: 0) == "Wiki updated.")
+        #expect(GitService.updateSummary(changedPages: 1) == "Wiki updated: 1 page changed.")
+        #expect(GitService.updateSummary(changedPages: 4) == "Wiki updated: 4 pages changed.")
+    }
+
     @Test("only offline reports itself as offline")
     func offlineState() {
         #expect(AppModel.SyncState.failed("Offline — reading from the last pull.").isOffline)

@@ -499,11 +499,8 @@ final class AppModel {
             headRevision = marker.sha
             headDate = marker.commitDate
         }
-        if let git {
-            if let gh = tools.path(for: .gh) {
-                await git.configureCredentialHelper(clone: paths.clone, ghPath: gh)
-            }
-        }
+        // The push credential helper is configured by `refreshPushCapability`
+        // below; doing it here as well cost a second git call per load.
 
         let pages = loaded.0.allPages
         let searchIndex = self.searchIndex
@@ -596,7 +593,17 @@ final class AppModel {
             default:
                 syncState = .running("Indexing…")
                 await loadLibrary()
-                syncState = .succeeded(outcome.summary)
+                var summary = outcome.summary
+                if case .updated(let before, let after) = outcome {
+                    if let git, paths.wikiStore == .git {
+                        let changed = await git.changedPages(in: paths.clone, from: before, to: after)
+                        summary = GitService.updateSummary(changedPages: changed.count)
+                    } else {
+                        // A snapshot has no history to compare.
+                        summary = GitService.updateSummary(changedPages: 0)
+                    }
+                }
+                syncState = .succeeded(summary)
                 warnings.removeAll { $0.contains("Fast-forward failed") }
                 scheduleStatusReset()
             }
