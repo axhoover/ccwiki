@@ -298,7 +298,18 @@ struct SettingsView: View {
     private var aboutTab: some View {
         Form {
             Section("CCwiki") {
-                LabeledContent("Version", value: Bundle.main.shortVersion)
+                LabeledContent("Version") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(Bundle.main.shortVersion)
+                            .textSelection(.enabled)
+                        Text(UpdateChecker.isDevelopmentVersion(Bundle.main.shortVersion)
+                            ? "Local build \(Bundle.main.buildNumber) — not a release"
+                            : "Build \(Bundle.main.buildNumber)")
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
                 LabeledContent("Wiki", value: "axhoover/cryptology.city")
             }
             Section {
@@ -399,6 +410,12 @@ extension SettingsView {
 }
 
 extension Bundle {
+    /// `CFBundleVersion`: `build.sh` stamps the build time, `yyyyMMddHHmm`,
+    /// which is what tells two builds of one version apart.
+    var buildNumber: String {
+        (object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "?"
+    }
+
     var shortVersion: String {
         (object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
     }

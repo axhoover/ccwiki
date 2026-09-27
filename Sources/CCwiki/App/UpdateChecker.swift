@@ -123,9 +123,12 @@ enum UpdateChecker {
         return false
     }
 
-    /// `build.sh` stamps `0.0.0` on anything that is not a tagged release.
-    /// There is nothing to compare such a build against.
+    /// A build that is not a tagged release: the Makefile stamps `-dev` on
+    /// those, and `build.sh` run by hand stamps `0.0.0`. Such a build never
+    /// checks on its own and is never replaced by the updater: it is
+    /// somebody's work in progress, and a release is not newer than it in
+    /// any sense that matters.
     static func isDevelopmentVersion(_ version: String) -> Bool {
-        components(version).allSatisfy { $0 == 0 }
+        version.lowercased().contains("-dev") || components(version).allSatisfy { $0 == 0 }
     }
 }

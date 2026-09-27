@@ -1186,10 +1186,16 @@ final class AppModel {
             let version = appVersion
 
             if UpdateChecker.isDevelopmentVersion(version) {
-                alert.messageText = "This is a development build."
-                alert.informativeText = "Version \(version) was not made by make dist, so there "
-                    + "is no release to compare it against."
-                alert.runModal()
+                alert.messageText = "This is a local build."
+                alert.informativeText = "Version \(version) was built from source rather than "
+                    + "downloaded as a release, so CCwiki does not replace it. The latest "
+                    + "release is always on the releases page."
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Open Releases Page")
+                if alert.runModal() == .alertSecondButtonReturn,
+                   let url = URL(string: UpdateChecker.releasesPage) {
+                    NSWorkspace.shared.open(url)
+                }
                 return
             }
 
@@ -1247,7 +1253,9 @@ final class AppModel {
                             NSWorkspace.shared.open(release.url)
                         }
                     } else {
-                        offerRelaunch(for: release)
+                        // The button said "and Relaunch": no second question.
+                        // `relaunchToUpdate` still asks about running jobs.
+                        relaunchToUpdate()
                     }
                 } else if (installable && choice == .alertSecondButtonReturn)
                     || (!installable && choice == .alertFirstButtonReturn) {

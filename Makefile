@@ -32,11 +32,17 @@ ENTITLEMENTS  := CCwiki/CCwiki.entitlements
 # ---------------------------------------------------------------------------
 # Version is resolved in this order:
 #   1. VERSION=... on the command line (one-off testing, no tag needed).
-#   2. An exact `vX.Y.Z` git tag at HEAD (the canonical `make dist` path).
-#   3. The VERSION file at the repo root (preview the pipeline pre-tag).
-GIT_TAG_VERSION := $(shell git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
-FILE_VERSION    := $(shell test -f VERSION && sed -n '1p' VERSION | tr -d '[:space:]')
-VERSION         ?= $(or $(GIT_TAG_VERSION),$(FILE_VERSION))
+#   2. An exact `vX.Y.Z` git tag at HEAD: a release. `make package` and
+#      `make dist` insist on this.
+#   3. Anything else is a local build and says so: the most recent tag (or
+#      the VERSION file, without one) plus `-dev`. A local build used to
+#      carry the bare VERSION, and so looked exactly like a release: one
+#      was mistaken for 0.1.0 while the real 0.1.0 sat unopened.
+GIT_TAG_VERSION  := $(shell git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
+LAST_TAG_VERSION := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
+FILE_VERSION     := $(shell test -f VERSION && sed -n '1p' VERSION | tr -d '[:space:]')
+DEV_VERSION      := $(or $(LAST_TAG_VERSION),$(FILE_VERSION))-dev
+VERSION          ?= $(or $(GIT_TAG_VERSION),$(DEV_VERSION))
 
 DIST_DIR      := dist
 NOTARY_ZIP    := $(DIST_DIR)/$(APP_NAME)-$(VERSION)-notary.zip
@@ -184,6 +190,7 @@ test-corpus: deps
 print-version:
 	@echo "VERSION=$(VERSION)"
 	@echo "  git tag at HEAD: $(if $(GIT_TAG_VERSION),$(GIT_TAG_VERSION),(none))"
+	@echo "  latest tag:      $(if $(LAST_TAG_VERSION),$(LAST_TAG_VERSION),(none))"
 	@echo "  VERSION file:    $(if $(FILE_VERSION),$(FILE_VERSION),(missing))"
 
 # ---------------------------------------------------------------------------
