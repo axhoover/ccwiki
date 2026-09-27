@@ -41,6 +41,11 @@ reductions since the migration, so cited-by needed a second hop.
 grep's job is the exact string, TeX included. Smart case, page order,
 three lines per page. The old hidden ⇧⌘F alias for ⌘S is gone.
 
+**Then "Did you mean", because the numbers asked.** A generated one-typo
+set returned nothing 99.4% of the time. Correcting unknown words to the
+nearest word of any name (Meilisearch's budgets: one edit from five
+letters, two from nine) finds the page first 87.6% of the time.
+
 ## 2026-09-27 — Welcome, What's New, and a round of quality of life
 
 No release today, by choice: everything below accumulates in `CHANGELOG.md`

@@ -9,6 +9,8 @@ struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == Strin
     let systemImage: String
     let items: [Item]
     let error: String?
+    /// A line above the results, such as the correction they are for.
+    var note: String? = nil
     /// Shown before anything is typed.
     let emptyTitle: String
     let emptyDescription: String
@@ -94,6 +96,14 @@ struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == Strin
         } else if items.isEmpty {
             ContentUnavailableView.search(text: query)
         } else {
+            if let note {
+                Label(note, systemImage: "wand.and.stars")
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.large)
+                    .padding(.top, Theme.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {

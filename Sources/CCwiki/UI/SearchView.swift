@@ -19,11 +19,14 @@ struct SearchView: View {
             systemImage: "text.magnifyingglass",
             items: model.searchResults,
             error: model.searchError,
+            note: model.searchCorrection.map {
+                "Nothing matches “\(model.searchQuery)”. Showing results for “\($0)”."
+            },
             emptyTitle: "Search the Wiki",
             emptyDescription: "Names and aliases first, then headings, then text. "
                 + "Primitives and assumptions lead. Papers have their own search, ⇧⌘R.",
             countLabel: { "\($0) page\($0 == 1 ? "" : "s")" },
-            open: { model.openSearchResult($0, query: model.searchQuery) }
+            open: { model.openSearchResult($0, query: model.searchCorrection ?? model.searchQuery) }
         ) { hit in
             resultRow(hit)
         }

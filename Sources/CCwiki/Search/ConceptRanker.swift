@@ -119,6 +119,9 @@ struct ConceptRanker: Sendable {
     }
 
     let entries: [Entry]
+    /// Every word of every name and section name, with the number of times it
+    /// occurs: what a misspelled word is corrected to.
+    let vocabulary: [String: Int]
 
     /// A heading on this many pages or more is the page template, not a name:
     /// "Participates in" is on 117 pages, "Statement" on nearly every
@@ -136,12 +139,20 @@ struct ConceptRanker: Sendable {
         for list in headings {
             for folded in Set(list.map(\.name.folded)) { pageCounts[folded, default: 0] += 1 }
         }
-        entries = zip(pages, headings).map { page, list in
+        let entries = zip(pages, headings).map { page, list in
             Entry(page: page, headings: list.filter {
                 !$0.name.folded.isEmpty
                     && pageCounts[$0.name.folded, default: 0] < Self.structuralHeadingPages
             })
         }
+        var vocabulary: [String: Int] = [:]
+        for entry in entries {
+            for name in entry.names + entry.headings.map(\.name) {
+                for word in name.words { vocabulary[word, default: 0] += 1 }
+            }
+        }
+        self.entries = entries
+        self.vocabulary = vocabulary
     }
 
     static let empty = ConceptRanker(pages: [])
@@ -211,6 +222,75 @@ struct ConceptRanker: Sendable {
             return a.entry.path < b.entry.path
         }
         return Array(ranked.prefix(limit))
+    }
+
+    // MARK: Did you mean
+
+    /// How many typos a word may have and still be corrected, as Meilisearch
+    /// allows: none below five letters, where one edit makes another real
+    /// word (`SIS`, `SIVP`, `LPN`); one up to eight; two from nine.
+    static func typoBudget(_ word: String) -> Int {
+        word.count < 5 ? 0 : word.count < 9 ? 1 : 2
+    }
+
+    /// The query, folded, with each word that no name or section name
+    /// contains replaced by the nearest one that does; nil when there is
+    /// nothing to correct. The last word is left alone while it is still the
+    /// start of a known word, since it is probably being typed.
+    func correction(for query: String) -> String? {
+        let words = Self.fold(query).split(separator: " ").map(String.init)
+        var changed = false
+        let corrected = words.enumerated().map { index, word -> String in
+            let budget = Self.typoBudget(word)
+            guard budget > 0, vocabulary[word] == nil else { return word }
+            if index == words.count - 1, vocabulary.keys.contains(where: { $0.hasPrefix(word) }) {
+                return word
+            }
+            // Nearest first, then the more common word, then alphabetical so
+            // the answer does not depend on dictionary order.
+            var best: (distance: Int, count: Int, word: String)?
+            for (candidate, count) in vocabulary
+            where abs(candidate.count - word.count) <= budget {
+                guard let distance = Self.editDistance(word, candidate, limit: budget),
+                      best.map({ (distance, -count, candidate) < ($0.distance, -$0.count, $0.word) })
+                        ?? true
+                else { continue }
+                best = (distance, count, candidate)
+            }
+            guard let best else { return word }
+            changed = true
+            return best.word
+        }
+        return changed ? corrected.joined(separator: " ") : nil
+    }
+
+    /// Optimal string alignment distance: insertions, deletions,
+    /// substitutions, and swaps of two adjacent letters, each one edit. Nil
+    /// when it is more than `limit`.
+    static func editDistance(_ a: String, _ b: String, limit: Int) -> Int? {
+        let a = Array(a), b = Array(b)
+        guard abs(a.count - b.count) <= limit else { return nil }
+        guard !a.isEmpty, !b.isEmpty else {
+            let distance = max(a.count, b.count)
+            return distance <= limit ? distance : nil
+        }
+        var twoBack = [Int](repeating: 0, count: b.count + 1)
+        var previous = Array(0...b.count)
+        var current = [Int](repeating: 0, count: b.count + 1)
+        for i in 1...a.count {
+            current[0] = i
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                var value = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+                if i > 1, j > 1, a[i - 1] == b[j - 2], a[i - 2] == b[j - 1] {
+                    value = min(value, twoBack[j - 2] + 1)
+                }
+                current[j] = value
+            }
+            (twoBack, previous, current) = (previous, current, twoBack)
+        }
+        let distance = previous[b.count]
+        return distance <= limit ? distance : nil
     }
 
     /// How well `query` matches `name`, or nil.

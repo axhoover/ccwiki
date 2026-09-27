@@ -20,6 +20,13 @@ struct SearchHit: Identifiable, Sendable {
     var id: String { path }
 }
 
+/// What ⌘S found, and the corrected query it found it for when nothing
+/// matched the query as typed.
+struct ConceptResults: Sendable {
+    var hits: [SearchHit]
+    var correction: String?
+}
+
 /// One ⇧⌘R hit: a paper, and why it matched.
 struct ReferenceHit: Identifiable, Sendable {
     let path: String
@@ -238,7 +245,20 @@ actor SearchIndex {
     /// few: the ranker's first rules outrank BM25, so the page that belongs
     /// first can sit anywhere in BM25's order. That is at most a few hundred
     /// rows.
-    func conceptSearch(_ query: String, limit: Int = 60) throws -> [SearchHit] {
+    ///
+    /// When nothing matches as typed, each word no name contains is corrected
+    /// to the nearest one that does, and the search runs again: a one-letter
+    /// typo otherwise returned nothing 99% of the time (plans/search-v2.md
+    /// §6.7).
+    func conceptSearch(_ query: String, limit: Int = 60) throws -> ConceptResults {
+        let hits = try conceptHits(query, limit: limit)
+        guard hits.isEmpty, let corrected = ranker.correction(for: query) else {
+            return ConceptResults(hits: hits, correction: nil)
+        }
+        return ConceptResults(hits: try conceptHits(corrected, limit: limit), correction: corrected)
+    }
+
+    private func conceptHits(_ query: String, limit: Int) throws -> [SearchHit] {
         let (scores, snippets) = try textMatches(query, kindClause: "d.kind != 'reference'")
 
         return ranker.rank(query, textScores: scores, limit: limit).map { ranked in

@@ -163,7 +163,7 @@ struct SearchRelevanceTests {
         print(baseline.summary)
 
         let report = try await Self.evaluate("⌘S navigational", judgments) { query in
-            try await searchIndex.conceptSearch(query).map(\.path)
+            try await searchIndex.conceptSearch(query).hits.map(\.path)
         }
         print(report)
 
@@ -187,7 +187,7 @@ struct SearchRelevanceTests {
         #expect(judgments.count > 50, "expected most of the manifest's variants")
 
         let report = try await Self.evaluate("⌘S sections", judgments) { query in
-            try await searchIndex.conceptSearch(query).map { hit in
+            try await searchIndex.conceptSearch(query).hits.map { hit in
                 hit.anchor.map { "\(hit.path)#\($0)" } ?? hit.path
             }
         }
@@ -250,5 +250,41 @@ struct SearchRelevanceTests {
         #expect(byKey.successAt(1) >= 0.95, "\(byKey)")
         #expect(byTitle.successAt(1) >= 0.9, "\(byTitle)")
         #expect(byAuthorYear.successAt(3) >= 0.9, "\(byAuthorYear)")
+    }
+
+    /// Every navigational query with one typo: the middle letter of its
+    /// longest word, when that word has six letters or more, deleted.
+    /// Deterministic, so the number moves only when search or the wiki does.
+    static func typoJudgments(_ index: WikiIndex) -> [Judgment] {
+        navigationalJudgments(index).compactMap { judgment in
+            var words = judgment.query.split(separator: " ").map(String.init)
+            guard let longest = words.indices.max(by: { words[$0].count < words[$1].count }),
+                  words[longest].count >= 6
+            else { return nil }
+            var letters = Array(words[longest])
+            letters.remove(at: letters.count / 2)
+            words[longest] = String(letters)
+            return Judgment(query: words.joined(separator: " "), expected: judgment.expected)
+        }
+    }
+
+    @Test("⌘S with a typo: the correction still finds the page")
+    func typos() async throws {
+        guard let contentRoot = CorpusTests.contentRoot else { return }
+        let index = WikiIndex.build(contentRoot: contentRoot)
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-relevance-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let searchIndex = try await Self.buildIndex(index, in: directory)
+
+        let judgments = Self.typoJudgments(index)
+        #expect(judgments.count > 100)
+        let report = try await Self.evaluate("⌘S one typo", judgments) { query in
+            try await searchIndex.conceptSearch(query).hits.map(\.path)
+        }
+        print(report)
+        // Without correction this was 0% (99% returned nothing); the Python
+        // replica measured 87.6% with it. See plans/search-v2.md §6.7.
+        #expect(report.successAt(1) >= 0.75, "\(report)")
     }
 }

@@ -204,6 +204,9 @@ final class AppModel {
         didSet { scheduleSearch() }
     }
     private(set) var searchResults: [SearchHit] = []
+    /// Set when nothing matched as typed and the results are for this
+    /// corrected query instead.
+    private(set) var searchCorrection: String?
     private(set) var searchError: String?
     private var searchTask: Task<Void, Never>?
 
@@ -1023,6 +1026,7 @@ final class AppModel {
         let query = searchQuery
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             searchResults = []
+            searchCorrection = nil
             searchError = nil
             return
         }
@@ -1032,12 +1036,14 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled, let self else { return }
             do {
-                let hits = try await searchIndex.conceptSearch(query)
+                let results = try await searchIndex.conceptSearch(query)
                 guard !Task.isCancelled else { return }
-                searchResults = hits
+                searchResults = results.hits
+                searchCorrection = results.correction
                 searchError = nil
             } catch {
                 searchResults = []
+                searchCorrection = nil
                 searchError = error.localizedDescription
             }
         }

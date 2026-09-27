@@ -220,6 +220,7 @@ re-read while writing this.
 3. **⇧⌘R reference search.** *Done; §6.5.*
 4. **⇧⌘F literal search.** *Done; §6.6.*
 5. Then "Did you mean …?" (option B), if the zero-result rate warrants it.
+   *It did; done for ⌘S, §6.7.*
 
 ### 6.3 The test set, generated from the wiki
 
@@ -350,6 +351,30 @@ load; a query is one pass of `range(of:)` over them, off the main actor.
 - **⇧⌘F moved.** It was a hidden alias for ⌘S, kept for muscle memory
   after 0.1.1; it is now Find in All Pages…, beside Find in the Edit menu,
   where Xcode keeps Find in Project.
+
+### 6.7 Step 5, built: typo correction for ⌘S
+
+**Measured first.** The navigational set has no typos, so a typo set was
+generated from it: each query with the middle letter of its longest word
+deleted (words of six letters or more; 178 queries). ⌘S found the page
+first **0%** of the time and returned nothing **99.4%** of the time. With
+correction, in the Python replica: **87.6%** first. CI reports it on every
+push; the floor is 75%.
+
+**How** (`ConceptRanker.correction`), after Meilisearch's typo tolerance:
+only when nothing matches as typed, each query word that no name or section
+name contains is replaced by the nearest word that one does, within one
+edit for five to eight letters and two from nine (optimal string alignment,
+so a swap of neighbours is one edit); ties go to the more common word. Words
+under five letters are never corrected, since one edit turns one acronym
+into another (`SIS`, `SIVP`, `LPN`). The last word is left alone while it
+is still the start of a known word, because it is probably being typed. The
+sheet says what happened: "Nothing matches “pseudorandm”. Showing results
+for “pseudorandom”."
+
+**What it does not do:** join or split words (`DiffieHellman`), correct
+short acronyms, or correct ⇧⌘R, where `Laszlo` still misses the wiki's
+misspelled `Lázló`. Each would need its own measurement first.
 
 ## References
 

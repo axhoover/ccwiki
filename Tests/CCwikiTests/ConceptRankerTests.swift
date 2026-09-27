@@ -149,4 +149,34 @@ struct ConceptRankerTests {
         #expect(ConceptRanker.fold("  --  ") == "")
         #expect(ConceptRanker.collapse("  Ring   LWE ") == "ring lwe")
     }
+
+    @Test("edit distance counts a swap of neighbours as one edit")
+    func editDistance() {
+        #expect(ConceptRanker.editDistance("function", "function", limit: 1) == 0)
+        #expect(ConceptRanker.editDistance("fucntion", "function", limit: 1) == 1)
+        #expect(ConceptRanker.editDistance("functon", "function", limit: 1) == 1)
+        #expect(ConceptRanker.editDistance("functiion", "function", limit: 1) == 1)
+        #expect(ConceptRanker.editDistance("fnuctoin", "function", limit: 1) == nil)
+        #expect(ConceptRanker.editDistance("fnuctoin", "function", limit: 2) == 2)
+        #expect(ConceptRanker.editDistance("", "abc", limit: 3) == 3)
+    }
+
+    @Test("a misspelled word is corrected to the nearest word a name contains")
+    func correction() {
+        let ranker = ConceptRanker(pages: [
+            Self.page("Primitives/prf.md", title: "Pseudorandom function", aliases: ["PRF"]),
+            Self.page("Assumptions/lwe.md", title: "Learning with errors",
+                      body: "## Ring-LWE\n\ntext\n"),
+        ])
+        #expect(ranker.correction(for: "pseudorandm function") == "pseudorandom function")
+        #expect(ranker.correction(for: "Lerning with erors") == "learning with errors")
+        // From a section name too.
+        #expect(ranker.correction(for: "rnig lwe") == nil, "four letters: too short to correct")
+        #expect(ranker.correction(for: "learning with erorrs") == "learning with errors")
+        // Nothing to correct, or nothing near enough.
+        #expect(ranker.correction(for: "pseudorandom function") == nil)
+        #expect(ranker.correction(for: "zzzzzzzz") == nil)
+        // The last word is left alone while it could still be being typed.
+        #expect(ranker.correction(for: "pseudoran") == nil)
+    }
 }
