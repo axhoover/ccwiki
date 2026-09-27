@@ -48,7 +48,10 @@ struct ConceptRankerTests {
         #expect(match("vigenere", "Vigenère cipher") == .prefix)
         #expect(match("one-wa", "One-way function") == .prefix)
         #expect(match("function one", "One-way function") == .allWords)
-        #expect(match("commitments", "Commitment scheme") == .allWords)
+        #expect(match("signatures", "Digital signature") == .allWords)
+        // Read without its word break, "Commitment scheme" starts with
+        // `commitments`: the same page, one tier higher.
+        #expect(match("commitments", "Commitment scheme") == .prefix)
         #expect(match("hashes", "Hash function") == .allWords)
         #expect(match("lattice", "Learning with errors") == nil)
         // Joined, split or hyphenated: one spelling.
