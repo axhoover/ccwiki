@@ -5,7 +5,7 @@ Two different problems, two different mechanisms, deliberately not merged:
 - **⌘O, the quick switcher** — "I know the page, get me there in four
   keystrokes." Fuzzy subsequence matching over titles, aliases and reference
   paper titles. No tokenizer will rank `pseudorandom-function` first for `prf`.
-- **⇧⌘F, full-text search** — "which pages mention this." SQLite FTS5 over the
+- **⌘S, full-text search** — "which pages mention this." SQLite FTS5 over the
   whole corpus, with the matching passage in the result.
 
 ---
