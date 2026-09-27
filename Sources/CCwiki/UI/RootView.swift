@@ -69,6 +69,21 @@ struct RootView: View {
         .onChange(of: model.jobsWindowRequests) { _, _ in
             openWindow(id: CCwikiApp.jobsWindowID)
         }
+        // Two kinds of URL reach the app from outside: a PDF handed to it by
+        // Finder or the Dock (Info.plist declares the type), and a
+        // ccwiki:// link from anywhere (Info.plist declares the scheme).
+        .onOpenURL { url in
+            if url.isFileURL {
+                guard url.pathExtension.lowercased() == "pdf",
+                      let staged = try? model.stagePDF(from: url)
+                else { return }
+                model.pendingDroppedPDF = staged
+                model.ingestSheetPresented = true
+                openWindow(id: CCwikiApp.jobsWindowID)
+            } else if let destination = CCwikiURL.destination(of: url.absoluteString) {
+                model.navigate(to: destination)
+            }
+        }
         .onChange(of: model.settingsRequests) { _, _ in
             openSettings()
         }

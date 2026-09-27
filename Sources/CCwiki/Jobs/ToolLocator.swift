@@ -22,9 +22,6 @@ struct ToolLocator: Sendable {
             case .node: "running the wiki's lint script"
             }
         }
-
-        /// Whether the reader — as opposed to ingestion — needs it.
-        var requiredForReading: Bool { self == .git }
     }
 
     /// The directories a login shell would normally add, in the order a
@@ -98,10 +95,8 @@ struct ToolLocator: Sendable {
         return process.terminationStatus == 0
     }
 
-    var missingForReading: [Tool] {
-        Tool.allCases.filter { $0.requiredForReading && paths[$0] == nil }
-    }
-
+    /// Reading needs none of these: without git the wiki arrives as a
+    /// tarball snapshot (`SnapshotService`). Every tool here is for jobs.
     var missingForIngestion: [Tool] {
         Tool.allCases.filter { paths[$0] == nil }
     }

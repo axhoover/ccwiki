@@ -32,5 +32,37 @@
 	<string>NSApplication</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Alex Hoover. MIT licensed.</string>
+	<!-- A PDF dropped on the Dock icon, or opened with CCwiki from Finder,
+	     starts an ingestion job. Alternate rank: Preview stays the default. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PDF document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+	</array>
+	<!-- ccwiki://wiki/page/Primitives%2Fprf.md opens that page from anywhere:
+	     a note, a mail, a link on the website. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.axhoover.ccwiki.link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ccwiki</string>
+			</array>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
+	</array>
 </dict>
 </plist>

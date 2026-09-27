@@ -34,6 +34,16 @@ final class AppModel {
         didSet { CCwikiSettings.syncsAtLaunch = syncsAtLaunch }
     }
 
+    /// The broken-link banner on a page. Persisted; off for readers.
+    var showsMaintenanceNotices: Bool = CCwikiSettings.showsMaintenanceNotices {
+        didSet {
+            guard showsMaintenanceNotices != oldValue else { return }
+            CCwikiSettings.showsMaintenanceNotices = showsMaintenanceNotices
+            webController.invalidate()
+            renderCurrent(preservingScroll: true)
+        }
+    }
+
     /// Hide stub pages in the sidebar and on folder listings. Persisted.
     var hidesStubs: Bool = CCwikiSettings.hidesStubs {
         didSet {
@@ -275,8 +285,17 @@ final class AppModel {
         vendorManifest = try? String(
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
-        webController.onNavigate = { [weak self] destination, _ in
-            self?.navigate(to: destination)
+        webController.onNavigate = { [weak self] destination, modified in
+            guard let self else { return }
+            // ⌘-click: the same page on cryptology.city, in the browser. The
+            // app has one reader window, so "open elsewhere" means the site.
+            if modified, case .page(let path, let anchor) = destination,
+               let page = index?.pages[path],
+               let url = Self.siteURL(slug: page.slug, anchor: anchor) {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            navigate(to: destination)
         }
         webController.onReady = { [weak self] in
             self?.renderCurrent()
@@ -330,15 +349,10 @@ final class AppModel {
         await refreshPushCapability()
     }
 
+    /// Nothing to warn about any more: reading works without git (the wiki
+    /// arrives as a snapshot), and the ingest sheet lists what a job needs.
     private func refreshToolWarnings() {
         warnings.removeAll { $0.hasPrefix(Self.toolsWarningPrefix) }
-        if needsDeveloperTools {
-            warn(Self.toolsWarningPrefix
-                + "git needs Apple's Command Line Tools. Install them to fetch the wiki.")
-        } else if let missing = tools.missingForReading.first {
-            warn(Self.toolsWarningPrefix
-                + "\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
-        }
     }
 
     /// Ask macOS to install the Command Line Tools. `xcode-select --install`
@@ -360,7 +374,8 @@ final class AppModel {
             blockers.append("The wiki has not been cloned yet. Sync first (⌘R).")
         }
         if needsDeveloperTools {
-            blockers.append("git needs Apple's Command Line Tools.")
+            blockers.append("git needs Apple's Command Line Tools (reading does not; "
+                + "jobs do). Settings > Tools has the installer.")
         }
         for tool in tools.missingForIngestion where !(tool == .git && needsDeveloperTools) {
             blockers.append("\(tool.rawValue) was not found. It is needed for \(tool.purpose).")
@@ -423,10 +438,18 @@ final class AppModel {
         }
 
         let git = gitService
-        if let git {
+        if let git, paths.wikiStore == .git {
             modifiedDates = await git.modifiedDates(in: paths.clone)
             headRevision = await git.head(in: paths.clone)
             headDate = await git.headDate(in: paths.clone)
+        } else if let marker = SnapshotService.marker(in: paths.clone) {
+            // A snapshot has no history to date files by; the commit itself
+            // is dated, which is what the status bar shows.
+            modifiedDates = [:]
+            headRevision = marker.sha
+            headDate = marker.commitDate
+        }
+        if let git {
             if let gh = tools.path(for: .gh) {
                 await git.configureCredentialHelper(clone: paths.clone, ghPath: gh)
             }
@@ -478,20 +501,37 @@ final class AppModel {
     /// does not start two clones.
     func sync() {
         guard syncTask == nil else { return }
-        guard let git = gitService else {
-            syncState = .failed(needsDeveloperTools
-                ? "git needs Apple's Command Line Tools — install them, then sync again."
-                : "git was not found — see Settings.")
+        let store = paths.wikiStore
+        let git = gitService
+
+        // With git: clone or fast-forward; a snapshot left by a git-less
+        // launch is replaced by a real clone (the clone lands beside it and
+        // is moved in only on success). Without git: a tarball snapshot,
+        // which is all the reader needs. A clone with no git to update it is
+        // the one dead end, and it says so.
+        if git == nil, store == .git {
+            syncState = .failed("This wiki copy is a git clone, and git is no longer available "
+                + "to update it. Reset Clone in Settings > Storage downloads a snapshot instead.")
             return
         }
 
         syncLog = []
-        syncState = .running(paths.cloneExists ? "Fetching…" : "Cloning the wiki…")
+        syncState = .running(
+            store == .none ? (git != nil ? "Cloning the wiki…" : "Downloading the wiki…")
+                : (git != nil ? "Fetching…" : "Checking for a newer snapshot…"))
 
         syncTask = Task { [weak self] in
             guard let self else { return }
-            let outcome = await git.sync(clone: paths.clone, remote: AppPaths.remoteURL) { line in
+            let onLine: @Sendable (ProcessLine) -> Void = { line in
                 Task { @MainActor [weak self] in self?.appendSyncLine(line) }
+            }
+            let outcome: GitService.SyncOutcome
+            if let git {
+                outcome = await git.sync(clone: paths.clone, remote: AppPaths.remoteURL, onLine: onLine)
+            } else {
+                let snapshots = SnapshotService(
+                    repository: AppPaths.repositorySlug, branch: AppPaths.defaultBranch)
+                outcome = await snapshots.sync(destination: paths.clone, onLine: onLine)
             }
             switch outcome {
             case .offline:
@@ -634,7 +674,8 @@ final class AppModel {
 
     private func renderCurrent(preservingScroll: Bool = false) {
         guard let index else { return }
-        let renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
+        var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
+        renderer.reportsBrokenLinks = showsMaintenanceNotices
         var notices: [RenderRequest.Notice] = []
         if macros.isEmpty {
             notices.append(RenderRequest.Notice(

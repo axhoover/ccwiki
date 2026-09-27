@@ -226,46 +226,15 @@ struct ReaderView: View {
 
     // MARK: Empty state
 
-    @ViewBuilder
+    /// Reading needs nothing installed: without git the wiki arrives as a
+    /// tarball snapshot (`SnapshotService`). So the only empty state is
+    /// "not downloaded yet", whatever the machine has on it.
     private var emptyState: some View {
-        if model.needsDeveloperTools {
-            developerToolsState
-        } else {
-            syncPrompt
-        }
-    }
-
-    /// A Mac without Apple's Command Line Tools has a `/usr/bin/git` that is
-    /// only a stub. This is the one thing a reader has to install, so it gets
-    /// a state of its own rather than a git-flavoured error.
-    private var developerToolsState: some View {
-        ContentUnavailableView {
-            Label("Command Line Tools needed", systemImage: "terminal")
-        } description: {
-            Text("CCwiki fetches the wiki with git, which on a Mac comes with Apple's "
-                + "Command Line Tools. Installing them is a system download of a few "
-                + "hundred megabytes; no Apple account is needed.")
-        } actions: {
-            Button {
-                model.installDeveloperTools()
-            } label: {
-                Label("Install Command Line Tools…", systemImage: "arrow.down.circle")
-            }
-            Button("Check Again") {
-                Task {
-                    await model.discoverTools()
-                    if !model.needsDeveloperTools { model.sync() }
-                }
-            }
-        }
-    }
-
-    private var syncPrompt: some View {
         ContentUnavailableView {
             Label("CCwiki", systemImage: "building.columns")
         } description: {
             Text("An offline reader for cryptology.city.\n"
-                + "Sync to clone the wiki — after that, reading needs no network.")
+                + "Download the wiki once — after that, reading needs no network.")
         } actions: {
             Button {
                 model.sync()

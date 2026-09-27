@@ -124,7 +124,9 @@ The two things only a scheme handler can do:
    in Application Support. Those have no useful common ancestor.
 
 It also means a wikilink click is a real navigation to a URL we can intercept,
-which is where back/forward and ⌘-click come from.
+which is where back/forward come from. A ⌘-click opens the same page on
+cryptology.city in the browser: the app has one reader window, so "open
+elsewhere" means the site.
 
 ## 5. Three layers that keep reading offline
 

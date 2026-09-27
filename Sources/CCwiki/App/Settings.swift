@@ -16,7 +16,15 @@ struct CCwikiSettings: Sendable {
     private static let checksForUpdatesKey = "ccwiki.checksForUpdates"
     private static let lastUpdateCheckKey = "ccwiki.lastUpdateCheck"
     private static let installsUpdatesAutomaticallyKey = "ccwiki.installsUpdatesAutomatically"
+    private static let showsMaintenanceNoticesKey = "ccwiki.showsMaintenanceNotices"
     private static let lastPageKey = "ccwiki.lastPage"
+
+    /// The "N links on this page have no target" banner. A signal for
+    /// someone editing the wiki, noise for someone reading it; off by default.
+    static var showsMaintenanceNotices: Bool {
+        get { UserDefaults.standard.bool(forKey: showsMaintenanceNoticesKey) }
+        set { UserDefaults.standard.set(newValue, forKey: showsMaintenanceNoticesKey) }
+    }
 
     /// When the daily check finds a release, download, verify and install it
     /// without asking, and offer a relaunch. On by default: the point of the

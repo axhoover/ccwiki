@@ -149,7 +149,9 @@ enum Subprocess {
         currentDirectory: URL? = nil,
         environment: [String: String]
     ) -> AsyncStream<ProcessLine> {
-        AsyncStream(bufferingPolicy: .bufferingNewest(8192)) { continuation in
+        // Unbounded: a transcript with lines silently missing from the middle
+        // is worse than a few megabytes held while the main actor catches up.
+        AsyncStream(bufferingPolicy: .unbounded) { continuation in
             guard FileManager.default.isExecutableFile(atPath: executable) else {
                 continuation.yield(ProcessLine(
                     stream: .stderr, text: "not executable: \(executable)", isProgress: false))

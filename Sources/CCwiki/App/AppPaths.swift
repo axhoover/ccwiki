@@ -141,6 +141,20 @@ struct AppPaths: Sendable {
             atPath: clone.appending(path: ".git").path(percentEncoded: false))
     }
 
+    /// What is at `clone`: a git clone, a tarball snapshot (see
+    /// `SnapshotService`), or nothing usable.
+    enum WikiStore: Equatable, Sendable {
+        case none
+        case git
+        case snapshot
+    }
+
+    var wikiStore: WikiStore {
+        if cloneExists { return .git }
+        if SnapshotService.marker(in: clone) != nil { return .snapshot }
+        return .none
+    }
+
     func worktree(forJob id: String) -> URL { worktrees.appending(path: id) }
     func log(forJob id: String) -> URL { logs.appending(path: "\(id).log") }
     /// The small JSON record that brings a job back after a relaunch.

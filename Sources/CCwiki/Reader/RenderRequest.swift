@@ -86,6 +86,9 @@ struct PageRenderer: Sendable {
     /// reachable by link, by search and from a relation row — they are only
     /// kept off the folder listings, which is what "unlisted" means.
     var hiddenPaths: Set<String> = []
+    /// Add the "N links have no target" notice. The links are styled as
+    /// broken either way; the banner is for someone maintaining the wiki.
+    var reportsBrokenLinks = true
 
     /// Image extensions the reader inlines for `![[…]]` embeds.
     private static let imageExtensions: Set<String> = [
@@ -128,7 +131,7 @@ struct PageRenderer: Sendable {
         }
 
         var allNotices = notices
-        if brokenCount > 0 {
+        if reportsBrokenLinks, brokenCount > 0 {
             allNotices.append(RenderRequest.Notice(
                 level: "info",
                 text: brokenCount == 1
