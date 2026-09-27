@@ -128,19 +128,32 @@ extension WikiIndex {
     /// quick switcher is navigation, and an unlisted node is deliberately not
     /// somewhere to navigate to — but it stays fully findable in ⌘S, which is
     /// search rather than browse.
+    /// With an empty query: the `recent` pages first, in the order given,
+    /// then everything else by title. With a query: fuzzy-ranked, and
+    /// `recent` plays no part — what you typed decides.
     func quickSwitch(
-        _ query: String, limit: Int = 40, excluding hidden: Set<String> = []
+        _ query: String, limit: Int = 40, excluding hidden: Set<String> = [],
+        recent: [String] = []
     ) -> [QuickSwitchItem] {
         let pages = pages.values.filter { !hidden.contains($0.path) }
 
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return pages
+            func item(_ page: WikiPage) -> QuickSwitchItem {
+                QuickSwitchItem(path: page.path, title: page.title, subtitle: subtitle(for: page),
+                                kind: page.kind, status: page.status, score: 0)
+            }
+            var seen = Set<String>()
+            let recentItems = recent.compactMap { path -> QuickSwitchItem? in
+                guard let page = self.pages[path], !hidden.contains(path),
+                      seen.insert(path).inserted
+                else { return nil }
+                return item(page)
+            }
+            let rest = pages
+                .filter { !seen.contains($0.path) }
                 .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                .prefix(limit)
-                .map {
-                    QuickSwitchItem(path: $0.path, title: $0.title, subtitle: subtitle(for: $0),
-                                    kind: $0.kind, status: $0.status, score: 0)
-                }
+                .map(item)
+            return Array((recentItems + rest).prefix(limit))
         }
 
         var results: [QuickSwitchItem] = []

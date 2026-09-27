@@ -18,6 +18,13 @@ struct CCwikiSettings: Sendable {
     private static let installsUpdatesAutomaticallyKey = "ccwiki.installsUpdatesAutomatically"
     private static let showsMaintenanceNoticesKey = "ccwiki.showsMaintenanceNotices"
     private static let lastPageKey = "ccwiki.lastPage"
+    private static let recentPagesKey = "ccwiki.recentPages"
+
+    /// Pages opened most recently, newest first, by `content/`-relative path.
+    static var recentPages: [String] {
+        get { UserDefaults.standard.stringArray(forKey: recentPagesKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: recentPagesKey) }
+    }
 
     /// The "N links on this page have no target" banner. A signal for
     /// someone editing the wiki, noise for someone reading it; off by default.

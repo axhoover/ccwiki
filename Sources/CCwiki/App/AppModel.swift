@@ -183,6 +183,13 @@ final class AppModel {
         didSet { refreshQuickSwitcher() }
     }
     private(set) var quickSwitcherResults: [QuickSwitchItem] = []
+    /// How many of `quickSwitcherResults` are recent pages, so the view can
+    /// head them. Zero whenever there is a query.
+    private(set) var quickSwitcherRecentCount = 0
+    /// Most recent first, persisted. The page on screen is left out of the
+    /// switcher's list, so ⌘O then Return goes back to the page before it.
+    private var recentPages: [String] = CCwikiSettings.recentPages
+    static let recentPagesLimit = 12
 
     // MARK: Jobs
 
@@ -306,6 +313,9 @@ final class AppModel {
         }
         webController.onReady = { [weak self] in
             self?.renderCurrent()
+        }
+        webController.siteURLProvider = { [weak self] in
+            self?.currentSiteURL
         }
 
         refreshMacrosWarning()
@@ -633,7 +643,10 @@ final class AppModel {
             }
             return
         }
-        if case .page(let path, _) = newLocation { CCwikiSettings.lastPage = path }
+        if case .page(let path, _) = newLocation {
+            CCwikiSettings.lastPage = path
+            noteRecent(path)
+        }
         reveal(newLocation)
         renderCurrent()
     }
@@ -823,10 +836,25 @@ final class AppModel {
     func refreshQuickSwitcher() {
         guard let index else {
             quickSwitcherResults = []
+            quickSwitcherRecentCount = 0
             return
         }
+        let recent = recentPages.filter { $0 != location.path && index.pages[$0] != nil }
         quickSwitcherResults = index.quickSwitch(
-            quickSwitcherQuery, excluding: unlistedPaths)
+            quickSwitcherQuery, excluding: unlistedPaths, recent: recent)
+        let isEmptyQuery = quickSwitcherQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        quickSwitcherRecentCount = isEmptyQuery
+            ? quickSwitcherResults.prefix(recent.count).count { recent.contains($0.path) }
+            : 0
+    }
+
+    private func noteRecent(_ path: String) {
+        recentPages.removeAll { $0 == path }
+        recentPages.insert(path, at: 0)
+        if recentPages.count > Self.recentPagesLimit {
+            recentPages.removeLast(recentPages.count - Self.recentPagesLimit)
+        }
+        CCwikiSettings.recentPages = recentPages
     }
 
     func presentQuickSwitcher() {

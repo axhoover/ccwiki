@@ -260,9 +260,13 @@
     headingIds(md);
     callouts(md);
 
+    // Every rendered formula carries its source in `data-tex`, so a
+    // right-click can offer Copy TeX. KaTeX's own annotation would do it,
+    // but only with MathML output, which the site does not emit.
     md.renderer.rules.math_inline = function (tokens, idx) {
       try {
-        return global.katex.renderToString(tokens[idx].content, katexOptions);
+        return '<span class="math" data-tex="' + md.utils.escapeHtml(tokens[idx].content) + '">' +
+          global.katex.renderToString(tokens[idx].content, katexOptions) + "</span>";
       } catch (e) {
         return '<code class="math-error">' + md.utils.escapeHtml(tokens[idx].content) + "</code>";
       }
@@ -271,7 +275,7 @@
     md.renderer.rules.math_block = function (tokens, idx) {
       try {
         var opts = Object.assign({}, katexOptions, { displayMode: true });
-        return '<div class="math-display">' +
+        return '<div class="math-display" data-tex="' + md.utils.escapeHtml(tokens[idx].content) + '">' +
           global.katex.renderToString(tokens[idx].content, opts) + "</div>\n";
       } catch (e) {
         return '<pre class="math-error">' + md.utils.escapeHtml(tokens[idx].content) + "</pre>\n";
@@ -553,6 +557,14 @@
 
   // Internal links are navigations for the *app*, not the web view: the Swift
   // side owns history, the sidebar selection and the inspector.
+  // Before WebKit builds the context menu, tell Swift what is under the
+  // pointer. The message is sent on the same connection as, and ahead of,
+  // the menu request, so it arrives first.
+  document.addEventListener("contextmenu", function (event) {
+    var math = event.target.closest ? event.target.closest("[data-tex]") : null;
+    post({ type: "contextTarget", tex: math ? math.getAttribute("data-tex") : null });
+  }, true);
+
   document.addEventListener("click", function (event) {
     var anchor = event.target.closest ? event.target.closest("a") : null;
     if (!anchor) return;

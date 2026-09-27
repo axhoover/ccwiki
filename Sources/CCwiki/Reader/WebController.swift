@@ -24,6 +24,11 @@ final class WebController: NSObject {
 
     /// Set by the owner to act on a link click.
     var onNavigate: ((CCwikiURL.Destination, _ modified: Bool) -> Void)?
+    /// The page's own address on the site, for the page context menu.
+    var siteURLProvider: (() -> URL?)?
+    /// The TeX source of the formula under the last right-click, if any.
+    @ObservationIgnored fileprivate var contextTeX: String?
+
     /// Called when the shell has (re)loaded and there is nothing queued: the
     /// owner should render whatever it is showing again. That is how the
     /// reader comes back from a WebContent crash or a stray Reload.
@@ -49,8 +54,10 @@ final class WebController: NSObject {
         let controller = WKUserContentController()
         configuration.userContentController = controller
 
-        webView = ReaderWebView(frame: .zero, configuration: configuration)
+        let readerView = ReaderWebView(frame: .zero, configuration: configuration)
+        webView = readerView
         super.init()
+        readerView.controller = self
 
         controller.add(Bridge(controller: self), name: "ccwiki")
         webView.navigationDelegate = self
@@ -182,6 +189,9 @@ final class WebController: NSObject {
             else { return }
             onNavigate?(destination, message["modified"] as? Bool ?? false)
 
+        case "contextTarget":
+            contextTeX = message["tex"] as? String
+
         case "openExternal":
             guard let string = message["url"] as? String,
                   let url = URL(string: string),
@@ -282,10 +292,27 @@ final class ReaderWebView: WKWebView {
         "WKMenuItemIdentifierDownloadImage",
     ]
 
+    weak var controller: WebController?
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         menu.items.removeAll { item in
             item.identifier.map { Self.removedIdentifiers.contains($0.rawValue) } ?? false
+        }
+
+        // Copy TeX first, when the click was on a formula: the one thing
+        // the default menu cannot offer, since the page shows only glyphs.
+        if let tex = controller?.contextTeX, !tex.isEmpty {
+            menu.insertItem(.separator(), at: 0)
+            menu.insertItem(ClosureMenuItem("Copy TeX") { Self.copy(tex) }, at: 0)
+        }
+        // The page itself, wherever the click was.
+        if let url = controller?.siteURLProvider?() {
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem("Open Page on cryptology.city") {
+                NSWorkspace.shared.open(url)
+            })
+            menu.addItem(ClosureMenuItem("Copy Link to Page") { Self.copy(url.absoluteString) })
         }
         // No leading, trailing or doubled separators once the items are gone.
         var cleaned: [NSMenuItem] = []
@@ -296,6 +323,32 @@ final class ReaderWebView: WKWebView {
         if cleaned.last?.isSeparatorItem == true { cleaned.removeLast() }
         menu.items = cleaned
     }
+
+    override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {
+        super.didCloseMenu(menu, with: event)
+        controller?.contextTeX = nil
+    }
+
+    private static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// A menu item that runs a closure, for menus built in code.
+final class ClosureMenuItem: NSMenuItem {
+    private let handler: @MainActor () -> Void
+
+    init(_ title: String, handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func fire() { handler() }
 }
 
 // MARK: - SwiftUI
