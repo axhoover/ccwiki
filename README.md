@@ -22,11 +22,13 @@ only canonical store; the app owns no content and never merges anything.
 
 ## Requirements
 
-- macOS 14 or newer
-- A Swift 6 toolchain (Xcode, or the swift.org installer)
-- `git` — for the clone
-- `node` ≥ 20, `gh`, and the `claude` CLI — for ingestion jobs only; the reader
-  works without them
+To read: macOS 14 or newer, and nothing else. Without `git` the wiki arrives
+as a tarball snapshot; with it, as a pull-only clone that fast-forwards.
+
+To build from source: a Swift 6 toolchain (Xcode, or the swift.org installer).
+
+To run ingestion jobs: `git` (a real one — Apple's Command Line Tools, or
+Homebrew's), `node` ≥ 20, `gh`, and the `claude` CLI.
 
 A Finder-launched app inherits launchd's `PATH`, which is
 `/usr/bin:/bin:/usr/sbin:/sbin` — enough for `/usr/bin/git` and nothing else.
@@ -34,7 +36,30 @@ CCwiki searches Homebrew's directories and `~/.local/bin` as well, and falls
 back to asking a login shell, so a normal Homebrew or npm install is found
 automatically.
 
-## Setup
+## Installing a release
+
+Download `CCwiki-<version>-macos.zip` from the
+[releases page](https://github.com/axhoover/ccwiki/releases), unzip it, and
+drag `CCwiki.app` to Applications. The app is not notarized (there is no
+Apple Developer ID behind it), so the **first** launch needs one extra step:
+open it, let macOS refuse, then go to System Settings → Privacy & Security
+and click **Open Anyway**. Once.
+
+Or, from Terminal, which skips that dialog because `curl` does not mark
+downloads for Gatekeeper:
+
+```sh
+curl -L -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip"
+ditto -x -k /tmp/CCwiki.zip /Applications
+```
+
+After that, CCwiki keeps itself current: once a day it checks for a newer
+release, verifies its Ed25519 signature against a key built into the app,
+installs it in place, and asks before relaunching. Settings → About has the
+switches. See [plans/distribution.md](plans/distribution.md) for how that
+works without a Developer ID.
+
+## Building from source
 
 ```sh
 git clone <this repo> ccwiki && cd ccwiki
@@ -51,9 +76,11 @@ Re-verify an existing tree with `./scripts/vendor-web.sh --check`.
 
 ### First launch
 
-CCwiki clones the wiki (~35 MB) into
-`~/Library/Application Support/CCwiki/repo` and builds a search index. After
-that, reading needs no network — ⌘R fast-forwards when you want an update.
+CCwiki downloads the wiki (~35 MB) into
+`~/Library/Application Support/CCwiki/repo` — a git clone if `git` is there,
+a snapshot otherwise — and builds a search index. After that, reading needs no
+network. It checks for a newer wiki at each launch (Settings → Reading to turn
+that off), and ⌘R does the same at any time.
 
 ```
 ~/Library/Application Support/CCwiki/
@@ -102,7 +129,8 @@ a job that could not push.
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
-| ⌘0 | Go home |
+| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
+| ⇧⌘H | Go home |
 | ⇧⌘N | Ingest a paper |
 | ⇧⌘J | Show the jobs window |
 | ⌘, | Settings |
@@ -114,7 +142,9 @@ make check         compile + unit tests — the gate after every change
 make run           build and launch
 make shots         drive the app and capture screenshots (the visual gate)
 make test-corpus   validate the resolver against the real cloned wiki
-make dist          signed + notarized release zip
+make release-keys  once: the Ed25519 key that signs releases
+make package       universal, ad-hoc-signed, Ed25519-signed release zip
+make dist          the same with a Developer ID + notarization
 make help          everything else
 ```
 
@@ -124,6 +154,8 @@ it. Without it, it falls back to an in-app capture that renders everything
 except vibrancy backdrops.
 
 `make run` ad-hoc signs, so it works on a bare machine with no certificates.
+
+Every push runs `make check` on a macOS runner (`.github/workflows/ci.yml`).
 
 ## Where to read next
 

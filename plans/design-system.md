@@ -95,7 +95,8 @@ discoverable rather than folklore.
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
-| ⌘0 | Go home |
+| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
+| ⇧⌘H | Go home |
 | Esc | Dismiss any sheet or the find bar |
 
 Both palettes are keyboard-shaped: type, arrow, Return, with the shortcut hints

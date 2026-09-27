@@ -40,6 +40,8 @@ redesign, not a refactor.
 | Constraint | Why | Where |
 |---|---|---|
 | The clone is **pull-only** | The app is a reader; a dirty reader checkout is a bug with no good recovery | `GitService.sync` uses `--ff-only` and says so loudly when it fails |
+| **Reading needs nothing installed** | A Mac without the Command Line Tools has no working `git`, and a reader must not be asked to install them | `SnapshotService` fetches a tarball of the branch head when there is no `git`; same layout, plus a marker naming the commit |
+| A release is **signed with the maintainer's Ed25519 key**, and the app installs nothing it cannot verify | There is no Developer ID; the signature is what makes an update trustworthy | `ReleaseKey`, `UpdateInstaller`, `make package`; see [plans/distribution.md](plans/distribution.md) §3 |
 | Jobs run in **git worktrees** | A job cannot dirty the reader's checkout, and jobs can run in parallel | `GitService.addWorktree`, `AppPaths.worktrees` |
 | Rendering is **fully offline** | Reading must work on a plane | Vendored into `Resources/web/`; a CSP header and a scheme handler make it structural, not aspirational |
 | The **search index is derived** | Never authoritative, safe to delete at any time | `SearchIndex.reset()` is a legitimate answer to any problem |
@@ -98,6 +100,13 @@ redesign, not a refactor.
 - [plans/roadmap.md](plans/roadmap.md) — what we deliberately deferred and how
   we would build it: a human review step before the PR, a better ingestion
   pipeline, and page corrections from the reader.
+- [plans/audit-2026-09.md](plans/audit-2026-09.md) — a full read-through
+  aimed at "what happens when a stranger downloads this": eight first-launch
+  breakers, the correctness tail, reader usability gaps, performance, and a
+  suggested order of work. **Start here for the next batch of fixes.**
+- [plans/distribution.md](plans/distribution.md) — signing and notarization,
+  a release workflow, and three tiers of update mechanism (an in-app check,
+  a Homebrew cask, Sparkle) with what each costs in this codebase.
 - [PROGRESS.md](PROGRESS.md) — running log, newest first.
 - [PROBLEMS.md](PROBLEMS.md) — things that bit us.
 - [SWIFTUI-RULES.md](SWIFTUI-RULES.md) — hard-won SwiftUI rules; the code here

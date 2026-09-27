@@ -10,7 +10,7 @@ import Observation
 @MainActor
 final class IngestJob: Identifiable {
 
-    enum State: Equatable, Sendable {
+    enum State: Equatable, Sendable, Codable {
         case queued
         /// Setting up: worktree, submodules.
         case preparing(String)
@@ -68,6 +68,9 @@ final class IngestJob: Identifiable {
     /// take the next free name if a previous attempt left one behind.
     private(set) var branch: String
     let logFile: URL
+    /// Written on every state change, so the job comes back after a relaunch
+    /// — with its PR URL, which used to be lost with the window.
+    let recordFile: URL
 
     private(set) var state: State = .queued
     private(set) var log: [JobLogEntry] = []
@@ -93,11 +96,46 @@ final class IngestJob: Identifiable {
         self.worktree = paths.worktree(forJob: id)
         self.branch = "ingest/\(submission.slug)"
         self.logFile = paths.log(forJob: id)
+        self.recordFile = paths.record(forJob: id)
+    }
+
+    /// A job from an earlier launch. One that was still running when the app
+    /// quit is reported as failed, and says so.
+    init(restoring record: JobRecord, paths: AppPaths) {
+        self.id = record.id
+        self.submission = record.submission
+        self.worktree = paths.worktree(forJob: record.id)
+        self.branch = record.branch
+        self.logFile = paths.log(forJob: record.id)
+        self.recordFile = paths.record(forJob: record.id)
+        self.startedAt = record.startedAt
+        self.finishedAt = record.finishedAt ?? (record.state.isTerminal ? nil : record.startedAt)
+        self.state = record.state.isTerminal
+            ? record.state
+            : .failed("Interrupted — CCwiki quit while this job was running.")
+        self.log = [JobLogEntry(.system,
+            "Restored from an earlier launch. The full transcript is in \(logFile.lastPathComponent).",
+            at: record.startedAt ?? record.submission.submittedAt)]
+    }
+
+    var record: JobRecord {
+        JobRecord(
+            id: id, submission: submission, branch: branch, state: state,
+            startedAt: startedAt, finishedAt: finishedAt)
+    }
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(record) else { return }
+        try? FileManager.default.createDirectory(
+            at: recordFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: recordFile, options: .atomic)
     }
 
     private static let stampFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        // Milliseconds, because two submissions of the same paper within a
+        // second would share a worktree path and the second would fail.
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         return formatter
@@ -110,7 +148,10 @@ final class IngestJob: Identifiable {
 
     // MARK: Mutation — the runner is the only caller
 
-    func setBranch(_ newBranch: String) { branch = newBranch }
+    func setBranch(_ newBranch: String) {
+        branch = newBranch
+        persist()
+    }
 
     func setState(_ newState: State) {
         state = newState
@@ -119,6 +160,7 @@ final class IngestJob: Identifiable {
             finishedAt = Date()
             closeLogFile()
         }
+        persist()
     }
 
     func setPreflight(_ findings: [PreflightFinding]) {
@@ -162,4 +204,15 @@ final class IngestJob: Identifiable {
         append(JobLogEntry(.system, "Cancelled."))
         setState(.cancelled)
     }
+}
+
+/// What survives a relaunch. Everything else about a job is either derivable
+/// from the id (its paths) or in the transcript file.
+struct JobRecord: Codable, Sendable {
+    let id: String
+    let submission: IngestSubmission
+    let branch: String
+    let state: IngestJob.State
+    let startedAt: Date?
+    let finishedAt: Date?
 }

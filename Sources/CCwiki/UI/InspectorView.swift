@@ -18,7 +18,7 @@ struct InspectorView: View {
             // three do not, and a truncated word is worse than no glyph — the
             // names are the affordance here, and macOS segmented controls are
             // routinely text-only.
-            Picker("", selection: $model.inspectorTab) {
+            Picker("Inspector", selection: $model.inspectorTab) {
                 ForEach(AppModel.InspectorTab.allCases) { tab in
                     Text(tab.rawValue).tag(tab)
                 }
@@ -115,6 +115,14 @@ struct InspectorView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.plain)
+                        .listRowSeparator(.hidden)
+                        .contextMenu {
+                            if let page = model.index?.pages[link.sourcePath],
+                               let url = AppModel.siteURL(slug: page.slug) {
+                                Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
+                                Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
+                            }
+                        }
                     }
                 }
                 .listStyle(.inset)

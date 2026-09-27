@@ -29,14 +29,39 @@ INFO_PLIST_SRC="Resources/Info.plist"
 # Build number: monotonic-ish from the date so re-signs differ. Falls back to 1.
 BUILD_NUMBER="$(date +%Y%m%d%H%M 2>/dev/null || echo 1)"
 
-echo "→ swift build -c $CONFIG"
-swift build -c "$CONFIG"
-
-BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)"
-EXECUTABLE="$BIN_PATH/$APP_NAME"
-if [ ! -x "$EXECUTABLE" ]; then
-	echo "✗ executable not found at $EXECUTABLE" >&2
-	exit 1
+# A release is built for both architectures: a download has to run on an
+# Intel Mac and an Apple silicon one. One `swift build` per architecture and
+# `lipo -create`, rather than one build with two `--arch` flags: the latter
+# fails with "duplicate output file" on current toolchains. Debug builds
+# stay native, since they are for the machine that made them.
+if [ "$CONFIG" = "release" ]; then
+	UNIVERSAL_DIR="$BUILD_DIR/universal"
+	mkdir -p "$UNIVERSAL_DIR"
+	SLICES=()
+	for arch in arm64 x86_64; do
+		echo "→ swift build -c release --arch $arch"
+		swift build -c release --arch "$arch"
+		slice="$(swift build -c release --arch "$arch" --show-bin-path)/$APP_NAME"
+		if [ ! -x "$slice" ]; then
+			echo "✗ executable not found at $slice" >&2
+			exit 1
+		fi
+		SLICES+=("$slice")
+	done
+	EXECUTABLE="$UNIVERSAL_DIR/$APP_NAME"
+	lipo -create "${SLICES[@]}" -output "$EXECUTABLE"
+	# Resource bundles, if any dependency ever ships one, are per-arch
+	# identical; take them from the first slice's directory.
+	BIN_PATH="$(dirname "${SLICES[0]}")"
+else
+	echo "→ swift build -c $CONFIG"
+	swift build -c "$CONFIG"
+	BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)"
+	EXECUTABLE="$BIN_PATH/$APP_NAME"
+	if [ ! -x "$EXECUTABLE" ]; then
+		echo "✗ executable not found at $EXECUTABLE" >&2
+		exit 1
+	fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -115,4 +140,7 @@ if ! codesign "${sign_args[@]}" "$APP" 2>/dev/null; then
 fi
 
 codesign --verify --verbose=1 "$APP"
+if [ "$CONFIG" = "release" ]; then
+	echo "  $(lipo -info "$APP/Contents/MacOS/$APP_NAME")"
+fi
 echo "✓ built $APP"

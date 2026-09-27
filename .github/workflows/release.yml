@@ -1,0 +1,53 @@
+# Publish a release when a vX.Y.Z tag is pushed.
+#
+# No Developer ID: the app is ad-hoc signed and universal, and the zip is
+# signed with the Ed25519 release key, which is what the in-app updater
+# checks. The private key is the CCWIKI_RELEASE_KEY repository secret (the
+# contents of ~/.config/ccwiki/release-key from `make release-keys`); the
+# public half is committed in Sources/CCwiki/App/ReleaseKey.swift.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: make package
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Release key
+        env:
+          CCWIKI_RELEASE_KEY_CONTENTS: ${{ secrets.CCWIKI_RELEASE_KEY }}
+        run: |
+          if [ -z "$CCWIKI_RELEASE_KEY_CONTENTS" ]; then
+            echo "::error::The CCWIKI_RELEASE_KEY secret is not set. Add the contents of"
+            echo "::error::~/.config/ccwiki/release-key (from 'make release-keys') under"
+            echo "::error::Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$CCWIKI_RELEASE_KEY_CONTENTS" > "$RUNNER_TEMP/release-key"
+          echo "RELEASE_KEY_FILE=$RUNNER_TEMP/release-key" >> "$GITHUB_ENV"
+
+      - name: Vendored render pipeline is intact
+        run: ./scripts/vendor-web.sh --check
+
+      - name: make check
+        run: make check
+
+      - name: make package
+        run: make package RELEASE_KEY_FILE="$RELEASE_KEY_FILE"
+
+      - name: make github-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make github-release

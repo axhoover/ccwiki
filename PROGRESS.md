@@ -5,6 +5,253 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — A review pass over the branch, and what it caught
+
+With about three thousand lines on the branch that had only ever been
+compiled and unit-tested, a review of the whole diff against `main` was the
+next gate. It found ten things; all are fixed and CI is green. The three
+that would have bitten a real user:
+
+- **A merged PR could be mistaken for the job's own.** `gh pr view <branch>`
+  resolves a merged PR for a reused branch name, so a job that aborted would
+  have been marked "opened" with a stale URL and had its worktree pruned.
+  Confirmation now asks for *open* PRs on the branch created after the job
+  started, with a test for the filter.
+- **Reset Clone under a running job.** A worktree's metadata lives in the
+  clone's `.git`; deleting the clone breaks every git step the job has left.
+  Refused, and the button disabled, while a job is active.
+- **The relaunch could strand the user.** It launched the new instance and
+  then quit unconditionally: a launch failure left no app (with the old one
+  already in the Trash), and answering "Don't Quit" to the running-jobs
+  question left two instances on one clone and one search index. The jobs
+  question now comes first, and the quit only after the launch succeeded.
+
+The one worth a rule: **an in-place bundle swap changes what the running
+app reads from disk.** A WebContent restart after an update would have
+loaded the new release's `ccwiki.js` against the old Swift. The render
+pipeline is now served from a per-build copy in Caches made at launch, so
+the pair stays matched until the relaunch. (`prompts/ingest.md` is still
+read from the bundle at job start; a job started after an update composes
+the new prompt. Noted, not fixed.)
+
+The rest: a false success when an install was already in flight; a manual
+check erasing the "installed, relaunch" note; a pid-registry race for
+short-lived children; `dist` and `package` unsafe under `make -j`; and the
+same download and request code in four places, now one `GitHubHTTP`.
+
+## 2026-09-27 — Reading needs nothing installed
+
+The audit's first finding, closed for real: a Mac without Apple's Command
+Line Tools has no working `git`, and the reader used to fail at the first
+sync with a git-flavoured error. `SnapshotService` now fetches the wiki
+without git: one request to GitHub's branch API for the head commit, the
+tarball of *that* commit from codeload (so the marker and the content cannot
+disagree), unpacked with the `tar` in every Mac's base system, moved into
+place atomically, with a `.ccwiki-snapshot` marker naming the commit. The
+layout is a clone's, so `WikiIndex`, `MacroTable` and `RelationsManifest`
+read it unchanged, and the status bar dates the wiki from the marker.
+
+**The decision that kept it small:** the snapshot reports the same
+`SyncOutcome` cases as `GitService.sync`, so `AppModel.sync` only chooses
+which service to call. When git turns up later, the ordinary clone path
+replaces the snapshot — it lands beside it and is moved in only on success,
+so a failed clone never costs a working copy. The one dead end is a clone
+with no git left to update it, which says so and points at Reset Clone.
+
+**What changed for the reader:** the Command Line Tools state is gone from
+the empty view; Settings > Tools still offers the installer, for jobs. The
+`requiredForReading` notion left `ToolLocator` with it.
+
+**Also in this batch:** PDF as an alternate document type and `ccwiki://` as
+a URL scheme, both through `onOpenURL`; ⌘-click opens the page on the site
+(the app has one reader window, so that is what "open elsewhere" means);
+the broken-link banner behind a Reading preference, off by default; and
+three long-tail fixes from the audit (§1.10, §1.12, §2.5).
+
+**Not verified here:** the snapshot's download and unpack need a network and
+a Mac. The marker, the branch-API parsing, the unpacked-root rule and the
+outage classification have tests.
+
+## 2026-09-27 — The app updates itself, and no Developer ID is involved
+
+**The question that changed the plan.** The distribution plan said a
+Developer ID was the price of admission. Asked whether it really was, the
+honest answer turned out to be: only for a frictionless *first*
+double-click. Gatekeeper assesses only files carrying the quarantine
+attribute, which browsers add and an app's own `URLSession` download does
+not (CCwiki does not opt in to `LSFileQuarantineEnabled`). A bundle the app
+fetches and unpacks itself is ad-hoc signed and unquarantined, and launches
+exactly like the one `make install` put there. So the first install costs
+one trip to Privacy & Security, and every update after it costs nothing.
+The maintainer chose that trade.
+
+**What stands in for Apple's signature** is an Ed25519 signature over the
+release zip, made with a key only the maintainer holds and checked against
+the public half built into the app (`ReleaseKey.swift`). CryptoKit does it
+with no dependency. TLS to github.com protects the transport; the signature
+protects against a compromised GitHub account, which a `.sha256` beside the
+zip never did. `make release-keys` makes the pair once and embeds the public
+key; it refuses to run twice, because replacing the key orphans every
+installed copy.
+
+**The installer's order is the safety argument.** Download both files to a
+temporary directory; verify before unpacking; unpack with `ditto`; check the
+bundle identifier, the version the release promised, and `codesign
+--verify --deep --strict`; only then move the running bundle aside, the new
+one in, and the old one to the Trash, undoing the first move if the second
+fails. Relaunch is a separate, user-initiated step
+(`NSWorkspace.OpenConfiguration.createsNewApplicationInstance`, then
+terminate). It never installs while a job is running.
+
+**Two release paths share one artifact.** `make package` (ad-hoc, universal,
+Ed25519-signed) and `make dist` (Developer ID, notarized, and now also
+Ed25519-signed) both produce `CCwiki-<v>-macos.zip` plus `.sha256` and
+`.sig`; `make github-release` uploads all three, and refuses without the
+`.sig`, since the app installs nothing without it. `release.yml` runs the
+package path on a tag push with the key as a repository secret.
+
+**Not verified here:** the download, unpack and swap need a real release
+and a real Mac. The signature check, the `.sig` format, bundle inspection
+and asset selection have unit tests. The first real release is the test of
+the rest, and the plan says to do it from the laptop once before trusting
+the workflow.
+
+**What surprised me.** `ReleaseInfo` needed to become partly mutable
+(`var archiveURL: URL? = nil`) to keep its memberwise initializer usable
+with and without assets; a `let` with a default is excluded from it.
+
+## 2026-09-26 — Block A and most of Block B, verified by a new CI workflow
+
+The audit's fixes, in five batches on `claude/amazing-curie-swfkbd`. The
+table in [plans/audit-2026-09.md](plans/audit-2026-09.md) §6 says which item
+each batch closed; what follows is what was learned doing it.
+
+**The review machine had no Swift toolchain, so CI became the compiler.**
+`.github/workflows/ci.yml` runs `make check` on a `macos-15` runner in about
+half a minute, and every batch was pushed, read back from the runner's log,
+and fixed before the next. Three things it caught that reading did not:
+
+- swift-testing's `#expect` evaluates a call inside a closure over an
+  *immutable* copy, so `#expect(history.visit(x))` on a mutating method does
+  not compile. Hoist the call into a `let` first.
+- `NSLock.lock()` is unavailable from an async context. `withLock` is the
+  form Swift 6 accepts there.
+- An off-by-one in a bounded-history test: the first visit records nothing.
+- `swift build --arch arm64 --arch x86_64` fails with "duplicate output
+  file" on the runner's toolchain. One build per architecture and
+  `lipo -create` is what `build.sh` does now, and CI assembles the universal
+  `.app` and uploads it as a one-day artifact — on pull requests, `main` and
+  manual runs only, since this is a private repository and macOS minutes
+  count ten-fold against the Actions quota.
+
+**The visual gate has not run.** Every UI change here — the sync log sheet,
+the Command Line Tools state, the blockers list in the ingest sheet, the
+Updates section, the trimmed context menu — compiles and is reasoned about,
+and none has been looked at. `make shots` on a Mac is the next step before
+trusting any of them.
+
+**Decisions worth recording.**
+
+- **Macros travel with every render** rather than being re-injected as a user
+  script. The JS compares a canonical key of the table and rebuilds
+  markdown-it only when it differs, so the cost in the common case is a sort
+  of 122 keys. This removed the "must be known before the web view is built"
+  constraint entirely.
+- **The git stub is detected with `xcode-select -p`, never with `git
+  --version`.** On a Mac without the Command Line Tools the latter pops the
+  system installer, and a check that runs at every launch would pop it at
+  every launch.
+- **Tool discovery is two phases.** `git` is one `stat` and is all the reader
+  needs, so the launch task awaits it and goes on; the ingestion tools, which
+  may each cost a login shell, are found afterwards. A generation counter
+  keeps a re-discovery started from Settings from being overwritten by a
+  slower one that started earlier.
+- **`NavigationHistory` is its own type** so the rule that was wrong — asking
+  for the current page without an anchor is not a visit — has a test that
+  needs no web view. The sidebar observer was left as it was; the model
+  simply no longer treats its re-selection as a move.
+- **The update check is tier 1 and nothing more.** One request, a numeric
+  comparison, a link. It is inert until a release exists, and a `0.0.0`
+  build never asks. The decision not to build Sparkle is in
+  [plans/distribution.md](plans/distribution.md) §3 with its cost.
+- **Job records are written on every state change**, not at the end, so a
+  crash mid-run comes back as "Interrupted" rather than vanishing. The
+  transcript file is pointed at, not re-parsed; that half is still open.
+- **Indented code blocks are still not inert for the wikilink parser**,
+  deliberately: a nested list item is indented four spaces too, and hiding
+  its links would be worse than the bug.
+
+**What surprised me.**
+
+- `AppKit`'s default `WKWebView` context menu carries Back, Forward and
+  Reload, and Reload blanked the reader for good. Overriding
+  `willOpenMenu(_:with:)` on a subclass and dropping the items by their
+  `WKMenuItemIdentifier…` identifiers is the whole fix; the crash-recovery
+  path (`webViewWebContentProcessDidTerminate` plus an `onReady` re-render)
+  makes a stray Reload survivable anyway.
+- Quartz strips `%% comments %%` over the whole source before anything else
+  reads it, fences included. The per-line masking here was subtly different
+  in two ways; the fix was to use its regex on the whole text and delete the
+  per-line logic rather than reconcile them.
+
+## 2026-09-26 — Audit for a public download; the distribution plan
+
+No app code changed. Two plans and one Makefile fix.
+
+**The question was "what would we work on next to turn this into something
+people download".** Answered by reading every source file against that
+scenario rather than against the developer who has been using it. The result
+is [plans/audit-2026-09.md](plans/audit-2026-09.md): eight things that break
+a stranger's first launch, a correctness tail, reader usability gaps, the
+performance items that scale with the corpus, and an ordered list of PR-sized
+work. [plans/distribution.md](plans/distribution.md) covers signing,
+notarization, a release workflow, and three tiers of update mechanism.
+
+**The three findings that matter most**, because they hit the exact path a
+non-developer takes (launch → auto-clone → read):
+
+- **Reading requires git, and a fresh Mac's `/usr/bin/git` is Apple's
+  install-the-developer-tools stub.** It passes `isExecutableFile`, so the
+  app raises no warning and the clone fails with "exit 1, see the sync log",
+  and the sync log is shown nowhere. The short fix is to detect the stub and
+  offer `xcode-select --install`; the real one is to fetch a tarball of
+  `main` with `/usr/bin/tar`, which is base-OS, so the reader needs no
+  developer tools at all.
+- **First launch renders every page with broken macros and never says so.**
+  `macros.ts` is read before the clone exists and baked into a
+  `documentStart` script that is never rebuilt. After the clone, the model
+  has 122 macros and drops its warning; the web view still has none.
+- **The Makefile's release identity was the template author's.** `make dist`
+  would have failed at `sign` on its first run. Fixed on this branch:
+  `CERT_NAME` derives from `DEVELOPER_NAME` and the notary profile is
+  `ccwiki-notary`. The entitlements also carry two hardened-runtime
+  exceptions justified by "we spawn git and claude", which is not what those
+  entitlements govern; the plan says to drop them and verify on a notarized
+  build.
+
+**On updates.** The worry was a complicated pipeline. The recommendation is
+the opposite: a daily call to the GitHub releases API with an "update
+available" line in About, and a Homebrew cask so `brew upgrade` does the
+rest. Sparkle is written up with its real cost here (a framework in a
+hand-assembled bundle, inside-out signing, an appcast) and deferred until
+there is evidence people stay on old versions.
+
+**What surprised me.**
+
+- Following any `[[page#heading]]` link across pages corrupts back/forward:
+  the sidebar's selection observer re-opens the page without the anchor,
+  which counts as a new location, so the anchored entry is pushed twice and
+  Forward is wiped. Thirteen corpus links and every Relations-pane variant
+  take that path. No history test exists.
+- Launch does up to nine seconds of main-thread busy-waiting on a Mac
+  without `gh`, `claude` and `node`, which is every non-developer's Mac,
+  plus a blocking `gh auth status` network call before the first frame.
+- `"unable to access"` in the offline detector matches every HTTP error git
+  reports, so a 403 or a certificate problem shows the calm wifi-slash.
+- The review machine had no Swift toolchain, so every line reference was
+  read, not run. `make check` and `make shots` on a Mac are the next step
+  before any of the fixes land.
+
 ## 2026-08-24 — The wiki's relationships become data, and the ingestion prompt stops undoing them
 
 The wiki migrated its relationship claims out of prose and into first-class

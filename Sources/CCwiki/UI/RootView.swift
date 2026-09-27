@@ -35,22 +35,54 @@ struct RootView: View {
         .sheet(isPresented: $model.ingestSheetPresented) {
             IngestSheet()
         }
+        .sheet(isPresented: $model.syncLogPresented) {
+            SyncLogView()
+        }
         // The whole reader is a drop target: when you have the paper open, the
         // natural gesture is to drag it onto the wiki, not to go looking for a
         // form.
         .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
             acceptDroppedPDF(providers)
         }
-        .overlay { if isDropTargeted { dropOverlay } }
+        // Mounted permanently and faded, not inserted: a transition on a view
+        // inserted inside a NavigationSplitView is SWIFTUI-RULES §1.1.
+        .overlay {
+            dropOverlay
+                .opacity(isDropTargeted ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: isDropTargeted)
+        }
         .task {
-            // Read what is already on disk before touching the network, so the
-            // app is usable instantly and offline.
+            // Find git (one stat), read what is already on disk, and only then
+            // touch the network — so the app is usable instantly and offline.
+            // The ingestion tools are looked for in the background.
+            await model.discoverTools()
+            model.loadJobHistory()
             await model.loadLibrary()
-            if model.index == nil { model.sync() }
+            // A launch fetch keeps the wiki current for someone who never
+            // presses ⌘R. Not under the screenshot harness, whose captures
+            // must not depend on the network.
+            let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
+            if model.index == nil || launchFetch { model.sync() }
             ScreenshotRunner.run(model: model)
+            if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in
             openWindow(id: CCwikiApp.jobsWindowID)
+        }
+        // Two kinds of URL reach the app from outside: a PDF handed to it by
+        // Finder or the Dock (Info.plist declares the type), and a
+        // ccwiki:// link from anywhere (Info.plist declares the scheme).
+        .onOpenURL { url in
+            if url.isFileURL {
+                guard url.pathExtension.lowercased() == "pdf",
+                      let staged = try? model.stagePDF(from: url)
+                else { return }
+                model.pendingDroppedPDF = staged
+                model.ingestSheetPresented = true
+                openWindow(id: CCwikiApp.jobsWindowID)
+            } else if let destination = CCwikiURL.destination(of: url.absoluteString) {
+                model.navigate(to: destination)
+            }
         }
         .onChange(of: model.settingsRequests) { _, _ in
             openSettings()
@@ -69,12 +101,14 @@ struct RootView: View {
             }
             .disabled(!model.canGoBack)
             .help("Back (⌘[)")
+            .accessibilityLabel("Back")
 
             Button { model.goForward() } label: {
                 Image(systemName: "chevron.right")
             }
             .disabled(!model.canGoForward)
             .help("Forward (⌘])")
+            .accessibilityLabel("Forward")
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
@@ -82,11 +116,13 @@ struct RootView: View {
                 Image(systemName: "magnifyingglass")
             }
             .help("Quick switcher (⌘O)")
+            .accessibilityLabel("Quick Switcher")
 
             Button { model.searchPresented = true } label: {
                 Image(systemName: "text.magnifyingglass")
             }
             .help("Search all pages (⇧⌘F)")
+            .accessibilityLabel("Search All Pages")
 
             Button { model.sync() } label: {
                 if model.syncState.isRunning {
@@ -97,11 +133,13 @@ struct RootView: View {
             }
             .disabled(model.syncState.isRunning)
             .help("Sync with GitHub (⌘R)")
+            .accessibilityLabel("Sync with GitHub")
 
             Button { model.showInspector.toggle() } label: {
                 Image(systemName: "sidebar.right")
             }
             .help("Toggle inspector (⌥⌘I)")
+            .accessibilityLabel("Toggle Inspector")
         }
     }
 
@@ -112,7 +150,8 @@ struct RootView: View {
             Rectangle().fill(.ultraThinMaterial)
             VStack(spacing: Theme.small) {
                 Image(systemName: "doc.badge.plus")
-                    .font(.system(size: 48))
+                    .font(.largeTitle)
+                    .imageScale(.large)
                     .foregroundStyle(.tint)
                 Text("Ingest this paper")
                     .font(Theme.Fonts.emptyTitle)
@@ -121,8 +160,6 @@ struct RootView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .transition(.opacity)
-        .animation(.easeOut(duration: 0.15), value: isDropTargeted)
         .allowsHitTesting(false)
     }
 
@@ -166,14 +203,32 @@ struct RootView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if !model.syncLog.isEmpty {
+                        Button("Details…") { model.syncLogPresented = true }
+                            .buttonStyle(.link)
+                            .font(Theme.Fonts.meta)
+                            .fixedSize()
+                    }
                 case .succeeded(let message):
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                     Text(message)
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 case .idle:
-                    if let revision = model.headRevision {
+                    // The resting state says how current the wiki is, which
+                    // a reader can act on; the hash is in the tooltip.
+                    if let date = model.headDate {
+                        Image(systemName: "clock")
+                            .foregroundStyle(.tertiary)
+                        (Text("Wiki as of ") + Text(date, format: .relative(presentation: .named)))
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .help(model.headRevision.map { "Commit \($0.prefix(12))" } ?? "")
+                    } else if let revision = model.headRevision {
                         Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                             .foregroundStyle(.tertiary)
                         Text(revision.prefix(7))
@@ -191,6 +246,15 @@ struct RootView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
+                if let progress = model.updateInstallProgress {
+                    HStack(spacing: Theme.tight) {
+                        ProgressView().controlSize(.small).scaleEffect(0.6)
+                        Text(progress)
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 if model.activeJobCount > 0 {
                     Button {
                         openWindow(id: CCwikiApp.jobsWindowID)
@@ -205,10 +269,14 @@ struct RootView: View {
                     .help("Show the jobs window (⇧⌘J)")
                 }
                 if !model.warnings.isEmpty {
+                    // Warnings are unique (`AppModel.warn`), so the text is a
+                    // stable identity — and a row, once read, can be put away.
                     Menu {
-                        ForEach(Array(model.warnings.enumerated()), id: \.offset) { _, warning in
-                            Text(warning)
+                        ForEach(model.warnings, id: \.self) { warning in
+                            Button(warning) { model.dismissWarning(warning) }
                         }
+                        Divider()
+                        Button("Dismiss All") { model.dismissAllWarnings() }
                     } label: {
                         Label("\(model.warnings.count)", systemImage: "exclamationmark.triangle")
                             .font(Theme.Fonts.meta)
@@ -216,6 +284,7 @@ struct RootView: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                     .foregroundStyle(.orange)
+                    .help("Choose a warning to dismiss it")
                 }
             }
             .padding(.horizontal, Theme.medium)

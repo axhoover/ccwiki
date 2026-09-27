@@ -104,7 +104,14 @@ struct WikiPage: Identifiable, Sendable {
     /// reference page the `KEY - Full Title` string that carries the real
     /// paper title.
     var stem: String {
-        (path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+        Self.stem(of: path)
+    }
+
+    /// The filename with a trailing `.md` removed — only a trailing one, as
+    /// `path.parse(fp).name` does in Quartz.
+    static func stem(of path: String) -> String {
+        let name = (path as NSString).lastPathComponent
+        return name.hasSuffix(".md") ? String(name.dropLast(3)) : name
     }
 
     var directory: String {
@@ -123,7 +130,7 @@ struct WikiPage: Identifiable, Sendable {
 
     /// The short label for the sidebar and the quick switcher: the citation key
     /// for references, the title everywhere else.
-    var shortTitle: String { kind == .reference ? title : title }
+    var shortTitle: String { title }
 
     var authors: String? { frontmatter.string("authors") }
     var venue: String? { frontmatter.string("venue") }
@@ -153,9 +160,7 @@ struct WikiPage: Identifiable, Sendable {
         self.body = String(text[frontmatter.bodyStart...])
         self.aliases = frontmatter.list("aliases")
 
-        let stem = (path as NSString).lastPathComponent
-            .replacingOccurrences(of: ".md", with: "")
-        self.title = frontmatter.string("title") ?? stem
+        self.title = frontmatter.string("title") ?? Self.stem(of: path)
 
         let directory = (path as NSString).deletingLastPathComponent
         self.kind = PageKind.forDirectory(directory)

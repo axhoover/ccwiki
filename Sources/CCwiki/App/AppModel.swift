@@ -17,18 +17,42 @@ final class AppModel {
     let paths: AppPaths
     private(set) var tools = ToolLocator()
     private(set) var toolOverrides: [ToolLocator.Tool: String] = [:]
+    /// True until the ingestion tools have been looked for. Reading never
+    /// waits on this; Settings and the ingest sheet say "looking" meanwhile.
+    private(set) var isDiscoveringTools = true
+    /// `/usr/bin/git` is on every Mac, but is only Apple's install-the-tools
+    /// stub until the Command Line Tools are there. When this is set, `git`
+    /// counts as missing and the reader's empty state says what to install.
+    private(set) var needsDeveloperTools = false
+    private var discoveryGeneration = 0
     private(set) var isGitHubAuthenticated = false
     private(set) var canPushToRemote = false
     private(set) var vendorManifest: String?
+
+    /// Fast-forward the clone at launch. Persisted; see `CCwikiSettings`.
+    var syncsAtLaunch: Bool = CCwikiSettings.syncsAtLaunch {
+        didSet { CCwikiSettings.syncsAtLaunch = syncsAtLaunch }
+    }
+
+    /// The broken-link banner on a page. Persisted; off for readers.
+    var showsMaintenanceNotices: Bool = CCwikiSettings.showsMaintenanceNotices {
+        didSet {
+            guard showsMaintenanceNotices != oldValue else { return }
+            CCwikiSettings.showsMaintenanceNotices = showsMaintenanceNotices
+            webController.invalidate()
+            renderCurrent(preservingScroll: true)
+        }
+    }
 
     /// Hide stub pages in the sidebar and on folder listings. Persisted.
     var hidesStubs: Bool = CCwikiSettings.hidesStubs {
         didSet {
             guard hidesStubs != oldValue else { return }
             CCwikiSettings.hidesStubs = hidesStubs
-            // The tree recomputes on read; the rendered folder page does not.
+            rebuildBrowseState()
+            // The rendered folder page does not follow the preference by itself.
             webController.invalidate()
-            renderCurrent()
+            renderCurrent(preservingScroll: true)
         }
     }
 
@@ -51,6 +75,8 @@ final class AppModel {
     private(set) var unlistedPaths: Set<String> = []
     private(set) var modifiedDates: [String: Date] = [:]
     private(set) var headRevision: String?
+    /// When the checked-out commit was made: "the wiki as of".
+    private(set) var headDate: Date?
 
     // MARK: Navigation
 
@@ -66,19 +92,25 @@ final class AppModel {
         }
     }
 
-    private(set) var location: Location = .empty
-    private var back: [Location] = []
-    private var forward: [Location] = []
+    /// Where the reader is and how it got there. The rules live in
+    /// `NavigationHistory` so they can be tested without a web view.
+    private var history = NavigationHistory()
 
-    var canGoBack: Bool { !back.isEmpty }
-    var canGoForward: Bool { !forward.isEmpty }
+    var location: Location { history.current }
+    var canGoBack: Bool { history.canGoBack }
+    var canGoForward: Bool { history.canGoForward }
 
     /// The directory the sidebar has expanded to, so selection survives a reload.
     var sidebarSelection: String?
     /// Which sidebar folders are open. Opening a page from a link, the quick
     /// switcher or search reveals its folder, so the sidebar always shows where
     /// you are rather than silently disagreeing with the reader.
-    var expandedFolders: Set<String> = []
+    var expandedFolders: Set<String> = Set(CCwikiSettings.expandedFolders) {
+        didSet {
+            guard expandedFolders != oldValue else { return }
+            CCwikiSettings.expandedFolders = expandedFolders.sorted()
+        }
+    }
     var inspectorTab: InspectorTab = .outline
     var showInspector = true
 
@@ -128,6 +160,9 @@ final class AppModel {
     private(set) var syncState: SyncState = .idle
     private(set) var syncLog: [String] = []
     private var syncTask: Task<Void, Never>?
+    /// The sync log sheet. Every failure message ends "see the sync log", so
+    /// there has to be somewhere to see it.
+    var syncLogPresented = false
 
     // MARK: Search
 
@@ -173,6 +208,32 @@ final class AppModel {
 
     var activeJobCount: Int { jobs.filter { $0.state.isActive }.count }
 
+    // MARK: Updates
+
+    var checksForUpdates: Bool = CCwikiSettings.checksForUpdates {
+        didSet { CCwikiSettings.checksForUpdates = checksForUpdates }
+    }
+    var installsUpdatesAutomatically: Bool = CCwikiSettings.installsUpdatesAutomatically {
+        didSet { CCwikiSettings.installsUpdatesAutomatically = installsUpdatesAutomatically }
+    }
+    private(set) var availableUpdate: ReleaseInfo?
+    /// Downloaded, verified and swapped into place; waiting for a relaunch.
+    private(set) var installedUpdate: ReleaseInfo?
+    private(set) var lastUpdateCheck: Date? = CCwikiSettings.lastUpdateCheck
+    private(set) var isCheckingForUpdates = false
+    private(set) var isInstallingUpdate = false
+    /// What the installer is doing right now, for the status bar.
+    private(set) var updateInstallProgress: String?
+    /// Whether this build can verify a download at all. See `ReleaseKey`.
+    var canInstallUpdates: Bool { ReleaseKey.isConfigured }
+    static let updateInterval: TimeInterval = 24 * 60 * 60
+    /// "X is available": replaced on every check.
+    static let updateWarningPrefix = "Update: "
+    /// "X is installed, relaunch": survives checks; cleared by the relaunch.
+    static let updateInstalledPrefix = "Update installed: "
+
+    var appVersion: String { Bundle.main.shortVersion }
+
     // MARK: Reader
 
     let webController: WebController
@@ -183,37 +244,164 @@ final class AppModel {
     /// a failed pull, a macro table that would not parse, missing tooling.
     private(set) var warnings: [String] = []
 
+    /// Append once. A warning that repeats on every sync is noise, and a
+    /// duplicate could not be dismissed on its own.
+    private func warn(_ message: String) {
+        guard !warnings.contains(message) else { return }
+        warnings.append(message)
+    }
+
+    func dismissWarning(_ message: String) {
+        warnings.removeAll { $0 == message }
+    }
+
+    func dismissAllWarnings() {
+        warnings.removeAll()
+    }
+
+    /// Marks the macro warning so a reload replaces it. On a fresh install it
+    /// is raised before the clone exists and has to go away once it does.
+    static let macrosWarningPrefix = "Custom LaTeX macros unavailable — "
+    /// Same for the leftover-worktree count, which changes as they are pruned.
+    static let orphansWarningPrefix = "Leftover worktrees: "
+    /// And for the missing-tool warning, which discovery re-derives.
+    static let toolsWarningPrefix = "Tools: "
+
     // MARK: Init
 
     init(paths: AppPaths = .standard()) {
         self.paths = paths
         self.searchIndex = SearchIndex(path: paths.searchDatabase)
-        // The macro table has to be known before the web view is built: the
-        // macros go in as a documentStart user script, which cannot be changed
-        // afterwards without recreating the configuration.
+        // On a fresh install this is empty: the clone does not exist yet. The
+        // table travels with every render request, so the web view picks up
+        // the real one as soon as the clone lands.
         let macros = MacroTable.load(cloneRoot: paths.clone)
         self.macros = macros
-        self.webController = WebController(paths: paths, macros: macros)
+        // The render pipeline is served from a per-build copy in Caches, not
+        // from the bundle: the updater swaps the bundle under the running
+        // app, and a WebContent restart after that must not load the new
+        // release's JavaScript against this release's Swift.
+        self.webController = WebController(paths: paths, webRoot: paths.stagedWebRoot())
 
         try? paths.createDirectories()
+        // Tools are looked for in `discoverTools()`, after the first frame:
+        // the login-shell fallback costs up to three seconds per tool that is
+        // not installed, and `init` runs on the main thread before any window.
         toolOverrides = CCwikiSettings.toolOverrides()
         tools = ToolLocator(overrides: toolOverrides)
-        tools.locateAll()
-        isGitHubAuthenticated = GitHubAuth.isAuthenticated(tools: tools)
         vendorManifest = try? String(
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
-        webController.onNavigate = { [weak self] destination, _ in
-            self?.navigate(to: destination)
+        webController.onNavigate = { [weak self] destination, modified in
+            guard let self else { return }
+            // ⌘-click: the same page on cryptology.city, in the browser. The
+            // app has one reader window, so "open elsewhere" means the site.
+            if modified, case .page(let path, let anchor) = destination,
+               let page = index?.pages[path],
+               let url = Self.siteURL(slug: page.slug, anchor: anchor) {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            navigate(to: destination)
+        }
+        webController.onReady = { [weak self] in
+            self?.renderCurrent()
         }
 
-        if let missing = tools.missingForReading.first {
-            warnings.append(
-                "\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
+        refreshMacrosWarning()
+    }
+
+    // MARK: Tools
+
+    /// Find `git`, then everything else.
+    ///
+    /// Two phases because they cost differently. `git` is one `stat` in the
+    /// common case and is all the reader needs, so the caller can `await` it
+    /// and go on to load the library. The ingestion tools may each fall
+    /// through to a login shell; they are found in the background and nothing
+    /// the reader does waits on them.
+    func discoverTools() async {
+        discoveryGeneration += 1
+        let generation = discoveryGeneration
+        isDiscoveringTools = true
+        let overrides = toolOverrides
+
+        let reading = await Task.detached(priority: .userInitiated) { () -> (ToolLocator, Bool) in
+            var located = ToolLocator(overrides: overrides)
+            located.locate([.git])
+            let stub = located.path(for: .git).map(ToolLocator.isAppleStub) ?? false
+            let needsTools = stub && !ToolLocator.developerToolsInstalled()
+            if needsTools { located.forget(.git) }
+            return (located, needsTools)
+        }.value
+        guard generation == discoveryGeneration else { return }
+        tools = reading.0
+        needsDeveloperTools = reading.1
+        refreshToolWarnings()
+
+        Task { await discoverIngestionTools(generation: generation, from: reading.0) }
+    }
+
+    private func discoverIngestionTools(generation: Int, from base: ToolLocator) async {
+        let all = await Task.detached(priority: .utility) { () -> ToolLocator in
+            var located = base
+            located.locate([.gh, .claude, .node])
+            return located
+        }.value
+        guard generation == discoveryGeneration else { return }
+        tools = all
+        isDiscoveringTools = false
+        isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: all)
+        guard generation == discoveryGeneration else { return }
+        await refreshPushCapability()
+    }
+
+    /// Nothing to warn about any more: reading works without git (the wiki
+    /// arrives as a snapshot), and the ingest sheet lists what a job needs.
+    private func refreshToolWarnings() {
+        warnings.removeAll { $0.hasPrefix(Self.toolsWarningPrefix) }
+    }
+
+    /// Ask macOS to install the Command Line Tools. `xcode-select --install`
+    /// only opens the system's own installer dialog and returns; the download
+    /// and the licence are the OS's, not ours.
+    func installDeveloperTools() {
+        Task.detached(priority: .userInitiated) {
+            _ = await Subprocess.run(
+                executable: "/usr/bin/xcode-select", arguments: ["--install"],
+                environment: ProcessInfo.processInfo.environment)
         }
+    }
+
+    /// Why a job could not start right now, in the order the sheet shows them.
+    /// Empty means the pre-flight checks that concern tooling would pass.
+    var ingestionBlockers: [String] {
+        var blockers: [String] = []
+        if index == nil {
+            blockers.append("The wiki has not been cloned yet. Sync first (⌘R).")
+        }
+        if needsDeveloperTools {
+            blockers.append("git needs Apple's Command Line Tools (reading does not; "
+                + "jobs do). Settings > Tools has the installer.")
+        }
+        for tool in tools.missingForIngestion where !(tool == .git && needsDeveloperTools) {
+            blockers.append("\(tool.rawValue) was not found. It is needed for \(tool.purpose).")
+        }
+        if tools.path(for: .gh) != nil, !isGitHubAuthenticated {
+            blockers.append("The GitHub CLI is not signed in. Run `gh auth login` in Terminal.")
+        }
+        if tools.path(for: .gh) != nil, isGitHubAuthenticated, !canPushToRemote {
+            blockers.append("CCwiki's clone cannot authenticate a push. Sync again (⌘R) to configure it.")
+        }
+        return blockers
+    }
+
+    /// Replace the macro warning with whatever is true now.
+    private func refreshMacrosWarning() {
+        warnings.removeAll { $0.hasPrefix(Self.macrosWarningPrefix) }
         if macros.isEmpty, let diagnostic = macros.diagnostic {
-            warnings.append("Custom LaTeX macros unavailable — \(diagnostic.message) "
-                + "Math will render, but site-specific commands will show as errors.")
+            warn(Self.macrosWarningPrefix + diagnostic.message
+                + " Math will render, but site-specific commands will show as errors.")
         }
     }
 
@@ -245,19 +433,30 @@ final class AppModel {
         relations = loaded.2
         relationLabels = loaded.3
         unlistedPaths = loaded.2.unlistedPaths
+        rebuildBrowseState()
         macros = MacroTable.load(cloneRoot: paths.clone)
+        refreshMacrosWarning()
 
         // Replaced rather than appended: `loadLibrary` runs after every pull,
         // and a warning that stacks up once per sync is noise.
         warnings.removeAll { $0.hasPrefix(Self.relationsWarningPrefix) }
         if let diagnostic = relations.diagnostic {
-            warnings.append(Self.relationsWarningPrefix + diagnostic.message)
+            warn(Self.relationsWarningPrefix + diagnostic.message)
         }
 
         let git = gitService
-        if let git {
+        if let git, paths.wikiStore == .git {
             modifiedDates = await git.modifiedDates(in: paths.clone)
             headRevision = await git.head(in: paths.clone)
+            headDate = await git.headDate(in: paths.clone)
+        } else if let marker = SnapshotService.marker(in: paths.clone) {
+            // A snapshot has no history to date files by; the commit itself
+            // is dated, which is what the status bar shows.
+            modifiedDates = [:]
+            headRevision = marker.sha
+            headDate = marker.commitDate
+        }
+        if let git {
             if let gh = tools.path(for: .gh) {
                 await git.configureCredentialHelper(clone: paths.clone, ghPath: gh)
             }
@@ -270,8 +469,7 @@ final class AppModel {
                 try await searchIndex.rebuild(pages: pages)
             } catch {
                 await MainActor.run {
-                    self.warnings.append(
-                        "Search index could not be rebuilt: \(error.localizedDescription)")
+                    self.warn("Search index could not be rebuilt: \(error.localizedDescription)")
                 }
             }
         }
@@ -284,15 +482,18 @@ final class AppModel {
         // `git worktree add` will refuse to reuse the path. Finding them at
         // launch is cheaper than making the user learn `git worktree prune`.
         await refreshOrphanedWorktrees()
+        warnings.removeAll { $0.hasPrefix(Self.orphansWarningPrefix) }
         if !orphanedWorktrees.isEmpty {
-            warnings.append(
-                "\(orphanedWorktrees.count) worktree(s) left over from an interrupted job. "
-                + "Open the jobs window (⇧⌘J) to prune them.")
+            let count = orphanedWorktrees.count
+            warn(Self.orphansWarningPrefix
+                + "\(count) left over from an interrupted job. "
+                + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
         }
 
-        // Re-render whatever is on screen, since the file may have changed.
+        // Re-render whatever is on screen, since the file may have changed —
+        // keeping the reader's place, since it usually has not.
         webController.invalidate()
-        if case .empty = location { openHome() } else { renderCurrent() }
+        if case .empty = location { openInitialPage() } else { renderCurrent(preservingScroll: true) }
         refreshQuickSwitcher()
     }
 
@@ -307,18 +508,37 @@ final class AppModel {
     /// does not start two clones.
     func sync() {
         guard syncTask == nil else { return }
-        guard let git = gitService else {
-            syncState = .failed("git was not found — see Settings.")
+        let store = paths.wikiStore
+        let git = gitService
+
+        // With git: clone or fast-forward; a snapshot left by a git-less
+        // launch is replaced by a real clone (the clone lands beside it and
+        // is moved in only on success). Without git: a tarball snapshot,
+        // which is all the reader needs. A clone with no git to update it is
+        // the one dead end, and it says so.
+        if git == nil, store == .git {
+            syncState = .failed("This wiki copy is a git clone, and git is no longer available "
+                + "to update it. Reset Clone in Settings > Storage downloads a snapshot instead.")
             return
         }
 
         syncLog = []
-        syncState = .running(paths.cloneExists ? "Fetching…" : "Cloning the wiki…")
+        syncState = .running(
+            store == .none ? (git != nil ? "Cloning the wiki…" : "Downloading the wiki…")
+                : (git != nil ? "Fetching…" : "Checking for a newer snapshot…"))
 
         syncTask = Task { [weak self] in
             guard let self else { return }
-            let outcome = await git.sync(clone: paths.clone, remote: AppPaths.remoteURL) { line in
+            let onLine: @Sendable (ProcessLine) -> Void = { line in
                 Task { @MainActor [weak self] in self?.appendSyncLine(line) }
+            }
+            let outcome: GitService.SyncOutcome
+            if let git {
+                outcome = await git.sync(clone: paths.clone, remote: AppPaths.remoteURL, onLine: onLine)
+            } else {
+                let snapshots = SnapshotService(
+                    repository: AppPaths.repositorySlug, branch: AppPaths.defaultBranch)
+                outcome = await snapshots.sync(destination: paths.clone, onLine: onLine)
             }
             switch outcome {
             case .offline:
@@ -329,15 +549,40 @@ final class AppModel {
                 syncState = .failed(outcome.summary)
             case .failed(let message):
                 syncState = .failed(message)
-                warnings.append(message)
+                warn(message)
             default:
                 syncState = .running("Indexing…")
                 await loadLibrary()
                 syncState = .succeeded(outcome.summary)
                 warnings.removeAll { $0.contains("Fast-forward failed") }
+                scheduleStatusReset()
             }
             syncTask = nil
         }
+    }
+
+    /// "Already up to date" has been read after a few seconds; the resting
+    /// state — the wiki as of when — is the more useful thing to leave up.
+    private func scheduleStatusReset() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard let self, case .succeeded = self.syncState else { return }
+            self.syncState = .idle
+        }
+    }
+
+    /// Delete the clone and fetch it again. The clone is the app's own
+    /// artifact and CCwiki never writes into it, so nothing of the user's
+    /// is lost; the loaded index stays on screen until the new clone lands.
+    func resetClone() {
+        // A job's worktree keeps its metadata inside the clone's `.git`, so
+        // deleting the clone under a running job breaks every git step it
+        // has left. Settings disables the button; this is the backstop.
+        guard syncTask == nil, activeJobCount == 0 else { return }
+        try? FileManager.default.removeItem(at: paths.clone)
+        headRevision = nil
+        headDate = nil
+        sync()
     }
 
     private func appendSyncLine(_ line: ProcessLine) {
@@ -354,6 +599,17 @@ final class AppModel {
 
     // MARK: Navigation
 
+    /// Cold start: the page from last time, if it still exists, else home.
+    /// Not under the screenshot harness, whose plan starts where it says.
+    private func openInitialPage() {
+        if ScreenshotRunner.directory == nil,
+           let last = CCwikiSettings.lastPage, index?.pages[last] != nil {
+            open(.page(path: last, anchor: nil))
+        } else {
+            openHome()
+        }
+    }
+
     func openHome() {
         guard let index else { return }
         if index.pages["index.md"] != nil {
@@ -364,18 +620,20 @@ final class AppModel {
     }
 
     func open(_ newLocation: Location, recordHistory: Bool = true) {
-        guard newLocation != location else {
-            if case .page(_, let anchor) = newLocation, let anchor {
+        // A page the clone does not have is not somewhere the reader can be.
+        // Without this the chrome moved — title, selection, history — while
+        // the web view kept the previous page.
+        if case .page(let path, _) = newLocation, index?.pages[path] == nil { return }
+
+        guard history.visit(newLocation, recording: recordHistory) else {
+            // Not a move. The one case worth acting on: the same page, same
+            // anchor, asked for again — jump back to the anchor.
+            if newLocation == location, case .page(_, let anchor) = newLocation, let anchor {
                 webController.scrollTo(anchor: anchor)
             }
             return
         }
-        if recordHistory, location != .empty {
-            back.append(location)
-            forward.removeAll()
-            if back.count > 100 { back.removeFirst() }
-        }
-        location = newLocation
+        if case .page(let path, _) = newLocation { CCwikiSettings.lastPage = path }
         reveal(newLocation)
         renderCurrent()
     }
@@ -413,24 +671,21 @@ final class AppModel {
     }
 
     func goBack() {
-        guard let previous = back.popLast() else { return }
-        forward.append(location)
-        location = previous
+        guard let previous = history.goBack() else { return }
         reveal(previous)
         renderCurrent()
     }
 
     func goForward() {
-        guard let next = forward.popLast() else { return }
-        back.append(location)
-        location = next
+        guard let next = history.goForward() else { return }
         reveal(next)
         renderCurrent()
     }
 
-    private func renderCurrent() {
+    private func renderCurrent(preservingScroll: Bool = false) {
         guard let index else { return }
-        let renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
+        var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
+        renderer.reportsBrokenLinks = showsMaintenanceNotices
         var notices: [RenderRequest.Notice] = []
         if macros.isEmpty {
             notices.append(RenderRequest.Notice(
@@ -439,16 +694,68 @@ final class AppModel {
                     + "such as \\calA will not render."))
         }
 
+        var request: RenderRequest
         switch location {
         case .page(let path, let anchor):
             guard let page = index.pages[path] else { return }
-            webController.render(renderer.request(for: page, anchor: anchor, notices: notices))
+            request = renderer.request(for: page, anchor: anchor, notices: notices)
         case .folder(let slug):
-            webController.render(renderer.folderRequest(
-                slug: slug, hidingStubs: hidesStubs, notices: notices))
+            request = renderer.folderRequest(
+                slug: slug, hidingStubs: hidesStubs, notices: notices)
         case .empty:
-            break
+            return
         }
+        // The table rides along on every render, so a clone that arrived
+        // after launch, or a pull that changed `macros.ts`, takes effect on
+        // the next page rather than the next launch.
+        request.macros = macros.macros
+        request.preservesScroll = preservingScroll
+        webController.render(request)
+    }
+
+    // MARK: Text size
+
+    func makeTextBigger() {
+        webController.setPageZoom(webController.pageZoom * WebController.zoomStep)
+    }
+
+    func makeTextSmaller() {
+        webController.setPageZoom(webController.pageZoom / WebController.zoomStep)
+    }
+
+    func resetTextSize() {
+        webController.setPageZoom(1)
+    }
+
+    // MARK: The published site
+
+    /// The same page on cryptology.city, for "Open on the website" and
+    /// "Copy Link". A Quartz page's URL is its simplified slug.
+    nonisolated static func siteURL(slug: String, anchor: String? = nil) -> URL? {
+        let simple = QuartzSlug.simplifySlug(slug)
+        let path = simple == "/" ? "" : simple
+        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              var components = URLComponents(string: AppPaths.siteURL + "/" + encoded)
+        else { return nil }
+        components.fragment = anchor
+        return components.url
+    }
+
+    var currentSiteURL: URL? {
+        switch location {
+        case .page(let path, let anchor):
+            guard let page = index?.pages[path] else { return nil }
+            return Self.siteURL(slug: page.slug, anchor: anchor)
+        case .folder(let slug):
+            return Self.siteURL(slug: slug + "/")
+        case .empty:
+            return nil
+        }
+    }
+
+    func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     // MARK: Current page accessors
@@ -545,12 +852,33 @@ final class AppModel {
     /// of stacking a fresh copy once per sync.
     static let relationsWarningPrefix = "Relationships: "
 
-    /// The sidebar's directory tree.
-    func pageTree() -> [PageTreeNode] {
-        guard let index else { return [] }
-        return PageTreeNode.build(
-            pages: index.allPages.filter(isBrowsable),
-            excluding: Self.kindsOutsideTree)
+    /// The sidebar's directory tree, and the counts beside it.
+    ///
+    /// Stored, not computed: the sidebar's `body` reads these on every
+    /// navigation, and building the tree walks and sorts every page. They
+    /// change only when the index or a browse preference does, which is
+    /// where `rebuildBrowseState` is called.
+    private(set) var pageTree: [PageTreeNode] = []
+    private(set) var referenceCount = 0
+    private(set) var reductionCount = 0
+    /// Stubs currently being hidden, so the UI can say so rather than quietly
+    /// showing a shorter list than the repo has.
+    private(set) var hiddenStubCount = 0
+
+    private func rebuildBrowseState() {
+        guard let index else {
+            pageTree = []
+            referenceCount = 0
+            reductionCount = 0
+            hiddenStubCount = 0
+            return
+        }
+        let pages = index.allPages
+        let browsable = pages.filter(isBrowsable)
+        pageTree = PageTreeNode.build(pages: browsable, excluding: Self.kindsOutsideTree)
+        referenceCount = browsable.count { $0.kind == .reference }
+        reductionCount = browsable.count { $0.kind == .reduction }
+        hiddenStubCount = hidesStubs ? pages.count { $0.status == .stub } : 0
     }
 
     /// Should this page appear in browse and navigation?
@@ -561,20 +889,6 @@ final class AppModel {
     /// somewhere to navigate to. Nothing here removes a node from the graph.
     func isBrowsable(_ page: WikiPage) -> Bool {
         (!hidesStubs || page.status != .stub) && !unlistedPaths.contains(page.path)
-    }
-
-    func count(ofKind kind: PageKind) -> Int {
-        index?.allPages.count { $0.kind == kind && isBrowsable($0) } ?? 0
-    }
-
-    var referenceCount: Int { count(ofKind: .reference) }
-    var reductionCount: Int { count(ofKind: .reduction) }
-
-    /// Stubs currently being hidden, so the UI can say so rather than quietly
-    /// showing a shorter list than the repo has.
-    var hiddenStubCount: Int {
-        guard hidesStubs, let index else { return 0 }
-        return index.allPages.count { $0.status == .stub }
     }
 
     /// The pages that cite the page being read.
@@ -593,20 +907,17 @@ final class AppModel {
     func setToolOverride(_ path: String?, for tool: ToolLocator.Tool) {
         CCwikiSettings.setToolOverride(path, for: tool)
         toolOverrides = CCwikiSettings.toolOverrides()
-        tools = ToolLocator(overrides: toolOverrides)
-        tools.locateAll()
-        recheckGitHubAuth()
-        warnings.removeAll { $0.contains("was not found") }
-        if let missing = tools.missingForReading.first {
-            warnings.append(
-                "\(missing.rawValue) was not found. CCwiki needs it for \(missing.purpose).")
-        }
+        GitHubAuth.invalidate()
+        Task { await discoverTools() }
     }
 
     func recheckGitHubAuth() {
         GitHubAuth.invalidate()
-        isGitHubAuthenticated = GitHubAuth.isAuthenticated(tools: tools)
-        Task { @MainActor in await refreshPushCapability() }
+        let tools = tools
+        Task { @MainActor in
+            isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: tools)
+            await refreshPushCapability()
+        }
     }
 
     private func refreshPushCapability() async {
@@ -681,6 +992,49 @@ final class AppModel {
         start(job)
     }
 
+    /// Jobs from earlier launches, from the records beside their transcripts.
+    ///
+    /// A job that was running when the app last quit comes back as failed
+    /// and says why; its worktree, if any, shows up under "Left Behind".
+    func loadJobHistory() {
+        let manager = FileManager.default
+        guard let files = try? manager.contentsOfDirectory(
+            at: paths.logs, includingPropertiesForKeys: nil)
+        else { return }
+        let decoder = JSONDecoder()
+        let known = Set(jobs.map(\.id))
+        var restored: [IngestJob] = []
+        for file in files where file.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: file),
+                  let record = try? decoder.decode(JobRecord.self, from: data),
+                  !known.contains(record.id)
+            else { continue }
+            restored.append(IngestJob(restoring: record, paths: paths))
+        }
+        restored.sort { $0.submission.submittedAt > $1.submission.submittedAt }
+        jobs.append(contentsOf: restored)
+    }
+
+    /// Forget the finished jobs. Their transcripts stay on disk; only the
+    /// records that bring them back at launch go.
+    func clearFinishedJobs() {
+        for job in jobs where job.state.isTerminal {
+            try? FileManager.default.removeItem(at: job.recordFile)
+        }
+        jobs.removeAll { $0.state.isTerminal }
+    }
+
+    var hasFinishedJobs: Bool { jobs.contains { $0.state.isTerminal } }
+
+    /// The same submission again, as a new job. The common case after a
+    /// failure that was the machine's fault rather than the paper's.
+    func runAgain(_ job: IngestJob) {
+        submitIngestion(
+            source: job.submission.source,
+            pdf: job.submission.localPDF,
+            notes: job.submission.notes)
+    }
+
     private func start(_ job: IngestJob) {
         guard let git = gitService else {
             job.setState(.failed("git was not found."))
@@ -691,9 +1045,243 @@ final class AppModel {
             await runner.run(job)
             // A job that changed the wiki has changed nothing locally — the PR
             // lives on GitHub — but the branch and worktree bookkeeping moved,
-            // so refresh what we know about strays.
-            await refreshOrphanedWorktrees()
+            // so refresh what we know about strays. In a fresh task: a
+            // cancelled job's task would kill the `git worktree list` it
+            // needs and report no strays at all.
+            await Task { @MainActor in await self.refreshOrphanedWorktrees() }.value
         }
+    }
+
+    // MARK: Update check
+
+    /// The daily check, from the launch task. Silent whatever happens: an
+    /// update is a note in the status bar, and a failure is nothing at all.
+    func checkForUpdatesIfDue() async {
+        guard checksForUpdates, !UpdateChecker.isDevelopmentVersion(appVersion) else { return }
+        if let last = lastUpdateCheck, Date().timeIntervalSince(last) < Self.updateInterval {
+            return
+        }
+        if case .available(let release) = await performUpdateCheck() {
+            await installFoundUpdateIfAllowed(release)
+        }
+    }
+
+    /// `nil` when GitHub could not be reached or understood. The time of the
+    /// check is recorded only when an answer came back.
+    private func performUpdateCheck() async -> UpdateChecker.Outcome? {
+        guard !isCheckingForUpdates else { return nil }
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+
+        guard let outcome = try? await UpdateChecker.check(currentVersion: appVersion) else {
+            return nil
+        }
+        lastUpdateCheck = Date()
+        CCwikiSettings.lastUpdateCheck = lastUpdateCheck
+        warnings.removeAll { $0.hasPrefix(Self.updateWarningPrefix) }
+        if case .available(let release) = outcome {
+            availableUpdate = release
+            if installedUpdate?.version != release.version {
+                warn(Self.updateWarningPrefix + "CCwiki \(release.version) is available. "
+                    + "Choose CCwiki > Check for Updates… to install it.")
+            }
+        } else {
+            availableUpdate = nil
+        }
+        return outcome
+    }
+
+    /// The daily check's second half: install what it found, if allowed,
+    /// and say so in the status bar. Never relaunches by itself.
+    private func installFoundUpdateIfAllowed(_ release: ReleaseInfo) async {
+        guard installsUpdatesAutomatically, canInstallUpdates, release.isInstallable,
+              installedUpdate?.version != release.version, activeJobCount == 0
+        else { return }
+        if let error = await installUpdate(release) {
+            warn(Self.updateWarningPrefix + "CCwiki \(release.version) could not be installed: "
+                + error.localizedDescription)
+        }
+    }
+
+    /// Download, verify, unpack, check and swap. `nil` on success, in which
+    /// case `installedUpdate` is set and a relaunch is all that is left.
+    private func installUpdate(_ release: ReleaseInfo) async -> Error? {
+        guard !isInstallingUpdate else { return UpdateInstaller.Failure.installInProgress }
+        isInstallingUpdate = true
+        defer {
+            isInstallingUpdate = false
+            updateInstallProgress = nil
+        }
+        do {
+            _ = try await UpdateInstaller.install(
+                release,
+                replacing: Bundle.main.bundleURL,
+                expectedIdentifier: Bundle.main.bundleIdentifier ?? "com.axhoover.ccwiki",
+                publicKey: ReleaseKey.publicKey
+            ) { [weak self] message in
+                Task { @MainActor in
+                    // A report can land after the install returned; the
+                    // defer above has cleared the flag by then.
+                    guard let self, self.isInstallingUpdate else { return }
+                    self.updateInstallProgress = message
+                }
+            }
+        } catch {
+            return error
+        }
+        installedUpdate = release
+        availableUpdate = nil
+        warnings.removeAll {
+            $0.hasPrefix(Self.updateWarningPrefix) || $0.hasPrefix(Self.updateInstalledPrefix)
+        }
+        warn(Self.updateInstalledPrefix + "CCwiki \(release.version) is installed. "
+            + "Choose CCwiki > Relaunch to Update when convenient.")
+        return nil
+    }
+
+    /// Quit and start the bundle that is now at this app's path.
+    ///
+    /// Jobs first: the new instance must not be started until it is settled
+    /// that this one will quit, or "Don't Quit" would leave two copies of
+    /// the app on one clone and one search index. And the quit comes only
+    /// after the launch succeeded, so a bundle that will not start leaves
+    /// this window where it is.
+    func relaunchToUpdate() {
+        Task { @MainActor in
+            let running = activeJobCount
+            if running > 0 {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = running == 1
+                    ? "Stop the running job and relaunch?"
+                    : "Stop \(running) running jobs and relaunch?"
+                alert.informativeText = "The agent will be stopped before it opens a pull "
+                    + "request. Its worktree and transcript are kept."
+                alert.addButton(withTitle: running == 1 ? "Stop Job and Relaunch" : "Stop Jobs and Relaunch")
+                alert.addButton(withTitle: "Don't Relaunch")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                cancelActiveJobs()
+            }
+            do {
+                try await UpdateInstaller.relaunch(Bundle.main.bundleURL)
+            } catch {
+                let alert = NSAlert()
+                alert.alertStyle = .critical
+                alert.messageText = "The new version could not be started."
+                alert.informativeText = "\(error.localizedDescription) This window keeps "
+                    + "running the version you have. The previous copy is in the Trash as "
+                    + "CCwiki.app.previous, should the new one turn out to be broken."
+                alert.runModal()
+                return
+            }
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// The menu item and the Settings button. The person asked, so this one
+    /// answers with an alert either way.
+    func checkForUpdates() {
+        Task { @MainActor in
+            let alert = NSAlert()
+            let version = appVersion
+
+            if UpdateChecker.isDevelopmentVersion(version) {
+                alert.messageText = "This is a development build."
+                alert.informativeText = "Version \(version) was not made by make dist, so there "
+                    + "is no release to compare it against."
+                alert.runModal()
+                return
+            }
+
+            guard let outcome = await performUpdateCheck() else {
+                alert.messageText = "CCwiki could not check for updates."
+                alert.informativeText = "GitHub could not be reached. Try again later, or look "
+                    + "at the releases page directly."
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Open Releases Page")
+                if alert.runModal() == .alertSecondButtonReturn,
+                   let url = URL(string: UpdateChecker.releasesPage) {
+                    NSWorkspace.shared.open(url)
+                }
+                return
+            }
+
+            switch outcome {
+            case .available(let release):
+                if let installed = installedUpdate, installed.version == release.version {
+                    offerRelaunch(for: installed)
+                    return
+                }
+                alert.messageText = "CCwiki \(release.version) is available."
+                let installable = canInstallUpdates && release.isInstallable && activeJobCount == 0
+                if installable {
+                    alert.informativeText = "You have \(version). CCwiki will download the "
+                        + "release, verify its signature, and replace itself. The old version "
+                        + "goes to the Trash."
+                    alert.addButton(withTitle: "Install and Relaunch")
+                    alert.addButton(withTitle: "Open Release Page")
+                    alert.addButton(withTitle: "Later")
+                } else {
+                    alert.informativeText = "You have \(version). "
+                        + (activeJobCount > 0
+                            ? "A job is running, so it will not be installed now; "
+                            : canInstallUpdates
+                                ? "The release has no signed archive attached, so it cannot "
+                                    + "be installed from here; "
+                                : "This build cannot verify a download, so it cannot install "
+                                    + "one; ")
+                        + "the release page has the zip."
+                    alert.addButton(withTitle: "Open Release Page")
+                    alert.addButton(withTitle: "Later")
+                }
+                let choice = alert.runModal()
+                if installable, choice == .alertFirstButtonReturn {
+                    if let error = await installUpdate(release) {
+                        let failed = NSAlert()
+                        failed.alertStyle = .warning
+                        failed.messageText = "CCwiki \(release.version) was not installed."
+                        failed.informativeText = error.localizedDescription
+                        failed.addButton(withTitle: "OK")
+                        failed.addButton(withTitle: "Open Release Page")
+                        if failed.runModal() == .alertSecondButtonReturn {
+                            NSWorkspace.shared.open(release.url)
+                        }
+                    } else {
+                        offerRelaunch(for: release)
+                    }
+                } else if (installable && choice == .alertSecondButtonReturn)
+                    || (!installable && choice == .alertFirstButtonReturn) {
+                    NSWorkspace.shared.open(release.url)
+                }
+            case .upToDate:
+                alert.messageText = "You're up to date."
+                alert.informativeText = "CCwiki \(version) is the newest release."
+                alert.runModal()
+            case .noReleases:
+                alert.messageText = "No releases yet."
+                alert.informativeText = "Nothing has been published on GitHub to compare "
+                    + "\(version) against."
+                alert.runModal()
+            }
+        }
+    }
+
+    private func offerRelaunch(for release: ReleaseInfo) {
+        let alert = NSAlert()
+        alert.messageText = "CCwiki \(release.version) is installed."
+        alert.informativeText = "Relaunch to start using it. Until then this window keeps "
+            + "running the version you have."
+        alert.addButton(withTitle: "Relaunch Now")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn { relaunchToUpdate() }
+    }
+
+    /// Stop every job that has not finished. Called on quit, so no agent
+    /// outlives the window it was reporting to: left alone it would keep
+    /// working in the worktree and could open a PR nobody is watching.
+    func cancelActiveJobs() {
+        for job in jobs where !job.state.isTerminal { job.cancel() }
+        Subprocess.terminateAll()
     }
 
     func refreshOrphanedWorktrees() async {

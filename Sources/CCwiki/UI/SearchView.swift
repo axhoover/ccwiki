@@ -99,6 +99,8 @@ struct SearchView: View {
                                     highlightedID = hit.id
                                     openHighlighted()
                                 }
+                                .accessibilityElement(children: .combine)
+                                .accessibilityAddTraits(.isButton)
                         }
                     }
                     .padding(.vertical, Theme.tight)

@@ -16,7 +16,12 @@ import Foundation
 struct AppPaths: Sendable {
 
     static let remoteURL = "https://github.com/axhoover/cryptology.city"
+    /// The same repository as `gh` names it.
+    static let repositorySlug = "axhoover/cryptology.city"
     static let defaultBranch = "main"
+    /// The published site. A page's URL there is its Quartz slug, so the
+    /// reader can point at the same page it is showing.
+    static let siteURL = "https://cryptology.city"
 
     let support: URL
     /// Space-free scratch space. See `worktrees`.
@@ -58,6 +63,42 @@ struct AppPaths: Sendable {
             // back to the source tree so the reader is debuggable there too.
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .appending(path: "Resources/web")
+    }
+
+    /// A copy of `webRoot` in Caches, one directory per build number.
+    ///
+    /// The updater replaces the bundle while the app runs; the process keeps
+    /// its mapped code, but anything read from disk afterwards — the shell,
+    /// `ccwiki.js`, KaTeX — would come from the *new* release. A reload
+    /// after a WebContent crash would then pair the new JavaScript with the
+    /// old Swift. Serving from a copy made at launch keeps them together.
+    /// Falls back to the bundle if the copy cannot be made.
+    func stagedWebRoot() -> URL {
+        let source = webRoot
+        let build = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "dev"
+        let root = cacheRoot.appending(path: "web")
+        let staged = root.appending(path: build)
+        let manager = FileManager.default
+        if manager.fileExists(
+            atPath: staged.appending(path: "index.html").path(percentEncoded: false)) {
+            return staged
+        }
+        do {
+            try manager.createDirectory(at: root, withIntermediateDirectories: true)
+            // Copies for other builds are just cache.
+            let stale = (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+            for entry in stale where entry.lastPathComponent != build {
+                try? manager.removeItem(at: entry)
+            }
+            let partial = root.appending(path: build + ".partial")
+            try? manager.removeItem(at: partial)
+            try manager.copyItem(at: source, to: partial)
+            try manager.moveItem(at: partial, to: staged)
+            return staged
+        } catch {
+            return source
+        }
     }
 
     init(support: URL, cacheRoot: URL) {
@@ -136,6 +177,22 @@ struct AppPaths: Sendable {
             atPath: clone.appending(path: ".git").path(percentEncoded: false))
     }
 
+    /// What is at `clone`: a git clone, a tarball snapshot (see
+    /// `SnapshotService`), or nothing usable.
+    enum WikiStore: Equatable, Sendable {
+        case none
+        case git
+        case snapshot
+    }
+
+    var wikiStore: WikiStore {
+        if cloneExists { return .git }
+        if SnapshotService.marker(in: clone) != nil { return .snapshot }
+        return .none
+    }
+
     func worktree(forJob id: String) -> URL { worktrees.appending(path: id) }
     func log(forJob id: String) -> URL { logs.appending(path: "\(id).log") }
+    /// The small JSON record that brings a job back after a relaunch.
+    func record(forJob id: String) -> URL { logs.appending(path: "\(id).json") }
 }

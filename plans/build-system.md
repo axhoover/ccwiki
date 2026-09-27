@@ -79,6 +79,11 @@ make notary-setup TEAM_ID=XXXXXXXXXX APPLE_ID=you@example.com
 The minimum a change must pass: `make check && make test`. The minimum a *UI*
 change must pass: also `make run` and look at it — see `SWIFTUI-RULES.md` §9.
 
+`.github/workflows/ci.yml` runs `make check` on a `macos-15` runner for every
+push and pull request, after `scripts/vendor-web.sh --check`. That is the
+compile-and-unit-test half of the gate; `make shots` and `make test-corpus`
+need a real Mac with a display and a clone, and stay manual.
+
 
 ---
 

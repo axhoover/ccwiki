@@ -34,6 +34,14 @@ struct RenderRequest: Sendable {
     let anchor: String?
     /// Shown above the page — a macro-parse failure, a broken-link count.
     let notices: [Notice]
+    /// KaTeX's `macros` option, `\calA` → `\mathcal{A}`. Sent with every
+    /// request rather than once at startup, because on a fresh install the
+    /// clone — and so `macros.ts` — does not exist until after the first sync.
+    var macros: [String: String] = [:]
+    /// Keep the reader's scroll position across the render. For a re-render
+    /// of the page already showing — after a pull, or a listing toggle —
+    /// where jumping to the top would lose the reader's place.
+    var preservesScroll = false
 
     struct Notice: Sendable {
         let level: String  // "info" | "warning"
@@ -57,6 +65,8 @@ struct RenderRequest: Sendable {
             "markdown": markdown,
             "links": linkObject,
             "notices": notices.map { ["level": $0.level, "text": $0.text] },
+            "macros": macros,
+            "preserveScroll": preservesScroll,
         ]
         if let html { payload["html"] = html }
         if let anchor { payload["anchor"] = anchor }
@@ -76,6 +86,9 @@ struct PageRenderer: Sendable {
     /// reachable by link, by search and from a relation row — they are only
     /// kept off the folder listings, which is what "unlisted" means.
     var hiddenPaths: Set<String> = []
+    /// Add the "N links have no target" notice. The links are styled as
+    /// broken either way; the banner is for someone maintaining the wiki.
+    var reportsBrokenLinks = true
 
     /// Image extensions the reader inlines for `![[…]]` embeds.
     private static let imageExtensions: Set<String> = [
@@ -118,7 +131,7 @@ struct PageRenderer: Sendable {
         }
 
         var allNotices = notices
-        if brokenCount > 0 {
+        if reportsBrokenLinks, brokenCount > 0 {
             allNotices.append(RenderRequest.Notice(
                 level: "info",
                 text: brokenCount == 1

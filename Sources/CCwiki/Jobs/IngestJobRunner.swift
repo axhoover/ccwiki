@@ -31,9 +31,13 @@ struct IngestJobRunner {
         job.setState(.preparing("Checking…"))
 
         let canPush = await git.canAuthenticatePush(clone: paths.clone)
+        let authenticated = await GitHubAuth.isAuthenticated(tools: tools)
+        let pushRights = authenticated
+            ? await GitHubAuth.canPush(tools: tools, repository: AppPaths.repositorySlug)
+            : nil
         let findings = Preflight.run(
             submission: job.submission, index: index, paths: paths, tools: tools,
-            canPush: canPush)
+            isGitHubAuthenticated: authenticated, canPush: canPush, hasPushRights: pushRights)
         job.setPreflight(findings)
         for finding in findings {
             job.append(JobLogEntry(
@@ -70,6 +74,12 @@ struct IngestJobRunner {
         ) { line in
             Task { @MainActor in job.append(JobLogEntry(.system, line.text)) }
         }
+        // Cancelled during `worktree add`: `job.cancel()` has set the state,
+        // and a failed add is not a failure to report over it.
+        if Task.isCancelled {
+            if created { await cleanUpDespiteCancellation(job, keep: false) }
+            return
+        }
         guard created else {
             job.setState(.failed(
                 "Could not create the worktree at \(job.worktree.lastPathComponent). "
@@ -77,14 +87,13 @@ struct IngestJobRunner {
             return
         }
 
-        if Task.isCancelled { await cleanUp(job, keep: false); return }
-
         // MARK: Submodules
 
         job.setState(.preparing("Checking out submodules…"))
         let submodules = await git.updateSubmodules(in: job.worktree) { line in
             Task { @MainActor in job.append(JobLogEntry(.system, line.text)) }
         }
+        if Task.isCancelled { await cleanUpDespiteCancellation(job, keep: true); return }
         if !submodules {
             job.append(JobLogEntry(.error,
                 "Submodules did not check out. The agent cannot look up a cryptobib_key "
@@ -193,6 +202,17 @@ struct IngestJobRunner {
             job.append(JobLogEntry(.assistant, outcome.result))
         }
 
+        // What the agent says is prose; what GitHub says is fact. A final
+        // message that quotes the abort protocol or mentions an older PR
+        // used to be misread — this asks `gh` before believing either.
+        if let url = await confirmedPullRequest(job) {
+            job.append(JobLogEntry(.system,
+                "GitHub confirms a pull request for \(job.branch): \(url.absoluteString)"))
+            await cleanUp(job, keep: false)
+            job.setState(.opened(url: url))
+            return
+        }
+
         if let reason = outcome.abortReason {
             // Aborting is a good outcome, and the prompt says so: a wrong page
             // in the wiki costs a maintainer more than a submission that did
@@ -219,6 +239,52 @@ struct IngestJobRunner {
         job.setState(.failed(
             "The agent finished without opening a pull request and without aborting. "
             + "The worktree has been kept so you can see what it did."))
+    }
+
+    /// The PR *this job* opened, if GitHub has one: open, on the job's
+    /// branch, and created after the job started. A branch name is reused
+    /// once its earlier PR has merged and the branch is gone, and `gh pr
+    /// view <branch>` happily returns that merged PR; this does not.
+    private func confirmedPullRequest(_ job: IngestJob) async -> URL? {
+        guard let gh = tools.path(for: .gh) else { return nil }
+        let result = await Subprocess.run(
+            executable: gh,
+            arguments: ["pr", "list", "--repo", AppPaths.repositorySlug,
+                        "--head", job.branch, "--state", "open",
+                        "--json", "url,createdAt",
+                        "--jq", #".[] | "\(.createdAt) \(.url)""#],
+            currentDirectory: job.worktree,
+            environment: tools.childEnvironment())
+        guard result.succeeded else { return nil }
+        let notBefore = (job.startedAt ?? job.submission.submittedAt).addingTimeInterval(-60)
+        return Self.pullRequest(createdAfter: notBefore, in: result.stdout)
+    }
+
+    /// `<ISO8601 createdAt> <url>` lines → the newest URL created after `date`.
+    nonisolated static func pullRequest(createdAfter date: Date, in listing: String) -> URL? {
+        let formatter = ISO8601DateFormatter()
+        var best: (Date, URL)?
+        for line in listing.components(separatedBy: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2,
+                  let created = formatter.date(from: parts[0]),
+                  created >= date,
+                  parts[1].hasPrefix("https://"),
+                  let url = URL(string: parts[1])
+            else { continue }
+            if best == nil || created > best!.0 { best = (created, url) }
+        }
+        return best?.1
+    }
+
+    /// `cleanUp`, from a task that has been cancelled.
+    ///
+    /// A `git worktree remove` started from a cancelled task is killed the
+    /// moment it starts (`Subprocess.lines` honours cancellation). An
+    /// unstructured task does not inherit the cancellation, so the removal
+    /// actually runs.
+    private func cleanUpDespiteCancellation(_ job: IngestJob, keep: Bool) async {
+        await Task { @MainActor in await cleanUp(job, keep: keep) }.value
     }
 
     /// Remove the worktree, unless there is something in it worth looking at.

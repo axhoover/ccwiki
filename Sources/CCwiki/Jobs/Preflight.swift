@@ -39,7 +39,9 @@ enum Preflight {
         index: WikiIndex?,
         paths: AppPaths,
         tools: ToolLocator,
-        canPush: Bool = true
+        isGitHubAuthenticated: Bool,
+        canPush: Bool = true,
+        hasPushRights: Bool? = nil
     ) -> [PreflightFinding] {
         var findings: [PreflightFinding] = []
 
@@ -54,7 +56,7 @@ enum Preflight {
 
         // 2. GitHub auth. `gh pr create` failing at the very end of a long job
         //    is a miserable way to find this out.
-        if tools.path(for: .gh) != nil, !GitHubAuth.isAuthenticated(tools: tools) {
+        if tools.path(for: .gh) != nil, !isGitHubAuthenticated {
             findings.append(PreflightFinding(
                 level: .blocking,
                 title: "GitHub CLI is not authenticated",
@@ -71,6 +73,17 @@ enum Preflight {
                 title: "The clone cannot authenticate a push",
                 detail: "Run `gh auth setup-git`, or let CCwiki configure a credential "
                     + "helper on its own clone by syncing again (⌘R)."))
+        }
+
+        // 3b. Push *rights*, asked of GitHub. A helper that exists is not a
+        //     helper that works, and an account without write access finds
+        //     out at the very end of the job otherwise.
+        if hasPushRights == false {
+            findings.append(PreflightFinding(
+                level: .blocking,
+                title: "The signed-in account cannot push to \(AppPaths.repositorySlug)",
+                detail: "The job pushes a branch to the wiki itself, so a fork is not enough. "
+                    + "Ask for write access, or sign in to gh as an account that has it."))
         }
 
         // 4. The submodules the wiki's lint reads.
@@ -151,38 +164,58 @@ enum Preflight {
     }
 }
 
-/// Is `gh` logged in? Cached, because the answer does not change mid-session
-/// and `gh auth status` costs about a hundred milliseconds.
+/// Is `gh` logged in? Cached, because the answer does not change mid-session.
+///
+/// `gh auth status` talks to the GitHub API, so it is `async` with a deadline:
+/// it used to run synchronously on the main actor at launch, where a captive
+/// portal or a slow network held the first window hostage.
 enum GitHubAuth {
 
     nonisolated(unsafe) private static var cached: Bool?
     private static let lock = NSLock()
 
-    static func isAuthenticated(tools: ToolLocator) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if let cached { return cached }
-        guard let gh = tools.path(for: .gh) else {
-            cached = false
-            return false
+    /// How long to wait on `gh auth status` before treating it as a "no".
+    static let deadline: Duration = .seconds(15)
+
+    static func isAuthenticated(tools: ToolLocator) async -> Bool {
+        if let known = lock.withLock({ cached }) { return known }
+
+        // Not cached: `gh` may turn up later in discovery.
+        guard let gh = tools.path(for: .gh) else { return false }
+        let environment = tools.childEnvironment()
+
+        let answer: Bool? = await withTaskGroup(of: Bool?.self) { group in
+            group.addTask {
+                await Subprocess.run(
+                    executable: gh, arguments: ["auth", "status"], environment: environment
+                ).succeeded
+            }
+            group.addTask {
+                try? await Task.sleep(for: deadline)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: gh)
-        process.arguments = ["auth", "status"]
-        process.environment = tools.childEnvironment()
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            cached = process.terminationStatus == 0
-        } catch {
-            cached = false
+        // A timeout is not an answer, so it is not cached either.
+        if let answer {
+            lock.withLock { cached = answer }
         }
-        return cached ?? false
+        return answer ?? false
+    }
+
+    /// Whether the signed-in account may push to `repository`, asked of
+    /// GitHub itself. `nil` when it could not be asked — no `gh`, no network.
+    static func canPush(tools: ToolLocator, repository: String) async -> Bool? {
+        guard let gh = tools.path(for: .gh) else { return nil }
+        let result = await Subprocess.run(
+            executable: gh,
+            arguments: ["api", "repos/\(repository)", "--jq", ".permissions.push"],
+            environment: tools.childEnvironment())
+        guard result.succeeded else { return nil }
+        return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
     }
 
     /// Call after the user has been told to run `gh auth login`.

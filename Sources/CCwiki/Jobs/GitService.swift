@@ -43,12 +43,17 @@ struct GitService: Sendable {
 
     /// git's vocabulary for "there is no network". Matched on the message
     /// rather than the exit code because git reports all of these as 128.
+    ///
+    /// Deliberately *not* on "unable to access": git prefixes every HTTP
+    /// failure with it — a 403, a certificate problem, a proxy refusing —
+    /// and those are faults to show, not outages to sit through quietly.
     static func isNetworkFailure(_ output: String) -> Bool {
         let lowered = output.lowercased()
         return ["could not resolve host", "could not resolve proxy",
                 "failed to connect", "connection refused", "network is unreachable",
                 "operation timed out", "temporary failure in name resolution",
-                "no route to host", "unable to access"].contains { lowered.contains($0) }
+                "no route to host", "connection reset by peer", "network is down",
+        ].contains { lowered.contains($0) }
     }
 
     // MARK: Sync
@@ -64,19 +69,36 @@ struct GitService: Sendable {
             atPath: clone.appending(path: ".git").path(percentEncoded: false))
 
         if !exists {
-            try? FileManager.default.createDirectory(
-                at: clone.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let clone = await stream(
-                ["clone", "--progress", remote, clone.path(percentEncoded: false)],
+            // Clone beside the destination and move it into place. git
+            // creates `.git` first, so a clone interrupted midway used to
+            // look like a clone, and the next sync tried to fast-forward a
+            // repository with no HEAD and blamed the user for it.
+            let manager = FileManager.default
+            let parent = clone.deletingLastPathComponent()
+            let partial = parent.appending(path: clone.lastPathComponent + ".partial")
+            try? manager.createDirectory(at: parent, withIntermediateDirectories: true)
+            try? manager.removeItem(at: partial)
+
+            let result = await stream(
+                ["clone", "--progress", remote, partial.path(percentEncoded: false)],
                 in: nil, onLine: onLine)
-            let (status, transcript) = (clone.status, clone.transcript)
+            let (status, transcript) = (result.status, result.transcript)
             guard status == 0 else {
+                try? manager.removeItem(at: partial)
                 // With no clone there is nothing to read, so this one *is* an
                 // alarm however it failed.
                 return .failed(Self.isNetworkFailure(transcript)
                     ? "Could not reach GitHub to clone the wiki. Check your connection "
                         + "and sync again."
                     : "git clone failed (exit \(status)). See the sync log.")
+            }
+            // Whatever is at the destination has no `.git`, so it is not a clone.
+            try? manager.removeItem(at: clone)
+            do {
+                try manager.moveItem(at: partial, to: clone)
+            } catch {
+                return .failed("The clone finished but could not be moved into place: "
+                    + error.localizedDescription)
             }
             return .cloned
         }
@@ -99,7 +121,7 @@ struct GitService: Sendable {
             return .failed(
                 "Fast-forward failed. The reader's clone at \(clone.lastPathComponent) has "
                 + "diverged from origin — CCwiki never writes there, so something else did. "
-                + "Resolve it by hand, or delete the clone and let CCwiki re-clone.")
+                + "Resolve it by hand, or use Reset Clone in Settings > Storage.")
         }
 
         let after = await head(in: clone) ?? ""
@@ -153,6 +175,18 @@ struct GitService: Sendable {
     func head(in clone: URL) async -> String? {
         let result = await run(["-C", clone.path(percentEncoded: false), "rev-parse", "HEAD"])
         return result.succeeded ? result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+    }
+
+    /// When the checked-out commit was made — "the wiki as of", for the
+    /// status bar, which is more use to a reader than a hash.
+    func headDate(in clone: URL) async -> Date? {
+        let result = await run([
+            "-C", clone.path(percentEncoded: false), "log", "-1", "--format=%ct",
+        ])
+        guard result.succeeded,
+              let seconds = TimeInterval(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return nil }
+        return Date(timeIntervalSince1970: seconds)
     }
 
     func defaultBranch(in clone: URL) async -> String {

@@ -68,6 +68,50 @@ enum Subprocess {
 
     static let exitMarker = "\u{1}exit "
 
+    /// The pids of every child still running, so a quit can stop them all.
+    /// `Process` is not Sendable; a pid is.
+    private static let running = RunningProcesses()
+
+    final class RunningProcesses: @unchecked Sendable {
+        private let lock = NSLock()
+        private var pids: Set<pid_t> = []
+
+        func insert(_ pid: pid_t) {
+            lock.lock()
+            pids.insert(pid)
+            lock.unlock()
+        }
+
+        func remove(_ pid: pid_t) {
+            lock.lock()
+            pids.remove(pid)
+            lock.unlock()
+        }
+
+        func drain() -> Set<pid_t> {
+            lock.lock()
+            let copy = pids
+            pids.removeAll()
+            lock.unlock()
+            return copy
+        }
+    }
+
+    /// `SIGTERM` to every child still running. The app is quitting; nothing
+    /// that outlives it has anyone to report to.
+    static func terminateAll() {
+        for pid in running.drain() { deliver(SIGTERM, to: pid) }
+    }
+
+    /// Signal the child's process group, which reaches `git`'s helpers and
+    /// `claude`'s node children. If the child has no group of its own, signal
+    /// the child alone. Either way the group id is the child's pid, never
+    /// CCwiki's, so this cannot reach the app itself.
+    private static func deliver(_ sig: Int32, to pid: pid_t) {
+        guard pid > 0 else { return }
+        if kill(-pid, sig) != 0 { kill(pid, sig) }
+    }
+
     struct Result: Sendable {
         let status: Int32
         let stdout: String
@@ -105,7 +149,9 @@ enum Subprocess {
         currentDirectory: URL? = nil,
         environment: [String: String]
     ) -> AsyncStream<ProcessLine> {
-        AsyncStream(bufferingPolicy: .bufferingNewest(8192)) { continuation in
+        // Unbounded: a transcript with lines silently missing from the middle
+        // is worse than a few megabytes held while the main actor catches up.
+        AsyncStream(bufferingPolicy: .unbounded) { continuation in
             guard FileManager.default.isExecutableFile(atPath: executable) else {
                 continuation.yield(ProcessLine(
                     stream: .stderr, text: "not executable: \(executable)", isProgress: false))
@@ -159,6 +205,7 @@ enum Subprocess {
             drain(errPipe, .stderr)
 
             process.terminationHandler = { finished in
+                running.remove(finished.processIdentifier)
                 drained.notify(queue: .global()) {
                     continuation.yield(ProcessLine(
                         stream: .stdout,
@@ -170,15 +217,19 @@ enum Subprocess {
 
             continuation.onTermination = { reason in
                 guard case .cancelled = reason, process.isRunning else { return }
-                kill(-process.processIdentifier, SIGTERM)
+                deliver(SIGTERM, to: process.processIdentifier)
                 // Escalate if it ignores the polite request.
                 DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
-                    if process.isRunning { kill(-process.processIdentifier, SIGKILL) }
+                    if process.isRunning { deliver(SIGKILL, to: process.processIdentifier) }
                 }
             }
 
             do {
                 try process.run()
+                running.insert(process.processIdentifier)
+                // A child that already exited had its termination handler run
+                // before the insert; do not keep a pid that may be reused.
+                if !process.isRunning { running.remove(process.processIdentifier) }
             } catch {
                 outPipe.fileHandleForReading.readabilityHandler = nil
                 errPipe.fileHandleForReading.readabilityHandler = nil

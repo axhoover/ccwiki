@@ -25,9 +25,16 @@ struct ReaderView: View {
         }
         .navigationTitle(documentTitle)
         .navigationSubtitle(subtitle)
-        .focusedSceneValue(\.findAction, FindAction {
-            findPresented = true
-        })
+        .focusedSceneValue(\.findAction, FindAction(
+            perform: { findPresented = true },
+            next: {
+                findPresented = true
+                Task { await find(backwards: false) }
+            },
+            previous: {
+                findPresented = true
+                Task { await find(backwards: true) }
+            }))
     }
 
     // MARK: Title bar
@@ -219,12 +226,15 @@ struct ReaderView: View {
 
     // MARK: Empty state
 
+    /// Reading needs nothing installed: without git the wiki arrives as a
+    /// tarball snapshot (`SnapshotService`). So the only empty state is
+    /// "not downloaded yet", whatever the machine has on it.
     private var emptyState: some View {
         ContentUnavailableView {
             Label("CCwiki", systemImage: "building.columns")
         } description: {
             Text("An offline reader for cryptology.city.\n"
-                + "Sync to clone the wiki — after that, reading needs no network.")
+                + "Download the wiki once — after that, reading needs no network.")
         } actions: {
             Button {
                 model.sync()
@@ -244,9 +254,20 @@ struct ReaderView: View {
 /// without the command needing a reference to the view.
 struct FindAction: Equatable {
     let perform: () -> Void
+    /// Find Next / Find Previous (⌘G / ⇧⌘G). Only the reader offers them.
+    let next: (() -> Void)?
+    let previous: (() -> Void)?
     private let id = UUID()
 
-    init(perform: @escaping () -> Void) { self.perform = perform }
+    init(
+        perform: @escaping () -> Void,
+        next: (() -> Void)? = nil,
+        previous: (() -> Void)? = nil
+    ) {
+        self.perform = perform
+        self.next = next
+        self.previous = previous
+    }
 
     static func == (lhs: FindAction, rhs: FindAction) -> Bool { lhs.id == rhs.id }
 }
