@@ -49,6 +49,19 @@ jobs:
       - name: make check
         run: make check
 
+      # The whole-corpus suites, and search relevance, against the wiki as
+      # it is today. The wiki is public, so this is one shallow clone.
+      - name: Clone the wiki
+        run: git clone --depth 1 https://github.com/axhoover/cryptology.city "$RUNNER_TEMP/wiki"
+
+      - name: Corpus and search relevance
+        run: make test-corpus WIKI="$RUNNER_TEMP/wiki" 2>&1 | tee "$RUNNER_TEMP/corpus.log"; exit ${PIPESTATUS[0]}
+
+      - name: Relevance report
+        if: always()
+        run: |
+          sed -n '/navigational: /,/^[^ ]/p' "$RUNNER_TEMP/corpus.log" | head -80 || true
+
       # The other half of build.sh: the icon, the bundle, the universal
       # binary, ad-hoc signing. Uploaded so a build of any commit can be
       # tried without a toolchain. It is NOT a release: ad-hoc signed, so

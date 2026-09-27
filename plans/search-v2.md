@@ -1,6 +1,10 @@
-# Search, the next version: a proposal
+# Search, the next version
 
-**Status: proposal, 2026-09-27. Nothing here is built.** Written so the
+**Status: decided 2026-09-27, being built on `claude/search-v2`.** §6 records
+the decisions and the design that follows from them; §1–§5 are the proposal
+they answered, kept because the reasoning is still the reasoning.
+
+**Original status: proposal, 2026-09-27.** Written so the
 maintainer can choose a direction without needing a background in search
 engines: each option says what it would feel like to use, what it costs, and
 what it risks. The current design is in [search.md](search.md); this assumes
@@ -144,6 +148,95 @@ so it is not forgotten, not recommended now.
 - One search box (C), or keep ⌘O and ⌘S separate?
 - Is search-by-meaning (D) worth an experiment?
 
+## 6. Decided, and the design that follows
+
+### What the maintainer chose
+
+- **Three searches with clear jobs**, not one merged box:
+
+  | Shortcut | Searches | Order |
+  |---|---|---|
+  | ⌘S | Concept pages only, by name and text. **No references.** | Field matched, then section priority, then relevance |
+  | ⇧⌘F | Every page, literal text, grep-like, with the lines | Page, then line |
+  | ⇧⌘R | References only: key, authors, title, venue, year, abstract, and the concept pages that cite them | Field matched, then relevance |
+
+  ⌘O stays the jump-to-page switcher. ⌘R stays Sync: it means reload in
+  nearly every Mac app, so references take ⇧⌘R.
+- **Section priority**, the maintainer's call for this wiki: primitives and
+  assumptions first, then complexity classes, then glossary, barriers and
+  folklore, then reductions. References are not in ⌘S at all.
+- **Search by meaning (option D) is dropped**: readers who want that will
+  point a general-purpose LLM at the site.
+- **The test set is generated, not hand-written** (§6.3), since the
+  maintainer should not have to know what makes a good judgment list.
+
+### 6.1 How good search systems order results, and what that means here
+
+Written from knowledge of these systems; this session's network policy
+blocked their documentation, so the links in the references were not
+re-read while writing this.
+
+- **Tiered rules, not one blended score.** Algolia and Meilisearch both rank
+  by a list of rules applied in order, each only breaking the ties the
+  previous one left: how many query words matched, typos, how close
+  together, **which field matched**, exactness, and only then a custom
+  business rule. The effect is predictable: a title match beats any number
+  of body matches, which a single BM25 score does not guarantee, since a
+  long body full of the word can outscore a short title.
+  *Here:* ⌘S sorts by (1) which field matched — name or alias, then a
+  heading, then the text; (2) the section priority above; (3) BM25 within
+  what is left. The priority is a tie-breaker *after* the field, so a
+  complexity class named in the query (`AM`) still beats a primitive that
+  mentions it in passing, and among pages that only mention a term, the
+  primitive comes first.
+- **Records per section, grouped by page.** Documentation search (Algolia's
+  DocSearch is the common example) indexes each section under its page and
+  heading trail, and a hit opens *at that section*. *Here:* a hit whose best
+  match is a heading opens at that heading's anchor.
+- **Field-scoped search for literature.** Reference managers and
+  bibliographies (Zotero's quick-search modes, dblp, Google Scholar's author
+  search) search authors, title and year by default and the full record only
+  when asked, fold accents (`Lázló` = `Laszlo`), and let a year narrow a
+  result. *Here:* ⇧⌘R ranks a citation-key or author match above a title
+  match above an abstract match, folds diacritics, treats a four-digit
+  number as a year, and adds one field this wiki has that a library does
+  not: the concept pages that cite the paper. Searching *oblivious transfer*
+  in ⇧⌘R then finds first the papers the OT page cites, then papers whose
+  abstract mentions it.
+- **Grep is exhaustive and unranked.** A literal-text search is for "every
+  place this string occurs": results in page order with the matching lines,
+  no relevance, nothing hidden. *Here:* ⇧⌘F, over references too.
+- **Measure with a judgment list.** Relevance work everywhere starts from
+  queries with known right answers and a few numbers: success@1, success@5,
+  mean reciprocal rank, and the rate of queries that return nothing.
+
+### 6.2 Build order on the branch
+
+1. **The measuring harness** (§6.3), run in CI against a fresh clone of the
+   wiki, with today's ⌘S as the baseline.
+2. **⌘S as concept search**: references out, tiered ranking, heading hits
+   open at the heading, Porter stemming if the numbers say it helps.
+3. **⇧⌘R reference search.**
+4. **⇧⌘F literal search.**
+5. Then "Did you mean …?" (option B), if the zero-result rate warrants it.
+
+### 6.3 The test set, generated from the wiki
+
+- **Navigational, ⌘S:** every primitive, assumption and complexity class,
+  queried by its title and by each alias it alone owns, must come first.
+  About a hundred and fifty queries, regenerated from the wiki each run, so
+  the set grows with it.
+- **Priority, ⌘S:** for any query, no complexity class, reduction or
+  reference may outrank a primitive or assumption that matched in the same
+  or a better field.
+- **Navigational, ⇧⌘R:** every reference by its citation key, and by its
+  paper title, must come first; by first author's surname and year, it must
+  be in the top three.
+- **Thresholds, not perfection:** the wiki changes daily, so the tests
+  report the numbers and fail only below a floor, set from the first
+  honest measurement. A failing query is printed, which is where a missing
+  alias in the wiki usually shows up.
+
 ## References
 
 - SQLite FTS5 — tokenizers (`porter`, `trigram`), `bm25()`, `fts5vocab`:
@@ -155,3 +248,10 @@ so it is not forgotten, not recommended now.
   the stemmer behind FTS5's `porter` tokenizer.
 - Apple, `NLEmbedding`:
   <https://developer.apple.com/documentation/naturallanguage/nlembedding>
+- Algolia, ranking criteria and the tie-breaking algorithm:
+  <https://www.algolia.com/doc/guides/managing-results/relevance-overview/in-depth/ranking-criteria/>
+- Meilisearch, ranking rules:
+  <https://www.meilisearch.com/docs/learn/relevancy/ranking_rules>
+- Algolia DocSearch, records and hierarchy:
+  <https://docsearch.algolia.com/docs/record-extractor/>
+- Zotero, searching (quick-search modes): <https://www.zotero.org/support/searching>
