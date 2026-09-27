@@ -406,7 +406,10 @@ finds `BIP+18`).
 | one typo (178), for comparison | 87.6% | 92.7% |
 | navigational (297) | 100% | 100% |
 
-CI reports both new sets; the floors are 90%.
+CI reports both new sets and confirmed all four numbers exactly; the
+floors are 90%. One side effect, harmless: read without its word break,
+"Commitment scheme" starts with `commitments`, so that plural is now a
+prefix match rather than an every-word one, for the same page.
 
 ## References
 
