@@ -231,6 +231,15 @@ struct RootView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
+                if let progress = model.updateInstallProgress {
+                    HStack(spacing: Theme.tight) {
+                        ProgressView().controlSize(.small).scaleEffect(0.6)
+                        Text(progress)
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 if model.activeJobCount > 0 {
                     Button {
                         openWindow(id: CCwikiApp.jobsWindowID)

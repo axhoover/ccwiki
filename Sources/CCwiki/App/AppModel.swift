@@ -203,9 +203,19 @@ final class AppModel {
     var checksForUpdates: Bool = CCwikiSettings.checksForUpdates {
         didSet { CCwikiSettings.checksForUpdates = checksForUpdates }
     }
+    var installsUpdatesAutomatically: Bool = CCwikiSettings.installsUpdatesAutomatically {
+        didSet { CCwikiSettings.installsUpdatesAutomatically = installsUpdatesAutomatically }
+    }
     private(set) var availableUpdate: ReleaseInfo?
+    /// Downloaded, verified and swapped into place; waiting for a relaunch.
+    private(set) var installedUpdate: ReleaseInfo?
     private(set) var lastUpdateCheck: Date? = CCwikiSettings.lastUpdateCheck
     private(set) var isCheckingForUpdates = false
+    private(set) var isInstallingUpdate = false
+    /// What the installer is doing right now, for the status bar.
+    private(set) var updateInstallProgress: String?
+    /// Whether this build can verify a download at all. See `ReleaseKey`.
+    var canInstallUpdates: Bool { ReleaseKey.isConfigured }
     static let updateInterval: TimeInterval = 24 * 60 * 60
     static let updateWarningPrefix = "Update: "
 
@@ -1000,7 +1010,9 @@ final class AppModel {
         if let last = lastUpdateCheck, Date().timeIntervalSince(last) < Self.updateInterval {
             return
         }
-        _ = await performUpdateCheck()
+        if case .available(let release) = await performUpdateCheck() {
+            await installFoundUpdateIfAllowed(release)
+        }
     }
 
     /// `nil` when GitHub could not be reached or understood. The time of the
@@ -1018,12 +1030,65 @@ final class AppModel {
         warnings.removeAll { $0.hasPrefix(Self.updateWarningPrefix) }
         if case .available(let release) = outcome {
             availableUpdate = release
-            warn(Self.updateWarningPrefix + "CCwiki \(release.version) is available. "
-                + "Choose CCwiki > Check for Updates… to get it.")
+            if installedUpdate?.version != release.version {
+                warn(Self.updateWarningPrefix + "CCwiki \(release.version) is available. "
+                    + "Choose CCwiki > Check for Updates… to install it.")
+            }
         } else {
             availableUpdate = nil
         }
         return outcome
+    }
+
+    /// The daily check's second half: install what it found, if allowed,
+    /// and say so in the status bar. Never relaunches by itself.
+    private func installFoundUpdateIfAllowed(_ release: ReleaseInfo) async {
+        guard installsUpdatesAutomatically, canInstallUpdates, release.isInstallable,
+              installedUpdate?.version != release.version, activeJobCount == 0
+        else { return }
+        if let error = await installUpdate(release) {
+            warn(Self.updateWarningPrefix + "CCwiki \(release.version) could not be installed: "
+                + error.localizedDescription)
+        }
+    }
+
+    /// Download, verify, unpack, check and swap. `nil` on success, in which
+    /// case `installedUpdate` is set and a relaunch is all that is left.
+    private func installUpdate(_ release: ReleaseInfo) async -> Error? {
+        guard !isInstallingUpdate else { return nil }
+        isInstallingUpdate = true
+        defer {
+            isInstallingUpdate = false
+            updateInstallProgress = nil
+        }
+        do {
+            _ = try await UpdateInstaller.install(
+                release,
+                replacing: Bundle.main.bundleURL,
+                expectedIdentifier: Bundle.main.bundleIdentifier ?? "com.axhoover.ccwiki",
+                publicKey: ReleaseKey.publicKey
+            ) { [weak self] message in
+                Task { @MainActor in
+                    // A report can land after the install returned; the
+                    // defer above has cleared the flag by then.
+                    guard let self, self.isInstallingUpdate else { return }
+                    self.updateInstallProgress = message
+                }
+            }
+        } catch {
+            return error
+        }
+        installedUpdate = release
+        availableUpdate = nil
+        warnings.removeAll { $0.hasPrefix(Self.updateWarningPrefix) }
+        warn(Self.updateWarningPrefix + "CCwiki \(release.version) is installed. "
+            + "Choose CCwiki > Relaunch to Update when convenient.")
+        return nil
+    }
+
+    /// Quit and start the bundle that is now at this app's path.
+    func relaunchToUpdate() {
+        UpdateInstaller.relaunch(Bundle.main.bundleURL)
     }
 
     /// The menu item and the Settings button. The person asked, so this one
@@ -1056,12 +1121,49 @@ final class AppModel {
 
             switch outcome {
             case .available(let release):
+                if let installed = installedUpdate, installed.version == release.version {
+                    offerRelaunch(for: installed)
+                    return
+                }
                 alert.messageText = "CCwiki \(release.version) is available."
-                alert.informativeText = "You have \(version). The download is on the release "
-                    + "page; replace the app in your Applications folder with the new one."
-                alert.addButton(withTitle: "Open Release Page")
-                alert.addButton(withTitle: "Later")
-                if alert.runModal() == .alertFirstButtonReturn {
+                let installable = canInstallUpdates && release.isInstallable && activeJobCount == 0
+                if installable {
+                    alert.informativeText = "You have \(version). CCwiki will download the "
+                        + "release, verify its signature, and replace itself. The old version "
+                        + "goes to the Trash."
+                    alert.addButton(withTitle: "Install and Relaunch")
+                    alert.addButton(withTitle: "Open Release Page")
+                    alert.addButton(withTitle: "Later")
+                } else {
+                    alert.informativeText = "You have \(version). "
+                        + (activeJobCount > 0
+                            ? "A job is running, so it will not be installed now; "
+                            : canInstallUpdates
+                                ? "The release has no signed archive attached, so it cannot "
+                                    + "be installed from here; "
+                                : "This build cannot verify a download, so it cannot install "
+                                    + "one; ")
+                        + "the release page has the zip."
+                    alert.addButton(withTitle: "Open Release Page")
+                    alert.addButton(withTitle: "Later")
+                }
+                let choice = alert.runModal()
+                if installable, choice == .alertFirstButtonReturn {
+                    if let error = await installUpdate(release) {
+                        let failed = NSAlert()
+                        failed.alertStyle = .warning
+                        failed.messageText = "CCwiki \(release.version) was not installed."
+                        failed.informativeText = error.localizedDescription
+                        failed.addButton(withTitle: "OK")
+                        failed.addButton(withTitle: "Open Release Page")
+                        if failed.runModal() == .alertSecondButtonReturn {
+                            NSWorkspace.shared.open(release.url)
+                        }
+                    } else {
+                        offerRelaunch(for: release)
+                    }
+                } else if (installable && choice == .alertSecondButtonReturn)
+                    || (!installable && choice == .alertFirstButtonReturn) {
                     NSWorkspace.shared.open(release.url)
                 }
             case .upToDate:
@@ -1075,6 +1177,16 @@ final class AppModel {
                 alert.runModal()
             }
         }
+    }
+
+    private func offerRelaunch(for release: ReleaseInfo) {
+        let alert = NSAlert()
+        alert.messageText = "CCwiki \(release.version) is installed."
+        alert.informativeText = "Relaunch to start using it. Until then this window keeps "
+            + "running the version you have."
+        alert.addButton(withTitle: "Relaunch Now")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn { relaunchToUpdate() }
     }
 
     /// Stop every job that has not finished. Called on quit, so no agent

@@ -58,12 +58,20 @@ CERT_NAME      ?= $(if $(TEAM_ID),Developer ID Application: $(DEVELOPER_NAME) ($
 # `make notary-setup` (interactive; never puts the password on the cmdline).
 NOTARY_PROFILE ?= ccwiki-notary
 
+# The Ed25519 key that signs release zips, which is what the in-app updater
+# checks instead of a Developer ID. `make release-keys` makes it once.
+RELEASE_KEY_FILE   ?= $(if $(CCWIKI_RELEASE_KEY),$(CCWIKI_RELEASE_KEY),$(HOME)/.config/ccwiki/release-key)
+RELEASE_KEY_SOURCE := Sources/CCwiki/App/ReleaseKey.swift
+PUBLIC_KEY         := $(shell sed -n 's/.*publicKeyBase64 = "\(.*\)".*/\1/p' $(RELEASE_KEY_SOURCE) 2>/dev/null)
+RELEASE_SIG        := $(RELEASE_ZIP).sig
+
 PROVISION_PROFILE ?=
 NOTES_FILE       ?=
 
 .PHONY: all deps build check build-only test test-corpus release run clean install uninstall register help \
         icon check-version notary-setup sign zip-notary notarize staple zip-release \
-        checksum verify-release dist github-release print-version
+        checksum verify-release dist github-release print-version \
+        release-keys package zip-package sign-package verify-package
 
 all: build
 
@@ -86,10 +94,14 @@ help:
 	@echo "  uninstall         Remove /Applications/$(APP_NAME).app"
 	@echo "  register          Refresh LaunchServices for ./$(APP)"
 	@echo ""
-	@echo "Release pipeline (require an exact 'vX.Y.Z' git tag + signing identity):"
+	@echo "Release without a Developer ID (needs an exact 'vX.Y.Z' git tag):"
+	@echo "  release-keys      One-time: make the Ed25519 release key and embed its public half"
+	@echo "  package           Build (universal, ad-hoc) → zip → checksum → Ed25519 sign → verify"
+	@echo "  github-release    Upload the zip, .sha256 and .sig to a GitHub release"
+	@echo ""
+	@echo "Release with a Developer ID (also needs a signing identity):"
 	@echo "  notary-setup      One-time: store notary creds in keychain ($(NOTARY_PROFILE))"
-	@echo "  dist              Build → sign → notarize → staple → zip → checksum"
-	@echo "  github-release    Upload \$$(RELEASE_ZIP) + .sha256 to a GitHub release"
+	@echo "  dist              Build → sign → notarize → staple → zip → checksum → Ed25519 sign"
 	@echo "  print-version     Print resolved release VERSION"
 	@echo ""
 	@echo "  help              Show this message"
@@ -218,9 +230,58 @@ clean:
 #   git tag v0.1.0 && make dist
 # ---------------------------------------------------------------------------
 
-dist: check-version clean release sign zip-notary notarize staple zip-release checksum verify-release
+dist: check-version clean release sign zip-notary notarize staple zip-release checksum sign-package verify-release verify-package
 	@echo "✓ release artifact ready: $(RELEASE_ZIP)"
 	@echo "  next: make github-release   (or upload $(RELEASE_ZIP) manually)"
+
+# ---------------------------------------------------------------------------
+# The same, without a Developer ID. Ad-hoc signed and universal; what makes
+# it trustworthy to the updater is the Ed25519 signature over the zip, made
+# with the key from `make release-keys` and checked against the public key
+# built into the app. See plans/distribution.md §3, "Tier 2b".
+#
+#   make release-keys            (once; commit the change to ReleaseKey.swift)
+#   git tag v0.2.0 && make package && make github-release
+# ---------------------------------------------------------------------------
+
+release-keys:
+	@if ! grep -q 'publicKeyBase64 = ""' "$(RELEASE_KEY_SOURCE)"; then \
+	  echo "✗ $(RELEASE_KEY_SOURCE) already carries a public key."; \
+	  echo "  Replacing it orphans every installed copy, which would then refuse every"; \
+	  echo "  future update. If you really mean it, blank the string by hand first."; \
+	  exit 1; \
+	fi
+	@out="$$(swift scripts/release-sign.swift keygen "$(RELEASE_KEY_FILE)")" || exit 1; \
+	echo "$$out"; \
+	key="$$(printf '%s\n' "$$out" | sed -n 's/^PUBLIC_KEY=//p')"; \
+	[ -n "$$key" ] || { echo "✗ keygen printed no public key"; exit 1; }; \
+	sed -i '' "s|publicKeyBase64 = \"\"|publicKeyBase64 = \"$$key\"|" "$(RELEASE_KEY_SOURCE)"; \
+	echo "✓ embedded the public key in $(RELEASE_KEY_SOURCE) — commit it"
+
+package: check-version clean release zip-package checksum sign-package verify-package
+	@echo "✓ package ready: $(RELEASE_ZIP), .sha256, .sig"
+	@echo "  next: make github-release"
+
+zip-package:
+	@mkdir -p "$(DIST_DIR)"
+	rm -f "$(RELEASE_ZIP)"
+	ditto -c -k --keepParent "$(APP)" "$(RELEASE_ZIP)"
+	@echo "✓ wrote $(RELEASE_ZIP)"
+
+sign-package:
+	@if [ ! -f "$(RELEASE_KEY_FILE)" ]; then \
+	  echo "✗ no release key at $(RELEASE_KEY_FILE). Run 'make release-keys' once,"; \
+	  echo "  or point RELEASE_KEY_FILE (or CCWIKI_RELEASE_KEY) at it."; exit 1; \
+	fi
+	swift scripts/release-sign.swift sign "$(RELEASE_ZIP)" "$(RELEASE_KEY_FILE)"
+
+verify-package:
+	@if [ -z "$(PUBLIC_KEY)" ]; then \
+	  echo "✗ $(RELEASE_KEY_SOURCE) has no public key; the app could not verify this package."; \
+	  echo "  Run 'make release-keys' and commit the result."; exit 1; \
+	fi
+	swift scripts/release-sign.swift verify "$(RELEASE_ZIP)" "$(PUBLIC_KEY)"
+	codesign --verify --deep --strict --verbose=2 "$(APP)"
 
 check-version:
 	@if [ -z "$(VERSION)" ]; then \
@@ -287,7 +348,9 @@ zip-release: staple
 	ditto -c -k --keepParent "$(APP)" "$(RELEASE_ZIP)"
 	@echo "✓ wrote $(RELEASE_ZIP)"
 
-checksum: zip-release
+# Ordered by the chains that list it (`dist`, `package`); no prerequisite of
+# its own, so the notarized and the ad-hoc paths can both reach it.
+checksum:
 	cd "$(DIST_DIR)" && shasum -a 256 "$$(basename $(RELEASE_ZIP))" > "$$(basename $(RELEASE_ZIP)).sha256"
 	@echo "✓ wrote $(RELEASE_ZIP).sha256"
 
@@ -300,9 +363,13 @@ github-release:
 	@if [ -z "$(VERSION)" ]; then echo "✗ VERSION required (tag or override)"; exit 1; fi
 	@if [ ! -f "$(RELEASE_ZIP)" ]; then echo "✗ $(RELEASE_ZIP) not found — run make dist first"; exit 1; fi
 	@if [ ! -f "$(RELEASE_ZIP).sha256" ]; then echo "✗ $(RELEASE_ZIP).sha256 not found — run make dist first"; exit 1; fi
+	@if [ ! -f "$(RELEASE_SIG)" ]; then \
+	  echo "✗ $(RELEASE_SIG) not found — the app installs nothing without it. Run make package."; exit 1; \
+	fi
 	gh release create "v$(VERSION)" \
 	  "$(RELEASE_ZIP)" \
 	  "$(RELEASE_ZIP).sha256" \
+	  "$(RELEASE_SIG)" \
 	  --title "$(APP_NAME) $(VERSION)" \
 	  $(if $(NOTES_FILE),--notes-file "$(NOTES_FILE)",--generate-notes)
 	@echo "✓ published v$(VERSION)"

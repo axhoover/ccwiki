@@ -95,7 +95,12 @@ struct CCwikiCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { model?.checkForUpdates() }
-                .disabled(model == nil || model?.isCheckingForUpdates == true)
+                .disabled(model == nil || model?.isCheckingForUpdates == true
+                    || model?.isInstallingUpdate == true)
+
+            if let installed = model?.installedUpdate {
+                Button("Relaunch to Update to \(installed.version)") { model?.relaunchToUpdate() }
+            }
         }
 
         CommandGroup(after: .toolbar) {

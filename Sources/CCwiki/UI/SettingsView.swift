@@ -274,6 +274,10 @@ struct SettingsView: View {
                 Toggle("Check for updates daily", isOn: Binding(
                     get: { model.checksForUpdates },
                     set: { model.checksForUpdates = $0 }))
+                Toggle("Install them automatically", isOn: Binding(
+                    get: { model.installsUpdatesAutomatically },
+                    set: { model.installsUpdatesAutomatically = $0 }))
+                    .disabled(!model.checksForUpdates || !model.canInstallUpdates)
                 LabeledContent("Status") {
                     HStack(spacing: Theme.small) {
                         updateStatus
@@ -282,20 +286,36 @@ struct SettingsView: View {
                         Spacer(minLength: Theme.small)
                         Button("Check Now") { model.checkForUpdates() }
                             .controlSize(.small)
-                            .disabled(model.isCheckingForUpdates)
+                            .disabled(model.isCheckingForUpdates || model.isInstallingUpdate)
                     }
                 }
-                if let update = model.availableUpdate {
+                if let installed = model.installedUpdate {
                     HStack {
                         Spacer()
-                        Button("Get CCwiki \(update.version)…") { NSWorkspace.shared.open(update.url) }
+                        Button("Relaunch to Update to \(installed.version)") {
+                            model.relaunchToUpdate()
+                        }
+                    }
+                } else if let update = model.availableUpdate {
+                    HStack {
+                        Spacer()
+                        Button("Open Release Page") { NSWorkspace.shared.open(update.url) }
+                        if model.canInstallUpdates, update.isInstallable {
+                            Button("Install CCwiki \(update.version)…") { model.checkForUpdates() }
+                                .disabled(model.isInstallingUpdate || model.activeJobCount > 0)
+                        }
                     }
                 }
             } header: {
                 Text("Updates")
             } footer: {
-                Text("One request a day to GitHub's releases API. CCwiki only tells you; the "
-                    + "download is on the release page, and nothing is installed for you.")
+                Text(model.canInstallUpdates
+                    ? "One request a day to GitHub's releases API. An update is downloaded, "
+                        + "its Ed25519 signature checked against the key built into this app, "
+                        + "and the app replaced in place; the old one goes to the Trash. CCwiki "
+                        + "never relaunches on its own."
+                    : "One request a day to GitHub's releases API. This build has no release "
+                        + "key, so it can only tell you about an update and open its page.")
                 .font(Theme.Fonts.meta)
                 .foregroundStyle(.secondary)
             }
@@ -328,6 +348,12 @@ struct SettingsView: View {
 
 extension SettingsView {
     fileprivate var updateStatus: Text {
+        if let progress = model.updateInstallProgress {
+            return Text(progress)
+        }
+        if let installed = model.installedUpdate {
+            return Text("CCwiki \(installed.version) is installed — relaunch to use it")
+        }
         if let update = model.availableUpdate {
             return Text("CCwiki \(update.version) is available")
         }

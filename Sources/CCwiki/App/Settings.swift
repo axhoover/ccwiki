@@ -15,7 +15,19 @@ struct CCwikiSettings: Sendable {
     private static let pageZoomKey = "ccwiki.pageZoom"
     private static let checksForUpdatesKey = "ccwiki.checksForUpdates"
     private static let lastUpdateCheckKey = "ccwiki.lastUpdateCheck"
+    private static let installsUpdatesAutomaticallyKey = "ccwiki.installsUpdatesAutomatically"
     private static let lastPageKey = "ccwiki.lastPage"
+
+    /// When the daily check finds a release, download, verify and install it
+    /// without asking, and offer a relaunch. On by default: the point of the
+    /// updater is that nobody has to think about it. Never relaunches on its own.
+    static var installsUpdatesAutomatically: Bool {
+        get {
+            UserDefaults.standard.object(forKey: installsUpdatesAutomaticallyKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: installsUpdatesAutomaticallyKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: installsUpdatesAutomaticallyKey) }
+    }
     private static let expandedFoldersKey = "ccwiki.expandedFolders"
 
     /// The page showing when the app last quit, by `content/`-relative path.

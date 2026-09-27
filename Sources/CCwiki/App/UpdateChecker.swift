@@ -6,6 +6,13 @@ struct ReleaseInfo: Equatable, Sendable {
     let version: String
     /// The release page, where the zip is.
     let url: URL
+    /// `CCwiki-<version>-macos.zip`, when the release carries one.
+    var archiveURL: URL? = nil
+    /// The Ed25519 signature beside it, `<zip>.sig`.
+    var signatureURL: URL? = nil
+
+    /// Everything the installer needs is attached.
+    var isInstallable: Bool { archiveURL != nil && signatureURL != nil }
 }
 
 /// The lightweight update check: tier 1 of `plans/distribution.md` §3.
@@ -59,11 +66,16 @@ enum UpdateChecker {
     /// `nil` for a draft or a pre-release, which the endpoint should never
     /// return but the app should never offer.
     static func parse(_ data: Data) throws -> ReleaseInfo? {
+        struct Asset: Decodable {
+            let name: String
+            let browser_download_url: String
+        }
         struct Payload: Decodable {
             let tag_name: String
             let html_url: String
             let draft: Bool?
             let prerelease: Bool?
+            let assets: [Asset]?
         }
         let payload: Payload
         do {
@@ -73,7 +85,20 @@ enum UpdateChecker {
         }
         if payload.draft == true || payload.prerelease == true { return nil }
         guard let url = URL(string: payload.html_url) else { throw Failure.badPayload }
-        return ReleaseInfo(version: normalize(payload.tag_name), url: url)
+        var release = ReleaseInfo(version: normalize(payload.tag_name), url: url)
+        let assets = payload.assets ?? []
+        if let archive = assets.first(where: { isArchiveName($0.name) }) {
+            release.archiveURL = URL(string: archive.browser_download_url)
+            release.signatureURL = assets
+                .first { $0.name == archive.name + ".sig" }
+                .flatMap { URL(string: $0.browser_download_url) }
+        }
+        return release
+    }
+
+    /// What `make package` names the zip: `CCwiki-<version>-macos.zip`.
+    static func isArchiveName(_ name: String) -> Bool {
+        name.hasPrefix("CCwiki-") && name.hasSuffix("-macos.zip")
     }
 
     /// `v0.2.0` → `0.2.0`.
