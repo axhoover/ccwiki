@@ -15,7 +15,7 @@ import Foundation
 enum ReleaseKey {
 
     /// Base64 of the raw 32-byte Ed25519 public key. Filled in by `make release-keys`.
-    static let publicKeyBase64 = ""
+    static let publicKeyBase64 = "KZSDkcGTSAxklgzh6zUEVGRElL5uu51X3IdxKKERhyY="
 
     static var publicKey: Curve25519.Signing.PublicKey? {
         guard let raw = Data(base64Encoded: publicKeyBase64), raw.count == 32 else { return nil }
