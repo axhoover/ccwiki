@@ -3,13 +3,19 @@
 # This is `make check` on a macOS runner: the same gate a contributor runs
 # locally. It does not run `make shots` (no display, no Screen Recording
 # grant) and it does not run `make test-corpus` (no clone), so a green run is
-# "compiles and the 101 unit tests pass", nothing more. See
+# "compiles and the unit tests pass", nothing more. See
 # plans/build-system.md, "CI gate".
+#
+# Cost: this is a private repository, and a macOS runner minute counts ten
+# times against the account's free Actions quota. Every push gets the
+# compile-and-test half (~40 s); assembling and uploading the app is kept
+# for pull requests, main, and manual runs.
 name: CI
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -49,16 +55,21 @@ jobs:
       # Gatekeeper refuses it on any Mac but one that strips the quarantine
       # attribute — see plans/distribution.md for the real thing.
       - name: make release
+        if: github.event_name != 'push' || github.ref == 'refs/heads/main'
         run: make release
 
       - name: Package the app
+        if: github.event_name != 'push' || github.ref == 'refs/heads/main'
         run: |
           mkdir -p dist
           ditto -c -k --keepParent build/CCwiki.app dist/CCwiki-dev.zip
           shasum -a 256 dist/CCwiki-dev.zip
 
+      # One day: this is a build to try today, not to keep, and artifact
+      # storage counts against the account's Actions quota.
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'push' || github.ref == 'refs/heads/main'
         with:
           name: CCwiki-dev-${{ github.sha }}
           path: dist/CCwiki-dev.zip
-          retention-days: 14
+          retention-days: 1
