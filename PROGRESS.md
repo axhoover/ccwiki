@@ -5,6 +5,40 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — A review pass over the branch, and what it caught
+
+With about three thousand lines on the branch that had only ever been
+compiled and unit-tested, a review of the whole diff against `main` was the
+next gate. It found ten things; all are fixed and CI is green. The three
+that would have bitten a real user:
+
+- **A merged PR could be mistaken for the job's own.** `gh pr view <branch>`
+  resolves a merged PR for a reused branch name, so a job that aborted would
+  have been marked "opened" with a stale URL and had its worktree pruned.
+  Confirmation now asks for *open* PRs on the branch created after the job
+  started, with a test for the filter.
+- **Reset Clone under a running job.** A worktree's metadata lives in the
+  clone's `.git`; deleting the clone breaks every git step the job has left.
+  Refused, and the button disabled, while a job is active.
+- **The relaunch could strand the user.** It launched the new instance and
+  then quit unconditionally: a launch failure left no app (with the old one
+  already in the Trash), and answering "Don't Quit" to the running-jobs
+  question left two instances on one clone and one search index. The jobs
+  question now comes first, and the quit only after the launch succeeded.
+
+The one worth a rule: **an in-place bundle swap changes what the running
+app reads from disk.** A WebContent restart after an update would have
+loaded the new release's `ccwiki.js` against the old Swift. The render
+pipeline is now served from a per-build copy in Caches made at launch, so
+the pair stays matched until the relaunch. (`prompts/ingest.md` is still
+read from the bundle at job start; a job started after an update composes
+the new prompt. Noted, not fixed.)
+
+The rest: a false success when an install was already in flight; a manual
+check erasing the "installed, relaunch" note; a pid-registry race for
+short-lived children; `dist` and `package` unsafe under `make -j`; and the
+same download and request code in four places, now one `GitHubHTTP`.
+
 ## 2026-09-27 — Reading needs nothing installed
 
 The audit's first finding, closed for real: a Mac without Apple's Command
