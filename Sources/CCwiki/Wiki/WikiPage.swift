@@ -180,6 +180,32 @@ struct WikiPage: Identifiable, Sendable {
 
     // MARK: Outline
 
+    /// A CommonMark ATX heading, as markdown-it reads one — which is what
+    /// the web view renders and so what its anchors are built from. Up to
+    /// three spaces of indent; one to six `#`; then a space, a tab, or the
+    /// end of the line; and an optional closing run of `#` after a space,
+    /// which is not part of the text. Returns the level and the raw text.
+    static func atxHeading(_ line: Substring) -> (level: Int, text: String)? {
+        let indent = line.prefix { $0 == " " }.count
+        guard indent <= 3 else { return nil }
+        let rest = line.dropFirst(indent)
+        let level = rest.prefix { $0 == "#" }.count
+        guard (1...6).contains(level) else { return nil }
+        let afterHashes = rest.dropFirst(level)
+        guard afterHashes.isEmpty || afterHashes.first == " " || afterHashes.first == "\t"
+        else { return nil }
+
+        var text = afterHashes.trimmingCharacters(in: .whitespaces)
+        // A closing sequence: `#`s that are the whole text, or that follow a
+        // space. `C#` keeps its `#`; `Foo ##` loses them.
+        if text.allSatisfy({ $0 == "#" }) {
+            text = ""
+        } else if let range = text.range(of: #"[ \t]+#+$"#, options: .regularExpression) {
+            text = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+        }
+        return (level, text)
+    }
+
     /// Headings with the ids Quartz would assign them: `rehype-slug` uses a
     /// per-document *deduplicating* `GithubSlugger`, so a second `## Syntax`
     /// becomes `syntax-1`.
@@ -198,17 +224,13 @@ struct WikiPage: Identifiable, Sendable {
                 lineStart = lineEnd < body.endIndex ? body.index(after: lineEnd) : body.endIndex
             }
 
-            let line = body[lineStart..<lineEnd]
-            guard line.hasPrefix("#") else { continue }
-            let hashes = line.prefix { $0 == "#" }.count
-            guard hashes <= 6, line.dropFirst(hashes).hasPrefix(" ") else { continue }
+            guard let (level, raw) = Self.atxHeading(body[lineStart..<lineEnd]) else { continue }
             // A `#` inside a fenced block is a comment, not a heading.
             guard !inert.contains(where: { $0.contains(lineStart) }) else { continue }
 
-            let text = Heading.plainText(
-                String(line.dropFirst(hashes)).trimmingCharacters(in: .whitespaces))
+            let text = Heading.plainText(raw)
             guard !text.isEmpty else { continue }
-            result.append(Heading(level: hashes, text: text, id: slugger.slug(text)))
+            result.append(Heading(level: level, text: text, id: slugger.slug(text)))
         }
         return result
     }

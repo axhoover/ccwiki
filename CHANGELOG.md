@@ -39,6 +39,9 @@ panel's PDF menu to keep a copy.
   Outline, Backlinks and Relations.
 - Wiki → Random Page, for wandering. Wiki → Copy Wikilink copies the
   `[[link]]` to the page you're reading.
+- Links to a section now find it when the section's heading is written
+  `## Title ##` or indented, and a page's comma-separated aliases are all
+  found by ⌘O, matching the website.
 - Settings opens on Reading. The command-line tools, which only ingestion
   jobs need, moved to their own Ingestion tab.
 - Install and Relaunch no longer asks a second time.
