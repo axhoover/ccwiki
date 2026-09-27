@@ -51,7 +51,9 @@ struct SnapshotServiceTests {
             at: repo.appending(path: "content"), withIntermediateDirectories: true)
         // A stray file beside it does not count; a second directory does.
         try Data().write(to: root.appending(path: "pax_global_header"))
-        #expect(try SnapshotService.unpackedRoot(in: root) == repo)
+        // Compare names, not URLs: a directory listing yields URLs with a
+        // trailing slash and the resolved /private/var form of the temp dir.
+        #expect(try SnapshotService.unpackedRoot(in: root).lastPathComponent == repo.lastPathComponent)
 
         try FileManager.default.createDirectory(
             at: root.appending(path: "another"), withIntermediateDirectories: true)
