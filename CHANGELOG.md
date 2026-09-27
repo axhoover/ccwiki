@@ -14,6 +14,13 @@
 
 ## 0.1.2 — unreleased
 
+**⌘S finds the page you mean.** Search now puts the page named for what you
+typed first: `LWE` opens Learning with errors, not a reduction that mentions
+it forty times. Primitives and assumptions come before complexity classes,
+and those before reductions. Type a section's name, such as `Ring-LWE`, and
+the page opens at that section. Papers are no longer mixed in; they will get
+a search of their own.
+
 **⌘O remembers where you've been.** Open the quick switcher without typing
 and the pages you visited most recently come first. The page you're on is
 left out, so ⌘O then Return takes you back to the one before it.

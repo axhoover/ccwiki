@@ -213,9 +213,10 @@ re-read while writing this.
 ### 6.2 Build order on the branch
 
 1. **The measuring harness** (§6.3), run in CI against a fresh clone of the
-   wiki, with today's ⌘S as the baseline.
+   wiki, with today's ⌘S as the baseline. *Done.*
 2. **⌘S as concept search**: references out, tiered ranking, heading hits
    open at the heading, Porter stemming if the numbers say it helps.
+   *Done; §6.4.*
 3. **⇧⌘R reference search.**
 4. **⇧⌘F literal search.**
 5. Then "Did you mean …?" (option B), if the zero-result rate warrants it.
@@ -236,6 +237,60 @@ re-read while writing this.
   report the numbers and fail only below a floor, set from the first
   honest measurement. A failing query is printed, which is where a missing
   alias in the wiki usually shows up.
+
+### 6.4 Step 2, built: ⌘S as concept search
+
+**The numbers** (297 navigational queries, the wiki of 2026-09-27):
+
+| | success@1 | success@5 | MRR |
+|---|---|---|---|
+| BM25 alone, every page (the old ⌘S) | 53.9% | 85.9% | 0.675 |
+| `ConceptRanker` | 100% | 100% | 1.000 |
+
+Nearly every old miss was a reduction or a reference outranking the concept
+page for the concept's own name: `LWE` put the LWE page 40th, behind
+reductions whose text says "LWE" more often. A second generated set, the
+**section set**, queries every variant in the relations manifest by the
+heading it lives under (116 of the 131 variants have a heading no other page
+shares); the host page must come first *and open at that heading*.
+Measured in a Python replica of the index before the Swift was written,
+which reproduced the old ⌘S's numbers to the decimal: 116 of 116 once the
+test excludes headings that repeat the page's own name. CI prints all three
+reports on every push, and the floors are 95% / 98% (navigational) and 90%
+(sections), below the measurement so an ordinary wiki edit cannot fail CI.
+
+**The rules** (`Search/ConceptRanker.swift`), each breaking only the ties
+the one before left:
+
+1. *How much of a name matched*: all of it (exactly, then with case,
+   accents and punctuation folded), then part of it (a prefix of it, then
+   every query word in it), then none, only text. Names are the title, the
+   aliases, and the filename, since a reduction titled "LWE ⇒ PKE" is filed
+   as `lwe-to-pke-reg05` and that is what gets typed.
+2. *Whose name*: a concept page's, or one of its headings, before a
+   reduction's or a barrier's. Their names are built from the concepts they
+   connect, so without this `ring lw` put `Ring-LWE ⇒ NTRU` above the Ring-LWE
+   section of the LWE page.
+3. *The finer match*, and a title or alias before a heading. A page whose
+   best match is a heading opens at that heading.
+4. *The section priority* the maintainer set.
+5. *BM25* over title, aliases, headings and text.
+
+**What was decided along the way:**
+
+- **Headings on three or more pages are not names.** "Participates in" is
+  on 117 pages, "Notes" and "Statement" on nearly every reduction; as names
+  they would make `proof` or `syntax` land on a template heading. Their
+  words still count as text.
+- **No Porter stemmer.** The judgment sets are names, so they cannot show a
+  stemmer helping, and a stemmer conflates words it should not. A plural
+  fold for name matching (`commitments` → "Commitment scheme", `PRFs` →
+  "Pseudorandom function") covered the cases that came up.
+- **The FTS side scores every non-reference match**, not a top few: the
+  rules outrank BM25, so the page that belongs first can sit anywhere in
+  BM25's order. That is a few hundred rows at most.
+- **The quick switcher is unchanged.** ⌘O is "I know the page"; ⌘S is now
+  "which pages are about this".
 
 ## References
 

@@ -817,11 +817,13 @@ final class AppModel {
         renderCurrent(restoringScroll: true)
     }
 
-    /// Open a full-text search hit and find the query on it, so the reader
+    /// Open a search hit where it matched: at the heading when a section was
+    /// the match, otherwise finding the query on the page, so the reader
     /// lands on the match rather than the top of a long page.
-    func openSearchResult(_ path: String, query: String) {
-        pendingFind = Self.findCandidates(for: query)
-        openPage(path)
+    func openSearchResult(_ hit: SearchHit, query: String) {
+        // A find would scroll away from the heading the hit is about.
+        pendingFind = hit.anchor == nil ? Self.findCandidates(for: query) : nil
+        openPage(hit.path, anchor: hit.anchor)
         // Consumed by the render `openPage` just did; if it did not render
         // (a page the index lacks), it must not linger for the next one.
         pendingFind = nil
@@ -1007,7 +1009,7 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled, let self else { return }
             do {
-                let hits = try await searchIndex.search(query)
+                let hits = try await searchIndex.conceptSearch(query)
                 guard !Task.isCancelled else { return }
                 searchResults = hits
                 searchError = nil

@@ -60,7 +60,10 @@ jobs:
       - name: Relevance report
         if: always()
         run: |
-          sed -n '/navigational: /,/^[^ ]/p' "$RUNNER_TEMP/corpus.log" | head -80 || true
+          # Each report is a "<name>: N queries" line and its indented lines.
+          awk '/: [0-9]+ queries$/ { on = 1; print; next }
+               /^ / { if (on) print; next }
+               { on = 0 }' "$RUNNER_TEMP/corpus.log" | head -150 || true
 
       # The other half of build.sh: the icon, the bundle, the universal
       # binary, ad-hoc signing. Uploaded so a build of any commit can be

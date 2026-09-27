@@ -94,7 +94,7 @@ struct RootView: View {
         // so the alias is a button with no size and no opacity: `.hidden()`
         // would take its shortcut away with it.
         .background {
-            Button("Search All Pages") { model.searchPresented = true }
+            Button("Search the Wiki") { model.searchPresented = true }
                 .keyboardShortcut("f", modifiers: [.shift, .command])
                 .opacity(0)
                 .frame(width: 0, height: 0)
@@ -135,8 +135,8 @@ struct RootView: View {
             Button { model.searchPresented = true } label: {
                 Image(systemName: "text.magnifyingglass")
             }
-            .help("Search all pages (⌘S)")
-            .accessibilityLabel("Search All Pages")
+            .help("Search the wiki (⌘S)")
+            .accessibilityLabel("Search the Wiki")
 
             Button { model.sync() } label: {
                 if model.syncState.isRunning {

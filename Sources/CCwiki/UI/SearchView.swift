@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// ⌘⇧F — full-text search across the wiki, backed by SQLite FTS5.
+/// ⌘S — concept search: every page but the references, names first, in
+/// `ConceptRanker`'s order.
 ///
 /// Distinct from the quick switcher: that one is "I know the page"; this one
-/// is "which pages mention this". Results carry the matching passage, because
-/// a list of titles does not tell you which hit you want.
+/// is "which pages are about this". Results carry the matching passage, because
+/// a list of titles does not tell you which hit you want, and a hit that
+/// matched a heading names it and opens there.
 struct SearchView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -29,7 +31,7 @@ struct SearchView: View {
                 Image(systemName: "text.magnifyingglass")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                TextField("Search every page", text: $model.searchQuery)
+                TextField("Search the wiki", text: $model.searchQuery)
                     .textFieldStyle(.plain)
                     .font(Theme.Fonts.paletteTitle)
                     .focused($fieldFocused)
@@ -84,7 +86,8 @@ struct SearchView: View {
             ContentUnavailableView(
                 "Search the Wiki",
                 systemImage: "text.magnifyingglass",
-                description: Text("Titles, aliases, headings and body text are all indexed."))
+                description: Text("Names and aliases first, then headings, then text. "
+                    + "Primitives and assumptions lead; references are not included."))
         } else if results.isEmpty {
             ContentUnavailableView.search(text: model.searchQuery)
         } else {
@@ -117,8 +120,8 @@ struct SearchView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: Theme.small) {
                 KindIcon(kind: hit.kind)
-                Text(hit.title)
-                    .font(Theme.Fonts.paletteSubtitle.weight(.medium))
+                title(hit)
+                    .font(Theme.Fonts.paletteSubtitle)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 StatusBadge(status: hit.status, compact: true)
@@ -129,12 +132,15 @@ struct SearchView: View {
                     .lineLimit(1)
                     .truncationMode(.head)
             }
-            snippet(hit.snippet)
-                .font(Theme.Fonts.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-                .padding(.leading, 20)
+            // A page found by its name alone has no passage to show.
+            if !hit.snippet.isEmpty {
+                snippet(hit.snippet)
+                    .font(Theme.Fonts.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .padding(.leading, 20)
+            }
         }
         .padding(.horizontal, Theme.large)
         .padding(.vertical, Theme.small)
@@ -146,6 +152,14 @@ struct SearchView: View {
                     .padding(.horizontal, Theme.small)
             }
         }
+    }
+
+    /// "Learning with errors › Ring-LWE" when a section matched: the page in
+    /// the weight of a title, the section as the lighter half of the trail.
+    private func title(_ hit: SearchHit) -> Text {
+        let page = Text(hit.title).fontWeight(.medium)
+        guard let section = hit.section else { return page }
+        return page + Text("  ›  \(section)").foregroundStyle(.secondary)
     }
 
     /// FTS5's `snippet()` marks matches with `«` … `»` — cheaper and safer than
@@ -174,7 +188,7 @@ struct SearchView: View {
     private func openHighlighted() {
         guard let id = currentHighlight, let hit = results.first(where: { $0.id == id })
         else { return }
-        model.openSearchResult(hit.path, query: model.searchQuery)
+        model.openSearchResult(hit, query: model.searchQuery)
         dismiss()
     }
 }

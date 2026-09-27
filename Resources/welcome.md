@@ -21,7 +21,7 @@ right shows what links back.
 | | |
 |---|---|
 | ⌘O | Jump to a page by name. With nothing typed, recent pages come first. |
-| ⌘S | Search the text of every page. |
+| ⌘S | Search the wiki. The page named for what you typed comes first. |
 | ⌘F | Find on the page you are reading. |
 | ⌘[ and ⌘] | Back and forward. |
 | ⇧⌘H | The wiki's front page. |

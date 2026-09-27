@@ -170,7 +170,7 @@ struct CCwikiCommands: Commands {
             // the easiest chord to reach. It is Save by convention, but CCwiki
             // has nothing to save, and the Save slot is emptied below so no
             // default item can claim it. ⇧⌘F still works: see RootView.
-            Button("Search All Pages…") { searchAction?.perform() }
+            Button("Search the Wiki…") { searchAction?.perform() }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(searchAction == nil)
         }
