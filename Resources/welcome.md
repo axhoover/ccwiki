@@ -23,6 +23,7 @@ right shows what links back.
 | ⌘O | Jump to a page by name. With nothing typed, recent pages come first. |
 | ⌘S | Search the wiki. The page named for what you typed comes first. |
 | ⇧⌘R | Search the references by citation key, author, title or topic. Add a year to narrow it. |
+| ⇧⌘F | Find exact text on every page, with the lines it is on. |
 | ⌘F | Find on the page you are reading. |
 | ⌘[ and ⌘] | Back and forward. |
 | ⇧⌘H | The wiki's front page. |

@@ -27,6 +27,12 @@ or a topic: `oblivious transfer` finds the papers with it in their title,
 then the papers the Oblivious transfer page cites, then those whose abstract
 mentions it. Add a year to narrow it: `regev 2005`.
 
+**⇧⌘F finds text on every page.** Find in All Pages lists every page with
+the exact text on it, references included, with the lines it's on, in page
+order and nothing hidden. Case matters only if you type a capital, and TeX
+is searched as written, so `\classNP` finds every use of the macro. (⇧⌘F
+used to open the same search as ⌘S.)
+
 **⌘O remembers where you've been.** Open the quick switcher without typing
 and the pages you visited most recently come first. The page you're on is
 left out, so ⌘O then Return takes you back to the one before it.

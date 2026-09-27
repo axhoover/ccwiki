@@ -218,7 +218,7 @@ re-read while writing this.
    open at the heading, Porter stemming if the numbers say it helps.
    *Done; §6.4.*
 3. **⇧⌘R reference search.** *Done; §6.5.*
-4. **⇧⌘F literal search.**
+4. **⇧⌘F literal search.** *Done; §6.6.*
 5. Then "Did you mean …?" (option B), if the zero-result rate warrants it.
 
 ### 6.3 The test set, generated from the wiki
@@ -309,10 +309,12 @@ field: the finer match, BM25, then the newer paper. A four-digit word from
 1900 to 2099 is a year filter, and a year alone lists that year.
 
 **Measured** (202 references): first by key 100%, first by title 100%; by
-first author's surname and year, 93.1% first and 100% in the top three
-before the first-author tier, every miss a co-authored paper of the same
-year ahead of the one the person wrote first. The corpus suite reports all
-three on every push.
+first author's surname and year, 100% in the top three, and first 93.1% of
+the time before the first-author tier (every miss a co-authored paper of
+the same year ahead of the one the person wrote first) and 94.6% after. The
+rest are true ties, two papers of a year by the same first author, or a
+`published` year that differs from the one in the key. The corpus suite
+reports all three on every push.
 
 **What was decided along the way:**
 
@@ -329,6 +331,25 @@ three on every push.
   spelling. That is step 5's "Did you mean", if the numbers ask for it.
 - **One palette view for both searches.** `SearchPalette` owns the field,
   the list, the arrow keys and Return; ⌘S and ⇧⌘R supply their rows.
+
+### 6.6 Step 4, built: ⇧⌘F literal search
+
+`Search/TextGrep.swift`, deliberately not SQLite: FTS5 matches tokens, and
+grep's job is the exact string, punctuation and TeX included (`\classNP`,
+`O(n^2)`, `k-LIN`). Each page's body is split into lines once per library
+load; a query is one pass of `range(of:)` over them, off the main actor.
+
+- **Order is page path, then line.** Nothing ranked, nothing hidden; the
+  count is every occurrence.
+- **Smart case**, as ripgrep's `--smart-case`: case-insensitive unless the
+  query has a capital, so `ot` finds "not" and `OT` finds only OT.
+- **A row is a page**: its title, the count, and its first three matching
+  lines, each cut to a window around its first match (markdown paragraphs
+  are single lines, often a thousand characters) and set monospaced, since
+  they are source. Opening a row finds the text on the rendered page.
+- **⇧⌘F moved.** It was a hidden alias for ⌘S, kept for muscle memory
+  after 0.1.1; it is now Find in All Pages…, beside Find in the Edit menu,
+  where Xcode keeps Find in Project.
 
 ## References
 

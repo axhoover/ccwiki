@@ -218,6 +218,16 @@ final class AppModel {
     private(set) var referenceError: String?
     private var referenceTask: Task<Void, Never>?
     var referenceSearchPresented = false
+
+    /// ⇧⌘F, literal text across every page. The pages, split into lines,
+    /// are rebuilt with the library; a query scans them off the main actor.
+    var grepQuery = "" {
+        didSet { scheduleGrep() }
+    }
+    private(set) var grepResults: [TextGrep.Hit] = []
+    private var grepTask: Task<Void, Never>?
+    @ObservationIgnored private var textGrep = TextGrep.empty
+    var grepPresented = false
     var quickSwitcherPresented = false
     /// Setting the query recomputes the results, so the two can never drift —
     /// whether the change came from the text field, a menu command, or the
@@ -478,7 +488,8 @@ final class AppModel {
                 index,
                 index.backlinkMap(),
                 manifest,
-                RelationLabels(manifest: manifest, index: index))
+                RelationLabels(manifest: manifest, index: index),
+                TextGrep(pages: index.allPages))
         }.value
 
         index = loaded.0
@@ -514,6 +525,7 @@ final class AppModel {
 
         let pages = loaded.0.allPages
         let links = loaded.1
+        textGrep = loaded.4
         let searchIndex = self.searchIndex
         Task.detached(priority: .utility) {
             do {
@@ -1052,6 +1064,39 @@ final class AppModel {
                 referenceError = error.localizedDescription
             }
         }
+    }
+
+    private func scheduleGrep() {
+        grepTask?.cancel()
+        let query = grepQuery
+        let grep = textGrep
+        guard query.trimmingCharacters(in: .whitespaces).count >= TextGrep.minimumLength else {
+            grepResults = []
+            return
+        }
+        grepTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let hits = await Task.detached(priority: .userInitiated) {
+                grep.search(query)
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            grepResults = hits
+        }
+    }
+
+    /// "12 pages, 40 matches".
+    var grepSummary: String {
+        let matches = grepResults.reduce(0) { $0 + $1.count }
+        let pages = grepResults.count
+        return "\(pages) page\(pages == 1 ? "" : "s"), \(matches) match\(matches == 1 ? "" : "es")"
+    }
+
+    /// Open a ⇧⌘F hit and find the text on it.
+    func openGrepResult(_ hit: TextGrep.Hit, query: String) {
+        pendingFind = [query]
+        openPage(hit.path)
+        pendingFind = nil
     }
 
     /// Open a reference hit. A paper found by its text is opened with the

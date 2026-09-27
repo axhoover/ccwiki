@@ -5,7 +5,7 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
-## 2026-09-27 — Search v2: measured, ⌘S made a concept search, ⇧⌘R for papers
+## 2026-09-27 — Search v2: ⌘S for concepts, ⇧⌘R for papers, ⇧⌘F for text
 
 On `claude/search-v2`, cut from the QoL branch. The maintainer's decisions
 and the design are in [plans/search-v2.md](plans/search-v2.md) §6.
@@ -34,7 +34,12 @@ README's shortcut table said "⌘S (or ⌘S)"; fixed.
 (every paper by key, by title, by first author and year), then
 `ReferenceRanker`: key → authors → title → all three → cited by a concept
 page → abstract, with a year as a filter. ⌘S and ⇧⌘R now share one
-`SearchPalette` view.
+`SearchPalette` view. Learned: concept pages cite their papers *through*
+reductions since the migration, so cited-by needed a second hop.
+
+**⇧⌘F, literal text**: `TextGrep`, in memory rather than FTS5 because
+grep's job is the exact string, TeX included. Smart case, page order,
+three lines per page. The old hidden ⇧⌘F alias for ⌘S is gone.
 
 ## 2026-09-27 — Welcome, What's New, and a round of quality of life
 

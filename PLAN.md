@@ -71,7 +71,7 @@ redesign, not a refactor.
 │   ├── Wiki/                pure, testable: slugs, wikilinks, frontmatter, macros,
 │   │                        index, and the relations manifest
 │   ├── Reader/              the WKWebView, its scheme handler, and the render request
-│   ├── Search/              SQLite FTS5, the ⌘S and ⇧⌘R rankers, the quick-switcher matcher
+│   ├── Search/              SQLite FTS5, the ⌘S and ⇧⌘R rankers, ⇧⌘F grep, the quick switcher
 │   ├── Jobs/                subprocess plumbing, tool discovery, git, ingestion
 │   └── UI/                  the SwiftUI views
 └── Tests/CCwikiTests/     101 tests; see §6
@@ -90,8 +90,9 @@ redesign, not a refactor.
   query escaping, and the ranking backlog.
 - [plans/search-v2.md](plans/search-v2.md) — **decided, being built on
   `claude/search-v2`**: three searches (⌘S concepts, ⇧⌘F literal, ⇧⌘R
-  references), the generated relevance test set CI reports on, and the
-  ranking rules and measurements for ⌘S (§6.4) and ⇧⌘R (§6.5).
+  references), the generated relevance test set CI reports on, the ranking
+  rules and measurements for ⌘S (§6.4) and ⇧⌘R (§6.5), and ⇧⌘F's literal
+  search (§6.6).
 - [plans/relations.md](plans/relations.md) — how `relations.json` is consumed:
   the hyperedge rule, the class partial order and which way it points, variants,
   and how every "we do not know" value is displayed honestly.

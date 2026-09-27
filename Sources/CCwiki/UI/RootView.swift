@@ -35,6 +35,9 @@ struct RootView: View {
         .sheet(isPresented: $model.referenceSearchPresented) {
             ReferenceSearchView()
         }
+        .sheet(isPresented: $model.grepPresented) {
+            GrepView()
+        }
         .sheet(isPresented: $model.ingestSheetPresented) {
             IngestSheet()
         }
@@ -91,18 +94,6 @@ struct RootView: View {
         }
         .onChange(of: model.settingsRequests) { _, _ in
             openSettings()
-        }
-        // ⇧⌘F, the shortcut search had before ⌘S, kept as an alias so
-        // muscle memory still works. SwiftUI gives a menu item one shortcut,
-        // so the alias is a button with no size and no opacity: `.hidden()`
-        // would take its shortcut away with it.
-        .background {
-            Button("Search the Wiki") { model.searchPresented = true }
-                .keyboardShortcut("f", modifiers: [.shift, .command])
-                .opacity(0)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
-                .disabled(model.searchPresented)
         }
         .focusedSceneValue(\.appModel, model)
         .focusedSceneValue(\.searchAction, FindAction { model.searchPresented = true })
