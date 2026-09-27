@@ -116,7 +116,8 @@ struct ConceptRanker: Sendable {
             self.text = text
             exact = ConceptRanker.collapse(text)
             folded = ConceptRanker.fold(text)
-            words = folded.split(separator: " ").map(String.init)
+            let words = folded.split(separator: " ").map(String.init)
+            self.words = words
             compact = words.joined()
             compactTails = words.indices.map { words[$0...].joined() }
         }
