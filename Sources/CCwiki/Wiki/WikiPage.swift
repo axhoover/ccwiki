@@ -132,6 +132,15 @@ struct WikiPage: Identifiable, Sendable {
     /// for references, the title everywhere else.
     var shortTitle: String { title }
 
+    /// The `[[…]]` another page would use to link here: the citation key
+    /// with the filename for a reference, whose filename is not its key, and
+    /// the last slug segment for everything else.
+    var wikilink: String {
+        kind == .reference
+            ? "[[\(stem)|\(title)]]"
+            : "[[\(slug.components(separatedBy: "/").last ?? stem)]]"
+    }
+
     var authors: String? { frontmatter.string("authors") }
     var venue: String? { frontmatter.string("venue") }
     var source: String? { frontmatter.string("source") }

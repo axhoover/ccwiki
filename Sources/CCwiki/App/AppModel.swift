@@ -132,8 +132,20 @@ final class AppModel {
             CCwikiSettings.expandedFolders = expandedFolders.sorted()
         }
     }
-    var inspectorTab: InspectorTab = .outline
-    var showInspector = true
+    /// Both persisted: the inspector comes back as it was left.
+    var inspectorTab: InspectorTab =
+        CCwikiSettings.inspectorTab.flatMap(InspectorTab.init(rawValue:)) ?? .outline {
+        didSet { CCwikiSettings.inspectorTab = inspectorTab.rawValue }
+    }
+    var showInspector: Bool = CCwikiSettings.showsInspector {
+        didSet { CCwikiSettings.showsInspector = showInspector }
+    }
+
+    /// ⌥⌘1–3: straight to a tab, opening the inspector if it was closed.
+    func showInspectorTab(_ tab: InspectorTab) {
+        inspectorTab = tab
+        showInspector = true
+    }
 
     enum InspectorTab: String, CaseIterable, Identifiable {
         case outline = "Outline"
@@ -872,6 +884,35 @@ final class AppModel {
         case .document, .empty:
             return nil
         }
+    }
+
+    /// What the window is showing, as a title: for printing, and anything
+    /// else that needs to name the current page.
+    var currentTitle: String {
+        switch location {
+        case .page: currentPage?.displayTitle ?? "CCwiki"
+        case .folder(let slug): slug
+        case .document(let document): document.title
+        case .empty: "CCwiki"
+        }
+    }
+
+    func printCurrentPage() {
+        guard location != .empty else { return }
+        webController.printPage(title: currentTitle)
+    }
+
+    /// A concept page picked at random: not a stub, not a reference or a
+    /// reduction (they are reached through the pages that use them), not
+    /// the one on screen. For wandering.
+    func openRandomPage() {
+        guard let index else { return }
+        let candidates = index.allPages.filter {
+            isBrowsable($0) && !Self.kindsOutsideTree.contains($0.kind)
+                && $0.status != .stub && $0.path != location.path
+        }
+        guard let page = candidates.randomElement() else { return }
+        openPage(page.path)
     }
 
     func copyToPasteboard(_ text: String) {

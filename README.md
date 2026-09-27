@@ -129,6 +129,8 @@ a job that could not push.
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
+| ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
+| ⌘P | Print, or Save as PDF from the print panel |
 | ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
 | ⇧⌘H | Go home |
 | ⇧⌘N | Ingest a paper |

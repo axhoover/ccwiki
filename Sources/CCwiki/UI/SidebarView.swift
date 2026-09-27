@@ -219,12 +219,7 @@ struct SidebarView: View {
                     Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
                     Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
                 }
-                Button("Copy Wikilink") {
-                    let link = page.kind == .reference
-                        ? "[[\(page.stem)|\(page.title)]]"
-                        : "[[\(page.slug.components(separatedBy: "/").last ?? page.stem)]]"
-                    model.copyToPasteboard(link)
-                }
+                Button("Copy Wikilink") { model.copyToPasteboard(page.wikilink) }
                 Divider()
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting(

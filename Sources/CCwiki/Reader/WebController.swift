@@ -95,6 +95,32 @@ final class WebController: NSObject {
     /// Force a re-render of the current page (after a pull changed it).
     func invalidate() { loadedPath = nil }
 
+    // MARK: Printing
+
+    /// The standard print panel, whose PDF menu is also Save as PDF. The
+    /// page prints on white whatever the appearance: `app.css` has print
+    /// rules for that.
+    func printPage(title: String) {
+        guard let window = webView.window else { return }
+        let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isHorizontallyCentered = true
+        info.isVerticallyCentered = false
+        for edge in [\NSPrintInfo.topMargin, \.bottomMargin, \.leftMargin, \.rightMargin] {
+            info[keyPath: edge] = 42
+        }
+
+        let operation = webView.printOperation(with: info)
+        operation.jobTitle = title
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        // Without a frame, WebKit's print view is zero-sized and every page
+        // comes out blank.
+        operation.view?.frame = webView.bounds
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
     // MARK: Text size
 
     static let zoomRange = 0.6...2.4

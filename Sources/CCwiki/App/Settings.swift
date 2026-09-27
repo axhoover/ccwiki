@@ -20,6 +20,22 @@ struct CCwikiSettings: Sendable {
     private static let lastPageKey = "ccwiki.lastPage"
     private static let recentPagesKey = "ccwiki.recentPages"
     private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
+    private static let showsInspectorKey = "ccwiki.showsInspector"
+    private static let inspectorTabKey = "ccwiki.inspectorTab"
+
+    /// The inspector as it was left: showing or not, and on which tab.
+    static var showsInspector: Bool {
+        get {
+            UserDefaults.standard.object(forKey: showsInspectorKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: showsInspectorKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: showsInspectorKey) }
+    }
+
+    static var inspectorTab: String? {
+        get { UserDefaults.standard.string(forKey: inspectorTabKey) }
+        set { UserDefaults.standard.set(newValue, forKey: inspectorTabKey) }
+    }
 
     /// The app version that last launched. Absent on a first launch, which
     /// is when the Welcome page opens; older than the running version after

@@ -464,3 +464,33 @@ tbody tr:last-child td { border-bottom: none; }
   text-align: center;
   padding: 6rem 0;
 }
+
+/* ------------------------------------------------------------------ print */
+
+/* Printing, and Save as PDF from the print panel: black on white whatever
+ * the appearance, no reader chrome, and no break inside a formula or an
+ * algorithm. Last in the file so it outranks the dark-mode tokens. */
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --bg-raised: #ffffff;
+    --bg-sunken: #f4f4f4;
+    --rule: rgba(0, 0, 0, 0.18);
+    --rule-strong: rgba(0, 0, 0, 0.3);
+    --text: #000000;
+    --text-secondary: #333333;
+    --text-tertiary: #555555;
+    --accent: #3a1060;
+    --accent-hover: #3a1060;
+    --accent-wash: transparent;
+    --highlight: #e8e8e8;
+  }
+  html, body { background: #ffffff; }
+  .page { max-width: none; padding: 0; }
+  .notice { display: none; }
+  .math-display, .pseudocode-container, .game-group, pre, table, figure {
+    break-inside: avoid;
+  }
+  h1, h2, h3, h4 { break-after: avoid; }
+}

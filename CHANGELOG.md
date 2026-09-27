@@ -25,8 +25,16 @@ link to it.
 **A welcome page, and this page.** CCwiki greets you on first launch, and
 after an update it shows what changed. Both are in the Help menu.
 
+**Print a page, or save it as a PDF.** File → Print (⌘P) prints the page
+you're reading on white, even in dark mode. Choose Save as PDF from the print
+panel's PDF menu to keep a copy.
+
 **Smaller things.**
 
+- The inspector comes back as you left it, and ⌥⌘1, ⌥⌘2 and ⌥⌘3 jump to its
+  Outline, Backlinks and Relations.
+- Wiki → Random Page, for wandering. Wiki → Copy Wikilink copies the
+  `[[link]]` to the page you're reading.
 - Settings opens on Reading. The command-line tools, which only ingestion
   jobs need, moved to their own Ingestion tab.
 - Install and Relaunch no longer asks a second time.

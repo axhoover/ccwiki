@@ -122,6 +122,16 @@ struct CCwikiCommands: Commands {
                 .keyboardShortcut("i", modifiers: [.option, .command])
                 .disabled(model == nil)
 
+            Button("Show Outline") { model?.showInspectorTab(.outline) }
+                .keyboardShortcut("1", modifiers: [.option, .command])
+                .disabled(model == nil)
+            Button("Show Backlinks") { model?.showInspectorTab(.backlinks) }
+                .keyboardShortcut("2", modifiers: [.option, .command])
+                .disabled(model == nil)
+            Button("Show Relations") { model?.showInspectorTab(.relations) }
+                .keyboardShortcut("3", modifiers: [.option, .command])
+                .disabled(model == nil)
+
             Divider()
 
             Button("Back") { model?.goBack() }
@@ -168,6 +178,13 @@ struct CCwikiCommands: Commands {
         // A reader has no documents: no Save, Save As, Revert or Duplicate.
         CommandGroup(replacing: .saveItem) {}
 
+        // The page you are reading. The print panel's PDF menu is Save as PDF.
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") { model?.printCurrentPage() }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(model == nil || model?.location == .empty)
+        }
+
         // The default "CCwiki Help" item opens a help book that does not
         // exist. These are what help there is.
         CommandGroup(replacing: .help) {
@@ -201,6 +218,9 @@ struct CCwikiCommands: Commands {
             Button("Show Sync Log…") { model?.syncLogPresented = true }
                 .disabled(model == nil)
 
+            Button("Random Page") { model?.openRandomPage() }
+                .disabled(model?.index == nil)
+
             Divider()
 
             Button("Open on cryptology.city") {
@@ -214,6 +234,12 @@ struct CCwikiCommands: Commands {
                 model.copyToPasteboard(url.absoluteString)
             }
             .disabled(model?.currentSiteURL == nil)
+
+            Button("Copy Wikilink") {
+                guard let model, let page = model.currentPage else { return }
+                model.copyToPasteboard(page.wikilink)
+            }
+            .disabled(model?.currentPage == nil)
 
             Divider()
 

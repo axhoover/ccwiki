@@ -95,6 +95,8 @@ discoverable rather than folklore.
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
+| ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
+| ⌘P | Print, or Save as PDF from the print panel |
 | ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
 | ⇧⌘H | Go home |
 | Esc | Dismiss any sheet or the find bar |
