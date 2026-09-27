@@ -51,6 +51,14 @@ struct ConceptRankerTests {
         #expect(match("commitments", "Commitment scheme") == .allWords)
         #expect(match("hashes", "Hash function") == .allWords)
         #expect(match("lattice", "Learning with errors") == nil)
+        // Joined, split or hyphenated: one spelling.
+        #expect(match("ArthurMerlin", "Arthur-Merlin") == .folded)
+        #expect(match("Diffie Hell man", "Diffie-Hellman") == .folded)
+        #expect(match("multipar", "Multi-party computation") == .prefix)
+        #expect(match("multiparty computation", "Secure multi-party computation") == .allWords)
+        #expect(match("zeroknowledge", "Non-interactive zero-knowledge") == .allWords)
+        // A joined query starts at a word, never inside one.
+        #expect(match("ultiparty", "Secure multi-party computation") == nil)
         #expect(match("  ", "anything") == nil)
     }
 

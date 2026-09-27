@@ -287,4 +287,47 @@ struct SearchRelevanceTests {
         // replica measured 87.6% with it. See plans/search-v2.md §6.7.
         #expect(report.successAt(1) >= 0.75, "\(report)")
     }
+
+    /// Every navigational query spelled the other way: with its hyphens
+    /// removed (`ArthurMerlin`), and with its first two words run together
+    /// (`Securemulti-party computation`), the way names get typed.
+    static func joinedJudgments(_ index: WikiIndex) -> (hyphens: [Judgment], joined: [Judgment]) {
+        let judgments = navigationalJudgments(index)
+        let hyphens = judgments.filter { $0.query.contains("-") }.map {
+            Judgment(query: $0.query.replacingOccurrences(of: "-", with: ""), expected: $0.expected)
+        }
+        let joined = judgments.compactMap { judgment -> Judgment? in
+            var words = judgment.query.split(separator: " ").map(String.init)
+            guard words.count >= 2, words[0].count >= 3, words[1].count >= 3 else { return nil }
+            words.replaceSubrange(0...1, with: [words[0] + words[1]])
+            return Judgment(query: words.joined(separator: " "), expected: judgment.expected)
+        }
+        return (hyphens, joined)
+    }
+
+    @Test("⌘S with words joined or split differently from the name")
+    func joinedWords() async throws {
+        guard let contentRoot = CorpusTests.contentRoot else { return }
+        let index = WikiIndex.build(contentRoot: contentRoot)
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-relevance-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let searchIndex = try await Self.buildIndex(index, in: directory)
+
+        let judgments = Self.joinedJudgments(index)
+        #expect(judgments.hyphens.count > 30)
+        #expect(judgments.joined.count > 100)
+        let hyphens = try await Self.evaluate("⌘S hyphens removed", judgments.hyphens) { query in
+            try await searchIndex.conceptSearch(query).hits.map(\.path)
+        }
+        let joined = try await Self.evaluate("⌘S first two words joined", judgments.joined) { query in
+            try await searchIndex.conceptSearch(query).hits.map(\.path)
+        }
+        print(hyphens)
+        print(joined)
+        // Before names were also compared without their word breaks: 1.4% and
+        // 2.0%. The Python replica measured 100% on both after.
+        #expect(hyphens.successAt(1) >= 0.9, "\(hyphens)")
+        #expect(joined.successAt(1) >= 0.9, "\(joined)")
+    }
 }

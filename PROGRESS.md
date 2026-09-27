@@ -46,6 +46,12 @@ set returned nothing 99.4% of the time. Correcting unknown words to the
 nearest word of any name (Meilisearch's budgets: one edit from five
 letters, two from nine) finds the page first 87.6% of the time.
 
+**Joined and split words**, at the maintainer's request (`ArthurMerlin`,
+`multiparty`): names are also compared with their word breaks removed,
+and from the start of each word, instead of trying spaces inside the query.
+Linear, so no length cap. Hyphens-removed and first-two-words-joined sets
+went from about 2% to 100%; typos from 87.6% to 92.7%.
+
 ## 2026-09-27 — Welcome, What's New, and a round of quality of life
 
 No release today, by choice: everything below accumulates in `CHANGELOG.md`

@@ -30,13 +30,18 @@ struct ConceptRanker: Sendable {
     enum Match: Int, Comparable, Sendable {
         /// Equal, ignoring case and runs of whitespace. `#P` is not `P`.
         case exact
-        /// Equal once case, accents and punctuation are folded away:
-        /// `one way function` finds "One-way function".
+        /// Equal once case, accents and punctuation are folded away, or once
+        /// the spaces between words are too: `one way function` and
+        /// `ArthurMerlin` find "One-way function" and "Arthur-Merlin".
         case folded
-        /// The name starts with the query, which is what typing looks like.
+        /// The name starts with the query, which is what typing looks like,
+        /// with or without the spaces between words.
         case prefix
         /// Every word of the query is a word of the name, the last one as a
-        /// prefix, and a plural query word matches its singular.
+        /// prefix, and a plural query word matches its singular. Or the query,
+        /// its spaces removed, runs across words of the name from the start of
+        /// one: `multiparty computation` finds "Secure multi-party
+        /// computation".
         case allWords
         /// No name matched; the page is here for its text.
         case text
@@ -99,12 +104,21 @@ struct ConceptRanker: Sendable {
         let exact: String
         let folded: String
         let words: [String]
+        /// Folded with the word breaks removed too, so that a word written
+        /// joined, split or hyphenated is one spelling: `arthurmerlin`.
+        let compact: String
+        /// The compact form from the start of each word on: `multi-party
+        /// computation` is `multipartycomputation`, `partycomputation`,
+        /// `computation`. A joined query may begin at any word, not inside one.
+        let compactTails: [String]
 
         init(_ text: String) {
             self.text = text
             exact = ConceptRanker.collapse(text)
             folded = ConceptRanker.fold(text)
             words = folded.split(separator: " ").map(String.init)
+            compact = words.joined()
+            compactTails = words.indices.map { words[$0...].joined() }
         }
     }
 
@@ -297,16 +311,26 @@ struct ConceptRanker: Sendable {
     static func match(_ query: Name, _ name: Name) -> Match? {
         if !query.exact.isEmpty, query.exact == name.exact { return .exact }
         guard !query.words.isEmpty else { return nil }
-        if query.folded == name.folded { return .folded }
-        if name.folded.hasPrefix(query.folded) { return .prefix }
+        if query.folded == name.folded || query.compact == name.compact { return .folded }
+        if name.folded.hasPrefix(query.folded) || name.compact.hasPrefix(query.compact) {
+            return .prefix
+        }
+        if everyWord(of: query, isIn: name) { return .allWords }
+        // Joined or split differently from the name: linear in the name's
+        // words, so it needs no limit on the query's length.
+        if name.compactTails.contains(where: { $0.hasPrefix(query.compact) }) { return .allWords }
+        return nil
+    }
+
+    private static func everyWord(of query: Name, isIn name: Name) -> Bool {
         for (i, word) in query.words.enumerated() {
             let isLast = i == query.words.count - 1
             let forms = singulars(of: word)
             guard name.words.contains(where: {
                 forms.contains($0) || (isLast && $0.hasPrefix(word))
-            }) else { return nil }
+            }) else { return false }
         }
-        return .allWords
+        return true
     }
 
     /// A word and the singulars it might be the plural of. Deliberately

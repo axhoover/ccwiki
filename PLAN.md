@@ -92,7 +92,8 @@ redesign, not a refactor.
   `claude/search-v2`**: three searches (⌘S concepts, ⇧⌘F literal, ⇧⌘R
   references), the generated relevance test set CI reports on, the ranking
   rules and measurements for ⌘S (§6.4) and ⇧⌘R (§6.5), ⇧⌘F's literal
-  search (§6.6), and ⌘S's typo correction (§6.7).
+  search (§6.6), ⌘S's typo correction (§6.7), and joined or split words
+  (§6.8).
 - [plans/relations.md](plans/relations.md) — how `relations.json` is consumed:
   the hyperedge rule, the class partial order and which way it points, variants,
   and how every "we do not know" value is displayed honestly.

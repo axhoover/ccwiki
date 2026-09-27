@@ -19,8 +19,10 @@ typed first: `LWE` opens Learning with errors, not a reduction that mentions
 it forty times. Primitives and assumptions come before complexity classes,
 and those before reductions. Type a section's name, such as `Ring-LWE`, and
 the page opens at that section. Papers are no longer mixed in; they have a
-search of their own. And a typo no longer finds nothing: when no page
-matches, ⌘S corrects the misspelled word and says so.
+search of their own. A typo no longer finds nothing: when no page matches,
+⌘S corrects the misspelled word and says so. And words run together or
+split apart still match, so `ArthurMerlin`, `multiparty computation` and
+`zeroknowledge` find their pages.
 
 **⇧⌘R searches the references.** Find a paper by its citation key (`GGM86`),
 an author (accents optional: `Dottling` finds Döttling), words of its title,

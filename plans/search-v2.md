@@ -372,9 +372,41 @@ is still the start of a known word, because it is probably being typed. The
 sheet says what happened: "Nothing matches “pseudorandm”. Showing results
 for “pseudorandom”."
 
-**What it does not do:** join or split words (`DiffieHellman`), correct
-short acronyms, or correct ⇧⌘R, where `Laszlo` still misses the wiki's
-misspelled `Lázló`. Each would need its own measurement first.
+**What it does not do:** correct short acronyms, or correct ⇧⌘R, where
+`Laszlo` still misses the wiki's misspelled `Lázló`. Each would need its
+own measurement first. Joined and split words were the next gap; §6.8.
+
+### 6.8 Joined, split and hyphenated words
+
+The maintainer asked for `ArthurMerlin` and `multiparty` to work, and
+suggested trying spaces and hyphens inside a word when nothing matches,
+bounded to short queries so the combinations cannot blow up. The same
+effect comes without enumerating anything: compare names **with their word
+breaks removed** as well as word by word. "Arthur-Merlin", "Arthur Merlin"
+and `ArthurMerlin` all compact to `arthurmerlin`. Each name also keeps its
+compact form from the start of each word (`multipartycomputation`,
+`partycomputation`, `computation`), so `multiparty computation` finds
+"Secure multi-party computation": a joined query may begin at any word, but
+never inside one (`ultiparty` matches nothing). The cost is linear in a
+name's words, so there is no length limit. A list of alternative spellings
+is not needed for this; `aliases` remain the place for genuinely different
+names.
+
+In the match tiers, a compact equality counts as *folded*, a compact prefix
+as *prefix*, and a run across words as *every word*. It applies wherever
+`ConceptRanker.match` does, so ⇧⌘R's keys and titles get it too (`BIP18`
+finds `BIP+18`).
+
+**Measured** in the Python replica, as two more generated sets:
+
+| | before | after |
+|---|---|---|
+| every name with its hyphens removed (73) | 1.4% | 100% |
+| every name with its first two words joined (147) | 2.0% | 100% |
+| one typo (178), for comparison | 87.6% | 92.7% |
+| navigational (297) | 100% | 100% |
+
+CI reports both new sets; the floors are 90%.
 
 ## References
 
