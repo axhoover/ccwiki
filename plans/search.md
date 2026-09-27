@@ -128,6 +128,9 @@ model half can never regress silently again; the view half is covered by
 
 ## 6. Backlog: ranking by page kind
 
+> **2026-09-27.** Folded into a wider proposal, with a test set to measure
+> ranking changes against: [search-v2.md](search-v2.md).
+
 **Requested 2026-08-22, deferred until the architecture is done.**
 
 Full-text results should favour the pages you are usually looking for. Two
