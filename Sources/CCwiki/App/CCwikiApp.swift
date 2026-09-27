@@ -156,10 +156,17 @@ struct CCwikiCommands: Commands {
                 .keyboardShortcut("g", modifiers: [.shift, .command])
                 .disabled(findAction?.previous == nil)
 
+            // ⌘S, because searching is the thing a reader does most and ⌘S is
+            // the easiest chord to reach. It is Save by convention, but CCwiki
+            // has nothing to save, and the Save slot is emptied below so no
+            // default item can claim it. ⇧⌘F still works: see RootView.
             Button("Search All Pages…") { searchAction?.perform() }
-                .keyboardShortcut("f", modifiers: [.shift, .command])
+                .keyboardShortcut("s", modifiers: .command)
                 .disabled(searchAction == nil)
         }
+
+        // A reader has no documents: no Save, Save As, Revert or Duplicate.
+        CommandGroup(replacing: .saveItem) {}
 
         CommandMenu("Wiki") {
             Button("Sync with GitHub") { model?.sync() }

@@ -5,6 +5,21 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — v0.1.0 shipped; ⌘S searches the wiki
+
+**v0.1.0 is the first release**, published by `release.yml` from the merged
+branch with the zip, its checksum and its Ed25519 signature. The repository
+was made public the same day, which the updater needs: it has no GitHub
+credentials, and GitHub hides a private repository's releases and downloads
+from unauthenticated requests. It also made the Actions minutes free.
+
+**⌘S now opens Search All Pages**, the first change meant to arrive by the
+updater. ⌘S is Save by convention, but CCwiki has no documents, so the File
+menu's Save slot is emptied (`CommandGroup(replacing: .saveItem) {}`) and
+nothing else can claim the chord. ⇧⌘F keeps working through a zero-size,
+zero-opacity button in `RootView`, since SwiftUI gives a menu item one
+shortcut and `.hidden()` would disable the alias's shortcut too.
+
 ## 2026-09-27 — A review pass over the branch, and what it caught
 
 With about three thousand lines on the branch that had only ever been

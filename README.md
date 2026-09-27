@@ -13,7 +13,7 @@ only canonical store; the app owns no content and never merges anything.
   line-by-line port of Quartz's own slug rules, tested against the wiki's test
   suite and against all ~673 links in the live corpus.
 - **Find things.** ⌘O fuzzy quick-switcher over titles, aliases and paper
-  titles; ⇧⌘F full-text search over everything, backed by SQLite FTS5.
+  titles; ⌘S full-text search over everything, backed by SQLite FTS5.
 - **Ingest papers.** Drop a PDF on the reader, or paste an ePrint, arXiv, DOI or
   ECCC link (⇧⌘N). CCwiki runs `claude` in a throwaway git worktree, streams
   the transcript into a jobs window (⇧⌘J), and ends at a **draft** PR — it never
@@ -125,7 +125,7 @@ a job that could not push.
 |---|---|
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page / next / previous |
-| ⇧⌘F | Search all pages |
+| ⌘S (or ⌘S) | Search all pages |
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |

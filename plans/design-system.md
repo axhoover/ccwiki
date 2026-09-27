@@ -91,7 +91,7 @@ discoverable rather than folklore.
 |---|---|
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page, next, previous |
-| ⇧⌘F | Search all pages |
+| ⌘S (or ⌘S) | Search all pages |
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
@@ -139,7 +139,7 @@ So:
   when the tree already answers the question.
 
 Nothing is lost: ⌘O fuzzy-matches every reference by key, alias or paper title,
-⇧⌘F searches their full text, and every citation in the wiki is a link. The
+⌘S searches their full text, and every citation in the wiki is a link. The
 sidebar was never the fast way to reach one.
 
 ### The folder listing earns its keep
@@ -183,7 +183,7 @@ folder: 37 rows is a folder, not a wall.
 
 A third filter now applies alongside "hide stubs": the manifest marks 30 objects
 `unlisted`, and those leave the tree, the folder listings and the quick
-switcher. They are still real nodes — they appear in relation rows and in ⇧⌘F —
+switcher. They are still real nodes — they appear in relation rows and in ⌘S —
 which is precisely what `unlisted` means. See [relations.md](relations.md) §7.
 
 ## 4a. The jobs window

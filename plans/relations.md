@@ -155,7 +155,7 @@ and in the closure — kept out of **browse and navigation only**: the sidebar
 tree, folder listings, and the quick switcher. 28 of the 30 take part in an
 edge, so they do show up in relation rows, which is correct.
 
-They remain fully findable in ⇧⌘F, which is search rather than browse.
+They remain fully findable in ⌘S, which is search rather than browse.
 
 This is an independent filter from `hidesStubs`; the two compose in
 `AppModel.isBrowsable`.

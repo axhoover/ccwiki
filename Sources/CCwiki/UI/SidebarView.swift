@@ -115,7 +115,7 @@ struct SidebarView: View {
     /// would bury the 93 concept pages the wiki is actually about.
     ///
     /// Opening the row shows the folder listing in the reading pane, where a
-    /// long sorted list belongs; ⌘O and ⇧⌘F reach any single page faster than
+    /// long sorted list belongs; ⌘O and ⌘S reach any single page faster than
     /// scrolling ever would.
     private func collapsedFolderRow(
         _ name: String, systemImage: String, count: Int, help: String

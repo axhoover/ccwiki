@@ -126,7 +126,7 @@ extension WikiIndex {
     /// both find the same reference page.
     /// `excluding` holds the paths of pages the manifest marks `unlisted`. The
     /// quick switcher is navigation, and an unlisted node is deliberately not
-    /// somewhere to navigate to — but it stays fully findable in ⇧⌘F, which is
+    /// somewhere to navigate to — but it stays fully findable in ⌘S, which is
     /// search rather than browse.
     func quickSwitch(
         _ query: String, limit: Int = 40, excluding hidden: Set<String> = []
