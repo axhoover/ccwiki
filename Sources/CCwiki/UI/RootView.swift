@@ -32,6 +32,9 @@ struct RootView: View {
         .sheet(isPresented: $model.searchPresented) {
             SearchView()
         }
+        .sheet(isPresented: $model.referenceSearchPresented) {
+            ReferenceSearchView()
+        }
         .sheet(isPresented: $model.ingestSheetPresented) {
             IngestSheet()
         }
@@ -137,6 +140,12 @@ struct RootView: View {
             }
             .help("Search the wiki (⌘S)")
             .accessibilityLabel("Search the Wiki")
+
+            Button { model.referenceSearchPresented = true } label: {
+                Image(systemName: "books.vertical")
+            }
+            .help("Search references (⇧⌘R)")
+            .accessibilityLabel("Search References")
 
             Button { model.sync() } label: {
                 if model.syncState.isRunning {

@@ -173,6 +173,11 @@ struct CCwikiCommands: Commands {
             Button("Search the Wiki…") { searchAction?.perform() }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(searchAction == nil)
+
+            // ⇧⌘R, because ⌘R is Sync: reload, as in nearly every Mac app.
+            Button("Search References…") { model?.referenceSearchPresented = true }
+                .keyboardShortcut("r", modifiers: [.shift, .command])
+                .disabled(model == nil)
         }
 
         // A reader has no documents: no Save, Save As, Revert or Duplicate.

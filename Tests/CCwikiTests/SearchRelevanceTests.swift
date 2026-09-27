@@ -140,7 +140,7 @@ struct SearchRelevanceTests {
 
     static func buildIndex(_ index: WikiIndex, in directory: URL) async throws -> SearchIndex {
         let searchIndex = SearchIndex(path: directory.appending(path: "search.sqlite3"))
-        try await searchIndex.rebuild(pages: index.allPages)
+        try await searchIndex.rebuild(pages: index.allPages, backlinks: index.backlinkMap())
         return searchIndex
     }
 
@@ -193,5 +193,62 @@ struct SearchRelevanceTests {
         }
         print(report)
         #expect(report.successAt(1) >= 0.9, "\(report)")
+    }
+
+    /// Every paper by its citation key and by its title, which must come
+    /// first, and by its first author's surname and year, which must be in
+    /// the top three: a surname and a year can belong to more than one paper.
+    static func referenceJudgments(_ index: WikiIndex)
+        -> (key: [Judgment], title: [Judgment], authorYear: [Judgment]) {
+        let references = index.allPages.filter { $0.kind == .reference }
+            .sorted { $0.path < $1.path }
+        var titleCounts: [String: Int] = [:]
+        for page in references { titleCounts[page.displayTitle.lowercased(), default: 0] += 1 }
+
+        let byKey = references.map { Judgment(query: $0.title, expected: $0.path) }
+        let byTitle = references
+            .filter { titleCounts[$0.displayTitle.lowercased()] == 1 && $0.displayTitle != $0.title }
+            .map { Judgment(query: $0.displayTitle, expected: $0.path) }
+        let byAuthorYear = references.compactMap { page -> Judgment? in
+            let authors = ReferenceRanker.authorNames(page.frontmatter.string("authors") ?? "")
+            guard let surname = authors.first?.split(separator: " ").last,
+                  let year = ReferenceRanker.year(page.frontmatter.string("published"))
+            else { return nil }
+            return Judgment(query: "\(surname) \(year)", expected: page.path)
+        }
+        return (byKey, byTitle, byAuthorYear)
+    }
+
+    @Test("⇧⌘R: a paper by its key or title comes first, by author and year in the top three")
+    func referenceNavigation() async throws {
+        guard let contentRoot = CorpusTests.contentRoot else { return }
+        let index = WikiIndex.build(contentRoot: contentRoot)
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-relevance-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let searchIndex = try await Self.buildIndex(index, in: directory)
+
+        let judgments = Self.referenceJudgments(index)
+        #expect(judgments.key.count > 100, "expected the full set of references")
+
+        let byKey = try await Self.evaluate("⇧⌘R by key", judgments.key) { query in
+            try await searchIndex.referenceSearch(query).map(\.path)
+        }
+        let byTitle = try await Self.evaluate("⇧⌘R by title", judgments.title) { query in
+            try await searchIndex.referenceSearch(query).map(\.path)
+        }
+        let byAuthorYear = try await Self.evaluate(
+            "⇧⌘R by first author and year", judgments.authorYear
+        ) { query in
+            try await searchIndex.referenceSearch(query).map(\.path)
+        }
+        print(byKey)
+        print(byTitle)
+        print(byAuthorYear)
+
+        // Floors; the first measurement was 100% on all three.
+        #expect(byKey.successAt(1) >= 0.95, "\(byKey)")
+        #expect(byTitle.successAt(1) >= 0.9, "\(byTitle)")
+        #expect(byAuthorYear.successAt(3) >= 0.9, "\(byAuthorYear)")
     }
 }

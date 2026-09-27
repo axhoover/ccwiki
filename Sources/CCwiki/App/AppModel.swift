@@ -208,6 +208,16 @@ final class AppModel {
     private var searchTask: Task<Void, Never>?
 
     var searchPresented = false
+
+    /// ⇧⌘R, the reference search: the same shape as ⌘S, kept separate so
+    /// each sheet reopens on its own last query.
+    var referenceQuery = "" {
+        didSet { scheduleReferenceSearch() }
+    }
+    private(set) var referenceResults: [ReferenceHit] = []
+    private(set) var referenceError: String?
+    private var referenceTask: Task<Void, Never>?
+    var referenceSearchPresented = false
     var quickSwitcherPresented = false
     /// Setting the query recomputes the results, so the two can never drift —
     /// whether the change came from the text field, a menu command, or the
@@ -503,10 +513,11 @@ final class AppModel {
         // below; doing it here as well cost a second git call per load.
 
         let pages = loaded.0.allPages
+        let links = loaded.1
         let searchIndex = self.searchIndex
         Task.detached(priority: .utility) {
             do {
-                try await searchIndex.rebuild(pages: pages)
+                try await searchIndex.rebuild(pages: pages, backlinks: links)
             } catch {
                 await MainActor.run {
                     self.warn("Search index could not be rebuilt: \(error.localizedDescription)")
@@ -1020,6 +1031,39 @@ final class AppModel {
         }
     }
 
+    private func scheduleReferenceSearch() {
+        referenceTask?.cancel()
+        let query = referenceQuery
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            referenceResults = []
+            referenceError = nil
+            return
+        }
+        referenceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, let self else { return }
+            do {
+                let hits = try await searchIndex.referenceSearch(query)
+                guard !Task.isCancelled else { return }
+                referenceResults = hits
+                referenceError = nil
+            } catch {
+                referenceResults = []
+                referenceError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Open a reference hit. A paper found by its text is opened with the
+    /// query found on it, as ⌘S does; one found by its key, authors, title
+    /// or a citing page is opened at the top, where those are.
+    func openReferenceResult(_ hit: ReferenceHit, query: String) {
+        pendingFind = hit.field == .text
+            ? Self.findCandidates(for: ReferenceRanker.parse(query).text) : nil
+        openPage(hit.path)
+        pendingFind = nil
+    }
+
     func refreshQuickSwitcher() {
         guard let index else {
             quickSwitcherResults = []
@@ -1158,10 +1202,11 @@ final class AppModel {
     func rebuildSearchIndex() {
         guard let index else { return }
         let pages = index.allPages
+        let links = backlinks
         let searchIndex = self.searchIndex
         Task.detached(priority: .userInitiated) {
             await searchIndex.reset()
-            try? await searchIndex.rebuild(pages: pages)
+            try? await searchIndex.rebuild(pages: pages, backlinks: links)
         }
     }
 
