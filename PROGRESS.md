@@ -5,6 +5,45 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — Welcome, What's New, and a round of quality of life
+
+No release today, by choice: everything below accumulates in `CHANGELOG.md`
+under 0.1.2 and ships together.
+
+**`CHANGELOG.md` is now the one place release notes are written.** It is
+written for readers, bundled into the app, and read three ways: the What's
+New page after an update (only the releases since the version last run),
+the full history from the Help menu, and each GitHub release's notes, cut
+per version by `make release-notes` instead of GitHub's auto-generated list
+of PR titles. `make package` refuses a version with no section, and a test
+keeps the file well formed and newest first.
+
+**The Welcome page opens before the library loads**, so a first-time reader
+has something to read while the wiki downloads; its wikilinks resolve when
+the wiki lands. Both pages are a new reader location, `.document`, rendered
+through a synthetic `WikiPage` so they get the reader's typography, math and
+link resolution for free. The Help menu's default item opened a help book
+that does not exist; it now holds Welcome, What's New, Report an Issue.
+
+**Then the small things**, each through CI: ⌘P prints on white or saves a
+PDF (`@media print` last in `app.css`, so it outranks the dark tokens; the
+print view needs an explicit frame or every page is blank); Back and Forward
+restore the scroll position, kept in the page's own JavaScript for as long
+as the document lives; opening a ⌘S hit runs the system find for the query
+once the page reports it rendered; the inspector remembers itself, with
+⌥⌘1–3; Random Page and Copy Wikilink; "N pages changed" after a pull; a
+VoiceOver action on folder rows.
+
+**Two parsing fixes toward parity with the site:** headings as markdown-it
+reads them (indent, tabs, closing `#`s), and plain `aliases` split on commas
+as Quartz's `coerceToArray` does. The audit also listed `key: [[x]]` parsing
+as a flow list; that is what YAML says, so it stays.
+
+**Bigger work now has a home**: its own branch, cut from this one. The
+candidates are in [plans/roadmap.md](plans/roadmap.md), led by a search
+proposal, [plans/search-v2.md](plans/search-v2.md), which lays out options
+rather than choosing, because the choice is the maintainer's.
+
 ## 2026-09-27 — The first update arrived by the updater; what went into the next one
 
 **v0.1.1 installed itself.** The maintainer downloaded v0.1.0, ran Check for
