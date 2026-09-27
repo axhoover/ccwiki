@@ -110,7 +110,8 @@ struct ConceptRankerTests {
                       body: "## Participates in\n\ntext\n")
         }
         let ranker = ConceptRanker(pages: pages)
-        #expect(ranker.entries.allSatisfy(\.headings.isEmpty))
+        let noHeadings = ranker.entries.allSatisfy { $0.headings.isEmpty }
+        #expect(noHeadings)
         // Found through the text, if at all, never as a section.
         let ranked = ranker.rank("participates in", textScores: ["Primitives/p1.md": -1])
         #expect(ranked.map(\.match) == [.text])

@@ -61,6 +61,7 @@ jobs:
         if: always()
         run: |
           # Each report is a "<name>: N queries" line and its indented lines.
+          [ -f "$RUNNER_TEMP/corpus.log" ] || exit 0
           awk '/: [0-9]+ queries$/ { on = 1; print; next }
                /^ / { if (on) print; next }
                { on = 0 }' "$RUNNER_TEMP/corpus.log" | head -150 || true
