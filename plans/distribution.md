@@ -248,6 +248,8 @@ EdDSA idea, at the framework-embedding cost in tier 3.
 
 ## 4. Two `Info.plist` additions that make the download feel like an app
 
+**Done 2026-09-27**, both, handled by `onOpenURL` in `RootView`.
+
 - **`CFBundleDocumentTypes` for PDF** with `LSHandlerRank Alternate`, plus
   `onOpenURL` / `application(_:open:)` handling. Dropping a paper on the Dock
   icon then opens the ingest sheet; today only the reader window is a drop

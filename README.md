@@ -22,11 +22,13 @@ only canonical store; the app owns no content and never merges anything.
 
 ## Requirements
 
-- macOS 14 or newer
-- A Swift 6 toolchain (Xcode, or the swift.org installer)
-- `git` — for the clone
-- `node` ≥ 20, `gh`, and the `claude` CLI — for ingestion jobs only; the reader
-  works without them
+To read: macOS 14 or newer, and nothing else. Without `git` the wiki arrives
+as a tarball snapshot; with it, as a pull-only clone that fast-forwards.
+
+To build from source: a Swift 6 toolchain (Xcode, or the swift.org installer).
+
+To run ingestion jobs: `git` (a real one — Apple's Command Line Tools, or
+Homebrew's), `node` ≥ 20, `gh`, and the `claude` CLI.
 
 A Finder-launched app inherits launchd's `PATH`, which is
 `/usr/bin:/bin:/usr/sbin:/sbin` — enough for `/usr/bin/git` and nothing else.
@@ -74,9 +76,11 @@ Re-verify an existing tree with `./scripts/vendor-web.sh --check`.
 
 ### First launch
 
-CCwiki clones the wiki (~35 MB) into
-`~/Library/Application Support/CCwiki/repo` and builds a search index. After
-that, reading needs no network — ⌘R fast-forwards when you want an update.
+CCwiki downloads the wiki (~35 MB) into
+`~/Library/Application Support/CCwiki/repo` — a git clone if `git` is there,
+a snapshot otherwise — and builds a search index. After that, reading needs no
+network. It checks for a newer wiki at each launch (Settings → Reading to turn
+that off), and ⌘R does the same at any time.
 
 ```
 ~/Library/Application Support/CCwiki/

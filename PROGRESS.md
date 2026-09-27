@@ -5,6 +5,39 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — Reading needs nothing installed
+
+The audit's first finding, closed for real: a Mac without Apple's Command
+Line Tools has no working `git`, and the reader used to fail at the first
+sync with a git-flavoured error. `SnapshotService` now fetches the wiki
+without git: one request to GitHub's branch API for the head commit, the
+tarball of *that* commit from codeload (so the marker and the content cannot
+disagree), unpacked with the `tar` in every Mac's base system, moved into
+place atomically, with a `.ccwiki-snapshot` marker naming the commit. The
+layout is a clone's, so `WikiIndex`, `MacroTable` and `RelationsManifest`
+read it unchanged, and the status bar dates the wiki from the marker.
+
+**The decision that kept it small:** the snapshot reports the same
+`SyncOutcome` cases as `GitService.sync`, so `AppModel.sync` only chooses
+which service to call. When git turns up later, the ordinary clone path
+replaces the snapshot — it lands beside it and is moved in only on success,
+so a failed clone never costs a working copy. The one dead end is a clone
+with no git left to update it, which says so and points at Reset Clone.
+
+**What changed for the reader:** the Command Line Tools state is gone from
+the empty view; Settings > Tools still offers the installer, for jobs. The
+`requiredForReading` notion left `ToolLocator` with it.
+
+**Also in this batch:** PDF as an alternate document type and `ccwiki://` as
+a URL scheme, both through `onOpenURL`; ⌘-click opens the page on the site
+(the app has one reader window, so that is what "open elsewhere" means);
+the broken-link banner behind a Reading preference, off by default; and
+three long-tail fixes from the audit (§1.10, §1.12, §2.5).
+
+**Not verified here:** the snapshot's download and unpack need a network and
+a Mac. The marker, the branch-API parsing, the unpacked-root rule and the
+outage classification have tests.
+
 ## 2026-09-27 — The app updates itself, and no Developer ID is involved
 
 **The question that changed the plan.** The distribution plan said a

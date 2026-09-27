@@ -40,6 +40,8 @@ redesign, not a refactor.
 | Constraint | Why | Where |
 |---|---|---|
 | The clone is **pull-only** | The app is a reader; a dirty reader checkout is a bug with no good recovery | `GitService.sync` uses `--ff-only` and says so loudly when it fails |
+| **Reading needs nothing installed** | A Mac without the Command Line Tools has no working `git`, and a reader must not be asked to install them | `SnapshotService` fetches a tarball of the branch head when there is no `git`; same layout, plus a marker naming the commit |
+| A release is **signed with the maintainer's Ed25519 key**, and the app installs nothing it cannot verify | There is no Developer ID; the signature is what makes an update trustworthy | `ReleaseKey`, `UpdateInstaller`, `make package`; see [plans/distribution.md](plans/distribution.md) §3 |
 | Jobs run in **git worktrees** | A job cannot dirty the reader's checkout, and jobs can run in parallel | `GitService.addWorktree`, `AppPaths.worktrees` |
 | Rendering is **fully offline** | Reading must work on a plane | Vendored into `Resources/web/`; a CSP header and a scheme handler make it structural, not aspirational |
 | The **search index is derived** | Never authoritative, safe to delete at any time | `SearchIndex.reset()` is a legitimate answer to any problem |
