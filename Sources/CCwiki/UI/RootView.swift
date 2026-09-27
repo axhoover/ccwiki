@@ -57,6 +57,8 @@ struct RootView: View {
             // The ingestion tools are looked for in the background.
             await model.discoverTools()
             model.loadJobHistory()
+            // Before the library: Welcome is readable while the wiki downloads.
+            model.openLaunchDocumentIfNeeded()
             await model.loadLibrary()
             // A launch fetch keeps the wiki current for someone who never
             // presses ⌘R. Not under the screenshot harness, whose captures

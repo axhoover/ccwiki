@@ -70,6 +70,9 @@ RELEASE_KEY_FILE   ?= $(if $(CCWIKI_RELEASE_KEY),$(CCWIKI_RELEASE_KEY),$(HOME)/.
 RELEASE_KEY_SOURCE := Sources/CCwiki/App/ReleaseKey.swift
 PUBLIC_KEY         := $(shell sed -n 's/.*publicKeyBase64 = "\(.*\)".*/\1/p' $(RELEASE_KEY_SOURCE) 2>/dev/null)
 RELEASE_SIG        := $(RELEASE_ZIP).sig
+# The release's notes: its section of CHANGELOG.md, which is also what the
+# app shows as What's New. One text, written once, for people.
+RELEASE_NOTES      := $(DIST_DIR)/RELEASE_NOTES.md
 
 PROVISION_PROFILE ?=
 NOTES_FILE       ?=
@@ -77,7 +80,7 @@ NOTES_FILE       ?=
 .PHONY: all deps build check build-only test test-corpus release run clean install uninstall register help \
         icon check-version notary-setup sign zip-notary notarize staple zip-release \
         checksum verify-release dist github-release print-version \
-        release-keys package zip-package sign-package verify-package
+        release-keys package zip-package sign-package verify-package release-notes
 
 all: build
 
@@ -240,6 +243,7 @@ clean:
 # The steps run as sub-makes, in this order, so `make -j` cannot reorder
 # them: several have no file prerequisites of their own.
 dist: check-version clean
+	$(MAKE) release-notes
 	$(MAKE) release
 	$(MAKE) sign
 	$(MAKE) zip-notary
@@ -278,6 +282,7 @@ release-keys:
 	echo "✓ embedded the public key in $(RELEASE_KEY_SOURCE) — commit it"
 
 package: check-version clean
+	$(MAKE) release-notes
 	$(MAKE) release
 	$(MAKE) zip-package
 	$(MAKE) checksum
@@ -285,6 +290,17 @@ package: check-version clean
 	$(MAKE) verify-package
 	@echo "✓ package ready: $(RELEASE_ZIP), .sha256, .sig"
 	@echo "  next: make github-release"
+
+release-notes:
+	@mkdir -p "$(DIST_DIR)"
+	@awk -v v="$(VERSION)" ' \
+	  /^## / { if (found) exit; ver = $$2; sub(/^v/, "", ver); if (ver == v) { found = 1; next } } \
+	  found { print } \
+	  END { exit found ? 0 : 1 }' CHANGELOG.md > "$(RELEASE_NOTES)" || { \
+	  echo "✗ CHANGELOG.md has no '## $(VERSION)' section. Write the release's notes there"; \
+	  echo "  first: they become both the GitHub release notes and the app's What's New."; \
+	  rm -f "$(RELEASE_NOTES)"; exit 1; }
+	@echo "✓ wrote $(RELEASE_NOTES) from CHANGELOG.md"
 
 zip-package:
 	@mkdir -p "$(DIST_DIR)"
@@ -396,7 +412,7 @@ github-release:
 	  "$(RELEASE_ZIP).sha256" \
 	  "$(RELEASE_SIG)" \
 	  --title "$(APP_NAME) $(VERSION)" \
-	  $(if $(NOTES_FILE),--notes-file "$(NOTES_FILE)",--generate-notes)
+	  $(if $(NOTES_FILE),--notes-file "$(NOTES_FILE)",$(if $(wildcard $(RELEASE_NOTES)),--notes-file "$(RELEASE_NOTES)",--generate-notes))
 	@echo "✓ published v$(VERSION)"
 
 # ---------------------------------------------------------------------------

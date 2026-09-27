@@ -10,7 +10,7 @@ struct ReaderView: View {
 
     var body: some View {
         Group {
-            if model.index == nil {
+            if model.index == nil, !model.location.isDocument {
                 emptyState
             } else {
                 WebPane(controller: model.webController)
@@ -18,7 +18,7 @@ struct ReaderView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if model.index != nil { titleBar }
+            if model.index != nil || model.location.isDocument { titleBar }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if findPresented { findBar }
@@ -60,6 +60,13 @@ struct ReaderView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(slug)
+                        .font(Theme.Fonts.meta)
+                        .foregroundStyle(.secondary)
+                } else if case .document = model.location {
+                    Image(systemName: "book.pages")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("CCwiki")
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
                 }
@@ -160,6 +167,7 @@ struct ReaderView: View {
     private var documentTitle: String {
         if let page = model.currentPage { return page.displayTitle }
         if case .folder(let slug) = model.location { return slug }
+        if case .document(let document) = model.location { return document.title }
         return "CCwiki"
     }
 

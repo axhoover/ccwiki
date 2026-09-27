@@ -168,6 +168,26 @@ struct CCwikiCommands: Commands {
         // A reader has no documents: no Save, Save As, Revert or Duplicate.
         CommandGroup(replacing: .saveItem) {}
 
+        // The default "CCwiki Help" item opens a help book that does not
+        // exist. These are what help there is.
+        CommandGroup(replacing: .help) {
+            Button("Welcome to CCwiki") { model?.showWelcome() }
+                .disabled(model == nil)
+            Button("What's New in CCwiki") { model?.showWhatsNew() }
+                .disabled(model == nil)
+            Divider()
+            Button("Report an Issue…") {
+                if let url = URL(string: "https://github.com/axhoover/ccwiki/issues/new") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            Button("CCwiki on GitHub") {
+                if let url = URL(string: "https://github.com/axhoover/ccwiki") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+
         CommandMenu("Wiki") {
             Button("Sync with GitHub") { model?.sync() }
                 .keyboardShortcut("r", modifiers: .command)

@@ -19,6 +19,15 @@ struct CCwikiSettings: Sendable {
     private static let showsMaintenanceNoticesKey = "ccwiki.showsMaintenanceNotices"
     private static let lastPageKey = "ccwiki.lastPage"
     private static let recentPagesKey = "ccwiki.recentPages"
+    private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
+
+    /// The app version that last launched. Absent on a first launch, which
+    /// is when the Welcome page opens; older than the running version after
+    /// an update, which is when What's New opens.
+    static var lastSeenVersion: String? {
+        get { UserDefaults.standard.string(forKey: lastSeenVersionKey) }
+        set { UserDefaults.standard.set(newValue, forKey: lastSeenVersionKey) }
+    }
 
     /// Pages opened most recently, newest first, by `content/`-relative path.
     static var recentPages: [String] {

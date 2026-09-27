@@ -80,11 +80,32 @@ final class AppModel {
 
     // MARK: Navigation
 
+    /// A page that ships with the app rather than with the wiki.
+    enum Document: String, Equatable, Sendable {
+        case welcome
+        case whatsNew
+
+        var title: String {
+            switch self {
+            case .welcome: "Welcome to CCwiki"
+            case .whatsNew: "What's New in CCwiki"
+            }
+        }
+    }
+
     /// What the reader is showing.
     enum Location: Equatable, Sendable {
         case page(path: String, anchor: String?)
         case folder(slug: String)
+        case document(Document)
         case empty
+
+        /// Reading one of the app's own pages needs no wiki, so it can be
+        /// shown while the first download is still under way.
+        var isDocument: Bool {
+            if case .document = self { return true }
+            return false
+        }
 
         var path: String? {
             if case .page(let path, _) = self { return path }
@@ -611,6 +632,86 @@ final class AppModel {
 
     /// Cold start: the page from last time, if it still exists, else home.
     /// Not under the screenshot harness, whose plan starts where it says.
+    // MARK: The app's own pages
+
+    /// The release notes shipped in this build.
+    @ObservationIgnored private(set) lazy var changelog =
+        Changelog.parse(paths.bundledDocument("CHANGELOG.md") ?? "")
+    /// Which releases What's New lists: those after this version, or all of
+    /// them when nil (from the Help menu).
+    @ObservationIgnored private var whatsNewSince: String?
+
+    /// What to open before anything else this launch, if anything. Pure, so
+    /// it can be tested: a first launch shows Welcome; the first launch of
+    /// a newer version shows what changed since the last one, when the
+    /// changelog has anything to say about it.
+    nonisolated static func launchDocument(
+        lastSeen: String?, current: String, changelog: Changelog
+    ) -> (document: Document, since: String?)? {
+        guard let lastSeen else { return (.welcome, nil) }
+        guard !UpdateChecker.isDevelopmentVersion(current),
+              UpdateChecker.isNewer(current, than: lastSeen),
+              !changelog.entries(after: lastSeen, upTo: current).isEmpty
+        else { return nil }
+        return (.whatsNew, lastSeen)
+    }
+
+    /// Called once at launch, before the library loads, so Welcome can be
+    /// read while the wiki downloads. Records this version as seen.
+    func openLaunchDocumentIfNeeded() {
+        guard ScreenshotRunner.directory == nil else { return }
+        let current = appVersion
+        let decision = Self.launchDocument(
+            lastSeen: CCwikiSettings.lastSeenVersion, current: current, changelog: changelog)
+        CCwikiSettings.lastSeenVersion = current
+        guard let decision else { return }
+        if decision.document == .whatsNew { whatsNewSince = decision.since }
+        open(.document(decision.document))
+    }
+
+    func showWelcome() {
+        open(.document(.welcome))
+    }
+
+    /// Every release's notes, from the Help menu.
+    func showWhatsNew() {
+        whatsNewSince = nil
+        webController.invalidate()
+        if location == .document(.whatsNew) { renderCurrent() } else { open(.document(.whatsNew)) }
+    }
+
+    private func documentRequest(_ document: Document) -> RenderRequest {
+        let markdown: String
+        switch document {
+        case .welcome:
+            markdown = paths.bundledDocument("welcome.md") ?? "# Welcome to CCwiki\n"
+        case .whatsNew:
+            let entries = changelog.entries(after: whatsNewSince, upTo: appVersion)
+            markdown = Changelog.whatsNewMarkdown(
+                entries.isEmpty ? changelog.entries : entries, since: whatsNewSince)
+        }
+
+        // A synthetic page, so the markdown goes through the reader's own
+        // pipeline and its wikilinks resolve like any page's. The path is
+        // one no wiki page can have.
+        let page = WikiPage(path: "ccwiki:/\(document.rawValue).md", text: markdown)
+        var notices: [RenderRequest.Notice] = []
+        guard let index else {
+            if document == .welcome {
+                notices.append(RenderRequest.Notice(
+                    level: "info",
+                    text: "The wiki is downloading. The links on this page come alive as soon "
+                        + "as it lands."))
+            }
+            return RenderRequest(
+                path: page.path, title: document.title, markdown: page.body, html: nil,
+                links: [:], anchor: nil, notices: notices)
+        }
+        var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
+        renderer.reportsBrokenLinks = false
+        return renderer.request(for: page, anchor: nil, notices: notices)
+    }
+
     private func openInitialPage() {
         if ScreenshotRunner.directory == nil,
            let last = CCwikiSettings.lastPage, index?.pages[last] != nil {
@@ -663,7 +764,7 @@ final class AppModel {
             // A folder listing is not one of the tree's rows, so leaving the
             // previous page highlighted claims you are somewhere you are not.
             sidebarSelection = nil
-        case .empty:
+        case .document, .empty:
             sidebarSelection = nil
         }
     }
@@ -696,6 +797,13 @@ final class AppModel {
     }
 
     private func renderCurrent(preservingScroll: Bool = false) {
+        if case .document(let document) = location {
+            var request = documentRequest(document)
+            request.macros = macros.macros
+            request.preservesScroll = preservingScroll
+            webController.render(request)
+            return
+        }
         guard let index else { return }
         var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
         renderer.reportsBrokenLinks = showsMaintenanceNotices
@@ -715,7 +823,7 @@ final class AppModel {
         case .folder(let slug):
             request = renderer.folderRequest(
                 slug: slug, hidingStubs: hidesStubs, notices: notices)
-        case .empty:
+        case .document, .empty:
             return
         }
         // The table rides along on every render, so a clone that arrived
@@ -761,7 +869,7 @@ final class AppModel {
             return Self.siteURL(slug: page.slug, anchor: anchor)
         case .folder(let slug):
             return Self.siteURL(slug: slug + "/")
-        case .empty:
+        case .document, .empty:
             return nil
         }
     }

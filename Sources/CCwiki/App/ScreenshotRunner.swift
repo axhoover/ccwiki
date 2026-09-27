@@ -55,6 +55,9 @@ enum ScreenshotRunner {
         /// Just show the jobs window — useful for checking the orphaned-worktree
         /// recovery path without running a job.
         case jobs
+        /// The app's own pages.
+        case welcome
+        case whatsNew
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -70,6 +73,8 @@ enum ScreenshotRunner {
             case "light": return .appearance(.aqua, label: "light")
             case "dark": return .appearance(.darkAqua, label: "dark")
             case "ingest": return parts.count > 1 ? .ingest(parts[1]) : nil
+            case "welcome": return .welcome
+            case "whatsnew": return .whatsNew
             case "settings": return .settings
             case "jobs": return .jobs
             default: return nil
@@ -91,13 +96,15 @@ enum ScreenshotRunner {
             case .ingest: "ingest"
             case .settings: "settings"
             case .jobs: "jobs"
+            case .welcome: "welcome"
+            case .whatsNew: "whats-new"
             }
         }
 
         /// Rendering a page needs longer to settle than flipping a picker.
         var settleMilliseconds: Int {
             switch self {
-            case .page, .folder, .home: 1500
+            case .page, .folder, .home, .welcome, .whatsNew: 1500
             case .search: 900
             // An ingestion job is minutes, not milliseconds; `apply` waits for
             // a terminal state rather than guessing a duration.
@@ -165,6 +172,10 @@ enum ScreenshotRunner {
         switch step {
         case .home:
             model.openHome()
+        case .welcome:
+            model.showWelcome()
+        case .whatsNew:
+            model.showWhatsNew()
         case .page(let path):
             model.openPage(path)
         case .folder(let slug):
