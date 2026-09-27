@@ -200,7 +200,7 @@ struct RelationsView: View {
     /// and `unstated` is comparable to nothing at all.
     private func contradictsSubject(_ barrier: Barrier, of page: PageRelations) -> Bool {
         guard case .reduction(let relation) = page.subject else { return false }
-        return model.relations.barriers(contradicting: relation).contains { $0.id == barrier.id }
+        return model.relations.barrier(barrier, contradicts: relation)
     }
 
     // MARK: Rows

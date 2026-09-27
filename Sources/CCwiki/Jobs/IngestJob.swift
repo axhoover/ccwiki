@@ -85,7 +85,7 @@ final class IngestJob: Identifiable {
 
     /// The raw stream, appended to as it arrives. Kept even after the worktree
     /// is pruned — a transcript you cannot re-read is not a transcript.
-    @ObservationIgnored private var logHandle: FileHandle?
+    @ObservationIgnored private var logWriter: LogWriter?
 
     init(submission: IngestSubmission, paths: AppPaths) {
         // A timestamp prefix keeps the jobs directory sorted and readable, and
@@ -177,25 +177,25 @@ final class IngestJob: Identifiable {
         if log.count > 4_000 { log.removeFirst(1_000) }
     }
 
+    /// Many entries as one change to `log`, so the transcript view updates
+    /// once for the batch rather than once per line.
     func append(_ entries: [JobLogEntry]) {
-        for entry in entries { append(entry) }
+        guard !entries.isEmpty else { return }
+        log.append(contentsOf: entries)
+        if log.count > 4_000 { log.removeFirst(log.count - 3_000) }
     }
 
     /// Mirror the child's raw output to disk, so a finished job can be
-    /// re-read after the worktree is gone.
+    /// re-read after the worktree is gone. The write happens on the log's own
+    /// queue: a synchronous write per line used to run on the main actor.
     func appendRaw(_ line: String) {
-        if logHandle == nil {
-            try? FileManager.default.createDirectory(
-                at: logFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-            FileManager.default.createFile(atPath: logFile.path(percentEncoded: false), contents: nil)
-            logHandle = try? FileHandle(forWritingTo: logFile)
-        }
-        try? logHandle?.write(contentsOf: Data((line + "\n").utf8))
+        if logWriter == nil { logWriter = LogWriter(file: logFile) }
+        logWriter?.write(line)
     }
 
     private func closeLogFile() {
-        try? logHandle?.close()
-        logHandle = nil
+        logWriter?.close()
+        logWriter = nil
     }
 
     func cancel() {
@@ -215,4 +215,66 @@ struct JobRecord: Codable, Sendable {
     let state: IngestJob.State
     let startedAt: Date?
     let finishedAt: Date?
+}
+
+/// Appends lines to a file on a private serial queue, in order.
+///
+/// `@unchecked Sendable` with one audit: every access to `handle` happens on
+/// `queue`.
+final class LogWriter: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "ccwiki.job-log")
+    private var handle: FileHandle?
+
+    init(file: URL) {
+        queue.async {
+            try? FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: file.path(percentEncoded: false), contents: nil)
+            self.handle = try? FileHandle(forWritingTo: file)
+        }
+    }
+
+    func write(_ line: String) {
+        let data = Data((line + "\n").utf8)
+        queue.async { try? self.handle?.write(contentsOf: data) }
+    }
+
+    /// Flushes what is queued, then closes.
+    func close() {
+        queue.async {
+            try? self.handle?.close()
+            self.handle = nil
+        }
+    }
+}
+
+/// Collects transcript entries and hands them to the job in batches: at most
+/// one update to the transcript view every 100 ms, and never more than
+/// 100 ms late, so a line that arrives just before a long silence still
+/// shows promptly.
+@MainActor
+final class TranscriptBuffer {
+    private let job: IngestJob
+    private var pending: [JobLogEntry] = []
+    private var flushTask: Task<Void, Never>?
+    static let interval: Duration = .milliseconds(100)
+
+    init(job: IngestJob) { self.job = job }
+
+    func append(_ entries: [JobLogEntry]) {
+        guard !entries.isEmpty else { return }
+        pending.append(contentsOf: entries)
+        guard flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.interval)
+            self?.flush()
+        }
+    }
+
+    func flush() {
+        flushTask?.cancel()
+        flushTask = nil
+        job.append(pending)
+        pending.removeAll(keepingCapacity: true)
+    }
 }

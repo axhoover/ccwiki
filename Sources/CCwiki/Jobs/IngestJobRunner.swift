@@ -154,6 +154,7 @@ struct IngestJobRunner {
         ]
 
         var exitStatus: Int32 = -1
+        let transcript = TranscriptBuffer(job: job)
         for await line in Subprocess.lines(
             executable: claude,
             arguments: arguments,
@@ -165,16 +166,18 @@ struct IngestJobRunner {
 
             switch line.stream {
             case .stdout:
-                job.append(parser.consume(line.text))
+                transcript.append(parser.consume(line.text))
             case .stderr:
                 // The CLI logs progress to stderr; only surface the substantive
                 // lines, or the transcript fills with noise.
                 let text = line.text.trimmingCharacters(in: .whitespaces)
                 if !text.isEmpty, !line.isProgress {
-                    job.append(JobLogEntry(.stderr, text))
+                    transcript.append([JobLogEntry(.stderr, text)])
                 }
             }
         }
+        // Everything buffered lands before the outcome is written beneath it.
+        transcript.flush()
 
         if Task.isCancelled {
             await cleanUp(job, keep: true)
