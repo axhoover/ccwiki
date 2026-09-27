@@ -652,6 +652,8 @@ final class AppModel {
     /// Which releases What's New lists: those after this version, or all of
     /// them when nil (from the Help menu).
     @ObservationIgnored private var whatsNewSince: String?
+    /// Set by `openSearchResult` for the render it triggers, then cleared.
+    @ObservationIgnored private var pendingFind: [String]?
 
     /// What to open before anything else this launch, if anything. Pure, so
     /// it can be tested: a first launch shows Welcome; the first launch of
@@ -799,20 +801,45 @@ final class AppModel {
     func goBack() {
         guard let previous = history.goBack() else { return }
         reveal(previous)
-        renderCurrent()
+        renderCurrent(restoringScroll: true)
     }
 
     func goForward() {
         guard let next = history.goForward() else { return }
         reveal(next)
-        renderCurrent()
+        renderCurrent(restoringScroll: true)
     }
 
-    private func renderCurrent(preservingScroll: Bool = false) {
+    /// Open a full-text search hit and find the query on it, so the reader
+    /// lands on the match rather than the top of a long page.
+    func openSearchResult(_ path: String, query: String) {
+        pendingFind = Self.findCandidates(for: query)
+        openPage(path)
+        // Consumed by the render `openPage` just did; if it did not render
+        // (a page the index lacks), it must not linger for the next one.
+        pendingFind = nil
+    }
+
+    /// What to look for on the page, best first: the query as typed, then
+    /// its words longest first. Full-text search matches words anywhere on
+    /// the page, so the phrase itself may not occur.
+    nonisolated static func findCandidates(for query: String) -> [String] {
+        let phrase = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return [] }
+        let words = phrase.split(whereSeparator: \.isWhitespace)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count >= 3 }
+            .sorted { $0.count > $1.count }
+        var seen: Set<String> = []
+        return ([phrase] + words).filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    private func renderCurrent(preservingScroll: Bool = false, restoringScroll: Bool = false) {
         if case .document(let document) = location {
             var request = documentRequest(document)
             request.macros = macros.macros
             request.preservesScroll = preservingScroll
+            request.restoresScroll = restoringScroll
             webController.render(request)
             return
         }
@@ -843,7 +870,9 @@ final class AppModel {
         // the next page rather than the next launch.
         request.macros = macros.macros
         request.preservesScroll = preservingScroll
-        webController.render(request)
+        request.restoresScroll = restoringScroll
+        webController.render(request, thenFind: pendingFind)
+        pendingFind = nil
     }
 
     // MARK: Text size

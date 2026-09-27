@@ -37,6 +37,8 @@ final class WebController: NSObject {
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private var pendingRequest: RenderRequest?
     @ObservationIgnored private var loadedPath: String?
+    /// Searched for once the next render reports back.
+    @ObservationIgnored private var pendingFind: [String]?
 
     init(paths: AppPaths, webRoot: URL? = nil) {
         let configuration = WKWebViewConfiguration()
@@ -74,6 +76,22 @@ final class WebController: NSObject {
     }
 
     // MARK: Rendering
+
+    /// Render, then find `needle` on the result: how a search result lands
+    /// on its match instead of the top of the page. If the page is already
+    /// showing, only the find runs.
+    func render(_ request: RenderRequest, thenFind needle: [String]?) {
+        guard let needle, !needle.isEmpty else {
+            render(request)
+            return
+        }
+        if isReady, request.path == loadedPath, request.anchor == nil {
+            Task { _ = await findFirst(of: needle) }
+            return
+        }
+        pendingFind = needle
+        render(request)
+    }
 
     func render(_ request: RenderRequest) {
         guard isReady else {
@@ -154,6 +172,15 @@ final class WebController: NSObject {
         return result.matchFound
     }
 
+    /// The first of `candidates` that occurs on the page, found and shown
+    /// with the system's find highlight.
+    func findFirst(of candidates: [String]) async -> Bool {
+        for candidate in candidates where await find(candidate, backwards: false) {
+            return true
+        }
+        return false
+    }
+
     // MARK: Bridge
 
     /// A separate object so the controller itself is not retained by
@@ -199,6 +226,10 @@ final class WebController: NSObject {
             }
             if message["ok"] as? Bool == false {
                 lastRenderError = message["error"] as? String ?? "render failed"
+            }
+            if let needle = pendingFind {
+                pendingFind = nil
+                Task { _ = await findFirst(of: needle) }
             }
             if let errors = message["pseudocodeErrors"] as? Int, errors > 0 {
                 lastRenderError = "\(errors) pseudocode block(s) failed to render."

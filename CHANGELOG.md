@@ -25,6 +25,10 @@ link to it.
 **A welcome page, and this page.** CCwiki greets you on first launch, and
 after an update it shows what changed. Both are in the Help menu.
 
+**Back and Forward remember where you were** on each page, as a browser
+does. And opening a result from ⌘S search now finds your search term on the
+page, so you land on the match rather than at the top.
+
 **Print a page, or save it as a PDF.** File → Print (⌘P) prints the page
 you're reading on white, even in dark mode. Choose Save as PDF from the print
 panel's PDF menu to keep a copy.

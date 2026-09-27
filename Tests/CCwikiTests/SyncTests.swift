@@ -84,6 +84,21 @@ struct SiteURLTests {
     }
 }
 
+/// Opening a search hit finds the query on the page: the phrase first, then
+/// its words, longest first, since full-text search matches words anywhere.
+struct FindCandidateTests {
+
+    @Test("phrase first, then distinct words of three letters or more, longest first")
+    func candidates() {
+        #expect(AppModel.findCandidates(for: "  oblivious transfer ")
+            == ["oblivious transfer", "oblivious", "transfer"])
+        #expect(AppModel.findCandidates(for: "LWE") == ["LWE"])
+        #expect(AppModel.findCandidates(for: "a PRF, of LWE") == ["a PRF, of LWE", "PRF", "LWE"])
+        #expect(AppModel.findCandidates(for: "prf PRF") == ["prf PRF", "prf"])
+        #expect(AppModel.findCandidates(for: "   ").isEmpty)
+    }
+}
+
 struct SettingsTests {
 
     @Test("a tool override round-trips and can be cleared")

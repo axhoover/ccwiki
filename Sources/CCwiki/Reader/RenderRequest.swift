@@ -42,6 +42,9 @@ struct RenderRequest: Sendable {
     /// of the page already showing — after a pull, or a listing toggle —
     /// where jumping to the top would lose the reader's place.
     var preservesScroll = false
+    /// Return to where this page was last left, if it has been shown before:
+    /// set for Back and Forward.
+    var restoresScroll = false
 
     struct Notice: Sendable {
         let level: String  // "info" | "warning"
@@ -67,6 +70,7 @@ struct RenderRequest: Sendable {
             "notices": notices.map { ["level": $0.level, "text": $0.text] },
             "macros": macros,
             "preserveScroll": preservesScroll,
+            "restoreScroll": restoresScroll,
         ]
         if let html { payload["html"] = html }
         if let anchor { payload["anchor"] = anchor }

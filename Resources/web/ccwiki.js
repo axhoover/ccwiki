@@ -486,12 +486,23 @@
    *                                synthetic folder pages
    * }
    */
+  // Where each page was left, so Back and Forward return to the same place,
+  // as in a browser. Lives as long as this document does: a relaunch starts
+  // every page at the top again.
+  var scrollPositions = {};
+  var shownPath = null;
+
   function render(payload) {
     var started = Date.now();
     var page = document.getElementById("page");
     var env = { links: payload.links || {} };
     var toc = [];
+    if (shownPath !== null) scrollPositions[shownPath] = window.scrollY;
     var keepY = payload.preserveScroll ? window.scrollY : null;
+    var restoreY = payload.restoreScroll &&
+      Object.prototype.hasOwnProperty.call(scrollPositions, payload.path)
+      ? scrollPositions[payload.path] : null;
+    shownPath = payload.path;
     lastReportedHeading = undefined;
 
     try {
@@ -519,6 +530,8 @@
 
     if (keepY !== null) {
       window.scrollTo(0, keepY);
+    } else if (restoreY !== null) {
+      window.scrollTo(0, restoreY);
     } else if (payload.anchor) {
       if (!scrollToAnchor(payload.anchor)) window.scrollTo(0, 0);
     } else {

@@ -174,7 +174,7 @@ struct SearchView: View {
     private func openHighlighted() {
         guard let id = currentHighlight, let hit = results.first(where: { $0.id == id })
         else { return }
-        model.openPage(hit.path)
+        model.openSearchResult(hit.path, query: model.searchQuery)
         dismiss()
     }
 }
