@@ -12,7 +12,7 @@
   code. Commit messages are for the code.
 -->
 
-## 0.1.2 — unreleased
+## 0.1.2 — 2026-09-28
 
 **⌘S finds the page you mean.** Search now puts the page named for what you
 typed first: `LWE` opens Learning with errors, not a reduction that mentions
