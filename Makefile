@@ -186,8 +186,11 @@ test: deps
 # The corpus suite additionally validates against a real clone: every wikilink
 # in ~300 pages, the whole frontmatter schema, and the live macro table. Skipped
 # by `make test` because it needs the clone to exist.
+# WIKI= points it at any clone of the wiki; CI uses a fresh one.
+WIKI ?= $(HOME)/Library/Application Support/CCwiki/repo
+
 test-corpus: deps
-	CCWIKI_WIKI="$(HOME)/Library/Application Support/CCwiki/repo" swift test
+	CCWIKI_WIKI="$(WIKI)" swift test
 	@echo "✓ tests pass against the real corpus"
 
 print-version:

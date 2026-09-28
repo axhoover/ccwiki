@@ -1,6 +1,10 @@
-# Search, the next version: a proposal
+# Search, the next version
 
-**Status: proposal, 2026-09-27. Nothing here is built.** Written so the
+**Status: decided 2026-09-27, being built on `claude/search-v2`.** §6 records
+the decisions and the design that follows from them; §1–§5 are the proposal
+they answered, kept because the reasoning is still the reasoning.
+
+**Original status: proposal, 2026-09-27.** Written so the
 maintainer can choose a direction without needing a background in search
 engines: each option says what it would feel like to use, what it costs, and
 what it risks. The current design is in [search.md](search.md); this assumes
@@ -144,6 +148,269 @@ so it is not forgotten, not recommended now.
 - One search box (C), or keep ⌘O and ⌘S separate?
 - Is search-by-meaning (D) worth an experiment?
 
+## 6. Decided, and the design that follows
+
+### What the maintainer chose
+
+- **Three searches with clear jobs**, not one merged box:
+
+  | Shortcut | Searches | Order |
+  |---|---|---|
+  | ⌘S | Concept pages only, by name and text. **No references.** | Field matched, then section priority, then relevance |
+  | ⇧⌘F | Every page, literal text, grep-like, with the lines | Page, then line |
+  | ⇧⌘R | References only: key, authors, title, venue, year, abstract, and the concept pages that cite them | Field matched, then relevance |
+
+  ⌘O stays the jump-to-page switcher. ⌘R stays Sync: it means reload in
+  nearly every Mac app, so references take ⇧⌘R.
+- **Section priority**, the maintainer's call for this wiki: primitives and
+  assumptions first, then complexity classes, then glossary, barriers and
+  folklore, then reductions. References are not in ⌘S at all.
+- **Search by meaning (option D) is dropped**: readers who want that will
+  point a general-purpose LLM at the site.
+- **The test set is generated, not hand-written** (§6.3), since the
+  maintainer should not have to know what makes a good judgment list.
+
+### 6.1 How good search systems order results, and what that means here
+
+Written from knowledge of these systems; this session's network policy
+blocked their documentation, so the links in the references were not
+re-read while writing this.
+
+- **Tiered rules, not one blended score.** Algolia and Meilisearch both rank
+  by a list of rules applied in order, each only breaking the ties the
+  previous one left: how many query words matched, typos, how close
+  together, **which field matched**, exactness, and only then a custom
+  business rule. The effect is predictable: a title match beats any number
+  of body matches, which a single BM25 score does not guarantee, since a
+  long body full of the word can outscore a short title.
+  *Here:* ⌘S sorts by (1) which field matched — name or alias, then a
+  heading, then the text; (2) the section priority above; (3) BM25 within
+  what is left. The priority is a tie-breaker *after* the field, so a
+  complexity class named in the query (`AM`) still beats a primitive that
+  mentions it in passing, and among pages that only mention a term, the
+  primitive comes first.
+- **Records per section, grouped by page.** Documentation search (Algolia's
+  DocSearch is the common example) indexes each section under its page and
+  heading trail, and a hit opens *at that section*. *Here:* a hit whose best
+  match is a heading opens at that heading's anchor.
+- **Field-scoped search for literature.** Reference managers and
+  bibliographies (Zotero's quick-search modes, dblp, Google Scholar's author
+  search) search authors, title and year by default and the full record only
+  when asked, fold accents (`Lázló` = `Laszlo`), and let a year narrow a
+  result. *Here:* ⇧⌘R ranks a citation-key or author match above a title
+  match above an abstract match, folds diacritics, treats a four-digit
+  number as a year, and adds one field this wiki has that a library does
+  not: the concept pages that cite the paper. Searching *oblivious transfer*
+  in ⇧⌘R then finds first the papers the OT page cites, then papers whose
+  abstract mentions it.
+- **Grep is exhaustive and unranked.** A literal-text search is for "every
+  place this string occurs": results in page order with the matching lines,
+  no relevance, nothing hidden. *Here:* ⇧⌘F, over references too.
+- **Measure with a judgment list.** Relevance work everywhere starts from
+  queries with known right answers and a few numbers: success@1, success@5,
+  mean reciprocal rank, and the rate of queries that return nothing.
+
+### 6.2 Build order on the branch
+
+1. **The measuring harness** (§6.3), run in CI against a fresh clone of the
+   wiki, with today's ⌘S as the baseline. *Done.*
+2. **⌘S as concept search**: references out, tiered ranking, heading hits
+   open at the heading, Porter stemming if the numbers say it helps.
+   *Done; §6.4.*
+3. **⇧⌘R reference search.** *Done; §6.5.*
+4. **⇧⌘F literal search.** *Done; §6.6.*
+5. Then "Did you mean …?" (option B), if the zero-result rate warrants it.
+   *It did; done for ⌘S, §6.7.*
+
+### 6.3 The test set, generated from the wiki
+
+- **Navigational, ⌘S:** every primitive, assumption and complexity class,
+  queried by its title and by each alias it alone owns, must come first.
+  About a hundred and fifty queries, regenerated from the wiki each run, so
+  the set grows with it.
+- **Priority, ⌘S:** for any query, no complexity class, reduction or
+  reference may outrank a primitive or assumption that matched in the same
+  or a better field.
+- **Navigational, ⇧⌘R:** every reference by its citation key, and by its
+  paper title, must come first; by first author's surname and year, it must
+  be in the top three.
+- **Thresholds, not perfection:** the wiki changes daily, so the tests
+  report the numbers and fail only below a floor, set from the first
+  honest measurement. A failing query is printed, which is where a missing
+  alias in the wiki usually shows up.
+
+### 6.4 Step 2, built: ⌘S as concept search
+
+**The numbers** (297 navigational queries, the wiki of 2026-09-27):
+
+| | success@1 | success@5 | MRR |
+|---|---|---|---|
+| BM25 alone, every page (the old ⌘S) | 53.9% | 85.9% | 0.675 |
+| `ConceptRanker` | 100% | 100% | 1.000 |
+
+Nearly every old miss was a reduction or a reference outranking the concept
+page for the concept's own name: `LWE` put the LWE page 40th, behind
+reductions whose text says "LWE" more often. A second generated set, the
+**section set**, queries every variant in the relations manifest by the
+heading it lives under (116 of the 131 variants have a heading no other page
+shares); the host page must come first *and open at that heading*.
+Measured in a Python replica of the index before the Swift was written,
+which reproduced the old ⌘S's numbers to the decimal: 116 of 116 once the
+test excludes headings that repeat the page's own name. CI prints all three
+reports on every push, and the floors are 95% / 98% (navigational) and 90%
+(sections), below the measurement so an ordinary wiki edit cannot fail CI.
+
+**The rules** (`Search/ConceptRanker.swift`), each breaking only the ties
+the one before left:
+
+1. *How much of a name matched*: all of it (exactly, then with case,
+   accents and punctuation folded), then part of it (a prefix of it, then
+   every query word in it), then none, only text. Names are the title, the
+   aliases, and the filename, since a reduction titled "LWE ⇒ PKE" is filed
+   as `lwe-to-pke-reg05` and that is what gets typed.
+2. *Whose name*: a concept page's, or one of its headings, before a
+   reduction's or a barrier's. Their names are built from the concepts they
+   connect, so without this `ring lw` put `Ring-LWE ⇒ NTRU` above the Ring-LWE
+   section of the LWE page.
+3. *The finer match*, and a title or alias before a heading. A page whose
+   best match is a heading opens at that heading.
+4. *The section priority* the maintainer set.
+5. *BM25* over title, aliases, headings and text.
+
+**What was decided along the way:**
+
+- **Headings on three or more pages are not names.** "Participates in" is
+  on 117 pages, "Notes" and "Statement" on nearly every reduction; as names
+  they would make `proof` or `syntax` land on a template heading. Their
+  words still count as text.
+- **No Porter stemmer.** The judgment sets are names, so they cannot show a
+  stemmer helping, and a stemmer conflates words it should not. A plural
+  fold for name matching (`commitments` → "Commitment scheme", `PRFs` →
+  "Pseudorandom function") covered the cases that came up.
+- **The FTS side scores every non-reference match**, not a top few: the
+  rules outrank BM25, so the page that belongs first can sit anywhere in
+  BM25's order. That is a few hundred rows at most.
+- **The quick switcher is unchanged.** ⌘O is "I know the page"; ⌘S is now
+  "which pages are about this".
+
+### 6.5 Step 3, built: ⇧⌘R reference search
+
+**The corpus** (2026-09-27): 202 references. Every one has `authors`,
+`venue`, `published` (a year, or a date) and its key as an alias; 158 have
+a `cryptobib_key`, 191 an `## Abstract`. 151 are linked from some other
+page's text, and the frontmatter `source:` links on reductions add none
+that the text does not already have, so the backlink map is the cited-by
+field.
+
+**The rules** (`Search/ReferenceRanker.swift`): key (the key, aliases,
+cryptobib key, or a prefix of one) → first author → any author (every
+query word a word of the name, accents folded) → title → authors, title and
+venue words together → cited by a page whose name matches → text. Within a
+field: the finer match, BM25, then the newer paper. A four-digit word from
+1900 to 2099 is a year filter, and a year alone lists that year.
+
+**Measured** (202 references): first by key 100%, first by title 100%; by
+first author's surname and year, 100% in the top three, and first 93.1% of
+the time before the first-author tier (every miss a co-authored paper of
+the same year ahead of the one the person wrote first) and 94.6% after. The
+rest are true ties, two papers of a year by the same first author, or a
+`published` year that differs from the one in the key. The corpus suite
+reports all three on every push.
+
+**What was decided along the way:**
+
+- **Cited-by goes through reductions.** Since the reductions migration a
+  concept page cites few papers itself; it links its reductions, which
+  cite the papers (the OT page → `COM ⇒ OT` → Kil88). So a paper cited by
+  a reduction or barrier also counts for the concept pages linking to it,
+  and the row says so: "Cited for COM ⇒ OT, on Commitment scheme". With
+  one hop, `oblivious transfer` found only the papers with it in the
+  title; with two, it also finds YZ16, GMW87 and Yao82 before any
+  abstract match. References never count as citers.
+- **No typo tolerance yet.** `Laszlo` does not find the wiki's `Lázló`
+  (a misspelling of László in the source); folding handles accents, not
+  spelling. That is step 5's "Did you mean", if the numbers ask for it.
+- **One palette view for both searches.** `SearchPalette` owns the field,
+  the list, the arrow keys and Return; ⌘S and ⇧⌘R supply their rows.
+
+### 6.6 Step 4, built: ⇧⌘F literal search
+
+`Search/TextGrep.swift`, deliberately not SQLite: FTS5 matches tokens, and
+grep's job is the exact string, punctuation and TeX included (`\classNP`,
+`O(n^2)`, `k-LIN`). Each page's body is split into lines once per library
+load; a query is one pass of `range(of:)` over them, off the main actor.
+
+- **Order is page path, then line.** Nothing ranked, nothing hidden; the
+  count is every occurrence.
+- **Smart case**, as ripgrep's `--smart-case`: case-insensitive unless the
+  query has a capital, so `ot` finds "not" and `OT` finds only OT.
+- **A row is a page**: its title, the count, and its first three matching
+  lines, each cut to a window around its first match (markdown paragraphs
+  are single lines, often a thousand characters) and set monospaced, since
+  they are source. Opening a row finds the text on the rendered page.
+- **⇧⌘F moved.** It was a hidden alias for ⌘S, kept for muscle memory
+  after 0.1.1; it is now Find in All Pages…, beside Find in the Edit menu,
+  where Xcode keeps Find in Project.
+
+### 6.7 Step 5, built: typo correction for ⌘S
+
+**Measured first.** The navigational set has no typos, so a typo set was
+generated from it: each query with the middle letter of its longest word
+deleted (words of six letters or more; 178 queries). ⌘S found the page
+first **0%** of the time and returned nothing **99.4%** of the time. With
+correction, in the Python replica: **87.6%** first. CI reports it on every
+push; the floor is 75%.
+
+**How** (`ConceptRanker.correction`), after Meilisearch's typo tolerance:
+only when nothing matches as typed, each query word that no name or section
+name contains is replaced by the nearest word that one does, within one
+edit for five to eight letters and two from nine (optimal string alignment,
+so a swap of neighbours is one edit); ties go to the more common word. Words
+under five letters are never corrected, since one edit turns one acronym
+into another (`SIS`, `SIVP`, `LPN`). The last word is left alone while it
+is still the start of a known word, because it is probably being typed. The
+sheet says what happened: "Nothing matches “pseudorandm”. Showing results
+for “pseudorandom”."
+
+**What it does not do:** correct short acronyms, or correct ⇧⌘R, where
+`Laszlo` still misses the wiki's misspelled `Lázló`. Each would need its
+own measurement first. Joined and split words were the next gap; §6.8.
+
+### 6.8 Joined, split and hyphenated words
+
+The maintainer asked for `ArthurMerlin` and `multiparty` to work, and
+suggested trying spaces and hyphens inside a word when nothing matches,
+bounded to short queries so the combinations cannot blow up. The same
+effect comes without enumerating anything: compare names **with their word
+breaks removed** as well as word by word. "Arthur-Merlin", "Arthur Merlin"
+and `ArthurMerlin` all compact to `arthurmerlin`. Each name also keeps its
+compact form from the start of each word (`multipartycomputation`,
+`partycomputation`, `computation`), so `multiparty computation` finds
+"Secure multi-party computation": a joined query may begin at any word, but
+never inside one (`ultiparty` matches nothing). The cost is linear in a
+name's words, so there is no length limit. A list of alternative spellings
+is not needed for this; `aliases` remain the place for genuinely different
+names.
+
+In the match tiers, a compact equality counts as *folded*, a compact prefix
+as *prefix*, and a run across words as *every word*. It applies wherever
+`ConceptRanker.match` does, so ⇧⌘R's keys and titles get it too (`BIP18`
+finds `BIP+18`).
+
+**Measured** in the Python replica, as two more generated sets:
+
+| | before | after |
+|---|---|---|
+| every name with its hyphens removed (73) | 1.4% | 100% |
+| every name with its first two words joined (147) | 2.0% | 100% |
+| one typo (178), for comparison | 87.6% | 92.7% |
+| navigational (297) | 100% | 100% |
+
+CI reports both new sets and confirmed all four numbers exactly; the
+floors are 90%. One side effect, harmless: read without its word break,
+"Commitment scheme" starts with `commitments`, so that plural is now a
+prefix match rather than an every-word one, for the same page.
+
 ## References
 
 - SQLite FTS5 — tokenizers (`porter`, `trigram`), `bm25()`, `fts5vocab`:
@@ -155,3 +422,10 @@ so it is not forgotten, not recommended now.
   the stemmer behind FTS5's `porter` tokenizer.
 - Apple, `NLEmbedding`:
   <https://developer.apple.com/documentation/naturallanguage/nlembedding>
+- Algolia, ranking criteria and the tie-breaking algorithm:
+  <https://www.algolia.com/doc/guides/managing-results/relevance-overview/in-depth/ranking-criteria/>
+- Meilisearch, ranking rules:
+  <https://www.meilisearch.com/docs/learn/relevancy/ranking_rules>
+- Algolia DocSearch, records and hierarchy:
+  <https://docsearch.algolia.com/docs/record-extractor/>
+- Zotero, searching (quick-search modes): <https://www.zotero.org/support/searching>

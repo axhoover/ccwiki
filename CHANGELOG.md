@@ -12,7 +12,29 @@
   code. Commit messages are for the code.
 -->
 
-## 0.1.2 — unreleased
+## 0.1.2 — 2026-09-28
+
+**⌘S finds the page you mean.** Search now puts the page named for what you
+typed first: `LWE` opens Learning with errors, not a reduction that mentions
+it forty times. Primitives and assumptions come before complexity classes,
+and those before reductions. Type a section's name, such as `Ring-LWE`, and
+the page opens at that section. Papers are no longer mixed in; they have a
+search of their own. A typo no longer finds nothing: when no page matches,
+⌘S corrects the misspelled word and says so. And words run together or
+split apart still match, so `ArthurMerlin`, `multiparty computation` and
+`zeroknowledge` find their pages.
+
+**⇧⌘R searches the references.** Find a paper by its citation key (`GGM86`),
+an author (accents optional: `Dottling` finds Döttling), words of its title,
+or a topic: `oblivious transfer` finds the papers with it in their title,
+then the papers the Oblivious transfer page cites, then those whose abstract
+mentions it. Add a year to narrow it: `regev 2005`.
+
+**⇧⌘F finds text on every page.** Find in All Pages lists every page with
+the exact text on it, references included, with the lines it's on, in page
+order and nothing hidden. Case matters only if you type a capital, and TeX
+is searched as written, so `\classNP` finds every use of the macro. (⇧⌘F
+used to open the same search as ⌘S.)
 
 **⌘O remembers where you've been.** Open the quick switcher without typing
 and the pages you visited most recently come first. The page you're on is

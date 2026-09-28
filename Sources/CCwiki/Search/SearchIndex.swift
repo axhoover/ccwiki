@@ -11,6 +11,38 @@ struct SearchHit: Identifiable, Sendable {
     /// rather than HTML because this renders in SwiftUI, not the web view.
     let snippet: String
     let score: Double
+    /// The heading that matched, when a section rather than the page is the
+    /// best answer. Plain text, for the result row.
+    var section: String? = nil
+    /// That heading's anchor, so the reader opens the page there.
+    var anchor: String? = nil
+
+    var id: String { path }
+}
+
+/// What ⌘S found, and the corrected query it found it for when nothing
+/// matched the query as typed.
+struct ConceptResults: Sendable {
+    var hits: [SearchHit]
+    var correction: String?
+}
+
+/// One ⇧⌘R hit: a paper, and why it matched.
+struct ReferenceHit: Identifiable, Sendable {
+    let path: String
+    let key: String
+    let title: String
+    let authors: String
+    let venue: String?
+    let year: Int?
+    let status: PageStatus
+    let field: ReferenceRanker.Field
+    /// For a paper found through a page that cites it: that page's title,
+    /// and the reduction or barrier it cites the paper through, if any.
+    let citedBy: String?
+    let citedVia: String?
+    /// The matching passage, marked as `SearchHit.snippet` is.
+    let snippet: String
 
     var id: String { path }
 }
@@ -30,6 +62,12 @@ actor SearchIndex {
     private let path: URL
     private var database: SQLiteDatabase?
     private(set) var indexedCount = 0
+    /// ⌘S's ordering rules, over the pages of the last rebuild. Held here
+    /// rather than on the main actor because it is read on every keystroke,
+    /// next to the query it combines with.
+    private var ranker = ConceptRanker.empty
+    /// ⇧⌘R's, over the references.
+    private var referenceRanker = ReferenceRanker.empty
 
     init(path: URL) {
         self.path = path
@@ -128,7 +166,12 @@ actor SearchIndex {
     /// Rebuild from scratch. The corpus is ~300 pages and ~800 KB, so a full
     /// rebuild takes about a tenth of a second — much simpler than tracking
     /// which files a pull changed, and it cannot drift.
-    func rebuild(pages: [WikiPage]) throws {
+    ///
+    /// `backlinks` is `WikiIndex.backlinkMap()`, for the concept pages that
+    /// cite each reference.
+    func rebuild(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]] = [:]) throws {
+        ranker = ConceptRanker(pages: pages)
+        referenceRanker = ReferenceRanker(pages: pages, backlinks: backlinks)
         let database: SQLiteDatabase
         do {
             database = try open()
@@ -196,6 +239,85 @@ actor SearchIndex {
 
     // MARK: Query
 
+    /// ⌘S: concept pages, references left out, in `ConceptRanker`'s order.
+    ///
+    /// Every non-reference page the full text matches is scored, not a top
+    /// few: the ranker's first rules outrank BM25, so the page that belongs
+    /// first can sit anywhere in BM25's order. That is at most a few hundred
+    /// rows.
+    ///
+    /// When nothing matches as typed, each word no name contains is corrected
+    /// to the nearest one that does, and the search runs again: a one-letter
+    /// typo otherwise returned nothing 99% of the time (plans/search-v2.md
+    /// §6.7).
+    func conceptSearch(_ query: String, limit: Int = 60) throws -> ConceptResults {
+        let hits = try conceptHits(query, limit: limit)
+        guard hits.isEmpty, let corrected = ranker.correction(for: query) else {
+            return ConceptResults(hits: hits, correction: nil)
+        }
+        return ConceptResults(hits: try conceptHits(corrected, limit: limit), correction: corrected)
+    }
+
+    private func conceptHits(_ query: String, limit: Int) throws -> [SearchHit] {
+        let (scores, snippets) = try textMatches(query, kindClause: "d.kind != 'reference'")
+
+        return ranker.rank(query, textScores: scores, limit: limit).map { ranked in
+            let entry = ranked.entry
+            return SearchHit(
+                path: entry.path,
+                slug: entry.slug,
+                title: entry.title,
+                kind: entry.kind,
+                status: entry.status,
+                snippet: snippets[entry.path] ?? "",
+                score: scores[entry.path] ?? 0,
+                section: ranked.section?.name.text,
+                anchor: ranked.section?.id)
+        }
+    }
+
+    /// ⇧⌘R: references only, in `ReferenceRanker`'s order.
+    func referenceSearch(_ query: String, limit: Int = 60) throws -> [ReferenceHit] {
+        let text = ReferenceRanker.parse(query).text
+        let (scores, snippets) = try textMatches(text, kindClause: "d.kind = 'reference'")
+        return referenceRanker.rank(query, textScores: scores, limit: limit).map { ranked in
+            let entry = ranked.entry
+            return ReferenceHit(
+                path: entry.path, key: entry.key, title: entry.title,
+                authors: entry.authors, venue: entry.venue, year: entry.year,
+                status: entry.status, field: ranked.field,
+                citedBy: ranked.citer?.title,
+                citedVia: ranked.citer?.via,
+                snippet: snippets[entry.path] ?? "")
+        }
+    }
+
+    /// BM25 and a snippet for every page of the given kinds the text matches.
+    /// `kindClause` is a fixed SQL condition on `d.kind`, never user input.
+    private func textMatches(_ query: String, kindClause: String) throws
+        -> (scores: [String: Double], snippets: [String: String]) {
+        var scores: [String: Double] = [:]
+        var snippets: [String: String] = [:]
+        guard let expression = Self.matchExpression(query) else { return (scores, snippets) }
+        let statement = try open().prepare("""
+            SELECT d.path,
+                   snippet(doc_fts, -1, '«', '»', '…', 14),
+                   bm25(doc_fts, 14.0, 10.0, 4.0, 1.0)
+            FROM doc_fts
+            JOIN doc d ON d.id = doc_fts.rowid
+            WHERE doc_fts MATCH ? AND \(kindClause)
+            """)
+        statement.bind(1, expression)
+        while try statement.step() {
+            let path = statement.string(0)
+            snippets[path] = Self.oneLine(statement.string(1))
+            scores[path] = statement.double(2)
+        }
+        return (scores, snippets)
+    }
+
+    /// Every page, in BM25 order alone: ⌘S before it had rules, kept as the
+    /// baseline the relevance report compares against.
     func search(_ query: String, limit: Int = 60) throws -> [SearchHit] {
         guard let expression = Self.matchExpression(query) else { return [] }
         let database = try open()
@@ -221,12 +343,15 @@ actor SearchIndex {
                 title: statement.string(2),
                 kind: PageKind(rawValue: statement.string(3)) ?? .note,
                 status: PageStatus(rawValue: statement.string(4)) ?? .draft,
-                snippet: statement.string(5)
-                    .replacingOccurrences(of: "\n", with: " ")
-                    .trimmingCharacters(in: .whitespaces),
+                snippet: Self.oneLine(statement.string(5)),
                 score: statement.double(6)))
         }
         return hits
+    }
+
+    private static func oneLine(_ snippet: String) -> String {
+        snippet.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
     }
 
     /// Turn arbitrary typed text into a safe FTS5 `MATCH` expression.

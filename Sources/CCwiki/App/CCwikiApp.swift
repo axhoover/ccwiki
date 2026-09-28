@@ -166,13 +166,23 @@ struct CCwikiCommands: Commands {
                 .keyboardShortcut("g", modifiers: [.shift, .command])
                 .disabled(findAction?.previous == nil)
 
+            // ⇧⌘F, as Find in Project is in Xcode: the literal text, everywhere.
+            Button("Find in All Pages…") { model?.grepPresented = true }
+                .keyboardShortcut("f", modifiers: [.shift, .command])
+                .disabled(model == nil)
+
             // ⌘S, because searching is the thing a reader does most and ⌘S is
             // the easiest chord to reach. It is Save by convention, but CCwiki
             // has nothing to save, and the Save slot is emptied below so no
-            // default item can claim it. ⇧⌘F still works: see RootView.
-            Button("Search All Pages…") { searchAction?.perform() }
+            // default item can claim it.
+            Button("Search the Wiki…") { searchAction?.perform() }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(searchAction == nil)
+
+            // ⇧⌘R, because ⌘R is Sync: reload, as in nearly every Mac app.
+            Button("Search References…") { model?.referenceSearchPresented = true }
+                .keyboardShortcut("r", modifiers: [.shift, .command])
+                .disabled(model == nil)
         }
 
         // A reader has no documents: no Save, Save As, Revert or Duplicate.

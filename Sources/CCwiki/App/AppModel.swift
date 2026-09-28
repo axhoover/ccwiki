@@ -204,10 +204,33 @@ final class AppModel {
         didSet { scheduleSearch() }
     }
     private(set) var searchResults: [SearchHit] = []
+    /// Set when nothing matched as typed and the results are for this
+    /// corrected query instead.
+    private(set) var searchCorrection: String?
     private(set) var searchError: String?
     private var searchTask: Task<Void, Never>?
 
     var searchPresented = false
+
+    /// ⇧⌘R, the reference search: the same shape as ⌘S, kept separate so
+    /// each sheet reopens on its own last query.
+    var referenceQuery = "" {
+        didSet { scheduleReferenceSearch() }
+    }
+    private(set) var referenceResults: [ReferenceHit] = []
+    private(set) var referenceError: String?
+    private var referenceTask: Task<Void, Never>?
+    var referenceSearchPresented = false
+
+    /// ⇧⌘F, literal text across every page. The pages, split into lines,
+    /// are rebuilt with the library; a query scans them off the main actor.
+    var grepQuery = "" {
+        didSet { scheduleGrep() }
+    }
+    private(set) var grepResults: [TextGrep.Hit] = []
+    private var grepTask: Task<Void, Never>?
+    @ObservationIgnored private var textGrep = TextGrep.empty
+    var grepPresented = false
     var quickSwitcherPresented = false
     /// Setting the query recomputes the results, so the two can never drift —
     /// whether the change came from the text field, a menu command, or the
@@ -468,7 +491,8 @@ final class AppModel {
                 index,
                 index.backlinkMap(),
                 manifest,
-                RelationLabels(manifest: manifest, index: index))
+                RelationLabels(manifest: manifest, index: index),
+                TextGrep(pages: index.allPages))
         }.value
 
         index = loaded.0
@@ -503,10 +527,12 @@ final class AppModel {
         // below; doing it here as well cost a second git call per load.
 
         let pages = loaded.0.allPages
+        let links = loaded.1
+        textGrep = loaded.4
         let searchIndex = self.searchIndex
         Task.detached(priority: .utility) {
             do {
-                try await searchIndex.rebuild(pages: pages)
+                try await searchIndex.rebuild(pages: pages, backlinks: links)
             } catch {
                 await MainActor.run {
                     self.warn("Search index could not be rebuilt: \(error.localizedDescription)")
@@ -817,11 +843,13 @@ final class AppModel {
         renderCurrent(restoringScroll: true)
     }
 
-    /// Open a full-text search hit and find the query on it, so the reader
+    /// Open a search hit where it matched: at the heading when a section was
+    /// the match, otherwise finding the query on the page, so the reader
     /// lands on the match rather than the top of a long page.
-    func openSearchResult(_ path: String, query: String) {
-        pendingFind = Self.findCandidates(for: query)
-        openPage(path)
+    func openSearchResult(_ hit: SearchHit, query: String) {
+        // A find would scroll away from the heading the hit is about.
+        pendingFind = hit.anchor == nil ? Self.findCandidates(for: query) : nil
+        openPage(hit.path, anchor: hit.anchor)
         // Consumed by the render `openPage` just did; if it did not render
         // (a page the index lacks), it must not linger for the next one.
         pendingFind = nil
@@ -998,6 +1026,7 @@ final class AppModel {
         let query = searchQuery
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             searchResults = []
+            searchCorrection = nil
             searchError = nil
             return
         }
@@ -1007,15 +1036,83 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled, let self else { return }
             do {
-                let hits = try await searchIndex.search(query)
+                let results = try await searchIndex.conceptSearch(query)
                 guard !Task.isCancelled else { return }
-                searchResults = hits
+                searchResults = results.hits
+                searchCorrection = results.correction
                 searchError = nil
             } catch {
                 searchResults = []
+                searchCorrection = nil
                 searchError = error.localizedDescription
             }
         }
+    }
+
+    private func scheduleReferenceSearch() {
+        referenceTask?.cancel()
+        let query = referenceQuery
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            referenceResults = []
+            referenceError = nil
+            return
+        }
+        referenceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, let self else { return }
+            do {
+                let hits = try await searchIndex.referenceSearch(query)
+                guard !Task.isCancelled else { return }
+                referenceResults = hits
+                referenceError = nil
+            } catch {
+                referenceResults = []
+                referenceError = error.localizedDescription
+            }
+        }
+    }
+
+    private func scheduleGrep() {
+        grepTask?.cancel()
+        let query = grepQuery
+        let grep = textGrep
+        guard query.trimmingCharacters(in: .whitespaces).count >= TextGrep.minimumLength else {
+            grepResults = []
+            return
+        }
+        grepTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let hits = await Task.detached(priority: .userInitiated) {
+                grep.search(query)
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            grepResults = hits
+        }
+    }
+
+    /// "12 pages, 40 matches".
+    var grepSummary: String {
+        let matches = grepResults.reduce(0) { $0 + $1.count }
+        let pages = grepResults.count
+        return "\(pages) page\(pages == 1 ? "" : "s"), \(matches) match\(matches == 1 ? "" : "es")"
+    }
+
+    /// Open a ⇧⌘F hit and find the text on it.
+    func openGrepResult(_ hit: TextGrep.Hit, query: String) {
+        pendingFind = [query]
+        openPage(hit.path)
+        pendingFind = nil
+    }
+
+    /// Open a reference hit. A paper found by its text is opened with the
+    /// query found on it, as ⌘S does; one found by its key, authors, title
+    /// or a citing page is opened at the top, where those are.
+    func openReferenceResult(_ hit: ReferenceHit, query: String) {
+        pendingFind = hit.field == .text
+            ? Self.findCandidates(for: ReferenceRanker.parse(query).text) : nil
+        openPage(hit.path)
+        pendingFind = nil
     }
 
     func refreshQuickSwitcher() {
@@ -1156,10 +1253,11 @@ final class AppModel {
     func rebuildSearchIndex() {
         guard let index else { return }
         let pages = index.allPages
+        let links = backlinks
         let searchIndex = self.searchIndex
         Task.detached(priority: .userInitiated) {
             await searchIndex.reset()
-            try? await searchIndex.rebuild(pages: pages)
+            try? await searchIndex.rebuild(pages: pages, backlinks: links)
         }
     }
 

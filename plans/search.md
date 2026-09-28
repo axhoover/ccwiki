@@ -129,7 +129,10 @@ model half can never regress silently again; the view half is covered by
 ## 6. Backlog: ranking by page kind
 
 > **2026-09-27.** Folded into a wider proposal, with a test set to measure
-> ranking changes against: [search-v2.md](search-v2.md).
+> ranking changes against: [search-v2.md](search-v2.md). **Built there
+> differently**: tiered rules (`ConceptRanker`) rather than a bm25
+> multiplier, and references moved to their own search (⇧⌘R). What follows
+> is the original request, kept for its reasoning.
 
 **Requested 2026-08-22, deferred until the architecture is done.**
 

@@ -9,8 +9,9 @@ Ordered by how much they change the app's shape, not by priority.
 > quality-of-life branch, so small fixes keep shipping while it is under
 > way. The candidates, each large enough to want that:
 >
-> - **Search, the next version** — a proposal with options and decisions
->   for the maintainer: [search-v2.md](search-v2.md).
+> - **Search, the next version** — decided and built on `claude/search-v2`:
+>   ⌘S concept search, ⇧⌘R references, ⇧⌘F literal text, typo correction,
+>   all measured in CI. [search-v2.md](search-v2.md) §6.
 > - **Link previews** — hover a wikilink to see the target's title and
 >   first paragraph in a popover, without leaving the page. Deliberately
 >   omitted in M1 ([render-pipeline.md](render-pipeline.md) §3); worth
@@ -141,10 +142,9 @@ the UI to start one from a page.
 
 ## 4. Search ranking
 
-Deferred with a concrete plan; see [search.md](search.md) §6. Short version:
-weight the fields harder, and multiply the bm25 score by a per-kind factor so a
-`primitive` or `assumption` page outranks a `reference` — except when the query
-looks like a citation key, which is exactly when a reference should win.
+**Superseded** by [search-v2.md](search-v2.md) §6: tiered rules instead of a
+per-kind bm25 factor, and references in a search of their own (⇧⌘R), where
+a citation key is the first thing matched.
 
 ## 4a. A graph view of the relationship hypergraph
 

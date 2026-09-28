@@ -5,6 +5,53 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — Search v2: ⌘S for concepts, ⇧⌘R for papers, ⇧⌘F for text
+
+On `claude/search-v2`, cut from the QoL branch. The maintainer's decisions
+and the design are in [plans/search-v2.md](plans/search-v2.md) §6.
+
+**First a harness, then the change.** `SearchRelevanceTests` generates its
+judgments from the wiki (every concept page by its title and each alias it
+alone owns; every manifest variant by its heading) and CI clones the wiki
+to run it on every push, printing success@1, success@5, MRR and each miss.
+The old ⌘S put a concept page first for its own name 53.9% of the time.
+
+**`ConceptRanker` puts it first 100% of the time**, and a query naming a
+section opens the page at it. Tiered rules, not a blended score: how much
+of a name matched, a concept's name before a reduction's, then the
+maintainer's section priority, then BM25. References are out of ⌘S; they
+get ⇧⌘R next. The rules were tried against the real wiki in a Python
+replica of the index first (this container has no Swift), which reproduced
+the old numbers exactly, so the Swift went in with its measurements known.
+
+**Learned:** the misses were never BM25 being subtly wrong; they were a
+reduction or a paper whose text repeats a concept's acronym. Section
+headings repeat as page templates ("Participates in" on 117 pages), so a
+heading only counts as a name when it is on fewer than three pages. The
+README's shortcut table said "⌘S (or ⌘S)"; fixed.
+
+**⇧⌘R, the references**, the same way: prototype and judgments first
+(every paper by key, by title, by first author and year), then
+`ReferenceRanker`: key → authors → title → all three → cited by a concept
+page → abstract, with a year as a filter. ⌘S and ⇧⌘R now share one
+`SearchPalette` view. Learned: concept pages cite their papers *through*
+reductions since the migration, so cited-by needed a second hop.
+
+**⇧⌘F, literal text**: `TextGrep`, in memory rather than FTS5 because
+grep's job is the exact string, TeX included. Smart case, page order,
+three lines per page. The old hidden ⇧⌘F alias for ⌘S is gone.
+
+**Then "Did you mean", because the numbers asked.** A generated one-typo
+set returned nothing 99.4% of the time. Correcting unknown words to the
+nearest word of any name (Meilisearch's budgets: one edit from five
+letters, two from nine) finds the page first 87.6% of the time.
+
+**Joined and split words**, at the maintainer's request (`ArthurMerlin`,
+`multiparty`): names are also compared with their word breaks removed,
+and from the start of each word, instead of trying spaces inside the query.
+Linear, so no length cap. Hyphens-removed and first-two-words-joined sets
+went from about 2% to 100%; typos from 87.6% to 92.7%.
+
 ## 2026-09-27 — Welcome, What's New, and a round of quality of life
 
 No release today, by choice: everything below accumulates in `CHANGELOG.md`
