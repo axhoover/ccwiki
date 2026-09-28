@@ -80,11 +80,32 @@ final class AppModel {
 
     // MARK: Navigation
 
+    /// A page that ships with the app rather than with the wiki.
+    enum Document: String, Equatable, Sendable {
+        case welcome
+        case whatsNew
+
+        var title: String {
+            switch self {
+            case .welcome: "Welcome to CCwiki"
+            case .whatsNew: "What's New in CCwiki"
+            }
+        }
+    }
+
     /// What the reader is showing.
     enum Location: Equatable, Sendable {
         case page(path: String, anchor: String?)
         case folder(slug: String)
+        case document(Document)
         case empty
+
+        /// Reading one of the app's own pages needs no wiki, so it can be
+        /// shown while the first download is still under way.
+        var isDocument: Bool {
+            if case .document = self { return true }
+            return false
+        }
 
         var path: String? {
             if case .page(let path, _) = self { return path }
@@ -111,8 +132,20 @@ final class AppModel {
             CCwikiSettings.expandedFolders = expandedFolders.sorted()
         }
     }
-    var inspectorTab: InspectorTab = .outline
-    var showInspector = true
+    /// Both persisted: the inspector comes back as it was left.
+    var inspectorTab: InspectorTab =
+        CCwikiSettings.inspectorTab.flatMap(InspectorTab.init(rawValue:)) ?? .outline {
+        didSet { CCwikiSettings.inspectorTab = inspectorTab.rawValue }
+    }
+    var showInspector: Bool = CCwikiSettings.showsInspector {
+        didSet { CCwikiSettings.showsInspector = showInspector }
+    }
+
+    /// ⌥⌘1–3: straight to a tab, opening the inspector if it was closed.
+    func showInspectorTab(_ tab: InspectorTab) {
+        inspectorTab = tab
+        showInspector = true
+    }
 
     enum InspectorTab: String, CaseIterable, Identifiable {
         case outline = "Outline"
@@ -183,6 +216,13 @@ final class AppModel {
         didSet { refreshQuickSwitcher() }
     }
     private(set) var quickSwitcherResults: [QuickSwitchItem] = []
+    /// How many of `quickSwitcherResults` are recent pages, so the view can
+    /// head them. Zero whenever there is a query.
+    private(set) var quickSwitcherRecentCount = 0
+    /// Most recent first, persisted. The page on screen is left out of the
+    /// switcher's list, so ⌘O then Return goes back to the page before it.
+    private var recentPages: [String] = CCwikiSettings.recentPages
+    static let recentPagesLimit = 12
 
     // MARK: Jobs
 
@@ -306,6 +346,9 @@ final class AppModel {
         }
         webController.onReady = { [weak self] in
             self?.renderCurrent()
+        }
+        webController.siteURLProvider = { [weak self] in
+            self?.currentSiteURL
         }
 
         refreshMacrosWarning()
@@ -456,11 +499,8 @@ final class AppModel {
             headRevision = marker.sha
             headDate = marker.commitDate
         }
-        if let git {
-            if let gh = tools.path(for: .gh) {
-                await git.configureCredentialHelper(clone: paths.clone, ghPath: gh)
-            }
-        }
+        // The push credential helper is configured by `refreshPushCapability`
+        // below; doing it here as well cost a second git call per load.
 
         let pages = loaded.0.allPages
         let searchIndex = self.searchIndex
@@ -553,7 +593,17 @@ final class AppModel {
             default:
                 syncState = .running("Indexing…")
                 await loadLibrary()
-                syncState = .succeeded(outcome.summary)
+                var summary = outcome.summary
+                if case .updated(let before, let after) = outcome {
+                    if let git, paths.wikiStore == .git {
+                        let changed = await git.changedPages(in: paths.clone, from: before, to: after)
+                        summary = GitService.updateSummary(changedPages: changed.count)
+                    } else {
+                        // A snapshot has no history to compare.
+                        summary = GitService.updateSummary(changedPages: 0)
+                    }
+                }
+                syncState = .succeeded(summary)
                 warnings.removeAll { $0.contains("Fast-forward failed") }
                 scheduleStatusReset()
             }
@@ -601,6 +651,88 @@ final class AppModel {
 
     /// Cold start: the page from last time, if it still exists, else home.
     /// Not under the screenshot harness, whose plan starts where it says.
+    // MARK: The app's own pages
+
+    /// The release notes shipped in this build.
+    @ObservationIgnored private(set) lazy var changelog =
+        Changelog.parse(paths.bundledDocument("CHANGELOG.md") ?? "")
+    /// Which releases What's New lists: those after this version, or all of
+    /// them when nil (from the Help menu).
+    @ObservationIgnored private var whatsNewSince: String?
+    /// Set by `openSearchResult` for the render it triggers, then cleared.
+    @ObservationIgnored private var pendingFind: [String]?
+
+    /// What to open before anything else this launch, if anything. Pure, so
+    /// it can be tested: a first launch shows Welcome; the first launch of
+    /// a newer version shows what changed since the last one, when the
+    /// changelog has anything to say about it.
+    nonisolated static func launchDocument(
+        lastSeen: String?, current: String, changelog: Changelog
+    ) -> (document: Document, since: String?)? {
+        guard let lastSeen else { return (.welcome, nil) }
+        guard !UpdateChecker.isDevelopmentVersion(current),
+              UpdateChecker.isNewer(current, than: lastSeen),
+              !changelog.entries(after: lastSeen, upTo: current).isEmpty
+        else { return nil }
+        return (.whatsNew, lastSeen)
+    }
+
+    /// Called once at launch, before the library loads, so Welcome can be
+    /// read while the wiki downloads. Records this version as seen.
+    func openLaunchDocumentIfNeeded() {
+        guard ScreenshotRunner.directory == nil else { return }
+        let current = appVersion
+        let decision = Self.launchDocument(
+            lastSeen: CCwikiSettings.lastSeenVersion, current: current, changelog: changelog)
+        CCwikiSettings.lastSeenVersion = current
+        guard let decision else { return }
+        if decision.document == .whatsNew { whatsNewSince = decision.since }
+        open(.document(decision.document))
+    }
+
+    func showWelcome() {
+        open(.document(.welcome))
+    }
+
+    /// Every release's notes, from the Help menu.
+    func showWhatsNew() {
+        whatsNewSince = nil
+        webController.invalidate()
+        if location == .document(.whatsNew) { renderCurrent() } else { open(.document(.whatsNew)) }
+    }
+
+    private func documentRequest(_ document: Document) -> RenderRequest {
+        let markdown: String
+        switch document {
+        case .welcome:
+            markdown = paths.bundledDocument("welcome.md") ?? "# Welcome to CCwiki\n"
+        case .whatsNew:
+            let entries = changelog.entries(after: whatsNewSince, upTo: appVersion)
+            markdown = Changelog.whatsNewMarkdown(
+                entries.isEmpty ? changelog.entries : entries, since: whatsNewSince)
+        }
+
+        // A synthetic page, so the markdown goes through the reader's own
+        // pipeline and its wikilinks resolve like any page's. The path is
+        // one no wiki page can have.
+        let page = WikiPage(path: "ccwiki:/\(document.rawValue).md", text: markdown)
+        var notices: [RenderRequest.Notice] = []
+        guard let index else {
+            if document == .welcome {
+                notices.append(RenderRequest.Notice(
+                    level: "info",
+                    text: "The wiki is downloading. The links on this page come alive as soon "
+                        + "as it lands."))
+            }
+            return RenderRequest(
+                path: page.path, title: document.title, markdown: page.body, html: nil,
+                links: [:], anchor: nil, notices: notices)
+        }
+        var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
+        renderer.reportsBrokenLinks = false
+        return renderer.request(for: page, anchor: nil, notices: notices)
+    }
+
     private func openInitialPage() {
         if ScreenshotRunner.directory == nil,
            let last = CCwikiSettings.lastPage, index?.pages[last] != nil {
@@ -633,7 +765,10 @@ final class AppModel {
             }
             return
         }
-        if case .page(let path, _) = newLocation { CCwikiSettings.lastPage = path }
+        if case .page(let path, _) = newLocation {
+            CCwikiSettings.lastPage = path
+            noteRecent(path)
+        }
         reveal(newLocation)
         renderCurrent()
     }
@@ -650,7 +785,7 @@ final class AppModel {
             // A folder listing is not one of the tree's rows, so leaving the
             // previous page highlighted claims you are somewhere you are not.
             sidebarSelection = nil
-        case .empty:
+        case .document, .empty:
             sidebarSelection = nil
         }
     }
@@ -673,16 +808,48 @@ final class AppModel {
     func goBack() {
         guard let previous = history.goBack() else { return }
         reveal(previous)
-        renderCurrent()
+        renderCurrent(restoringScroll: true)
     }
 
     func goForward() {
         guard let next = history.goForward() else { return }
         reveal(next)
-        renderCurrent()
+        renderCurrent(restoringScroll: true)
     }
 
-    private func renderCurrent(preservingScroll: Bool = false) {
+    /// Open a full-text search hit and find the query on it, so the reader
+    /// lands on the match rather than the top of a long page.
+    func openSearchResult(_ path: String, query: String) {
+        pendingFind = Self.findCandidates(for: query)
+        openPage(path)
+        // Consumed by the render `openPage` just did; if it did not render
+        // (a page the index lacks), it must not linger for the next one.
+        pendingFind = nil
+    }
+
+    /// What to look for on the page, best first: the query as typed, then
+    /// its words longest first. Full-text search matches words anywhere on
+    /// the page, so the phrase itself may not occur.
+    nonisolated static func findCandidates(for query: String) -> [String] {
+        let phrase = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return [] }
+        let words = phrase.split(whereSeparator: \.isWhitespace)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count >= 3 }
+            .sorted { $0.count > $1.count }
+        var seen: Set<String> = []
+        return ([phrase] + words).filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    private func renderCurrent(preservingScroll: Bool = false, restoringScroll: Bool = false) {
+        if case .document(let document) = location {
+            var request = documentRequest(document)
+            request.macros = macros.macros
+            request.preservesScroll = preservingScroll
+            request.restoresScroll = restoringScroll
+            webController.render(request)
+            return
+        }
         guard let index else { return }
         var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
         renderer.reportsBrokenLinks = showsMaintenanceNotices
@@ -702,7 +869,7 @@ final class AppModel {
         case .folder(let slug):
             request = renderer.folderRequest(
                 slug: slug, hidingStubs: hidesStubs, notices: notices)
-        case .empty:
+        case .document, .empty:
             return
         }
         // The table rides along on every render, so a clone that arrived
@@ -710,7 +877,9 @@ final class AppModel {
         // the next page rather than the next launch.
         request.macros = macros.macros
         request.preservesScroll = preservingScroll
-        webController.render(request)
+        request.restoresScroll = restoringScroll
+        webController.render(request, thenFind: pendingFind)
+        pendingFind = nil
     }
 
     // MARK: Text size
@@ -748,9 +917,38 @@ final class AppModel {
             return Self.siteURL(slug: page.slug, anchor: anchor)
         case .folder(let slug):
             return Self.siteURL(slug: slug + "/")
-        case .empty:
+        case .document, .empty:
             return nil
         }
+    }
+
+    /// What the window is showing, as a title: for printing, and anything
+    /// else that needs to name the current page.
+    var currentTitle: String {
+        switch location {
+        case .page: currentPage?.displayTitle ?? "CCwiki"
+        case .folder(let slug): slug
+        case .document(let document): document.title
+        case .empty: "CCwiki"
+        }
+    }
+
+    func printCurrentPage() {
+        guard location != .empty else { return }
+        webController.printPage(title: currentTitle)
+    }
+
+    /// A concept page picked at random: not a stub, not a reference or a
+    /// reduction (they are reached through the pages that use them), not
+    /// the one on screen. For wandering.
+    func openRandomPage() {
+        guard let index else { return }
+        let candidates = index.allPages.filter {
+            isBrowsable($0) && !Self.kindsOutsideTree.contains($0.kind)
+                && $0.status != .stub && $0.path != location.path
+        }
+        guard let page = candidates.randomElement() else { return }
+        openPage(page.path)
     }
 
     func copyToPasteboard(_ text: String) {
@@ -823,10 +1021,25 @@ final class AppModel {
     func refreshQuickSwitcher() {
         guard let index else {
             quickSwitcherResults = []
+            quickSwitcherRecentCount = 0
             return
         }
+        let recent = recentPages.filter { $0 != location.path && index.pages[$0] != nil }
         quickSwitcherResults = index.quickSwitch(
-            quickSwitcherQuery, excluding: unlistedPaths)
+            quickSwitcherQuery, excluding: unlistedPaths, recent: recent)
+        let isEmptyQuery = quickSwitcherQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        quickSwitcherRecentCount = isEmptyQuery
+            ? quickSwitcherResults.prefix(recent.count).count { recent.contains($0.path) }
+            : 0
+    }
+
+    private func noteRecent(_ path: String) {
+        recentPages.removeAll { $0 == path }
+        recentPages.insert(path, at: 0)
+        if recentPages.count > Self.recentPagesLimit {
+            recentPages.removeLast(recentPages.count - Self.recentPagesLimit)
+        }
+        CCwikiSettings.recentPages = recentPages
     }
 
     func presentQuickSwitcher() {
@@ -1186,10 +1399,16 @@ final class AppModel {
             let version = appVersion
 
             if UpdateChecker.isDevelopmentVersion(version) {
-                alert.messageText = "This is a development build."
-                alert.informativeText = "Version \(version) was not made by make dist, so there "
-                    + "is no release to compare it against."
-                alert.runModal()
+                alert.messageText = "This is a local build."
+                alert.informativeText = "Version \(version) was built from source rather than "
+                    + "downloaded as a release, so CCwiki does not replace it. The latest "
+                    + "release is always on the releases page."
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Open Releases Page")
+                if alert.runModal() == .alertSecondButtonReturn,
+                   let url = URL(string: UpdateChecker.releasesPage) {
+                    NSWorkspace.shared.open(url)
+                }
                 return
             }
 
@@ -1247,7 +1466,9 @@ final class AppModel {
                             NSWorkspace.shared.open(release.url)
                         }
                     } else {
-                        offerRelaunch(for: release)
+                        // The button said "and Relaunch": no second question.
+                        // `relaunchToUpdate` still asks about running jobs.
+                        relaunchToUpdate()
                     }
                 } else if (installable && choice == .alertSecondButtonReturn)
                     || (!installable && choice == .alertFirstButtonReturn) {

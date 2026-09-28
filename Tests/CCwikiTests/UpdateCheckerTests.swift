@@ -25,7 +25,9 @@ struct UpdateCheckerTests {
     func development() {
         #expect(UpdateChecker.isDevelopmentVersion("0.0.0"))
         #expect(UpdateChecker.isDevelopmentVersion("0.0"))
+        #expect(UpdateChecker.isDevelopmentVersion("0.1.1-dev"))
         #expect(!UpdateChecker.isDevelopmentVersion("0.1.0"))
+        #expect(!UpdateChecker.isDevelopmentVersion("0.2.0-rc1"))
     }
 
     @Test("the release payload yields a version and a page")

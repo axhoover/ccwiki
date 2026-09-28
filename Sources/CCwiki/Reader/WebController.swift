@@ -24,6 +24,11 @@ final class WebController: NSObject {
 
     /// Set by the owner to act on a link click.
     var onNavigate: ((CCwikiURL.Destination, _ modified: Bool) -> Void)?
+    /// The page's own address on the site, for the page context menu.
+    var siteURLProvider: (() -> URL?)?
+    /// The TeX source of the formula under the last right-click, if any.
+    @ObservationIgnored fileprivate var contextTeX: String?
+
     /// Called when the shell has (re)loaded and there is nothing queued: the
     /// owner should render whatever it is showing again. That is how the
     /// reader comes back from a WebContent crash or a stray Reload.
@@ -32,6 +37,8 @@ final class WebController: NSObject {
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private var pendingRequest: RenderRequest?
     @ObservationIgnored private var loadedPath: String?
+    /// Searched for once the next render reports back.
+    @ObservationIgnored private var pendingFind: [String]?
 
     init(paths: AppPaths, webRoot: URL? = nil) {
         let configuration = WKWebViewConfiguration()
@@ -49,8 +56,10 @@ final class WebController: NSObject {
         let controller = WKUserContentController()
         configuration.userContentController = controller
 
-        webView = ReaderWebView(frame: .zero, configuration: configuration)
+        let readerView = ReaderWebView(frame: .zero, configuration: configuration)
+        webView = readerView
         super.init()
+        readerView.controller = self
 
         controller.add(Bridge(controller: self), name: "ccwiki")
         webView.navigationDelegate = self
@@ -67,6 +76,22 @@ final class WebController: NSObject {
     }
 
     // MARK: Rendering
+
+    /// Render, then find `needle` on the result: how a search result lands
+    /// on its match instead of the top of the page. If the page is already
+    /// showing, only the find runs.
+    func render(_ request: RenderRequest, thenFind needle: [String]?) {
+        guard let needle, !needle.isEmpty else {
+            render(request)
+            return
+        }
+        if isReady, request.path == loadedPath, request.anchor == nil {
+            Task { _ = await findFirst(of: needle) }
+            return
+        }
+        pendingFind = needle
+        render(request)
+    }
 
     func render(_ request: RenderRequest) {
         guard isReady else {
@@ -87,6 +112,32 @@ final class WebController: NSObject {
 
     /// Force a re-render of the current page (after a pull changed it).
     func invalidate() { loadedPath = nil }
+
+    // MARK: Printing
+
+    /// The standard print panel, whose PDF menu is also Save as PDF. The
+    /// page prints on white whatever the appearance: `app.css` has print
+    /// rules for that.
+    func printPage(title: String) {
+        guard let window = webView.window else { return }
+        let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isHorizontallyCentered = true
+        info.isVerticallyCentered = false
+        for edge in [\NSPrintInfo.topMargin, \.bottomMargin, \.leftMargin, \.rightMargin] {
+            info[keyPath: edge] = 42
+        }
+
+        let operation = webView.printOperation(with: info)
+        operation.jobTitle = title
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        // Without a frame, WebKit's print view is zero-sized and every page
+        // comes out blank.
+        operation.view?.frame = webView.bounds
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
 
     // MARK: Text size
 
@@ -119,6 +170,15 @@ final class WebController: NSObject {
         guard let result = try? await webView.find(needle, configuration: configuration)
         else { return false }
         return result.matchFound
+    }
+
+    /// The first of `candidates` that occurs on the page, found and shown
+    /// with the system's find highlight.
+    func findFirst(of candidates: [String]) async -> Bool {
+        for candidate in candidates where await find(candidate, backwards: false) {
+            return true
+        }
+        return false
     }
 
     // MARK: Bridge
@@ -167,6 +227,10 @@ final class WebController: NSObject {
             if message["ok"] as? Bool == false {
                 lastRenderError = message["error"] as? String ?? "render failed"
             }
+            if let needle = pendingFind {
+                pendingFind = nil
+                Task { _ = await findFirst(of: needle) }
+            }
             if let errors = message["pseudocodeErrors"] as? Int, errors > 0 {
                 lastRenderError = "\(errors) pseudocode block(s) failed to render."
             }
@@ -181,6 +245,9 @@ final class WebController: NSObject {
                   let destination = CCwikiURL.destination(of: href)
             else { return }
             onNavigate?(destination, message["modified"] as? Bool ?? false)
+
+        case "contextTarget":
+            contextTeX = message["tex"] as? String
 
         case "openExternal":
             guard let string = message["url"] as? String,
@@ -282,10 +349,27 @@ final class ReaderWebView: WKWebView {
         "WKMenuItemIdentifierDownloadImage",
     ]
 
+    weak var controller: WebController?
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         menu.items.removeAll { item in
             item.identifier.map { Self.removedIdentifiers.contains($0.rawValue) } ?? false
+        }
+
+        // Copy TeX first, when the click was on a formula: the one thing
+        // the default menu cannot offer, since the page shows only glyphs.
+        if let tex = controller?.contextTeX, !tex.isEmpty {
+            menu.insertItem(.separator(), at: 0)
+            menu.insertItem(ClosureMenuItem("Copy TeX") { Self.copy(tex) }, at: 0)
+        }
+        // The page itself, wherever the click was.
+        if let url = controller?.siteURLProvider?() {
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem("Open Page on cryptology.city") {
+                NSWorkspace.shared.open(url)
+            })
+            menu.addItem(ClosureMenuItem("Copy Link to Page") { Self.copy(url.absoluteString) })
         }
         // No leading, trailing or doubled separators once the items are gone.
         var cleaned: [NSMenuItem] = []
@@ -296,6 +380,34 @@ final class ReaderWebView: WKWebView {
         if cleaned.last?.isSeparatorItem == true { cleaned.removeLast() }
         menu.items = cleaned
     }
+
+    override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {
+        super.didCloseMenu(menu, with: event)
+        controller?.contextTeX = nil
+    }
+
+    private static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// A menu item that runs a closure, for menus built in code. Menus are
+/// main-thread objects, so the item and its action are main-actor isolated.
+@MainActor
+final class ClosureMenuItem: NSMenuItem {
+    private let handler: @MainActor () -> Void
+
+    init(_ title: String, handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func fire() { handler() }
 }
 
 // MARK: - SwiftUI

@@ -84,7 +84,15 @@ struct QuickSwitcherView: View {
                 // A plain VStack, not lazy: the list is capped at 40 rows, and
                 // laziness only buys a caching layer to get wrong.
                 VStack(spacing: 0) {
+                    // Keyed by page, never by position (PROBLEMS.md: rows
+                    // keyed by index kept showing the previous query). The
+                    // headers are placed by comparing ids for the same reason.
                     ForEach(results) { item in
+                        if item.id == recentHeaderID {
+                            sectionHeader("Recent")
+                        } else if item.id == allPagesHeaderID {
+                            sectionHeader("All Pages")
+                        }
                         row(item, isHighlighted: item.id == currentHighlight)
                             .id(item.id)
                             .contentShape(.rect)
@@ -140,6 +148,29 @@ struct QuickSwitcherView: View {
                     .padding(.horizontal, Theme.small)
             }
         }
+    }
+
+    /// The first recent page, when there are recents to head.
+    private var recentHeaderID: String? {
+        model.quickSwitcherRecentCount > 0 ? results.first?.id : nil
+    }
+
+    /// The first page after the recents.
+    private var allPagesHeaderID: String? {
+        let count = model.quickSwitcherRecentCount
+        guard count > 0, count < results.count else { return nil }
+        return results[count].id
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(Theme.Fonts.sectionHeader)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.large)
+            .padding(.top, Theme.small)
+            .padding(.bottom, Theme.tight)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private var footer: some View {

@@ -48,6 +48,24 @@ struct SyncOutcomeTests {
         }
     }
 
+    @Test("a pull is summarized by the wiki pages it changed")
+    func updateSummary() {
+        let diff = """
+            content/Primitives/prf.md
+            content/Files/logo.png
+            quartz.config.ts
+            content/References/AGGM06 - On basing one-way functions on NP-hardness.md
+
+            """
+        #expect(GitService.pagePaths(fromDiff: diff) == [
+            "Primitives/prf.md",
+            "References/AGGM06 - On basing one-way functions on NP-hardness.md",
+        ])
+        #expect(GitService.updateSummary(changedPages: 0) == "Wiki updated.")
+        #expect(GitService.updateSummary(changedPages: 1) == "Wiki updated: 1 page changed.")
+        #expect(GitService.updateSummary(changedPages: 4) == "Wiki updated: 4 pages changed.")
+    }
+
     @Test("only offline reports itself as offline")
     func offlineState() {
         #expect(AppModel.SyncState.failed("Offline — reading from the last pull.").isOffline)
@@ -81,6 +99,21 @@ struct SiteURLTests {
             == "https://cryptology.city/Primitives/")
         #expect(AppModel.siteURL(slug: "Assumptions/learning-with-errors", anchor: "syntax")?
             .absoluteString == "https://cryptology.city/Assumptions/learning-with-errors#syntax")
+    }
+}
+
+/// Opening a search hit finds the query on the page: the phrase first, then
+/// its words, longest first, since full-text search matches words anywhere.
+struct FindCandidateTests {
+
+    @Test("phrase first, then distinct words of three letters or more, longest first")
+    func candidates() {
+        #expect(AppModel.findCandidates(for: "  oblivious transfer ")
+            == ["oblivious transfer", "oblivious", "transfer"])
+        #expect(AppModel.findCandidates(for: "LWE") == ["LWE"])
+        #expect(AppModel.findCandidates(for: "a PRF, of LWE") == ["a PRF, of LWE", "PRF", "LWE"])
+        #expect(AppModel.findCandidates(for: "prf PRF") == ["prf PRF", "prf"])
+        #expect(AppModel.findCandidates(for: "   ").isEmpty)
     }
 }
 

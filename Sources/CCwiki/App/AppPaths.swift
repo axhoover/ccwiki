@@ -65,6 +65,22 @@ struct AppPaths: Sendable {
                 .appending(path: "Resources/web")
     }
 
+    /// A markdown document shipped in the bundle: `welcome.md`,
+    /// `CHANGELOG.md`. Outside an .app (tests, `swift run`) it is read from
+    /// the source tree, where `CHANGELOG.md` sits at the root and the rest
+    /// under `Resources/`.
+    func bundledDocument(_ name: String) -> String? {
+        if let url = Bundle.main.resourceURL?.appending(path: name),
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            return text
+        }
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        for candidate in [cwd.appending(path: name), cwd.appending(path: "Resources/\(name)")] {
+            if let text = try? String(contentsOf: candidate, encoding: .utf8) { return text }
+        }
+        return nil
+    }
+
     /// A copy of `webRoot` in Caches, one directory per build number.
     ///
     /// The updater replaces the bundle while the app runs; the process keeps

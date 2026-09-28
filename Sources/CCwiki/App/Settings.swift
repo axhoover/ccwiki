@@ -18,6 +18,38 @@ struct CCwikiSettings: Sendable {
     private static let installsUpdatesAutomaticallyKey = "ccwiki.installsUpdatesAutomatically"
     private static let showsMaintenanceNoticesKey = "ccwiki.showsMaintenanceNotices"
     private static let lastPageKey = "ccwiki.lastPage"
+    private static let recentPagesKey = "ccwiki.recentPages"
+    private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
+    private static let showsInspectorKey = "ccwiki.showsInspector"
+    private static let inspectorTabKey = "ccwiki.inspectorTab"
+
+    /// The inspector as it was left: showing or not, and on which tab.
+    static var showsInspector: Bool {
+        get {
+            UserDefaults.standard.object(forKey: showsInspectorKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: showsInspectorKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: showsInspectorKey) }
+    }
+
+    static var inspectorTab: String? {
+        get { UserDefaults.standard.string(forKey: inspectorTabKey) }
+        set { UserDefaults.standard.set(newValue, forKey: inspectorTabKey) }
+    }
+
+    /// The app version that last launched. Absent on a first launch, which
+    /// is when the Welcome page opens; older than the running version after
+    /// an update, which is when What's New opens.
+    static var lastSeenVersion: String? {
+        get { UserDefaults.standard.string(forKey: lastSeenVersionKey) }
+        set { UserDefaults.standard.set(newValue, forKey: lastSeenVersionKey) }
+    }
+
+    /// Pages opened most recently, newest first, by `content/`-relative path.
+    static var recentPages: [String] {
+        get { UserDefaults.standard.stringArray(forKey: recentPagesKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: recentPagesKey) }
+    }
 
     /// The "N links on this page have no target" banner. A signal for
     /// someone editing the wiki, noise for someone reading it; off by default.

@@ -43,10 +43,16 @@ struct Frontmatter: Equatable, Sendable {
         return s
     }
 
+    /// A list field. A plain value is split on commas, as Quartz's
+    /// `coerceToArray` does for `aliases` and `tags`: `aliases: PRF, PRP` is
+    /// two aliases on the site, so it is two here.
     func list(_ key: String) -> [String] {
         switch fields[key] {
         case .list(let items): items
-        case .string(let s): [s]
+        case .string(let s):
+            s.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
         default: []
         }
     }
@@ -112,7 +118,7 @@ struct Frontmatter: Equatable, Sendable {
             } else if rest.hasPrefix("["), rest.hasSuffix("]") {
                 fm.fields[key] = .list(Self.flowSequence(rest))
             } else {
-                fm.fields[key] = .string(Self.unquote(rest))
+                fm.fields[key] = .string(Self.unquote(Self.quotedValue(rest) ?? rest))
             }
             i += 1
         }
@@ -210,6 +216,39 @@ struct Frontmatter: Equatable, Sendable {
     /// Strips quotes only when the value both starts and ends with the same
     /// quote character. Never strips a trailing `# comment`: doing so would
     /// mangle `title: "#P"` and every `source:` URL with a fragment.
+    /// `"Foo" # note` → `"Foo"`: a quoted scalar followed only by a comment.
+    ///
+    /// A trailing `# comment` is otherwise left alone on purpose (see
+    /// `unquote`): `#P` and URL fragments are real values. After a closing
+    /// quote there is no such ambiguity, so the comment can go. Returns nil
+    /// when `s` is not a quoted scalar with only a comment after it.
+    static func quotedValue(_ s: String) -> String? {
+        guard let quote = s.first, quote == "\"" || quote == "'" else { return nil }
+        var index = s.index(after: s.startIndex)
+        while index < s.endIndex {
+            let c = s[index]
+            if quote == "\"", c == "\\" {
+                // Skip the escaped character.
+                index = s.index(after: index)
+                if index < s.endIndex { index = s.index(after: index) }
+                continue
+            }
+            if c == quote {
+                let next = s.index(after: index)
+                // `''` inside single quotes is an escaped quote.
+                if quote == "'", next < s.endIndex, s[next] == "'" {
+                    index = s.index(after: next)
+                    continue
+                }
+                let tail = s[next...].trimmingCharacters(in: .whitespaces)
+                guard tail.isEmpty || tail.hasPrefix("#") else { return nil }
+                return String(s[...index])
+            }
+            index = s.index(after: index)
+        }
+        return nil
+    }
+
     static func unquote(_ s: String) -> String {
         guard s.count >= 2, let first = s.first, let last = s.last,
               first == last, first == "\"" || first == "'"

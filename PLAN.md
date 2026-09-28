@@ -88,6 +88,10 @@ redesign, not a refactor.
   each package, the `ccwiki://` scheme handler, and the CSP.
 - [plans/search.md](plans/search.md) — the FTS5 schema, tokenizer choices,
   query escaping, and the ranking backlog.
+- [plans/search-v2.md](plans/search-v2.md) — **a proposal, not built**: a
+  relevance test set first, then options from ranking tweaks to typo
+  tolerance, one search box, and search by meaning, with a recommendation
+  and the decisions it needs from the maintainer.
 - [plans/relations.md](plans/relations.md) — how `relations.json` is consumed:
   the hyperedge rule, the class partial order and which way it points, variants,
   and how every "we do not know" value is displayed honestly.

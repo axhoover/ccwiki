@@ -32,11 +32,17 @@ ENTITLEMENTS  := CCwiki/CCwiki.entitlements
 # ---------------------------------------------------------------------------
 # Version is resolved in this order:
 #   1. VERSION=... on the command line (one-off testing, no tag needed).
-#   2. An exact `vX.Y.Z` git tag at HEAD (the canonical `make dist` path).
-#   3. The VERSION file at the repo root (preview the pipeline pre-tag).
-GIT_TAG_VERSION := $(shell git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
-FILE_VERSION    := $(shell test -f VERSION && sed -n '1p' VERSION | tr -d '[:space:]')
-VERSION         ?= $(or $(GIT_TAG_VERSION),$(FILE_VERSION))
+#   2. An exact `vX.Y.Z` git tag at HEAD: a release. `make package` and
+#      `make dist` insist on this.
+#   3. Anything else is a local build and says so: the most recent tag (or
+#      the VERSION file, without one) plus `-dev`. A local build used to
+#      carry the bare VERSION, and so looked exactly like a release: one
+#      was mistaken for 0.1.0 while the real 0.1.0 sat unopened.
+GIT_TAG_VERSION  := $(shell git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
+LAST_TAG_VERSION := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
+FILE_VERSION     := $(shell test -f VERSION && sed -n '1p' VERSION | tr -d '[:space:]')
+DEV_VERSION      := $(or $(LAST_TAG_VERSION),$(FILE_VERSION))-dev
+VERSION          ?= $(or $(GIT_TAG_VERSION),$(DEV_VERSION))
 
 DIST_DIR      := dist
 NOTARY_ZIP    := $(DIST_DIR)/$(APP_NAME)-$(VERSION)-notary.zip
@@ -64,6 +70,9 @@ RELEASE_KEY_FILE   ?= $(if $(CCWIKI_RELEASE_KEY),$(CCWIKI_RELEASE_KEY),$(HOME)/.
 RELEASE_KEY_SOURCE := Sources/CCwiki/App/ReleaseKey.swift
 PUBLIC_KEY         := $(shell sed -n 's/.*publicKeyBase64 = "\(.*\)".*/\1/p' $(RELEASE_KEY_SOURCE) 2>/dev/null)
 RELEASE_SIG        := $(RELEASE_ZIP).sig
+# The release's notes: its section of CHANGELOG.md, which is also what the
+# app shows as What's New. One text, written once, for people.
+RELEASE_NOTES      := $(DIST_DIR)/RELEASE_NOTES.md
 
 PROVISION_PROFILE ?=
 NOTES_FILE       ?=
@@ -71,7 +80,7 @@ NOTES_FILE       ?=
 .PHONY: all deps build check build-only test test-corpus release run clean install uninstall register help \
         icon check-version notary-setup sign zip-notary notarize staple zip-release \
         checksum verify-release dist github-release print-version \
-        release-keys package zip-package sign-package verify-package
+        release-keys package zip-package sign-package verify-package release-notes
 
 all: build
 
@@ -184,6 +193,7 @@ test-corpus: deps
 print-version:
 	@echo "VERSION=$(VERSION)"
 	@echo "  git tag at HEAD: $(if $(GIT_TAG_VERSION),$(GIT_TAG_VERSION),(none))"
+	@echo "  latest tag:      $(if $(LAST_TAG_VERSION),$(LAST_TAG_VERSION),(none))"
 	@echo "  VERSION file:    $(if $(FILE_VERSION),$(FILE_VERSION),(missing))"
 
 # ---------------------------------------------------------------------------
@@ -233,6 +243,7 @@ clean:
 # The steps run as sub-makes, in this order, so `make -j` cannot reorder
 # them: several have no file prerequisites of their own.
 dist: check-version clean
+	$(MAKE) release-notes
 	$(MAKE) release
 	$(MAKE) sign
 	$(MAKE) zip-notary
@@ -271,6 +282,7 @@ release-keys:
 	echo "✓ embedded the public key in $(RELEASE_KEY_SOURCE) — commit it"
 
 package: check-version clean
+	$(MAKE) release-notes
 	$(MAKE) release
 	$(MAKE) zip-package
 	$(MAKE) checksum
@@ -278,6 +290,17 @@ package: check-version clean
 	$(MAKE) verify-package
 	@echo "✓ package ready: $(RELEASE_ZIP), .sha256, .sig"
 	@echo "  next: make github-release"
+
+release-notes:
+	@mkdir -p "$(DIST_DIR)"
+	@awk -v v="$(VERSION)" ' \
+	  /^## / { if (found) exit; ver = $$2; sub(/^v/, "", ver); if (ver == v) { found = 1; next } } \
+	  found { print } \
+	  END { exit found ? 0 : 1 }' CHANGELOG.md > "$(RELEASE_NOTES)" || { \
+	  echo "✗ CHANGELOG.md has no '## $(VERSION)' section. Write the release's notes there"; \
+	  echo "  first: they become both the GitHub release notes and the app's What's New."; \
+	  rm -f "$(RELEASE_NOTES)"; exit 1; }
+	@echo "✓ wrote $(RELEASE_NOTES) from CHANGELOG.md"
 
 zip-package:
 	@mkdir -p "$(DIST_DIR)"
@@ -389,7 +412,7 @@ github-release:
 	  "$(RELEASE_ZIP).sha256" \
 	  "$(RELEASE_SIG)" \
 	  --title "$(APP_NAME) $(VERSION)" \
-	  $(if $(NOTES_FILE),--notes-file "$(NOTES_FILE)",--generate-notes)
+	  $(if $(NOTES_FILE),--notes-file "$(NOTES_FILE)",$(if $(wildcard $(RELEASE_NOTES)),--notes-file "$(RELEASE_NOTES)",--generate-notes))
 	@echo "✓ published v$(VERSION)"
 
 # ---------------------------------------------------------------------------

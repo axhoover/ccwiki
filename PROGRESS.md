@@ -5,6 +5,79 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-09-27 — Welcome, What's New, and a round of quality of life
+
+No release today, by choice: everything below accumulates in `CHANGELOG.md`
+under 0.1.2 and ships together.
+
+**`CHANGELOG.md` is now the one place release notes are written.** It is
+written for readers, bundled into the app, and read three ways: the What's
+New page after an update (only the releases since the version last run),
+the full history from the Help menu, and each GitHub release's notes, cut
+per version by `make release-notes` instead of GitHub's auto-generated list
+of PR titles. `make package` refuses a version with no section, and a test
+keeps the file well formed and newest first.
+
+**The Welcome page opens before the library loads**, so a first-time reader
+has something to read while the wiki downloads; its wikilinks resolve when
+the wiki lands. Both pages are a new reader location, `.document`, rendered
+through a synthetic `WikiPage` so they get the reader's typography, math and
+link resolution for free. The Help menu's default item opened a help book
+that does not exist; it now holds Welcome, What's New, Report an Issue.
+
+**Then the small things**, each through CI: ⌘P prints on white or saves a
+PDF (`@media print` last in `app.css`, so it outranks the dark tokens; the
+print view needs an explicit frame or every page is blank); Back and Forward
+restore the scroll position, kept in the page's own JavaScript for as long
+as the document lives; opening a ⌘S hit runs the system find for the query
+once the page reports it rendered; the inspector remembers itself, with
+⌥⌘1–3; Random Page and Copy Wikilink; "N pages changed" after a pull; a
+VoiceOver action on folder rows.
+
+**Two parsing fixes toward parity with the site:** headings as markdown-it
+reads them (indent, tabs, closing `#`s), and plain `aliases` split on commas
+as Quartz's `coerceToArray` does. The audit also listed `key: [[x]]` parsing
+as a flow list; that is what YAML says, so it stays.
+
+**Bigger work now has a home**: its own branch, cut from this one. The
+candidates are in [plans/roadmap.md](plans/roadmap.md), led by a search
+proposal, [plans/search-v2.md](plans/search-v2.md), which lays out options
+rather than choosing, because the choice is the maintainer's.
+
+## 2026-09-27 — The first update arrived by the updater; what went into the next one
+
+**v0.1.1 installed itself.** The maintainer downloaded v0.1.0, ran Check for
+Updates…, and the app downloaded 0.1.1, verified its signature, replaced
+itself and relaunched. The one hitch was not the updater's: the copy they
+first opened was an old `make install` build, which also called itself
+0.1.0 because the `VERSION` file said so, and had no updater in it at all.
+
+**So local builds now say they are local.** Anything not built from an exact
+`vX.Y.Z` tag is stamped with the latest tag plus `-dev`, and About shows the
+build number under the version. A `-dev` build never checks on its own and
+is never replaced. The rule: *a build that is not a release must not be able
+to look like one.*
+
+**Then the reader and the jobs window**, in three batches, each through CI:
+
+- **⌘O remembers.** With nothing typed, the twelve most recent pages come
+  first under a Recent heading, the one on screen left out, so ⌘O then
+  Return goes back. First draft keyed the rows by index to place the
+  headings — the exact stale-rows bug in `PROBLEMS.md` — and was rewritten
+  to key by page and place the headings by id before it was pushed.
+- **Copy TeX** on a right-clicked formula, and Open Page on cryptology.city
+  and Copy Link to Page on every page's menu. See
+  [plans/render-pipeline.md](plans/render-pipeline.md) §3 for why the
+  formula under the pointer is known in time.
+- **Settings opens on Reading**; Tools became Ingestion and says reading
+  needs none of it. Install and Relaunch no longer asks twice.
+- **The transcript left the main actor**: file writes on a serial queue,
+  view updates batched to one per 100 ms and never later than that. Large
+  wiki assets are read off the main thread, with WebKit's `stop` honoured;
+  barrier pages stopped sweeping every barrier for every reduction.
+
+None of the UI has been looked at yet; the release is the visual gate now.
+
 ## 2026-09-27 — v0.1.0 shipped; ⌘S searches the wiki
 
 **v0.1.0 is the first release**, published by `release.yml` from the merged

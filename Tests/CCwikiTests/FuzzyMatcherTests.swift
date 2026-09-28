@@ -79,6 +79,25 @@ struct QuickSwitcherRankingTests {
                 "got \(byTitle.prefix(3).map(\.title))")
     }
 
+    @Test("an empty query puts recent pages first, then everything by title")
+    func recentFirst() throws {
+        let (index, root) = try WikilinkResolutionTests.makeIndex()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = index.pages.keys.sorted()
+        let recent = [paths[2], "Nowhere/missing.md", paths[0], paths[2]]
+        let results = index.quickSwitch("", recent: recent)
+        #expect(results.prefix(2).map(\.path) == [paths[2], paths[0]],
+                "recents in order, deduplicated, missing pages dropped")
+        #expect(Set(results.map(\.path)).count == results.count, "no page twice")
+        let rest = results.dropFirst(2).map(\.title)
+        #expect(rest == rest.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
+
+        // A query ignores recency entirely.
+        let typed = index.quickSwitch("prf", recent: recent)
+        #expect(typed.map(\.path) == index.quickSwitch("prf").map(\.path))
+    }
+
     @Test("an empty query lists everything by title")
     func emptyQuery() throws {
         let (index, root) = try WikilinkResolutionTests.makeIndex()

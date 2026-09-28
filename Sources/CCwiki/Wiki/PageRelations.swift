@@ -168,9 +168,7 @@ struct PageRelations: Sendable {
         // The reductions this barrier actually rules out. Usually none: a
         // barrier and a reduction on the same edge normally differ in class, or
         // one of them is `unstated`, which is comparable to nothing.
-        let ruled = manifest.reductions.filter {
-            manifest.barriers(contradicting: $0).contains(where: { $0.id == barrier.id })
-        }
+        let ruled = manifest.reductions(contradictedBy: barrier)
         if !ruled.isEmpty {
             result.append(RelationGroup(
                 id: "\(barrier.id)/contradicts",

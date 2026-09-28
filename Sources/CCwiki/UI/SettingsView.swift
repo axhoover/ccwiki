@@ -12,13 +12,15 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        // Reader first: most people who open this never run an ingestion
+        // job, and the window used to open on a list of command-line tools.
         TabView {
-            toolsTab
-                .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
             readingTab
                 .tabItem { Label("Reading", systemImage: "book") }
             storageTab
                 .tabItem { Label("Storage", systemImage: "internaldrive") }
+            toolsTab
+                .tabItem { Label("Ingestion", systemImage: "doc.badge.plus") }
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -36,7 +38,7 @@ struct SettingsView: View {
             } header: {
                 Text("Command-line tools")
             } footer: {
-                Text("A Finder-launched app inherits a minimal PATH, so CCwiki also "
+                Text("Only ingestion jobs need these; reading needs none of them. CCwiki "
                     + "searches Homebrew's directories and ~/.local/bin, then asks a login "
                     + "shell. Override one only if it lives somewhere unusual.")
                 .font(Theme.Fonts.meta)
@@ -298,7 +300,18 @@ struct SettingsView: View {
     private var aboutTab: some View {
         Form {
             Section("CCwiki") {
-                LabeledContent("Version", value: Bundle.main.shortVersion)
+                LabeledContent("Version") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(Bundle.main.shortVersion)
+                            .textSelection(.enabled)
+                        Text(UpdateChecker.isDevelopmentVersion(Bundle.main.shortVersion)
+                            ? "Local build \(Bundle.main.buildNumber) — not a release"
+                            : "Build \(Bundle.main.buildNumber)")
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
                 LabeledContent("Wiki", value: "axhoover/cryptology.city")
             }
             Section {
@@ -399,6 +412,12 @@ extension SettingsView {
 }
 
 extension Bundle {
+    /// `CFBundleVersion`: `build.sh` stamps the build time, `yyyyMMddHHmm`,
+    /// which is what tells two builds of one version apart.
+    var buildNumber: String {
+        (object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "?"
+    }
+
     var shortVersion: String {
         (object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
     }

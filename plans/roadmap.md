@@ -5,6 +5,22 @@ mean re-deciding it. Nothing here is started.
 
 Ordered by how much they change the app's shape, not by priority.
 
+> **2026-09-27. Bigger work goes on its own branch**, cut from the
+> quality-of-life branch, so small fixes keep shipping while it is under
+> way. The candidates, each large enough to want that:
+>
+> - **Search, the next version** — a proposal with options and decisions
+>   for the maintainer: [search-v2.md](search-v2.md).
+> - **Link previews** — hover a wikilink to see the target's title and
+>   first paragraph in a popover, without leaving the page. Deliberately
+>   omitted in M1 ([render-pipeline.md](render-pipeline.md) §3); worth
+>   revisiting now that relations and backlinks send readers across many
+>   pages.
+> - **Correcting a page** (§3 below) — the feature that turns a reader into
+>   a contributor.
+> - **Incremental indexing** — reindex only the pages a pull changed
+>   ([audit-2026-09.md](audit-2026-09.md) §3.5).
+>
 > **2026-09-26.** The fixes that come *before* any of this, and the plan for
 > shipping a download, are in [audit-2026-09.md](audit-2026-09.md) §6 and
 > [distribution.md](distribution.md). Several "smaller things" below (job

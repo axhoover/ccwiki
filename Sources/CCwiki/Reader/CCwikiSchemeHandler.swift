@@ -76,20 +76,64 @@ final class CCwikiSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendab
         // normalized first: a URL built from a directory carries a trailing
         // slash, and comparing against `root + "/"` would then test for a
         // double slash and reject every legitimate file.
-        guard Self.isContained(file, in: root), let data = try? Data(contentsOf: file) else {
+        guard Self.isContained(file, in: root) else {
             respond(task, url: url, status: 404, mime: "text/plain",
                     data: Data("not found: \(relative)".utf8))
             return
         }
+        let mime = Self.mimeType(for: file.pathExtension)
 
-        respond(task, url: url, status: 200,
-                mime: Self.mimeType(for: file.pathExtension), data: data)
+        // The shell, the scripts and the fonts are small and are read here,
+        // as they always were. A large file — a figure in the wiki — is read
+        // off the main thread, which WebKit calls this on, and answered back
+        // on it, unless WebKit stopped the task in the meantime.
+        let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size > Self.asyncReadThreshold else {
+            guard let data = try? Data(contentsOf: file) else {
+                respond(task, url: url, status: 404, mime: "text/plain",
+                        data: Data("not found: \(relative)".utf8))
+                return
+            }
+            respond(task, url: url, status: 200, mime: mime, data: data)
+            return
+        }
+
+        let key = ObjectIdentifier(task)
+        inFlight.insert(key)
+        let box = TaskBox(task: task)
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let data = try? Data(contentsOf: file)
+            DispatchQueue.main.async { [self] in
+                // `stop` removed the key: the task is dead, and calling back
+                // into it raises an Objective-C exception.
+                guard inFlight.remove(key) != nil else { return }
+                if let data {
+                    respond(box.task, url: url, status: 200, mime: mime, data: data)
+                } else {
+                    respond(box.task, url: url, status: 404, mime: "text/plain",
+                            data: Data("not found: \(relative)".utf8))
+                }
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
-        // Every response above is synchronous, so there is nothing in flight
-        // to cancel. (Calling back into a stopped task raises an ObjC
-        // exception, which is why this must stay true.)
+        // Only the asynchronous reads can still be in flight. Forgetting the
+        // task is what keeps them from answering it.
+        inFlight.remove(ObjectIdentifier(task))
+    }
+
+    /// Files above this are read off the main thread.
+    static let asyncReadThreshold = 256 * 1024
+
+    /// Tasks with a read in flight. Touched only on the main thread: in
+    /// `start`, in `stop`, and in the main-queue half of the read.
+    private var inFlight: Set<ObjectIdentifier> = []
+
+    /// A task crossing to a background queue and back. It is only ever used
+    /// on the main thread; the box exists to say so to the compiler.
+    private struct TaskBox: @unchecked Sendable {
+        let task: any WKURLSchemeTask
     }
 
     private func respond(

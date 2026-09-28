@@ -369,6 +369,28 @@ struct RelationsManifest: Sendable {
         }
     }
 
+    /// Does `barrier` rule out `relation`? The same rule as
+    /// `barriers(contradicting:)`, for one pair, without sweeping every
+    /// barrier in the manifest to answer it.
+    func barrier(_ barrier: Barrier, contradicts relation: Relation) -> Bool {
+        barrier.conclusion == relation.conclusion
+            && Set(barrier.hypotheses) == Set(relation.hypotheses)
+            && reductionClass(relation.reductionClass, implies: barrier.reductionClass)
+    }
+
+    /// The reductions `barrier` rules out. One pass over the reductions with
+    /// the barrier's edge built once; it used to be a sweep of every barrier
+    /// for every reduction, rebuilt in a view body.
+    func reductions(contradictedBy barrier: Barrier) -> [Relation] {
+        let edge = Set(barrier.hypotheses)
+        return reductions.filter { relation in
+            relation.conclusion == barrier.conclusion
+                && relation.hypotheses.count == edge.count
+                && Set(relation.hypotheses) == edge
+                && reductionClass(relation.reductionClass, implies: barrier.reductionClass)
+        }
+    }
+
     /// Every barrier sharing a hyperedge with this reduction, whether or not it
     /// bites. Shown as context on a reduction page — a barrier against a
     /// stricter notion is worth seeing even when it does not apply.
