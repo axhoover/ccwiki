@@ -24,7 +24,7 @@ import Foundation
 /// directly, degrading to empty plus a diagnostic rather than throwing.
 ///
 /// **The one structural rule.** A reduction is a *hyperedge*: a set of
-/// hypotheses, conjoined, implying one conclusion. 42 of the 343 have more than
+/// hypotheses, conjoined, implying one conclusion. 29 of the 283 have more than
 /// one hypothesis. Nothing in this type will hand you an object-to-object pair,
 /// because a pair cannot represent `{sparse-lpn, ddh} ⇒ she` without asserting
 /// two implications the wiki does not claim. Every query returns whole
@@ -52,8 +52,9 @@ struct RelationsManifest: Sendable {
     /// Why the manifest is empty, for the warnings menu. `nil` when it loaded.
     private(set) var diagnostic: Diagnostic?
     /// Non-fatal data problems, kept so they can be counted rather than
-    /// silently swallowed. One is known upstream today (a barrier consequence
-    /// naming a reduction slug where an id belongs).
+    /// silently swallowed. None is known upstream today; the one there was (a
+    /// barrier consequence naming a reduction slug where an id belongs) was
+    /// fixed in the wiki's final-form manifest.
     private(set) var anomalies: [String] = []
 
     // Derived indexes, all built once at load.
@@ -62,7 +63,11 @@ struct RelationsManifest: Sendable {
     private var barriersByEndpoint: [String: [Int]] = [:]
     private var objectIDsByPath: [String: [String]] = [:]
     private var relationIndexByPath: [String: Int] = [:]
+    private var relationIndexByID: [String: Int] = [:]
     private var barrierIndexByPath: [String: Int] = [:]
+    /// Reduction id → the barriers it circumvents. Built from each barrier's
+    /// `circumventedBy`, so a reduction page can name them too.
+    private var barriersByCircumventingReduction: [String: [Int]] = [:]
     /// class → every class it implies, transitively. Narrower → broader.
     private var classClosure: [String: Set<String>] = [:]
 
@@ -73,8 +78,14 @@ struct RelationsManifest: Sendable {
     /// Pages hidden from browse and navigation. `unlisted` nodes are real —
     /// they take part in relations and in the closure — they are only kept out
     /// of the sidebar, the folder listings and the quick switcher.
+    ///
+    /// Only an object can hide a page. A variant is a *section* of its host's
+    /// page and shares its `path`, so letting an unlisted variant count would
+    /// hide a listed host, and every other section on it, along with it. Two
+    /// variants are unlisted today, both on unlisted hosts, so the bug this
+    /// prevents is latent rather than visible.
     var unlistedPaths: Set<String> {
-        Set(objectsByID.values.filter { $0.unlisted }.map(\.path))
+        Set(objectsByID.values.filter { $0.unlisted && !$0.isVariant }.map(\.path))
     }
 
     enum Diagnostic: Equatable, Sendable {
@@ -200,6 +211,8 @@ struct RelationsManifest: Sendable {
                 source: raw.source,
                 via: raw.via,
                 securityLoss: raw.securityLoss,
+                heuristic: raw.heuristic,
+                rationale: raw.rationale,
                 status: PageStatus(rawValue: raw.status) ?? .draft,
                 path: Self.contentRelative(raw.page),
                 slug: raw.slug,
@@ -208,6 +221,7 @@ struct RelationsManifest: Sendable {
             let index = manifest.reductions.count
             manifest.reductions.append(relation)
             manifest.relationIndexByPath[relation.path] = index
+            manifest.relationIndexByID[relation.id] = index
             for hypothesis in relation.hypotheses {
                 manifest.relationsByHypothesis[hypothesis, default: []].append(index)
             }
@@ -224,7 +238,7 @@ struct RelationsManifest: Sendable {
                     continue
                 }
                 // Drop a consequence whose target does not resolve, keep the
-                // barrier. One of these exists upstream today.
+                // barrier. Upstream had one until its final-form manifest.
                 let target = rawConsequence.target
                 let resolves: Bool = switch kind {
                 case .contradiction: target.isEmpty
@@ -242,6 +256,19 @@ struct RelationsManifest: Sendable {
                     kind: kind, target: target, reductionClass: rawConsequence.reductionClass))
             }
 
+            // The same policy as a consequence: a circumventing reduction that
+            // does not resolve is dropped and counted, and the barrier kept.
+            var circumventedBy: [String] = []
+            for reductionID in raw.circumventedBy {
+                guard reductionIDs.contains(reductionID) else {
+                    manifest.anomalies.append(
+                        "barrier \(raw.id): circumventedBy names “\(reductionID)”, "
+                            + "which does not resolve")
+                    continue
+                }
+                circumventedBy.append(reductionID)
+            }
+
             let barrier = Barrier(
                 id: raw.id,
                 hypotheses: raw.hypotheses,
@@ -250,6 +277,8 @@ struct RelationsManifest: Sendable {
                 consequences: consequences,
                 strength: Barrier.Strength(rawValue: raw.strength) ?? .unconditional,
                 conditionalOn: raw.conditionalOn,
+                circumventedBy: circumventedBy,
+                rationale: raw.rationale,
                 source: raw.source,
                 status: PageStatus(rawValue: raw.status) ?? .draft,
                 path: Self.contentRelative(raw.page),
@@ -261,6 +290,10 @@ struct RelationsManifest: Sendable {
             manifest.barrierIndexByPath[barrier.path] = index
             for endpoint in Set(barrier.hypotheses + [barrier.conclusion]) {
                 manifest.barriersByEndpoint[endpoint, default: []].append(index)
+            }
+            for reductionID in Set(circumventedBy) {
+                manifest.barriersByCircumventingReduction[reductionID, default: []]
+                    .append(index)
             }
         }
 
@@ -316,7 +349,7 @@ struct RelationsManifest: Sendable {
     }
 
     /// A sentinel is not a class and is comparable to nothing, so the
-    /// contradiction rule never fires on it. 280 of 343 reductions are
+    /// contradiction rule never fires on it. 76 of 283 reductions are
     /// `unstated`, which is a deliberate, honest value.
     func isSentinel(_ name: String) -> Bool { classSentinels.contains(name) }
 
@@ -350,6 +383,29 @@ struct RelationsManifest: Sendable {
     /// The barrier a `content/Barriers/…` page *is*, if this is one.
     func barrier(onPage path: String) -> Barrier? {
         barrierIndexByPath[path].map { barriers[$0] }
+    }
+
+    func reduction(_ id: String) -> Relation? {
+        relationIndexByID[id].map { reductions[$0] }
+    }
+
+    /// Is this a containment between complexity classes, such as
+    /// `IP ⊆ PSPACE`, rather than a reduction between primitives?
+    ///
+    /// The wiki records those as class `free`, and its schema says that
+    /// neither the reduction-class axis nor the model axis applies to them, so
+    /// the site prints neither class nor standard model under one
+    /// (`relationMeta.ts`, `isComplexityContainment`). This is the same test:
+    /// not an implication, class `free`, and a complexity class concluded, or
+    /// an inclusion when the manifest cannot type the conclusion.
+    func isComplexityContainment(_ relation: Relation) -> Bool {
+        guard relation.kind != .implication, relation.reductionClass == "free" else {
+            return false
+        }
+        if let type = object(relation.conclusion)?.type, !type.isEmpty {
+            return type == "complexity-class"
+        }
+        return relation.kind == .inclusion
     }
 
     /// The barriers that actually rule out a given reduction.
@@ -399,6 +455,24 @@ struct RelationsManifest: Sendable {
         return barriers.filter {
             $0.conclusion == relation.conclusion && Set($0.hypotheses) == edge
         }
+    }
+
+    // MARK: Circumvention
+    //
+    // A barrier is not the last word on its conclusion: the manifest's
+    // contract says a consumer must check `circumventedBy` before reading it
+    // that way. A circumventing reduction need not share the barrier's
+    // hyperedge (BAR01's {crhf} ⇒ constant-round ZK argument gets around a
+    // barrier stated about {zkp}), so these are lookups by id, not by edge.
+
+    /// The reductions that get around `barrier`, in the manifest's order.
+    func reductions(circumventing barrier: Barrier) -> [Relation] {
+        barrier.circumventedBy.compactMap { reduction($0) }
+    }
+
+    /// The barriers `relation` gets around.
+    func barriers(circumventedBy relation: Relation) -> [Barrier] {
+        (barriersByCircumventingReduction[relation.id] ?? []).map { barriers[$0] }
     }
 }
 
@@ -453,6 +527,14 @@ struct Relation: Sendable, Identifiable, Hashable {
         /// across a "builds on" / "produces" pair, which would imply a
         /// direction the claim does not have.
         var isSymmetric: Bool { self == .equivalence }
+
+        var title: String {
+            switch self {
+            case .implication: "Implication"
+            case .inclusion: "Inclusion"
+            case .equivalence: "Equivalence"
+            }
+        }
     }
 
     let id: String
@@ -467,8 +549,21 @@ struct Relation: Sendable, Identifiable, Hashable {
     /// Citations in the wiki's own link form, or the single token `folklore`,
     /// which means the wiki has no attribution — never that none exists.
     let source: [String]
+    /// The technique the construction goes through, as wikilinks such as
+    /// `[[fiat-shamir-heuristic|Fiat–Shamir]]`. Usually empty.
     let via: [String]
+    /// Free text with `$…$` math in the site's macros. Usually empty.
     let securityLoss: String
+    /// A candidate construction whose source gives no security reduction, such
+    /// as GGHRSW13's iO from multilinear maps. **An edge of the graph, not a
+    /// theorem**: the manifest's contract says to skip it when deriving
+    /// anything, and the UI never shows one as if it were proved.
+    let heuristic: Bool
+    /// Why a field holds its value, keyed by field (`class`, `model`,
+    /// `heuristic`). The page body does not repeat these sentences, so this is
+    /// the only place the wiki keeps them. Purely explanatory: a rationale
+    /// never changes what a value means.
+    let rationale: [String: String]
     let status: PageStatus
     let path: String
     let slug: String
@@ -476,6 +571,11 @@ struct Relation: Sendable, Identifiable, Hashable {
 
     var isFolklore: Bool { source == ["folklore"] }
     var hasMultipleHypotheses: Bool { hypotheses.count > 1 }
+
+    /// What a heuristic edge is, in the words the inspector uses wherever one
+    /// appears.
+    static let heuristicExplanation =
+        "Candidate construction: the source gives no security reduction."
 }
 
 /// A statement that a reduction of some class *cannot* exist — or rather, that
@@ -494,7 +594,16 @@ struct Barrier: Sendable, Identifiable, Hashable {
         let reductionClass: String
     }
 
-    enum Strength: String, Sendable { case unconditional, conditional }
+    enum Strength: String, Sendable {
+        case unconditional, conditional
+
+        var title: String {
+            switch self {
+            case .unconditional: "Unconditional"
+            case .conditional: "Conditional"
+            }
+        }
+    }
 
     let id: String
     let hypotheses: [String]
@@ -503,7 +612,14 @@ struct Barrier: Sendable, Identifiable, Hashable {
     let reductionClass: String
     let consequences: [Consequence]
     let strength: Strength
+    /// The unproven assumptions a conditional barrier rests on: each an object
+    /// id, or free text when the wiki has no node for it.
     let conditionalOn: [String]
+    /// Ids of reductions that reach the conclusion outside the class or scope
+    /// this barrier rules out. Only ids that resolve are kept.
+    let circumventedBy: [String]
+    /// As on `Relation`: why `class` and `strength` hold, keyed by field.
+    let rationale: [String: String]
     let source: [String]
     let status: PageStatus
     let path: String
@@ -523,7 +639,8 @@ struct ReductionClass: Sendable, Hashable {
 struct Proposition: Sendable, Hashable {
     let title: String
     /// The community's working belief. Upstream uses it for a soft lint flag,
-    /// never as an error; CCwiki does not surface it.
+    /// never as an error. CCwiki shows it beside a barrier's consequence, as
+    /// context for what the barrier's conclusion would cost.
     let believed: Bool
     let page: String?
 }
@@ -660,6 +777,8 @@ private struct DTO: Decodable {
         var source: [String]
         var via: [String]
         var securityLoss: String
+        var heuristic: Bool
+        var rationale: [String: String]
         var status: String
         var page: String
         var slug: String
@@ -668,7 +787,7 @@ private struct DTO: Decodable {
         // `class` is a Swift keyword.
         enum CodingKeys: String, CodingKey {
             case id, kind, hypotheses, conclusion, model, source, via, securityLoss
-            case status, page, slug, title
+            case heuristic, rationale, status, page, slug, title
             case reductionClass = "class"
         }
 
@@ -683,6 +802,8 @@ private struct DTO: Decodable {
             source = c.value(.source, or: [])
             via = c.value(.via, or: [])
             securityLoss = c.value(.securityLoss, or: "")
+            heuristic = c.value(.heuristic, or: false)
+            rationale = c.optional(.rationale, RawRationale.self)?.entries ?? [:]
             status = c.value(.status, or: "")
             page = c.value(.page, or: "")
             slug = c.value(.slug, or: "")
@@ -698,6 +819,8 @@ private struct DTO: Decodable {
         var consequences: [RawConsequence]
         var strength: String
         var conditionalOn: [String]
+        var circumventedBy: [String]
+        var rationale: [String: String]
         var source: [String]
         var status: String
         var page: String
@@ -706,7 +829,7 @@ private struct DTO: Decodable {
 
         enum CodingKeys: String, CodingKey {
             case id, hypotheses, conclusion, consequences, strength, conditionalOn
-            case source, status, page, slug, title
+            case circumventedBy, rationale, source, status, page, slug, title
             case reductionClass = "class"
         }
 
@@ -719,6 +842,8 @@ private struct DTO: Decodable {
             consequences = c.value(.consequences, or: [])
             strength = c.value(.strength, or: "")
             conditionalOn = c.value(.conditionalOn, or: [])
+            circumventedBy = c.value(.circumventedBy, or: [])
+            rationale = c.optional(.rationale, RawRationale.self)?.entries ?? [:]
             source = c.value(.source, or: [])
             status = c.value(.status, or: "")
             page = c.value(.page, or: "")
@@ -741,6 +866,35 @@ private struct DTO: Decodable {
                 kind = c.value(.kind, or: "")
                 target = c.value(.target, or: "")
                 reductionClass = c.value(.reductionClass, or: "")
+            }
+        }
+    }
+
+    /// A record's `rationale`: one short sentence per field it justifies.
+    ///
+    /// Read entry by entry rather than as `[String: String]`, so a value of the
+    /// wrong type costs that one entry instead of every sentence on the
+    /// record. Anything that is not an object at all fails to decode here,
+    /// which the callers turn into an empty table, never a lost record.
+    struct RawRationale: Decodable {
+        var entries: [String: String] = [:]
+
+        /// Any key the object has. The fields a rationale may justify are the
+        /// wiki's to extend, so they are not enumerated here.
+        private struct AnyKey: CodingKey {
+            var stringValue: String
+            var intValue: Int? { nil }
+
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { return nil }
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            for key in c.allKeys {
+                if let sentence = try? c.decode(String.self, forKey: key) {
+                    entries[key.stringValue] = sentence
+                }
             }
         }
     }

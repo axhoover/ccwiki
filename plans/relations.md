@@ -18,7 +18,7 @@ conclusion.**
 { A₁, …, Aₙ }  ⇒  B     of class C
 ```
 
-`hypotheses` is a **conjunction, never a disjunction**. 42 of the corpus's 343
+`hypotheses` is a **conjunction, never a disjunction**. 29 of the corpus's 283
 reductions have more than one. Flattening those into pairwise object-to-object
 edges would render `{sparse-lpn, ddh} ⇒ she` as two independent implications —
 a false mathematical claim that the wiki does not make.
@@ -84,16 +84,33 @@ and a designed empty state in the pane.
 | `version != 1` | Empty + diagnostic naming the version. **No partial parse.** |
 | Unknown keys | Ignored silently — required by the contract |
 | Endpoint or consequence that does not resolve | That row dropped, everything else kept, counted in `anomalies` |
+| `circumventedBy` id that does not resolve | That id dropped, the barrier kept, counted in `anomalies` |
 | Unknown `kind` on a reduction | Dropped — rendering it as an implication would assert something the wiki did not |
 | `inclusion`/`equivalence` with >1 hypothesis | Dropped — a conjunction is not a containment claim |
+| `rationale` entry that is not a string | That entry dropped; a `rationale` that is not an object at all becomes an empty table |
 
 A version bump is refused rather than parsed optimistically because the contract
 says the number moves when *semantics* change. A half-understood manifest
 renders a false claim, which is worse than rendering nothing.
 
-There is one known anomaly upstream today: `bar-oihf-to-ot-bh26` names a
-`reduction` consequence `ot-from-oihf-non-black-box`, which is a slug where an
-id belongs. That consequence is dropped; the barrier survives.
+The final-form manifest decodes with **zero anomalies**. The one there used to
+be (`bar-oihf-to-ot-bh26` naming a `reduction` consequence by slug where an id
+belongs) was fixed upstream; no `reduction` or `object` consequences remain.
+
+## 3a. Fields the final-form manifest added
+
+The wiki's final-form commit kept `version: 1` and changed no field's type, so
+every addition is additive and the decoder reads each one with a default.
+
+| Field | On | n | What the app does |
+|---|---|---|---|
+| `heuristic` | reductions | 2 true | **Never shown as a theorem.** The row says "heuristic candidate", draws a dashed `⇢`/`⇠`, and its tooltip leads with "Candidate construction: the source gives no security reduction." The contract says to skip these edges when deriving anything; the app derives nothing yet. |
+| `circumventedBy` | barriers | 2 non-empty | Shown wherever the barrier appears: "circumvented by BH26" in its row on an object page, a **Circumvented by** group on the barrier's page, a **Circumvents** group on the reduction's page. The circumventing reduction need not share the barrier's hyperedge (BAR01 gets around a barrier about {zkp} from {crhf}), so these are lookups by id. |
+| `rationale` | both | 198 reductions, 32 barriers | Short sentences keyed by field (`class`, `model`, `heuristic`, `strength`). The page body does not repeat them, so the inspector shows each as the tooltip of the value it justifies, and in row tooltips as "Why fully black-box: …". The site does not show them at all. |
+| class `fixed-construction` | classes | 9 barriers | Read from `classes` like any class. It implies only `free`, so such a barrier bites no RTV04-classed reduction. |
+
+`graphSlug` is still ignored (see §2), and `formal` is documented upstream but
+appears nowhere.
 
 ## 4. `kind` — three claims, three renderings
 
@@ -101,13 +118,21 @@ Rendering all three as one arrow is wrong.
 
 | kind | n | row | group heading |
 |---|---|---|---|
-| `implication` | 277 | `⇒` / `⇐` | Builds on / Produces |
-| `inclusion` | 46 | `⊆` / `⊇` | Contained in / Contains |
-| `equivalence` | 20 | `⇔` | Equivalent to — **one** group, on both endpoints |
+| `implication` | 230 | `⇒` / `⇐` (`⇢` / `⇠` if heuristic) | Builds on / Produces |
+| `inclusion` | 45 | `⊆` / `⊇` | Contained in / Contains |
+| `equivalence` | 8 | `⇔` | Equivalent to — **one** group, on both endpoints |
 
 An inclusion is containment (`IP ⊆ PSPACE`, *not* "IP implies PSPACE"). An
 equivalence holds both ways, so it must never be split across a directional
 pair. Both take exactly one hypothesis, which is asserted at decode.
+
+**Containments between complexity classes carry no class.** The wiki records
+them as class `free`, and its schema says neither the class axis nor the
+standard/idealised model axis applies. The site omits both from its line
+(`relationMeta.ts`, `isComplexityContainment`), and so does the app:
+`RelationsManifest.isComplexityContainment` is the same test (not an
+implication, class `free`, a complexity class concluded). 46 edges qualify. A
+non-standard model, `quantum setting` on 11 of them, is still shown.
 
 ## 5. The class partial order, and which way it points
 
@@ -127,33 +152,55 @@ class `fully-black-box`, and they share a hyperedge. The correct answer is **no
 conflict** — `free` implies nothing. Inverted, this pair reports a
 contradiction, which is how you find out.
 
-**Today, five hyperedges are shared by a reduction and a barrier and zero
-conflicts fire.** So the conflict indicator is computed and tested but does not
-currently appear anywhere. That is the honest state, not a bug.
+**Today, one hyperedge is shared by a reduction and a barrier — that very
+BH26 pair — and zero conflicts fire.** So the conflict indicator is computed
+and tested but does not currently appear anywhere. That is the honest state,
+not a bug. The barrier also lists the reduction in `circumventedBy`, so the
+reduction's page files it under "Circumvents" rather than "Barriers on this
+hyperedge".
 
 ## 6. Variants
 
-131 of the 261 nodes are variants: a named sub-object living as a *section* of a
+131 of the 262 nodes are variants: a named sub-object living as a *section* of a
 page, so the graph can name `ring-lwe` without splitting the LWE page.
 
 - **Addressed** as its host's `page` plus `anchor` (with the `#` stripped), which
   goes straight into `AppModel.openPage(_:anchor:)`. Never a page of its own.
 - **Never** given a sidebar row or a folder-listing row.
-- **Named** by the host page's heading text: `Learning with errors § Evasive
-  LWE`. This is necessary, not decorative — **every variant in the corpus has
-  `title` equal to its own `id`** (`"abe-selective-security"`), so the manifest
-  cannot name them. `WikiPage.headings()` already computes Quartz-identical
-  heading ids, so the section's real heading is available. Falls back to the
-  host title plus a humanized anchor when no clone is loaded.
+- **Named** `Host § Section`, always: `Hash function § Collision resistance`.
+  The section text is the manifest's own `title`, which in the final-form
+  manifest is the heading text with any math kept as TeX. The heading alone is
+  not a name — both encryption pages have a "CPA Security" section, others
+  have "Types" or "Binding", and `owf`, the commonest endpoint in the corpus,
+  is the hash function page's "Preimage resistance (one-wayness)". With the
+  host, all 262 labels are unique, which the corpus test asserts.
+- **Older clones** have `title` equal to `id` on every variant
+  (`"abe-selective-security"`). For those the section is the host page's
+  heading, read through `WikiPage.headings()`, which computes Quartz-identical
+  heading ids; with no clone loaded it is the anchor, humanized.
 
-48 pages host the 131 variants; 31 host more than one.
+52 pages host the 131 variants; 35 host more than one.
+
+A literal `$` stands for itself in a title (`IND$-CPA Security`), as the
+manifest's contract says. `RelationText.plain` treats `$` as a delimiter only
+when a later run of the same length closes it, which is micromark's rule and
+the site's `escapeOutsideMath`; it used to delete every `$`, which named
+IND-CPA, a different notion, and made one barrier read as a false separation.
+For any string without an unpaired `$` the output is unchanged, which matters
+because `ConceptRanker` names headings with the same function.
 
 ## 7. `unlisted`
 
-30 objects, all `kind: object`. Real nodes — they appear as endpoints, in rows,
-and in the closure — kept out of **browse and navigation only**: the sidebar
-tree, folder listings, and the quick switcher. 28 of the 30 take part in an
-edge, so they do show up in relation rows, which is correct.
+32 nodes: 30 objects and 2 variants (`prg-in-nc0` and
+`schnorr-identification-protocol`). Real nodes — they appear as endpoints, in rows, and in the closure —
+kept out of **browse and navigation only**: the sidebar tree, folder listings,
+and the quick switcher. 24 of the 32 take part in an edge, so they do show up
+in relation rows, which is correct.
+
+**Only an object hides a page.** A variant shares its host's `path`, so an
+unlisted variant counting would hide a listed host and every other section on
+it. Both unlisted variants sit on unlisted hosts today, so this was latent;
+`unlistedPaths` now filters on `kind: object`, and a fixture pins it.
 
 They remain fully findable in ⌘S, which is search rather than browse.
 
@@ -165,20 +212,29 @@ This is an independent filter from `hidesStubs`; the two compose in
 The manifest's values for "we do not know" are deliberate, and the UI is built
 not to launder them into confidence.
 
-- **`class: "unstated"` (280 of 343)** — shown as itself, de-emphasized, with a
+- **`class: "unstated"` (76 of 283)** — shown as itself, de-emphasized, with a
   tooltip saying the source does not say which notion of reduction is meant.
-  Never "black-box", never guessed, never blank-as-if-missing.
-- **`source: ["folklore"]` (188 reductions, 13 barriers)** — a provenance label
+  Never "black-box", never guessed, never blank-as-if-missing. The site omits
+  it from its line; the inspector's summary shows it, because there it answers
+  a question the summary visibly asks, and it links to the glossary's
+  "Unstated" section. `fully-black-box` is now the plurality (132), and where
+  the source does not state it, `rationale.class` says why.
+- **`source: ["folklore"]` (86 reductions, 4 barriers)** — a provenance label
   in ordinary styling. It means the wiki has no attribution, never that none
   exists, and it is not an error.
-- **`status: "stub"` (202 reductions + 16 barriers)** — shown with the same
+- **`status: "stub"` (1 reduction, no barriers)** — shown with the same
   `StatusBadge` as everywhere else, and **its class and model are suppressed
   entirely** rather than printed. The spec is explicit that a stub's typing is
   not evidence, so showing `unstated · standard` under one would dress a default
   up as a finding. Stubs are *marked, not hidden* — `hidesStubs` deliberately
-  does not apply here, because silently dropping 60% of the relationships is
-  worse than showing them badged.
-- **`propositions[].believed`** is upstream's soft lint flag. Not surfaced.
+  does not apply here. (At the migration 202 of 343 reductions were stubs; the
+  rule matters far less now, and costs nothing.)
+- **`heuristic: true` (2)** — a candidate construction, never a theorem; see
+  §3a.
+- **`propositions[].believed`** is upstream's soft lint flag. The barrier
+  summary shows it beside a complexity consequence ("coNP ⊆ AM · believed
+  false"), as context for what the barrier's conclusion would cost. It never
+  changes a row or a rule.
 
 ## 9. The pane
 
@@ -220,7 +276,41 @@ about fewer assumptions than the theorem needs.
 
 On a reduction or barrier page the page itself *is* the edge, so the pane shows
 its hypotheses — under a heading that says "Hypotheses — all of them" when there
-is more than one — its conclusion, and any barrier on the same hyperedge.
+is more than one — its conclusion, any barrier on the same hyperedge, and from
+`circumventedBy` what the page circumvents or is circumvented by (§3a).
+
+**It leads with the page's own record, under "This result".** The final-form
+wiki moved kind, class, model, sources and security loss out of the page body
+into a line the site splices under the H1 at build time (`relationMeta.ts`), so
+before this the app showed none of them for the page being read. The summary
+is a label–value grid in the manner of a Get Info panel, built purely in
+`PageRelations.facts(for:manifest:)`:
+
+| Reduction | Barrier |
+|---|---|
+| Kind, with its arrow | Strength |
+| Proof: "Heuristic candidate", only if heuristic | Against: "Fully black-box reductions" |
+| Class (not on a stub or a containment) | Assuming: each `conditionalOn`, an object or free text |
+| Model, named as the site names it (not on a stub; not "standard" on a containment) | Would imply: each consequence, with "believed true/false" for a proposition |
+| Via, Sources, Security loss | Sources |
+
+Each value's tooltip is the record's `rationale` for it when there is one,
+else its full text. A value that leads somewhere the clone has is a link: the
+class to its section of `Glossary/reduction-classes`, an idealised model to its
+glossary page, a source to its reference page, an assumption to its object, a
+proposition to its page. Security loss goes through `RelationText.plain`,
+whose table now covers the losses' macros (`\Adv`, `\calX`, `\ell`, `\mapsto`,
+`\bmod`); the rendered page will carry the same loss as real KaTeX once the
+site's meta line is reproduced in the reader.
+
+Model names follow the site everywhere, rows included: "random oracle model",
+"CRS model", "generic group model", "quantum setting", and "non-standard model"
+for `other`.
+
+**Row hygiene.** Every relation, barrier and object row has a context menu —
+Open, Open on cryptology.city, Copy Link, Copy Wikilink, and Copy Statement (or
+Copy Name) — wired to the same calls as the sidebar and Backlinks, and rows
+hide the list separator as Outline and Backlinks do.
 
 ## 10. What this did not change
 
@@ -240,17 +330,21 @@ backlink from `attribute-based-encryption` and gained one from
 
 ```
 Sources/CCwiki/Wiki/
-├── RelationsManifest.swift   decode, index, the class closure, the barrier rule
-├── RelationLabels.swift      display names; TeX → plain text for chrome
-└── PageRelations.swift       path → ordered groups of rows (pure, testable)
+├── RelationsManifest.swift   decode, index, the class closure, the barrier rule,
+│                             circumvention, complexity containments
+├── RelationLabels.swift      display names; TeX → plain text for chrome; the
+│                             site's model names and citation keys
+└── PageRelations.swift       path → ordered groups of rows, and the summary's
+                              facts (pure, testable)
 Sources/CCwiki/UI/
 └── RelationsView.swift       the inspector tab
 Tests/CCwikiTests/
-└── RelationsTests.swift      33 tests; corpus checks gated on CCWIKI_WIKI
+└── RelationsTests.swift      44 tests; corpus checks gated on CCWIKI_WIKI
 ```
 
 `RelationText.plain` exists because manifest titles are wiki source carrying
 `$…$` math written with the site's KaTeX macros, and a SwiftUI `Text` has
 neither KaTeX nor the macro table. The vocabulary is small and closed — 20
-commands across all 674 titles — so the substitution is exact rather than a
-guess; anything outside it loses its backslash and keeps its letters.
+commands across the manifest's 610 titles, plus a handful more in the 75
+security losses — so the substitution is exact rather than a guess; anything
+outside it loses its backslash and keeps its letters.
