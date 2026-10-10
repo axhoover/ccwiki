@@ -10,9 +10,11 @@ real manifest (wiki `ab81f02`, `relations.json` v1: 262 objects, 283
 reductions, 32 barriers). It reads one more input, CCwiki's reviewed
 corrections in `Resources/derivation-curation.json` (§2a).
 `Tests/CCwikiTests/Fixtures/derivations-golden.json` records its answers. The
-Swift `Derivation` type (§3) is not built yet. The Swift port must give the
-same answers on the same manifest and curation, and the corpus test (§8)
-checks this. Read [relations.md](relations.md) first; this assumes its
+Swift port is `Sources/CCwiki/Wiki/Derivation*.swift` with
+`DerivationCuration.swift` (§3); it must give the same answers on the same
+manifest and curation, and the corpus test (§8, `DerivationCorpusTests`)
+checks this. `DerivationTests` covers each rule on fixtures whose expected
+values were computed with the reference script. Read [relations.md](relations.md) first; this assumes its
 hyperedge rule (§1 there) and its class order (§5 there). The UI half is
 [relations-explorer.md](relations-explorer.md); §11 lists what it must pick
 up from this revision.
@@ -628,6 +630,20 @@ A pure value type in `Sources/CCwiki/Wiki/Derivation.swift`, built once from a
 `RelationsManifest` and a `DerivationCuration`, `Sendable`, with no UI and no
 I/O, like `PageRelations`. It has no API that returns an object pair. A step
 carries its whole hypothesis list.
+
+The sketch below is where the design started. The built type keeps its names
+and nesting and is a superset of relations-explorer.md §6.6, which is the
+surface the UI compiles against: the answers also carry recorded-on-pair
+statuses, conflicts, the scope note, refuted, setting and model starts, hints,
+completions and question-becomes; refusals are typed (`Derivation.Refusal`);
+derived barriers carry their consequence, per-start up paths and split
+circumventions. It is split by concern: `Derivation.swift` (types, eligible
+steps, forward chaining, proof trees, the inspector's lookups),
+`DerivationAnswer.swift` (R8–R10, R13, R14), `DerivationBarriers.swift` (R8,
+R12), `DerivationBackward.swift` (R11), `DerivationChecks.swift` (invariants,
+sentinels, Statement lint) and `DerivationCuration.swift` (§2a). Inside, a
+closure runs over dense object indexes rather than string keys; every order
+the golden file can see is the script's.
 
 ```swift
 struct DerivationCuration: Sendable, Decodable {   // Resources/derivation-curation.json
