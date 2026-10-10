@@ -499,6 +499,24 @@ tbody tr:last-child td { border-bottom: none; }
 
 .byline strong { color: var(--text-tertiary); font-weight: 600; }
 
+/* --------------------------------------------------------- relation meta */
+
+/* The line under a reduction or barrier H1 — kind, class, model, sources,
+ * security loss — spliced in by RelationMeta.swift as the site's
+ * relationMeta.ts does. Metadata, not prose: the byline's small sans in the
+ * secondary colour, tucked under the title. Links keep their accent; math
+ * drops to the line's size rather than the body's slightly larger one. */
+.relation-meta {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.855rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin: 0 0 1.5rem;
+  overflow-wrap: break-word;
+}
+
+.relation-meta .katex { font-size: 1em; }
+
 /* ------------------------------------------------------------ folder page */
 
 .folder-count {

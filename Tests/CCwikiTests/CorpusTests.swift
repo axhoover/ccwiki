@@ -20,7 +20,7 @@ struct CorpusTests {
             ? root : nil
     }
 
-    @Test("every wikilink in the corpus resolves, or is a known dead link")
+    @Test("every link in the corpus resolves, or is a known dead link")
     func corpusResolves() throws {
         guard let contentRoot = Self.contentRoot else { return }
         let index = WikiIndex.build(contentRoot: contentRoot)
@@ -40,7 +40,7 @@ struct CorpusTests {
                 case .external: counts["external", default: 0] += 1
                 case .unresolved:
                     counts["unresolved", default: 0] += 1
-                    unresolved.append("\(page.path): [[\(link.target)]]")
+                    unresolved.append("\(page.path): \(page.body[link.range])")
                 }
             }
         }
@@ -49,13 +49,77 @@ struct CorpusTests {
         // The corpus had 673 links and 3 dead ones when the resolver was
         // written. Both numbers move as the wiki grows; what must not move is
         // the *ratio* — a resolver regression shows up as dozens of failures.
-        #expect(total > 500, "only \(total) wikilinks found — did the glob change?")
+        #expect(total > 500, "only \(total) links found — did the glob change?")
         #expect(Double(counts["unresolved"] ?? 0) / Double(total) < 0.02,
                 "too many dead links: \(unresolved)")
         #expect(counts["folder"] ?? 0 >= 5, "index.md links to the top-level folders")
 
-        print("corpus link resolution: \(counts.sorted { $0.key < $1.key })")
+        // Markdown links are counted above, but they are too few (35 on 16
+        // pages when they arrived) to move that ratio, so they get their own.
+        // The wiki writes one wherever a link's text holds math.
+        var markdownLinks = 0
+        var deadMarkdownLinks: [String] = []
+        for page in index.pages.values.sorted(by: { $0.path < $1.path }) {
+            for link in MarkdownLinkParser.links(in: page.body) {
+                markdownLinks += 1
+                if !index.resolve(link.wikilink, from: page.path).isResolved {
+                    deadMarkdownLinks.append("\(page.path): \(page.body[link.range])")
+                }
+            }
+        }
+        #expect(markdownLinks > 10, "only \(markdownLinks) markdown links — did the parser stop?")
+        #expect(Double(deadMarkdownLinks.count) / Double(max(markdownLinks, 1)) < 0.1,
+                "too many dead markdown links: \(deadMarkdownLinks)")
+
+        print("corpus link resolution: \(counts.sorted { $0.key < $1.key }), "
+              + "\(markdownLinks) of them markdown links")
         if !unresolved.isEmpty { print("dead links:\n  " + unresolved.joined(separator: "\n  ")) }
+    }
+
+    @Test("every reduction and barrier page gets the site's relation-meta line, and its links resolve")
+    func corpusRelationMeta() throws {
+        guard let path = ProcessInfo.processInfo.environment["CCWIKI_WIKI"], !path.isEmpty,
+              let contentRoot = Self.contentRoot
+        else { return }
+        let index = WikiIndex.build(contentRoot: contentRoot)
+        let manifest = RelationsManifest.load(cloneRoot: URL(fileURLWithPath: path))
+        let labels = RelationLabels(manifest: manifest, index: index)
+        var renderer = PageRenderer(index: index)
+        renderer.relations = manifest
+        renderer.relationLabels = labels
+
+        let relationPages = index.pages.values
+            .filter { $0.kind == .reduction || $0.kind == .barrier }
+            .sorted { $0.path < $1.path }
+        #expect(relationPages.count > 250, "expected ~315 relation pages, got \(relationPages.count)")
+
+        var missing: [String] = []
+        var linkCount = 0
+        var dead: [String] = []
+        for page in relationPages {
+            guard let line = RelationMeta.line(
+                for: page.frontmatter, manifest: manifest, labels: labels)
+            else {
+                missing.append(page.path)
+                continue
+            }
+            // The line's own links, resolved from the page, as the render
+            // request resolves them.
+            for link in WikiIndex.outgoingLinks(in: line) {
+                linkCount += 1
+                if !index.resolve(link, from: page.path).isResolved {
+                    dead.append("\(page.path): \(line[link.range])")
+                }
+            }
+            let request = renderer.request(for: page)
+            if !request.markdown.contains(line) { missing.append("\(page.path) (not spliced)") }
+        }
+
+        #expect(missing.isEmpty, "no relation-meta line:\n  \(missing.joined(separator: "\n  "))")
+        // Class, model, source and assumption links: 477 when the line arrived.
+        #expect(linkCount > 300, "only \(linkCount) links in relation-meta lines")
+        #expect(Double(dead.count) / Double(max(linkCount, 1)) < 0.02,
+                "relation-meta links with no target:\n  \(dead.joined(separator: "\n  "))")
     }
 
     @Test("every page parses, and the frontmatter schema holds")
