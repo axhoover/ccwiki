@@ -29,11 +29,17 @@ struct RelationsTests {
           "classes": {
             "fully-black-box": { "title": "Fully black-box",
                                  "implies": ["semi-black-box", "relativizing"] },
-            "semi-black-box": { "title": "Semi black-box", "implies": ["weakly-black-box"] },
-            "weakly-black-box": { "title": "Weakly black-box", "implies": ["free"] },
+            "semi-black-box": { "title": "Semi black-box",
+                                "implies": ["weakly-black-box", "forall-exists-semi-black-box"] },
+            "forall-exists-semi-black-box": { "title": "∀∃ semi black-box",
+                                              "implies": ["forall-exists-weakly-black-box"] },
+            "weakly-black-box": { "title": "Weakly black-box",
+                                  "implies": ["forall-exists-weakly-black-box", "free"] },
+            "forall-exists-weakly-black-box": { "title": "∀∃ weakly black-box",
+                                                "implies": ["free"] },
             "relativizing": { "title": "Relativizing", "implies": ["forall-exists-semi-black-box"] },
-            "forall-exists-semi-black-box": { "title": "∀∃ semi black-box", "implies": ["free"] },
-            "free": { "title": "Free", "implies": [] }
+            "free": { "title": "Free", "implies": [] },
+            "fixed-construction": { "title": "Fixed construction", "implies": ["free"] }
           },
           "classSentinels": ["unstated"],
           "propositions": {
@@ -77,15 +83,54 @@ struct RelationsTests {
         { "id": "prg-selective", "kind": "variant", "type": "primitive",
           "page": "content/Primitives/pseudorandom-generator.md",
           "slug": "pseudorandom-generator", "anchor": "#selective-security",
-          "of": "prg", "title": "prg-selective", "aliases": [], "unlisted": false }
+          "of": "prg", "title": "prg-selective", "aliases": [], "unlisted": false },
+        { "id": "ske", "kind": "object", "type": "primitive",
+          "page": "content/Primitives/symmetric-key-encryption.md",
+          "slug": "symmetric-key-encryption", "title": "Symmetric key encryption",
+          "aliases": [], "unlisted": false },
+        { "id": "pke", "kind": "object", "type": "primitive",
+          "page": "content/Primitives/public-key-encryption.md",
+          "slug": "public-key-encryption", "title": "Public key encryption",
+          "aliases": [], "unlisted": false },
+        { "id": "cpa-security", "kind": "variant", "type": "primitive",
+          "page": "content/Primitives/symmetric-key-encryption.md",
+          "slug": "symmetric-key-encryption", "anchor": "#cpa-security",
+          "of": "ske", "title": "CPA Security", "aliases": [], "unlisted": false },
+        { "id": "pke-cpa-security", "kind": "variant", "type": "primitive",
+          "page": "content/Primitives/public-key-encryption.md",
+          "slug": "public-key-encryption", "anchor": "#cpa-security",
+          "of": "pke", "title": "CPA Security", "aliases": [], "unlisted": false },
+        { "id": "ind-dollar-cpa-security", "kind": "variant", "type": "primitive",
+          "page": "content/Primitives/symmetric-key-encryption.md",
+          "slug": "symmetric-key-encryption", "anchor": "#ind-cpa-security",
+          "of": "ske", "title": "IND$-CPA Security", "aliases": [], "unlisted": false },
+        { "id": "pke-hidden-section", "kind": "variant", "type": "primitive",
+          "page": "content/Primitives/public-key-encryption.md",
+          "slug": "public-key-encryption", "anchor": "#hidden-section",
+          "of": "pke", "title": "Hidden section", "aliases": [], "unlisted": true }
         """
 
     static let defaultReductions = """
         { "id": "red-owf-to-prg", "kind": "implication", "hypotheses": ["owf"],
           "conclusion": "prg", "class": "fully-black-box", "model": "standard",
-          "source": ["[[HILL99|HILL99]]"], "via": [], "securityLoss": "", "status": "draft",
+          "source": ["[[HILL99 - A pseudorandom generator from any one-way function|HILL99]]"],
+          "via": ["[[hybrid-argument|Hybrid argument]]"],
+          "securityLoss": "$\\\\Adv^{\\\\mathrm{prf}} \\\\le q/|\\\\calD|$",
+          "heuristic": false,
+          "rationale": { "class": "HILL99 use the OWF only as an oracle.", "bogus": 3,
+                         "via": "One hybrid per output block.",
+                         "securityLoss": "A union bound over $q$ queries.",
+                         "source": "HILL99 give both the construction and the proof." },
+          "status": "draft",
           "page": "content/Reductions/owf-to-prg.md", "slug": "owf-to-prg",
           "title": "OWF ⇒ PRG" },
+        { "id": "red-ddh-to-pke-candidate", "kind": "implication", "hypotheses": ["ddh"],
+          "conclusion": "pke", "class": "unstated", "model": "standard",
+          "source": ["[[XY98 - A candidate|XY98]]"], "via": [], "securityLoss": "",
+          "heuristic": true,
+          "rationale": { "heuristic": "XY98 give no reduction from DDH." },
+          "status": "draft", "page": "content/Reductions/ddh-to-pke-candidate.md",
+          "slug": "ddh-to-pke-candidate", "title": "DDH ⇒ PKE" },
         { "id": "red-ddh-and-owf-to-ot", "kind": "implication",
           "hypotheses": ["ddh", "owf"], "conclusion": "ot", "class": "unstated",
           "model": "standard", "source": ["folklore"], "via": [], "securityLoss": "",
@@ -93,11 +138,14 @@ struct RelationsTests {
           "slug": "ddh-and-owf-to-ot", "title": "DDH + OWF ⇒ OT" },
         { "id": "red-free-owf-to-ot", "kind": "implication", "hypotheses": ["owf"],
           "conclusion": "ot", "class": "free", "model": "standard",
-          "source": ["folklore"], "via": [], "securityLoss": "", "status": "draft",
+          "source": ["folklore"], "via": [], "securityLoss": "",
+          "rationale": { "kind": "Only this direction is known.",
+                         "class": "It calls $\\\\Gen$ as an oracle on level-$(j-1)$ keys." },
+          "status": "draft",
           "page": "content/Reductions/free-owf-to-ot.md", "slug": "free-owf-to-ot",
           "title": "OWF ⇒ OT" },
         { "id": "red-ip-in-pspace", "kind": "inclusion", "hypotheses": ["ip"],
-          "conclusion": "pspace", "class": "unstated", "model": "standard",
+          "conclusion": "pspace", "class": "free", "model": "standard",
           "source": ["[[Sha92|Sha92]]"], "via": [], "securityLoss": "", "status": "draft",
           "page": "content/Reductions/ip-in-pspace.md", "slug": "ip-in-pspace",
           "title": "IP ⊆ PSPACE" },
@@ -116,12 +164,20 @@ struct RelationsTests {
           "page": "content/Reductions/bad-arity.md", "slug": "bad-arity", "title": "bad" }
         """
 
+    /// `bar-fbb-owf-to-ot` and its circumvention mirror the real BH26 pair:
+    /// a fully-black-box barrier on {OIHF} ⇒ OT, got around by a `free`
+    /// reduction on the very same hyperedge. `bar-ddh-to-ot` is got around by
+    /// a reduction on a *different* hyperedge, as BAR01 gets around GK96.
     static let defaultBarriers = """
         { "id": "bar-fbb-owf-to-ot", "hypotheses": ["owf"], "conclusion": "ot",
           "class": "fully-black-box",
           "consequences": [{ "kind": "contradiction", "target": "",
                              "class": "fully-black-box" }],
-          "strength": "unconditional", "conditionalOn": [], "source": ["[[IR89|IR89]]"],
+          "strength": "unconditional", "conditionalOn": [],
+          "circumventedBy": ["red-free-owf-to-ot", "red-never-written"],
+          "source": ["[[IR89|IR89]]"],
+          "rationale": { "class": "It refutes only that every scheme is IND$-CPA-secure; some other IND$-CPA-secure scheme is not ruled out.",
+                         "oracle": "A random permutation and a $\\\\classPSPACE$ oracle." },
           "status": "draft", "page": "content/Barriers/no-owf-to-ot.md",
           "slug": "no-owf-to-ot", "title": "No fully black-box reduction from OWF to OT" },
         { "id": "bar-relativizing-owf-to-prg", "hypotheses": ["owf"], "conclusion": "prg",
@@ -131,8 +187,23 @@ struct RelationsTests {
                            { "kind": "reduction", "target": "does-not-exist",
                              "class": "free" }],
           "strength": "unconditional", "conditionalOn": [], "source": ["folklore"],
+          "rationale": "not an object",
           "status": "stub", "page": "content/Barriers/no-owf-to-prg.md",
-          "slug": "no-owf-to-prg", "title": "No relativizing reduction from OWF to PRG" }
+          "slug": "no-owf-to-prg", "title": "No relativizing reduction from OWF to PRG" },
+        { "id": "bar-ddh-to-ot", "hypotheses": ["ddh"], "conclusion": "ot",
+          "class": "fixed-construction",
+          "consequences": [{ "kind": "complexity", "target": "p-neq-np",
+                             "class": "fixed-construction" }],
+          "strength": "conditional",
+          "conditionalOn": ["owf", "the language has a hard subset-membership problem"],
+          "circumventedBy": ["red-ddh-and-owf-to-ot"],
+          "source": ["[[XY20 - On DDH and OT|XY20]]", "[[ZW21 - More on OT|ZW21]]"],
+          "rationale": { "class": "Only the named construction is refuted.",
+                         "strength": "XY20 assume one-way functions exist.",
+                         "conditionalOn": "Both are XY20's own assumptions.",
+                         "source": "ZW21 repair XY20's proof." },
+          "status": "draft", "page": "content/Barriers/no-ddh-to-ot.md",
+          "slug": "no-ddh-to-ot", "title": "No fixed-construction reduction from DDH to OT" }
         """
 
     // MARK: The class partial order
@@ -152,6 +223,13 @@ struct RelationsTests {
         #expect(!m.reductionClass("free", implies: "fully-black-box"))
         #expect(!m.reductionClass("free", implies: "relativizing"))
         #expect(!m.reductionClass("relativizing", implies: "fully-black-box"))
+
+        // `fixed-construction` is not an RTV04 class: it implies only `free`,
+        // so a barrier refuting one named construction bites no reduction of
+        // any other class.
+        #expect(m.reductionClass("fixed-construction", implies: "free"))
+        #expect(!m.reductionClass("fully-black-box", implies: "fixed-construction"))
+        #expect(!m.reductionClass("free", implies: "fixed-construction"))
     }
 
     /// The regression that matters most, taken from a real pair in the corpus:
@@ -258,7 +336,11 @@ struct RelationsTests {
         // the shape of the one real dangling reference upstream today.
         #expect(barrier.consequences.count == 1)
         #expect(barrier.consequences.first?.kind == .complexity)
-        #expect(m.anomalies.contains { $0.contains("does-not-exist") })
+        // Pinned to this barrier, so no other dropped id can stand in for it.
+        let dropped = m.anomalies.filter {
+            $0.contains("bar-relativizing-owf-to-prg") && $0.contains("does-not-exist")
+        }
+        #expect(dropped.count == 1, "\(m.anomalies)")
     }
 
     @Test("consequence text resolves each kind against the right table")
@@ -352,6 +434,9 @@ struct RelationsTests {
         #expect(m.reductions.count == 1)
         #expect(m.reductions[0].via.isEmpty)
         #expect(m.object("a")?.unlisted == false)
+        // The fields the final-form manifest added are all optional too.
+        #expect(m.reductions[0].heuristic == false)
+        #expect(m.reductions[0].rationale.isEmpty)
     }
 
     // MARK: Nodes
@@ -399,9 +484,10 @@ struct RelationsTests {
         #expect(destination.anchor == "selective-security")
     }
 
-    /// Every variant in the corpus has `title == id`, so the label has to come
-    /// from the host page's heading text.
-    @Test("a variant whose title is its own id is named from its host's heading")
+    /// Clones from before the wiki's final-form manifest have `title == id` on
+    /// every variant, so the section's name has to come from the host page's
+    /// heading text.
+    @Test("a legacy variant whose title is its own id is named from its host's heading")
     func variantLabelComesFromTheHostHeading() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "ccwiki-variant-\(UUID().uuidString)")
@@ -434,6 +520,295 @@ struct RelationsTests {
         #expect(bare.label("prg-selective") == "Pseudorandom generator § Selective security")
     }
 
+    /// The final-form manifest titles every variant with its heading text.
+    /// The heading alone is not a name: the corpus has a "CPA Security"
+    /// section on both encryption pages.
+    @Test("a variant with a real title is still named with its host, so labels stay unique")
+    func variantLabelCarriesItsHost() {
+        let labels = RelationLabels(manifest: Self.manifest(), index: nil)
+        #expect(labels.label("cpa-security") == "Symmetric key encryption § CPA Security")
+        #expect(labels.label("pke-cpa-security") == "Public key encryption § CPA Security")
+        #expect(labels.label("cpa-security") != labels.label("pke-cpa-security"))
+        // A lone `$` in a title is a literal dollar.
+        #expect(labels.label("ind-dollar-cpa-security")
+            == "Symmetric key encryption § IND$-CPA Security")
+    }
+
+    @Test("an unlisted variant never hides its host's page")
+    func unlistedVariantDoesNotHideItsHost() throws {
+        let m = Self.manifest()
+        let hidden = try #require(m.object("pke-hidden-section"))
+        #expect(hidden.unlisted)
+        #expect(hidden.isVariant)
+        // The variant shares the PKE page, which is listed, so the page stays.
+        #expect(!m.unlistedPaths.contains("Primitives/public-key-encryption.md"))
+        #expect(m.unlistedPaths == ["Primitives/secret.md"])
+    }
+
+    // MARK: Additive fields
+
+    @Test("`heuristic` is decoded, and absent means false")
+    func heuristicIsDecoded() throws {
+        let m = Self.manifest()
+        let candidate = try #require(m.reduction("red-ddh-to-pke-candidate"))
+        #expect(candidate.heuristic)
+        #expect(candidate.rationale["heuristic"] == "XY98 give no reduction from DDH.")
+        // Every other fixture edge either says false or does not say.
+        let proved = try #require(m.reduction("red-free-owf-to-ot"))
+        #expect(!proved.heuristic)
+    }
+
+    /// The statement is what a row's tooltip leads with and what Copy
+    /// Statement puts on the clipboard, so it must not say `⇒` either.
+    @Test("a heuristic edge is stated with a dashed arrow, everywhere")
+    func heuristicStatement() throws {
+        let m = Self.manifest()
+        let labels = RelationLabels(manifest: m, index: nil)
+        let candidate = try #require(m.reduction("red-ddh-to-pke-candidate"))
+        #expect(candidate.arrow == "⇢")
+        #expect(labels.statement(candidate) == "Decisional Diffie-Hellman ⇢ Public key encryption")
+
+        // A proved implication keeps the solid arrow, and the other kinds
+        // keep theirs.
+        let proved = try #require(m.reduction("red-owf-to-prg"))
+        #expect(proved.arrow == "⇒")
+        let inclusion = try #require(m.reduction("red-ip-in-pspace"))
+        #expect(inclusion.arrow == "⊆")
+    }
+
+    @Test("`rationale` is read entry by entry, and a bad one costs nothing else")
+    func rationaleIsLenient() throws {
+        let m = Self.manifest()
+        let relation = try #require(m.reduction("red-owf-to-prg"))
+        // The strings survive; the number beside them is dropped, not fatal.
+        #expect(relation.rationale == [
+            "class": "HILL99 use the OWF only as an oracle.",
+            "via": "One hybrid per output block.",
+            "securityLoss": "A union bound over $q$ queries.",
+            "source": "HILL99 give both the construction and the proof.",
+        ])
+
+        // A rationale that is not an object at all costs only itself.
+        let stub = m.barrier(onPage: "Barriers/no-owf-to-prg.md")
+        let barrier = try #require(stub)
+        #expect(barrier.rationale.isEmpty)
+        #expect(barrier.consequences.count == 1)
+    }
+
+    @Test("`circumventedBy` is decoded, resolved, and indexed both ways")
+    func circumventionIsIndexed() throws {
+        let m = Self.manifest()
+        let barrier = try #require(m.barrier(onPage: "Barriers/no-owf-to-ot.md"))
+        // The dangling id is dropped and counted; the barrier survives.
+        #expect(barrier.circumventedBy == ["red-free-owf-to-ot"])
+        let dangling = m.anomalies.filter { $0.contains("red-never-written") }
+        #expect(dangling.count == 1)
+        #expect(m.reductions(circumventing: barrier).map(\.id) == ["red-free-owf-to-ot"])
+
+        let free = try #require(m.reduction("red-free-owf-to-ot"))
+        #expect(m.barriers(circumventedBy: free).map(\.id) == ["bar-fbb-owf-to-ot"])
+
+        // A circumventing reduction need not share the barrier's hyperedge.
+        let crossEdge = try #require(m.barrier(onPage: "Barriers/no-ddh-to-ot.md"))
+        let conjunction = try #require(m.reduction("red-ddh-and-owf-to-ot"))
+        #expect(m.reductions(circumventing: crossEdge).map(\.id) == ["red-ddh-and-owf-to-ot"])
+        #expect(m.barriers(circumventedBy: conjunction).map(\.id) == ["bar-ddh-to-ot"])
+    }
+
+    @Test("a barrier page lists what gets around it, and the reduction page says so too")
+    func circumventionGroups() throws {
+        let m = Self.manifest()
+
+        let barrierPage = PageRelations(path: "Barriers/no-owf-to-ot.md", manifest: m)
+        let circumventedBy = barrierPage.groups.first { $0.role == .circumventedBy }
+        let rows = try #require(circumventedBy).rows.map(\.id)
+        #expect(rows == ["r:red-free-owf-to-ot"])
+
+        // On the reduction's page the barrier is filed once, under the more
+        // specific claim, although it also shares the hyperedge.
+        let reductionPage = PageRelations(path: "Reductions/free-owf-to-ot.md", manifest: m)
+        let roles = reductionPage.groups.map(\.role)
+        #expect(roles == [.summary, .hypotheses, .conclusion, .circumvents])
+        let circumvents = reductionPage.groups.first { $0.role == .circumvents }
+        let circumventsRows = try #require(circumvents).rows.map(\.id)
+        #expect(circumventsRows == ["b:bar-fbb-owf-to-ot"])
+
+        // Across hyperedges too.
+        let crossPage = PageRelations(path: "Barriers/no-ddh-to-ot.md", manifest: m)
+        let cross = crossPage.groups.first { $0.role == .circumventedBy }
+        let crossRows = try #require(cross).rows.map(\.id)
+        #expect(crossRows == ["r:red-ddh-and-owf-to-ot"])
+    }
+
+    // MARK: The page's own record
+
+    @Test("a reduction page leads with its own record, in the site's order")
+    func reductionSummary() throws {
+        let m = Self.manifest()
+        let page = PageRelations(path: "Reductions/owf-to-prg.md", manifest: m)
+        #expect(page.groups.first?.role == .summary)
+
+        let relation = try #require(m.reduction("red-owf-to-prg"))
+        let facts = PageRelations.facts(for: relation, manifest: m)
+        #expect(facts.map(\.field)
+            == [.kind, .reductionClass, .model, .via, .source, .securityLoss])
+        #expect(facts.map(\.value) == [
+            .text("Implication"), .text("Fully black-box"), .text("Standard model"),
+            .text("Hybrid argument"), .text("HILL99"), .text("Adv^prf ≤ q/|D|"),
+        ])
+        #expect(facts.map(\.label)
+            == ["Kind", "Class", "Model", "Via", "Source", "Security loss"])
+
+        let kind = facts[0]
+        #expect(kind.symbol == "⇒")
+        #expect(kind.help == nil)
+        // The class carries the wiki's reason, and leads to the glossary.
+        let classFact = facts[1]
+        #expect(classFact.help == "HILL99 use the OWF only as an oracle.")
+        #expect(classFact.link == "[[reduction-classes#fully-black-box]]")
+        #expect(!classFact.isTentative)
+        // So does every other field the record gives a reason for.
+        #expect(facts[3].help == "One hybrid per output block.")
+        // A citation leads to its reference, with the paper as its tooltip,
+        // then the record's reason for its sources.
+        let source = facts[4]
+        #expect(source.link == "[[HILL99 - A pseudorandom generator from any one-way function|HILL99]]")
+        let sourceHelp = "HILL99 - A pseudorandom generator from any one-way function"
+            + "\nHILL99 give both the construction and the proof."
+        #expect(source.help == sourceHelp)
+        // The loss leads its own tooltip, where a long one can be read whole,
+        // and its reason is plain text like any other.
+        #expect(facts[5].help == "Adv^prf ≤ q/|D|\nA union bound over q queries.")
+        let ids = facts.map(\.id)
+        #expect(ids.count == Set(ids).count)
+    }
+
+    /// Five corpus rationales carry TeX, such as `$\classBPP$` and
+    /// `level-$j$`, and a tooltip cannot render it.
+    @Test("a rationale reaches the summary as plain text")
+    func summaryRationaleIsPlain() throws {
+        let m = Self.manifest()
+        let free = try #require(m.reduction("red-free-owf-to-ot"))
+        #expect(free.why("class") == "It calls Gen as an oracle on level-(j-1) keys.")
+        #expect(free.why("model") == nil)
+
+        let facts = PageRelations.facts(for: free, manifest: m)
+        #expect(facts.map(\.field) == [.kind, .reductionClass, .model, .source])
+        #expect(facts[0].help == "Only this direction is known.")
+        #expect(facts[1].help == "It calls Gen as an oracle on level-(j-1) keys.")
+        #expect(facts[3].help == "Folklore: the wiki has no attribution for this claim.")
+    }
+
+    @Test("a heuristic edge is never summarized as a theorem")
+    func heuristicSummary() throws {
+        let m = Self.manifest()
+        let candidate = try #require(m.reduction("red-ddh-to-pke-candidate"))
+        let facts = PageRelations.facts(for: candidate, manifest: m)
+        #expect(facts.map(\.field) == [.kind, .heuristic, .reductionClass, .model, .source])
+        // The kind's arrow is dashed too, as in the rows, never a solid `⇒`
+        // above "Heuristic candidate".
+        #expect(facts[0].symbol == "⇢")
+
+        let heuristic = facts[1]
+        #expect(heuristic.value == .text("Heuristic candidate"))
+        #expect(heuristic.help
+            == Relation.heuristicExplanation + "\nXY98 give no reduction from DDH.")
+        // `unstated` is shown as itself, de-emphasized, and still links to
+        // the glossary's section explaining it.
+        let unstated = facts[2]
+        #expect(unstated.value == .text("unstated"))
+        #expect(unstated.isTentative)
+        #expect(unstated.link == "[[reduction-classes#unstated]]")
+    }
+
+    @Test("a stub shows no class or model, and a containment no class or standard model")
+    func summaryOmissions() throws {
+        let m = Self.manifest()
+
+        let stub = try #require(m.reduction("red-ddh-and-owf-to-ot"))
+        let stubFields = PageRelations.facts(for: stub, manifest: m).map(\.field)
+        #expect(stubFields == [.kind, .source])
+
+        // IP ⊆ PSPACE: class `free`, into a complexity class.
+        let containment = try #require(m.reduction("red-ip-in-pspace"))
+        #expect(m.isComplexityContainment(containment))
+        let facts = PageRelations.facts(for: containment, manifest: m)
+        #expect(facts.map(\.field) == [.kind, .source])
+        #expect(facts.first?.value == .text("Inclusion"))
+        #expect(facts.first?.symbol == "⊆")
+
+        // An implication is never a containment, whatever its class.
+        let free = try #require(m.reduction("red-free-owf-to-ot"))
+        #expect(!m.isComplexityContainment(free))
+    }
+
+    @Test("a barrier page leads with its strength, class, assumptions and consequences")
+    func barrierSummary() throws {
+        let m = Self.manifest()
+        let barrier = try #require(m.barrier(onPage: "Barriers/no-ddh-to-ot.md"))
+        let page = PageRelations(path: barrier.path, manifest: m)
+        #expect(page.groups.first?.role == .summary)
+
+        let facts = PageRelations.facts(for: barrier, manifest: m)
+        #expect(facts.map(\.field)
+            == [.strength, .against, .assuming, .assuming, .consequence, .source, .source])
+        #expect(facts.map(\.label) == [
+            "Strength", "Against", "Assuming", "Assuming", "Would imply", "Sources", "Sources",
+        ])
+
+        let strength = facts[0]
+        #expect(strength.value == .text("Conditional"))
+        #expect(strength.help
+            == "The barrier rests on an unproven assumption.\nXY20 assume one-way functions exist.")
+        let against = facts[1]
+        #expect(against.value == .text("Fixed construction reductions"))
+        #expect(against.help == "Only the named construction is refuted.")
+
+        // An object id opens the object; free text is kept as written. The
+        // record's reason for its assumptions is on each of them.
+        #expect(facts[2].value == .object("owf"))
+        #expect(facts[3].value == .text("the language has a hard subset-membership problem"))
+        #expect(facts[2].help == "Both are XY20's own assumptions.")
+        #expect(facts[3].help == "Both are XY20's own assumptions.")
+        #expect(facts[5].help == "XY20 - On DDH and OT\nZW21 repair XY20's proof.")
+        #expect(facts[6].help == "ZW21 - More on OT\nZW21 repair XY20's proof.")
+
+        // The consequence is shown with the community's belief about it, and
+        // leads to the proposition's page.
+        let consequence = facts[4]
+        #expect(consequence.believed == true)
+        #expect(consequence.link == "[[Complexity/nondeterministic-polynomial-time]]")
+        let labels = RelationLabels(manifest: m, index: nil)
+        #expect(labels.assumption("owf") == "One-way function")
+        #expect(labels.assumption("the language has a hard subset-membership problem")
+            == "the language has a hard subset-membership problem")
+    }
+
+    @Test("a barrier's contradiction and folklore source read plainly")
+    func barrierSummaryPlainCases() throws {
+        let m = Self.manifest()
+        let barrier = try #require(m.barrier(onPage: "Barriers/no-owf-to-ot.md"))
+        let facts = PageRelations.facts(for: barrier, manifest: m)
+        #expect(facts.map(\.field) == [.strength, .against, .consequence, .source])
+        #expect(facts[1].value == .text("Fully black-box reductions"))
+        #expect(facts[2].believed == nil)
+        // The class's reason, then the oracle's, which has no field of its
+        // own. A sentence keeps its literal dollars (IND$-CPA, twice) but
+        // loses its TeX.
+        let againstHelp = "It refutes only that every scheme is IND$-CPA-secure; some other "
+            + "IND$-CPA-secure scheme is not ruled out."
+            + "\nA random permutation and a PSPACE oracle."
+        #expect(facts[1].help == againstHelp)
+
+        // A stub keeps its strength and sources, never its class.
+        let stub = try #require(m.barrier(onPage: "Barriers/no-owf-to-prg.md"))
+        let stubFacts = PageRelations.facts(for: stub, manifest: m)
+        #expect(stubFacts.map(\.field) == [.strength, .consequence, .source])
+        let folklore = stubFacts[2]
+        #expect(folklore.value == .text("folklore"))
+        #expect(folklore.link == nil)
+    }
+
     // MARK: Plain text for chrome
 
     @Test("wiki math reduces to something a SwiftUI Text can show")
@@ -449,9 +824,21 @@ struct RelationsTests {
             == "Pseudorandom generator in NC^1")
         #expect(RelationText.plain("Every ORAM incurs $\\Omega(\\log n)$ amortized overhead")
             == "Every ORAM incurs Ω(log n) amortized overhead")
-        // The unbalanced `$` in a real barrier title.
+        // A lone `$` is a literal dollar, as the wiki's contract says: this
+        // is a real barrier title, and deleting the `$` names a different
+        // notion, IND-CPA, and states a false separation.
         #expect(RelationText.plain("No reduction from CPA Security to IND$-CPA Security")
-            == "No reduction from CPA Security to IND-CPA Security")
+            == "No reduction from CPA Security to IND$-CPA Security")
+        // The site's own security-loss macros.
+        #expect(RelationText.plain(
+            "$\\Adv^{\\mathrm{prf}} \\le \\Adv^{\\mathrm{prp}} + q(q-1)/(2|\\calD|)$")
+            == "Adv^prf ≤ Adv^prp + q(q-1)/(2|D|)")
+        #expect(RelationText.plain("plus $O(\\ell q^2/2^n)$ for $\\le \\ell$ blocks")
+            == "plus O(ℓ q^2/2^n) for ≤ ℓ blocks")
+        #expect(RelationText.plain("$\\mathbf{z} \\mapsto \\mathbf{A}\\mathbf{z} \\bmod q$")
+            == "z ↦ Az mod q")
+        #expect(RelationText.plain("time $\\Omega(\\min(\\sqrt{p}, 1/\\delta))$")
+            == "time Ω(min(√p, 1/δ))")
         // A command with no rendering keeps its letters rather than its slash.
         #expect(RelationText.plain("$\\classFOO$") == "FOO")
         #expect(RelationText.plain("$\\someUnknownThing$") == "someUnknownThing")
@@ -459,6 +846,81 @@ struct RelationsTests {
         // Plain prose is untouched.
         #expect(RelationText.plain("The polynomial hierarchy collapses")
             == "The polynomial hierarchy collapses")
+    }
+
+    /// The pairing rule is micromark's, as the site's `escapeOutsideMath`
+    /// ports it: a run of n dollars is math only if a later run of exactly n
+    /// closes it.
+    @Test("a `$` is a delimiter only when it pairs")
+    func dollarsPairLikeMicromark() {
+        #expect(RelationText.plain("$5 fee") == "$5 fee")
+        #expect(RelationText.plain("$a$ and a lone $") == "a and a lone $")
+        #expect(RelationText.plain("$$x \\neq y$$") == "x ≠ y")
+        // A run of two is not closed by a run of one.
+        #expect(RelationText.plain("$$x$") == "$$x$")
+        // An escaped dollar is a dollar, and its backslash is markup.
+        #expect(RelationText.plain("costs \\$5") == "costs $5")
+        // Heading text arrives with every `$` already stripped; without a
+        // dollar the reduction is the one it always was, braces and all.
+        #expect(RelationText.plain("\\mathrm{NC}^1") == "NC^1")
+    }
+
+    /// The corpus's five TeX-bearing rationales, and the one whose literal
+    /// dollars would pair under the site's rule.
+    @Test("a rationale sentence loses its TeX and keeps its literal dollars")
+    func rationaleSentences() {
+        #expect(RelationText.sentence("an IPPE key may reveal the coefficients $r_i$.")
+            == "an IPPE key may reveal the coefficients r_i.")
+        #expect(RelationText.sentence("level-$j$ key material under the level-$(j-1)$ key")
+            == "level-j key material under the level-(j-1) key")
+        #expect(RelationText.sentence("calls $\\Gen$ and $\\Eval$ only as oracles")
+            == "calls Gen and Eval only as oracles")
+        #expect(RelationText.sentence(
+            "One fixed construction, $\\mathbf{z} \\mapsto \\mathbf{A}\\mathbf{z} \\bmod q$ keyed by")
+            == "One fixed construction, z ↦ Az mod q keyed by")
+        #expect(RelationText.sentence("a language outside $\\classBPP$, is")
+            == "a language outside BPP, is")
+
+        // Two IND$-CPA mentions pair under the site's rule, which `plain`
+        // keeps for titles; in a sentence the words between them are not
+        // math, so both dollars stay.
+        let indDollar = "is itself IND$-CPA-secure; building some other IND$-CPA-secure scheme"
+        #expect(RelationText.sentence(indDollar) == indDollar)
+        #expect(RelationText.plain(indDollar)
+            == "is itself IND-CPA-secure; building some other IND-CPA-secure scheme")
+        // A dollar left literal does not swallow a later math span.
+        #expect(RelationText.sentence("IND$-CPA and $x$") == "IND$-CPA and x")
+        #expect(RelationText.sentence("") == "")
+    }
+
+    @Test("a citation reads as its key, as the site's `renderSource` reads it")
+    func citationKeys() {
+        #expect(RelationText.citationKey("[[HILL99 - A pseudorandom generator|HILL99]]")
+            == "HILL99")
+        // No display text: the key comes from the filename.
+        #expect(RelationText.citationKey("[[GK96 - On the Composition]]") == "GK96")
+        #expect(RelationText.citationKey("[[References/BH26 - Steal OT]]") == "BH26")
+        #expect(RelationText.citationKey("folklore") == "folklore")
+        #expect(RelationText.citationKey("  ") == nil)
+
+        #expect(RelationText.linkText("[[fiat-shamir-heuristic|Fiat–Shamir]]") == "Fiat–Shamir")
+        #expect(RelationText.linkText("[[switching-lemma]]") == "switching-lemma")
+        #expect(RelationText.linkText("Fiat–Shamir") == "Fiat–Shamir")
+    }
+
+    @Test("models are named as the site names them")
+    func modelNames() {
+        #expect(RelationVocabulary.modelName("standard") == "standard model")
+        #expect(RelationVocabulary.modelName("rom") == "random oracle model")
+        #expect(RelationVocabulary.modelName("crs") == "CRS model")
+        #expect(RelationVocabulary.modelName("generic-group") == "generic group model")
+        #expect(RelationVocabulary.modelName("algebraic-group") == "algebraic group model")
+        #expect(RelationVocabulary.modelName("quantum") == "quantum setting")
+        #expect(RelationVocabulary.modelName("other") == "non-standard model")
+        #expect(RelationVocabulary.modelName("bounded-storage") == "bounded-storage model")
+
+        #expect(RelationVocabulary.modelPage("rom") == "random-oracle-model")
+        #expect(RelationVocabulary.modelPage("quantum") == nil)
     }
 
     // MARK: Grouping — the bipartite invariant
@@ -590,7 +1052,9 @@ struct RelationsTests {
         let m = RelationsManifest.load(cloneRoot: cloneRoot)
 
         #expect(m.diagnostic == nil)
-        #expect(m.reductions.count > 300, "got \(m.reductions.count) reductions")
+        // A floor, not a count: sourcing passes upstream retire and merge
+        // reductions (343 at the migration, 283 in the final-form manifest).
+        #expect(m.reductions.count > 250, "got \(m.reductions.count) reductions")
         #expect(m.barriers.count > 30, "got \(m.barriers.count) barriers")
         #expect(m.objectsByID.count > 200, "got \(m.objectsByID.count) objects")
         #expect(m.classSentinels.contains("unstated"))
@@ -610,23 +1074,73 @@ struct RelationsTests {
         // The conjunction is real: the corpus has genuine multi-hypothesis edges.
         #expect(m.reductions.count(where: \.hasMultipleHypotheses) > 20)
 
+        // The two candidate constructions are flagged, wherever they still
+        // exist: neither may ever be shown as a theorem.
+        for id in ["red-mmap-to-io-gghrsw13", "red-ntru-to-pke-hps98"] {
+            guard let relation = m.reduction(id) else { continue }
+            #expect(relation.heuristic, "\(id) is a candidate construction")
+        }
+        // Every circumvention resolves. One that did not would already be
+        // gone from `circumventedBy`, dropped at decode and counted, so the
+        // anomalies are the only place to look.
+        let droppedCircumventions = m.anomalies.filter { $0.contains("circumventedBy") }
+        #expect(droppedCircumventions.isEmpty, "\(droppedCircumventions)")
+        let circumventionCount = m.barriers.reduce(0) { $0 + $1.circumventedBy.count }
+        #expect(circumventionCount >= 2, "got \(circumventionCount) circumventions")
+
+        // No rationale reaches the chrome with TeX in it, and the one with
+        // two literal dollars keeps them.
+        for relation in m.reductions {
+            for field in relation.rationale.keys {
+                let why = relation.why(field) ?? ""
+                #expect(!why.contains("\\"), "\(relation.id) \(field): \(why)")
+            }
+        }
+        for barrier in m.barriers {
+            for field in barrier.rationale.keys {
+                let why = barrier.why(field) ?? ""
+                #expect(!why.contains("\\"), "\(barrier.id) \(field): \(why)")
+            }
+        }
+        let indDollar = m.barriers.first { $0.id == "bar-cpa-security-to-ind-cpa-security" }
+        if let why = indDollar?.why("class") {
+            #expect(why.contains("IND$-CPA"), "got \(why)")
+        }
+
         print("relations.json: \(m.reductions.count) reductions, \(m.barriers.count) barriers, "
             + "\(m.objectsByID.count) objects, \(m.anomalies.count) anomalies")
         if !m.anomalies.isEmpty { print("  " + m.anomalies.joined(separator: "\n  ")) }
     }
 
-    @Test("every corpus label is non-empty, including all 131 variants")
+    @Test("every corpus label is non-empty, unique, and names a variant's host")
     func corpusLabels() throws {
         guard let cloneRoot = Self.cloneRoot else { return }
         let m = RelationsManifest.load(cloneRoot: cloneRoot)
         let index = WikiIndex.build(contentRoot: cloneRoot.appending(path: "content"))
         let labels = RelationLabels(manifest: m, index: index)
 
+        var owners: [String: [String]] = [:]
         for object in m.objectsByID.values {
             let label = labels.label(object.id)
+            owners[label, default: []].append(object.id)
             #expect(!label.isEmpty, "\(object.id) has no label")
-            #expect(!label.contains("$"), "\(object.id) label still has math: \(label)")
             #expect(!label.contains("\\"), "\(object.id) label still has a macro: \(label)")
+            // A lone `$` is a literal dollar (IND$-CPA); two would mean a math
+            // span survived.
+            let dollars = label.filter { $0 == "$" }.count
+            #expect(dollars < 2, "\(object.id) label still has math: \(label)")
+            if object.isVariant {
+                #expect(label.contains(" § "), "\(object.id) is named without its host: \(label)")
+            }
+        }
+        // Two pages have a "CPA Security" section; the label must tell them
+        // apart, or a row names the wrong notion.
+        let shared = owners.filter { $0.value.count > 1 }
+        #expect(shared.isEmpty, "labels shared by several objects: \(shared)")
+
+        if m.object("ind-dollar-cpa-security") != nil {
+            let label = labels.label("ind-dollar-cpa-security")
+            #expect(label.contains("IND$-CPA"), "got \(label)")
         }
         for relation in m.reductions {
             #expect(!labels.statement(relation).isEmpty)
@@ -710,6 +1224,17 @@ struct RelationsTests {
             #expect(page.groups.contains {
                 $0.role == .hypotheses || $0.role == .hypothesesConjoined
             })
+            // The page leads with its own record, which always has its kind.
+            #expect(page.groups.first?.role == .summary)
+            let fields = page.groups.first?.facts.map(\.field) ?? []
+            #expect(fields.first == .kind, "\(relation.id)")
+            // Neither class nor standard model under IP ⊆ PSPACE.
+            let showsClass = fields.contains(.reductionClass)
+            if m.isComplexityContainment(relation) {
+                #expect(!showsClass, "\(relation.id)")
+            }
+            let showsHeuristic = fields.contains(.heuristic)
+            #expect(showsHeuristic == relation.heuristic, "\(relation.id)")
         }
         for barrier in m.barriers {
             let page = PageRelations(path: barrier.path, manifest: m)
@@ -718,6 +1243,19 @@ struct RelationsTests {
                 continue
             }
             #expect(found.id == barrier.id)
+            #expect(page.groups.first?.role == .summary)
+
+            // The contract: a barrier is not the last word until its
+            // circumvention has been read, on both pages.
+            guard !barrier.circumventedBy.isEmpty else { continue }
+            let listsCircumvention = page.groups.map(\.role).contains(.circumventedBy)
+            #expect(listsCircumvention, "\(barrier.id)")
+            for relation in m.reductions(circumventing: barrier) {
+                let reductionPage = PageRelations(path: relation.path, manifest: m)
+                let group = reductionPage.groups.first { $0.role == .circumvents }
+                let rows = group?.rows.map(\.id) ?? []
+                #expect(rows.contains("b:" + barrier.id), "\(relation.id)")
+            }
         }
     }
 
@@ -726,11 +1264,12 @@ struct RelationsTests {
         guard let cloneRoot = Self.cloneRoot else { return }
         let m = RelationsManifest.load(cloneRoot: cloneRoot)
 
-        // Today this is zero: every barrier that shares a hyperedge with a
-        // reduction has `unstated` on one side, or is the `free` reduction
-        // against a `fully-black-box` barrier, which does not bite. Recorded so
-        // that a change in the wiki — or an inversion of the rule here — shows
-        // up as a test failure rather than as a silent new warning in the UI.
+        // Today this is zero: one hyperedge is shared by a reduction and a
+        // barrier, BH26's `free` OIHF ⇒ OT against a `fully-black-box`
+        // barrier, which does not bite (the barrier lists that reduction as
+        // circumventing it). Recorded so that a change in the wiki — or an
+        // inversion of the rule here — shows up as a test failure rather than
+        // as a silent new warning in the UI.
         let conflicts = m.reductions.flatMap { relation in
             m.barriers(contradicting: relation).map { "\(relation.id) vs \($0.id)" }
         }
