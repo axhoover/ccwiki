@@ -260,8 +260,8 @@
     headingIds(md);
     callouts(md);
 
-    // Every rendered formula carries its source in `data-tex`, so a
-    // right-click can offer Copy TeX. KaTeX's own annotation would do it,
+    // Every rendered formula carries its source in `data-tex`, so ⌘C and a
+    // right-click can copy its LaTeX. KaTeX's own annotation would do it,
     // but only with MathML output, which the site does not emit.
     md.renderer.rules.math_inline = function (tokens, idx) {
       try {
@@ -365,6 +365,14 @@
 
     blocks.forEach(function (el, i) {
       var source = el.textContent;
+      // The box goes in first and the block renders inside it, so each box
+      // holds its own block. Finding the output afterwards by its position
+      // among the `.ps-root`s went wrong after a failed block, which leaves
+      // none, and misaligned every later block.
+      var box = document.createElement("div");
+      box.className = "pseudocode-container";
+      el.parentNode.insertBefore(box, el);
+      box.appendChild(el);
       try {
         // `Renderer.captionCount` is a module-level counter that never resets;
         // in a long-lived web view "Algorithm N" would drift across pages.
@@ -379,20 +387,129 @@
         var pre = document.createElement("pre");
         pre.className = "pseudocode-error";
         pre.textContent = "pseudocode error: " + e.message + "\n\n" + source;
-        el.replaceWith(pre);
+        box.replaceWith(pre);
         return;
       }
-      // renderElement replaces the <pre> in place; wrap whatever landed there.
-      var rendered = root.querySelectorAll(".ps-root");
-      var node = rendered[i];
-      if (node && !node.parentElement.classList.contains("pseudocode-container")) {
-        var box = document.createElement("div");
-        box.className = "pseudocode-container";
-        node.parentElement.insertBefore(box, node);
-        box.appendChild(node);
-      }
+      // On the box, never as a data-* attribute of the <pre>: renderElement
+      // copies the <pre>'s dataset into its own options.
+      var latex = stripAlgname(source);
+      box.setAttribute("data-source", latex);
+      var split = /^\s*%\s*oracle-split:\s*(\d+)/m.exec(source);
+      if (split) box.setAttribute("data-oracle-split", split[1]);
+      addCopyRow(box, latex);
     });
     return { count: blocks.length, errors: errors };
+  }
+
+  /** `\algname{…}` is the wiki fork's own directive, which LaTeX's
+   *  algorithmicx does not know, so copied source leaves it out, as the
+   *  site's copy buttons do (quartz pseudocode.ts:155). */
+  function stripAlgname(source) {
+    return source.replace(/\\algname\{[^}]*\}/g, "");
+  }
+
+  /** `source` with the wiki's macros written out, for a LaTeX document that
+   *  does not have the preamble. The site makes one pass over the table in
+   *  the order of macros.ts (quartz pseudocode.ts:159). Here the order is
+   *  whatever the Swift dictionary gave this launch, so passes repeat until
+   *  nothing changes: the result does not depend on the order, and a macro
+   *  whose body uses another would come out fully written. Today no body
+   *  does, so the first pass is the last and the result is the site's. The
+   *  cap stops a self-referring macro, which KaTeX would reject anyway. A
+   *  name matches only as a whole control word, so `\st` leaves `\stA`
+   *  alone. */
+  function expandMacros(source, macros) {
+    var patterns = Object.keys(macros).map(function (name) {
+      return {
+        pattern: new RegExp(
+          name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![a-zA-Z@*])", "g"),
+        body: macros[name],
+      };
+    });
+    var result = stripAlgname(source);
+    for (var pass = 0; pass < 10; pass++) {
+      var before = result;
+      patterns.forEach(function (macro) {
+        // A function, so a `$` in the body is never read as a replacement
+        // pattern.
+        result = result.replace(macro.pattern, function () { return macro.body; });
+      });
+      if (result === before) break;
+    }
+    return result;
+  }
+
+  /** A small button that puts `text()` on the pasteboard through the app,
+   *  and says so for two seconds, as the site's buttons do. The text is
+   *  worked out on click, from the page as rendered.
+   *
+   *  The label is generated content (`.copy-button::before` in app.css),
+   *  not text in the DOM: the buttons sit faded out on every algorithm, and
+   *  find in page would otherwise match "LaTeX" or "macros" in them and
+   *  could jump to one above the real hit. `aria-label` names the button
+   *  for VoiceOver. */
+  function copyButton(label, text) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-button";
+    setButtonLabel(button, label);
+    var timer = null;
+    button.addEventListener("click", function () {
+      post({ type: "copy", text: text() });
+      // Hold the width, so the row does not shift while the label is short.
+      button.style.minWidth = button.getBoundingClientRect().width + "px";
+      setButtonLabel(button, "Copied!");
+      button.classList.add("copied");
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        setButtonLabel(button, label);
+        button.classList.remove("copied");
+        button.style.minWidth = "";
+      }, 2000);
+    });
+    return button;
+  }
+
+  function setButtonLabel(button, label) {
+    button.setAttribute("data-label", label);
+    button.setAttribute("aria-label", label);
+  }
+
+  /** The site's pair of buttons under an algorithm (quartz pseudocode.ts:182):
+   *  its source as written, and the same with the macros written out. */
+  function addCopyRow(box, latex) {
+    var row = document.createElement("div");
+    row.className = "copy-row";
+    row.appendChild(copyButton("Copy LaTeX (macros)", function () { return latex; }));
+    row.appendChild(copyButton("Copy LaTeX (no macros)", function () {
+      return expandMacros(latex, currentMacros || {});
+    }));
+    box.appendChild(row);
+  }
+
+  /** Glossary/latex-macros has an empty `#macros-copy-area` for the site's
+   *  script to fill (quartz pseudocode.ts:253). Fill it the same way, from
+   *  the table this page was rendered with. The names are sorted: the table
+   *  crosses from Swift as a dictionary, so the order of macros.ts is gone. */
+  function fillMacrosCopyArea(root) {
+    var area = root.querySelector("#macros-copy-area");
+    var macros = currentMacros || {};
+    var names = Object.keys(macros).sort();
+    if (!area || !names.length) return;
+
+    var sorted = {};
+    names.forEach(function (name) { sorted[name] = macros[name]; });
+    var preamble = names.map(function (name) {
+      return "\\newcommand{" + name + "}{" + macros[name] + "}";
+    }).join("\n");
+    var json = JSON.stringify(sorted, null, 2);
+
+    var row = document.createElement("div");
+    row.className = "copy-row";
+    row.appendChild(copyButton("Copy LaTeX preamble", function () { return preamble; }));
+    row.appendChild(copyButton("Copy KaTeX/MathJax JSON", function () { return json; }));
+    area.textContent = "";
+    area.appendChild(row);
   }
 
   /** Groups a `\algname{Game}` block with the non-Game blocks that immediately
@@ -418,6 +535,15 @@
         column.className = "oracle-column";
         followers.forEach(function (box) { column.appendChild(box); });
         group.appendChild(column);
+        // `% oracle-split: N` in the game's source gives the oracles N% of
+        // the width (quartz pseudocode.ts:245). A class and a custom property
+        // rather than the site's inline `flex`, which the narrow-window
+        // rules could not override.
+        var share = parseInt(boxes[i].getAttribute("data-oracle-split"), 10);
+        if (share > 0 && share < 100) {
+          group.classList.add("split");
+          group.style.setProperty("--oracle-share", share + "%");
+        }
       }
       i = j;
     }
@@ -521,6 +647,7 @@
       return;
     }
 
+    fillMacrosCopyArea(page);
     var pseudo = { count: 0, errors: 0 };
     if (global.pseudocode) {
       pseudo = renderPseudocode(page);
@@ -568,16 +695,116 @@
     return best;
   }
 
-  // Internal links are navigations for the *app*, not the web view: the Swift
-  // side owns history, the sidebar selection and the inspector.
-  // Before WebKit builds the context menu, tell Swift what is under the
-  // pointer. The message is sent on the same connection as, and ahead of,
-  // the menu request, so it arrives first.
-  document.addEventListener("contextmenu", function (event) {
-    var math = event.target.closest ? event.target.closest("[data-tex]") : null;
-    post({ type: "contextTarget", tex: math ? math.getAttribute("data-tex") : null });
+  // ============================================================= copying ==
+  // A formula on the page is glyphs: copied as it stands, a fraction reads
+  // as "21" and every macro is lost. ⌘C and the context menu put its LaTeX
+  // on the pasteboard instead, and the buttons under each algorithm copy
+  // the whole block.
+
+  /** The formula `node` is part of, if any. Markdown math carries its source
+   *  in `data-tex`; pseudocode.js renders with KaTeX's default output, whose
+   *  MathML annotation carries it instead. */
+  function mathHost(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (!el || !el.closest) return null;
+    return el.closest("[data-tex]") || el.closest(".katex");
+  }
+
+  function texOf(host) {
+    if (host.hasAttribute("data-tex")) return host.getAttribute("data-tex");
+    var annotation = host.querySelector('annotation[encoding="application/x-tex"]');
+    return annotation ? annotation.textContent : null;
+  }
+
+  /** Replaces every formula under `root` with its LaTeX: `$…$` inline, and
+   *  display math as `$$`, the source and `$$` on lines of their own, which
+   *  is how the wiki writes it (a one-line `$$x$$` is inline math). */
+  function texify(root) {
+    root.querySelectorAll("[data-tex]").forEach(function (host) {
+      var display = host.classList.contains("math-display");
+      host.replaceWith(texNode(host.getAttribute("data-tex"), display));
+    });
+    root.querySelectorAll(".katex").forEach(function (katex) {
+      var tex = texOf(katex);
+      if (tex !== null) katex.replaceWith(texNode(tex, false));
+    });
+  }
+
+  function texNode(tex, display) {
+    var node = document.createElement(display ? "div" : "span");
+    node.textContent = display ? "$$\n" + tex + "\n$$" : "$" + tex + "$";
+    // As typed: innerText would otherwise fold the line breaks into spaces.
+    node.style.whiteSpace = "pre-wrap";
+    return node;
+  }
+
+  // ⌘C, Edit › Copy and the menu's own Copy all reach here. A selection with
+  // math in it is copied with each formula as its LaTeX, as plain text and
+  // as HTML, so Notes and Mail paste the LaTeX too. Anything else is left to
+  // WebKit.
+  document.addEventListener("copy", function (event) {
+    var selection = window.getSelection();
+    if (!event.clipboardData || !selection || selection.isCollapsed || !selection.rangeCount) return;
+
+    // A clone, widened to whole formulas: half a formula has no LaTeX, and
+    // moving the real selection would show.
+    var range = selection.getRangeAt(0).cloneRange();
+    var start = mathHost(range.startContainer);
+    if (start) range.setStartBefore(start);
+    var end = mathHost(range.endContainer);
+    if (end) range.setEndAfter(end);
+
+    var scratch = document.createElement("div");
+    scratch.className = "copy-scratch";
+    scratch.setAttribute("aria-hidden", "true");
+    scratch.appendChild(range.cloneContents());
+    // The copy buttons are not page text. Their labels are generated content,
+    // but the buttons themselves, whatever WebKit makes of their
+    // user-select: none, could still reach the copied HTML, so a selection
+    // across them is copied here, without them.
+    if (!scratch.querySelector("[data-tex], .katex, .copy-row")) return;
+    scratch.querySelectorAll(".copy-row").forEach(function (row) { row.remove(); });
+    texify(scratch);
+    // One line per algorithm line: to innerText a <p> is a paragraph, with
+    // a blank line after it.
+    scratch.querySelectorAll("p.ps-line").forEach(function (line) {
+      var div = document.createElement("div");
+      div.className = line.className;
+      while (line.firstChild) div.appendChild(line.firstChild);
+      line.replaceWith(div);
+    });
+
+    // Attached, because only a laid-out box has an innerText with the
+    // paragraph and line breaks the reader sees; textContent runs them
+    // together.
+    document.body.appendChild(scratch);
+    var text = scratch.innerText || scratch.textContent;
+    scratch.remove();
+
+    event.clipboardData.setData("text/plain", text);
+    event.clipboardData.setData("text/html", scratch.innerHTML);
+    event.preventDefault();
   }, true);
 
+  // Before WebKit builds the context menu, tell Swift what is under the
+  // pointer: a formula's LaTeX, and an algorithm's, as written and with the
+  // macros written out. The message is sent on the same connection as, and
+  // ahead of, the menu request, so it arrives first.
+  document.addEventListener("contextmenu", function (event) {
+    var target = event.target;
+    var host = mathHost(target);
+    var box = target && target.closest ? target.closest(".pseudocode-container") : null;
+    var source = box ? box.getAttribute("data-source") : null;
+    post({
+      type: "contextTarget",
+      tex: host ? texOf(host) : null,
+      algorithm: source,
+      algorithmExpanded: source === null ? null : expandMacros(source, currentMacros || {}),
+    });
+  }, true);
+
+  // Internal links are navigations for the *app*, not the web view: the Swift
+  // side owns history, the sidebar selection and the inspector.
   document.addEventListener("click", function (event) {
     var anchor = event.target.closest ? event.target.closest("a") : null;
     if (!anchor) return;

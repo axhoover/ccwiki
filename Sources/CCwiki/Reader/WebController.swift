@@ -26,8 +26,8 @@ final class WebController: NSObject {
     var onNavigate: ((CCwikiURL.Destination, _ modified: Bool) -> Void)?
     /// The page's own address on the site, for the page context menu.
     var siteURLProvider: (() -> URL?)?
-    /// The TeX source of the formula under the last right-click, if any.
-    @ObservationIgnored fileprivate var contextTeX: String?
+    /// What the page reported under the last right-click, for the menu.
+    @ObservationIgnored fileprivate var contextTarget: ReaderContextTarget?
 
     /// Called when the shell has (re)loaded and there is nothing queued: the
     /// owner should render whatever it is showing again. That is how the
@@ -247,7 +247,14 @@ final class WebController: NSObject {
             onNavigate?(destination, message["modified"] as? Bool ?? false)
 
         case "contextTarget":
-            contextTeX = message["tex"] as? String
+            contextTarget = ReaderContextTarget(message: message)
+
+        case "copy":
+            // The page's copy buttons. Their text comes here rather than
+            // going to navigator.clipboard, which a page on a custom scheme
+            // cannot count on having.
+            guard let text = message["text"] as? String, !text.isEmpty else { return }
+            ReaderWebView.copy(text)
 
         case "openExternal":
             guard let string = message["url"] as? String,
@@ -357,11 +364,15 @@ final class ReaderWebView: WKWebView {
             item.identifier.map { Self.removedIdentifiers.contains($0.rawValue) } ?? false
         }
 
-        // Copy TeX first, when the click was on a formula: the one thing
-        // the default menu cannot offer, since the page shows only glyphs.
-        if let tex = controller?.contextTeX, !tex.isEmpty {
-            menu.insertItem(.separator(), at: 0)
-            menu.insertItem(ClosureMenuItem("Copy TeX") { Self.copy(tex) }, at: 0)
+        // Copy LaTeX first, when the click was on a formula or an algorithm:
+        // the one thing the default menu cannot offer, since the page shows
+        // only glyphs.
+        let copyItems = controller?.contextTarget?.copyItems ?? []
+        if !copyItems.isEmpty {
+            for (index, item) in copyItems.enumerated() {
+                menu.insertItem(Self.menuItem(for: item), at: index)
+            }
+            menu.insertItem(.separator(), at: copyItems.count)
         }
         // The page itself, wherever the click was.
         if let url = controller?.siteURLProvider?() {
@@ -383,12 +394,85 @@ final class ReaderWebView: WKWebView {
 
     override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {
         super.didCloseMenu(menu, with: event)
-        controller?.contextTeX = nil
+        controller?.contextTarget = nil
     }
 
-    private static func copy(_ text: String) {
+    /// The item for one copy entry. The text is captured by value, so the
+    /// copy still works if `didCloseMenu` has cleared the target before the
+    /// action runs. An alternate replaces the item above it while Option is
+    /// held: it must follow that item directly and differ only in its
+    /// modifier mask.
+    private static func menuItem(for entry: ReaderContextTarget.CopyItem) -> NSMenuItem {
+        let text = entry.text
+        let item = ClosureMenuItem(entry.title) { Self.copy(text) }
+        if entry.isAlternate {
+            item.isAlternate = true
+            item.keyEquivalentModifierMask = .option
+        }
+        return item
+    }
+
+    static func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// What the page reported under the pointer at a right-click: the formula,
+/// the pseudocode block, both or neither. Reported by `ccwiki.js` just ahead
+/// of the menu, and turned into the menu's copy items here, where they can
+/// be tested without a menu.
+struct ReaderContextTarget: Equatable, Sendable {
+
+    /// One copy entry at the top of the menu.
+    struct CopyItem: Equatable, Sendable {
+        let title: String
+        let text: String
+        /// Shown in place of the entry above it while Option is held.
+        let isAlternate: Bool
+    }
+
+    /// The formula's LaTeX as written on the page, without delimiters.
+    let tex: String?
+    /// The pseudocode block's source, `\algname{…}` taken out.
+    let algorithm: String?
+    /// The same with the wiki's macros written out, for a document that
+    /// does not have the preamble.
+    let algorithmExpanded: String?
+
+    /// An empty string counts as absent: there is nothing to copy.
+    init(tex: String? = nil, algorithm: String? = nil, algorithmExpanded: String? = nil) {
+        self.tex = tex?.isEmpty == false ? tex : nil
+        self.algorithm = algorithm?.isEmpty == false ? algorithm : nil
+        self.algorithmExpanded = algorithmExpanded?.isEmpty == false ? algorithmExpanded : nil
+    }
+
+    /// The bridge message. A JavaScript `null` arrives as `NSNull`, which
+    /// reads as absent like anything else that is not a string.
+    init(message: [String: Any]) {
+        self.init(
+            tex: message["tex"] as? String,
+            algorithm: message["algorithm"] as? String,
+            algorithmExpanded: message["algorithmExpanded"] as? String)
+    }
+
+    /// In menu order: the formula, then the algorithm, then the algorithm
+    /// with its macros written out as the Option-key alternate.
+    var copyItems: [CopyItem] {
+        var items: [CopyItem] = []
+        if let tex {
+            items.append(CopyItem(title: "Copy LaTeX", text: tex, isAlternate: false))
+        }
+        if let algorithm {
+            items.append(CopyItem(title: "Copy Algorithm as LaTeX", text: algorithm, isAlternate: false))
+            if let algorithmExpanded {
+                items.append(CopyItem(
+                    title: "Copy Algorithm as LaTeX (No Macros)",
+                    text: algorithmExpanded,
+                    isAlternate: true))
+            }
+        }
+        return items
     }
 }
 

@@ -259,12 +259,114 @@ pre {
 
 .ps-algorithm { border-color: var(--rule-strong) !important; }
 .ps-algorithm.with-caption > .ps-line:first-child { border-color: var(--rule-strong) !important; }
-.ps-root .ps-comment { color: var(--text-tertiary); }
 .ps-root .ps-keyword { color: var(--text); }
+
+/* \Comment{…} sits flush right, as on the site (quartz pseudocode.ts:69).
+ * pseudocode.js appends it as the last span of the line it annotates; the
+ * 2em pad keeps it clear of the code when the two share a row. Secondary,
+ * not tertiary: comments are read, and tertiary is under 4.5:1 on the
+ * block's background. */
+.ps-root .ps-comment {
+  float: right;
+  padding-left: 2em;
+  text-indent: 0;              /* a float would take a \Require line's hanging indent */
+  color: var(--text-secondary);
+}
+
+/* Each line contains its own comment: one too long to share its statement's
+ * row drops to a row of its own beneath it, still flush right, instead of
+ * hanging beside the next statement as it does on the site. */
+.ps-root .ps-line { display: flow-root; }
+
+/* The site's copy buttons under each algorithm (quartz pseudocode.ts:73):
+ * out of sight until the pointer is over the block, never part of a text
+ * selection, and never printed. Faded rather than inserted, so the block
+ * does not change height under the pointer. */
+.copy-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Tucked into the algorithm's bottom margin, so the block grows by little
+ * more than the buttons' height.
+ *
+ * The row is laid out while faded, so it must not widen its box: in a game
+ * group that width becomes the oracle column's flex basis, and the two
+ * buttons' 310px or so pulled most groups back to an even split. A zero
+ * width with a 100% minimum counts as nothing when the box's width is
+ * worked out (a percentage of a width still being found counts as zero)
+ * and spans the box once it is known. The buttons wrap in a box narrower
+ * than the pair. */
+.pseudocode-container > .copy-row {
+  width: 0;
+  min-width: 100%;
+  flex-wrap: wrap;
+  margin-top: -0.3rem;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.pseudocode-container:hover > .copy-row,
+.pseudocode-container:focus-within > .copy-row { opacity: 1; }
+
+/* Glossary/latex-macros: the preamble and JSON buttons, always shown. */
+#macros-copy-area > .copy-row {
+  justify-content: flex-start;
+  margin: 0 0 1.05rem;
+}
+
+/* A small, quiet control in the system face, like a macOS small button:
+ * the arrow cursor, not a link's pointing hand. */
+.copy-button {
+  -webkit-appearance: none;
+  appearance: none;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.76rem;
+  font-weight: 400;
+  line-height: 1.35;
+  padding: 0.08rem 0.5rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  cursor: default;
+  white-space: nowrap;
+  text-align: center;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+/* The label, set by ccwiki.js in `data-label`. Generated content is not in
+ * the DOM, so find in page does not match the faded buttons. */
+.copy-button::before { content: attr(data-label); }
+
+.copy-button:hover { color: var(--text); border-color: var(--text-tertiary); }
+.copy-button:active { background: var(--bg-sunken); }
+.copy-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.copy-button.copied { color: var(--accent); }
+
+/* The off-screen box the copy handler lays a selection out in, so that
+ * innerText sees real line breaks. Laid out and visible, because hidden
+ * text has no innerText; it lives only for the length of the copy event. */
+.copy-scratch {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  width: var(--measure);
+  pointer-events: none;
+}
+
+/* A copied algorithm line keeps its comment on the same line. */
+.copy-scratch .ps-comment { float: none; }
 
 /* The site groups a `\algname{Game}` block with the oracle blocks that follow
  * it and lays them out side by side; the cryptography reads far worse stacked.
- * Falls back to stacking when the window is narrow. */
+ * Falls back to stacking when the window is narrow.
+ *
+ * The game takes what it needs and the oracles keep a readable minimum. An
+ * even split starves the game, whose lines and comments are the long ones. */
 .game-group {
   display: flex;
   gap: 0.85rem;
@@ -272,20 +374,29 @@ pre {
   margin: 0 0 1.05rem;
 }
 
-.game-group > .pseudocode-container { margin: 0; flex: 1 1 0; min-width: 0; }
+.game-group > .pseudocode-container { margin: 0; flex: 1 1 auto; min-width: 0; }
 .game-group > .oracle-column {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: 12rem;
 }
 .game-group > .oracle-column > .pseudocode-container { margin: 0; }
 
-@media (max-width: 760px) {
-  .game-group { flex-direction: column; }
+/* `% oracle-split: N` in the game's source fixes the oracles' share at N%. */
+@media (width > 760px) {
+  .game-group.split > .pseudocode-container { flex: 1 1 0; }
+  .game-group.split > .oracle-column { flex: 0 0 var(--oracle-share); min-width: 0; }
+}
+
+/* Stacked, every box takes its content's height. A zero flex basis here
+ * collapsed the game, which scrolls sideways and so has no minimum height
+ * of its own, to a sliver. */
+@media (width <= 760px) {
+  .game-group { flex-direction: column; align-items: stretch; }
   .game-group > .pseudocode-container,
-  .game-group > .oracle-column { width: 100%; }
+  .game-group > .oracle-column { flex: none; width: auto; min-width: 0; }
 }
 
 .pseudocode-error {
@@ -488,7 +599,7 @@ tbody tr:last-child td { border-bottom: none; }
   }
   html, body { background: #ffffff; }
   .page { max-width: none; padding: 0; }
-  .notice { display: none; }
+  .notice, .copy-row { display: none; }
   .math-display, .pseudocode-container, .game-group, pre, table, figure {
     break-inside: avoid;
   }
