@@ -8,8 +8,11 @@ struct CCwikiApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup {
+        // An id, so the explorer can open a reader when none is on screen to
+        // show the page it was asked to open.
+        WindowGroup(id: CCwikiApp.mainWindowID) {
             RootView()
+                .modifier(ReaderWindowHooks())
                 .environment(model)
                 .frame(
                     minWidth: Theme.windowMinWidth,
@@ -34,6 +37,17 @@ struct CCwikiApp: App {
         .defaultSize(width: 1000, height: 640)
         .keyboardShortcut("j", modifiers: [.command, .shift])
 
+        // The Relations Explorer, in a window of its own for the same reason:
+        // you want the proof open while reading the page it is about. No
+        // shortcut on the scene: ⇧⌘E is the Wiki menu's, so the key
+        // equivalent lives on one menu item, not two.
+        Window("Relations Explorer", id: CCwikiApp.explorerWindowID) {
+            RelationsExplorerView()
+                .environment(model)
+        }
+        .defaultSize(width: Theme.explorerDefaultWidth, height: Theme.explorerDefaultHeight)
+        .windowResizability(.contentMinSize)
+
         Settings {
             SettingsView()
                 .environment(model)
@@ -41,6 +55,28 @@ struct CCwikiApp: App {
     }
 
     static let jobsWindowID = "ccwiki.jobs"
+    static let explorerWindowID = "ccwiki.relations-explorer"
+    static let mainWindowID = "ccwiki.main"
+}
+
+/// What a reader window does for the others: it counts itself, so the
+/// explorer knows whether a page it opens will be seen, and it answers the
+/// model's requests to open the explorer. `openWindow` is an environment
+/// action, so a view has to make the call; the requests come from AppKit's
+/// menus and from `AppModel.explore(_:)`. The Jobs window's requests are
+/// answered the same way, in `RootView`.
+private struct ReaderWindowHooks: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { model.mainWindowCount += 1 }
+            .onDisappear { model.mainWindowCount -= 1 }
+            .onChange(of: model.explorerWindowRequests) { _, _ in
+                openWindow(id: CCwikiApp.explorerWindowID)
+            }
+    }
 }
 
 /// The one AppKit hook SwiftUI does not offer: a say in whether the app quits.
@@ -230,6 +266,25 @@ struct CCwikiCommands: Commands {
 
             Button("Random Page") { model?.openRandomPage() }
                 .disabled(model?.index == nil)
+
+            Divider()
+
+            // ⇧⌘E, the shape of ⇧⌘J for the other secondary window; E for
+            // explore. It opens the window directly, as Show Jobs does, so it
+            // works whichever window is key.
+            Button("Relations Explorer") { openWindow(id: CCwikiApp.explorerWindowID) }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+
+            // ⌥⇧⌘E: the Option form is the "this page" variant. It needs the
+            // reader's page, so it is disabled unless a reader window is key
+            // and its page has something to explore.
+            Button("Explore From This Page") {
+                guard let model, let query = model.currentPageExplorerQuery else { return }
+                model.explore(query)
+                openWindow(id: CCwikiApp.explorerWindowID)
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift, .option])
+            .disabled(model?.canExploreCurrentPage != true)
 
             Divider()
 

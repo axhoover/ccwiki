@@ -1,0 +1,3951 @@
+{
+ "about": "Expected answers of CCwiki's derivation engine on one wiki manifest and one curation. Written by scripts/derivations_reference.py; spec in plans/derivations.md. Exact when manifestSHA256 matches the clone's .reductions/relations.json and curationSHA256 matches Resources/derivation-curation.json; otherwise only each record's `stable` fields, `invariants`, `sentinels` and `mutations` are asserted, and only while every count is within `tolerance` of `counts`.",
+ "generator": "scripts/derivations_reference.py",
+ "wikiCommit": "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157",
+ "manifestSHA256": "b0c3fb657570d678d1d8bf69ca60d05ded9ade2b0bba05169d597767b4c0e3ee",
+ "curationSHA256": "ef14fbdfcfe4707fd8a688a70af199b62eeaadd9008f17b728ac928f254fb0ca",
+ "counts": {
+  "objects": 262,
+  "reductions": 283,
+  "barriers": 32
+ },
+ "tolerance": 0.1,
+ "policy": {
+  "defaultModels": [
+   "crs",
+   "quantum",
+   "standard"
+  ],
+  "idealisedModels": [
+   "algebraic-group",
+   "generic-group",
+   "other",
+   "rom"
+  ],
+  "modelNodes": {
+   "rom": "rom",
+   "ggm": "generic-group",
+   "agm": "algebraic-group"
+  },
+  "composableClasses": [
+   "fully-black-box",
+   "relativizing",
+   "free"
+  ],
+  "unstatedAfterIdealised": "refuse",
+  "unmetPrecondition": "refuse",
+  "completionCap": 8
+ },
+ "eligibleSteps": {
+  "default": 201,
+  "all": 236,
+  "quarantined": 3
+ },
+ "excluded": {
+  "complexity-class-endpoint": 4,
+  "heuristic": 2,
+  "inclusion": 45,
+  "quarantined": 3
+ },
+ "closureSizes": {
+  "owf": {
+   "default": 15,
+   "defaultWeak": 0,
+   "all": 15
+  },
+  "ddh": {
+   "default": 33,
+   "defaultWeak": 0,
+   "all": 37
+  },
+  "lwe": {
+   "default": 29,
+   "defaultWeak": 0,
+   "all": 29
+  },
+  "dcr": {
+   "default": 29,
+   "defaultWeak": 0,
+   "all": 31
+  },
+  "fac": {
+   "default": 16,
+   "defaultWeak": 0,
+   "all": 17
+  },
+  "rsa": {
+   "default": 22,
+   "defaultWeak": 0,
+   "all": 28
+  },
+  "gapsvp": {
+   "default": 33,
+   "defaultWeak": 0,
+   "all": 36
+  },
+  "dlog": {
+   "default": 19,
+   "defaultWeak": 0,
+   "all": 24
+  },
+  "rom": {
+   "default": 0,
+   "defaultWeak": 0,
+   "all": 2
+  },
+  "ggm": {
+   "default": 0,
+   "defaultWeak": 0,
+   "all": 28
+  },
+  "pke": {
+   "default": 19,
+   "defaultWeak": 0,
+   "all": 19
+  },
+  "ot": {
+   "default": 4,
+   "defaultWeak": 0,
+   "all": 4
+  },
+  "lpn-low-noise": {
+   "default": 31,
+   "defaultWeak": 0,
+   "all": 35
+  },
+  "bdh": {
+   "default": 5,
+   "defaultWeak": 1,
+   "all": 27
+  },
+  "circular-evasive-lwe": {
+   "default": 23,
+   "defaultWeak": 0,
+   "all": 23
+  }
+ },
+ "impliedBy": {
+  "pke": {
+   "singleCount": 27,
+   "pairCount": 39,
+   "settings": [],
+   "refutedExcluded": [
+    "circular-evasive-lwe"
+   ],
+   "singlesWithAssumptions": [],
+   "groups": {
+    "red-hash-function-and-io-to-pke-sw14": {
+     "pairCount": 21,
+     "models": [],
+     "assumes": [
+      "DLOG hard in Z_p^* (p prime, g a generator)",
+      "public-key FE for P/poly that is single-key, sub-exponentially secure and weakly compact"
+     ]
+    },
+    "red-kem-and-ske-to-pke": {
+     "pairCount": 15,
+     "models": [],
+     "assumes": [
+      "DLOG hard in Z_p^* (p prime, g a generator)",
+      "LPN that is 2^(O(sqrt n))-hard"
+     ]
+    },
+    "red-bdh-to-ibe-wat09": {
+     "pairCount": 1,
+     "models": [],
+     "assumes": [
+      "DBDH in the same symmetric prime-order pairing group as DLIN",
+      "DLIN in the same symmetric prime-order pairing group as DBDH"
+     ]
+    },
+    "red-noisy-k-lin-and-pc-to-pke-ghjs25": {
+     "pairCount": 1,
+     "models": [],
+     "assumes": []
+    },
+    "red-pc-and-search-noisy-k-lin-to-pke-ghjs25": {
+     "pairCount": 1,
+     "models": [],
+     "assumes": []
+    }
+   }
+  },
+  "ot": {
+   "singleCount": 22,
+   "pairCount": 0,
+   "settings": [],
+   "refutedExcluded": [],
+   "singlesWithAssumptions": [
+    "lpn-low-noise",
+    "subexponential-lpn"
+   ],
+   "groups": {}
+  },
+  "mpc": {
+   "singleCount": 17,
+   "pairCount": 0,
+   "settings": [
+    "honest-majority-t-lt-n-over-2",
+    "honest-majority-t-lt-n-over-3"
+   ],
+   "refutedExcluded": [],
+   "singlesWithAssumptions": [
+    "lpn-low-noise",
+    "ot"
+   ],
+   "groups": {}
+  }
+ },
+ "derivedBarrierCount": 406,
+ "derivedBarrierPairs": 272,
+ "invariants": {
+  "noIneligibleEdges": true,
+  "defaultHasNoIdealisedModels": true,
+  "noChainContradictsRecordedBarrier": true,
+  "noChainProvesBelievedProposition": true,
+  "noChainContradictsDerivedBarrier": true,
+  "noDerivedBarrierContradictsRecordedReduction": true,
+  "romDoesNotReachOT": true,
+  "romDoesNotReachKE": true
+ },
+ "sentinels": {
+  "curationResolves": true,
+  "regimeLossCurated": true,
+  "equivalencesReviewed": true
+ },
+ "queries": [
+  {
+   "id": "ddh-ot",
+   "start": [
+    "ddh"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-cpir-to-ot-dmo00",
+     "red-ddh-to-tdh-dgi-19",
+     "red-tdh-to-cpir-amr25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "ddh-mpc",
+   "start": [
+    "ddh"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 4,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-cpir-to-ot-dmo00",
+     "red-ddh-to-tdh-dgi-19",
+     "red-ot-to-mpc-kil88",
+     "red-tdh-to-cpir-amr25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "owf-kem-pke",
+   "start": [
+    "owf",
+    "kem"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 4,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-kem-and-ske-to-pke",
+     "red-owf-to-prg-hill99",
+     "red-prf-to-ske",
+     "red-prg-to-prf-ggm86"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "owf-io-pke",
+   "start": [
+    "owf",
+    "io"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-hash-function-and-io-to-pke-sw14",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-hash-function-and-io-to-pke-sw14"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "gapsvp-pke",
+   "start": [
+    "gapsvp"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 2,
+    "models": [
+     "quantum"
+    ],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-gapsvp-to-lwe-reg05",
+     "red-lwe-to-pke-reg05"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "oihf-mpc",
+   "start": [
+    "oblivious-interactive-hash-function"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-ot-to-mpc-kil88",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "ddh-invertible-prf",
+   "start": [
+    "ddh"
+   ],
+   "target": "invertible-prf",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-ddh-to-prf-nr97",
+     "red-prf-to-invertible-prf-hppy25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "rabin-ot-mpc",
+   "start": [
+    "rabin-ot"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-ot-to-mpc-kil88",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": [
+      "ot"
+     ]
+    }
+   }
+  },
+  {
+   "id": "ot-rabin-ot",
+   "start": [
+    "ot"
+   ],
+   "target": "rabin-ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-rabin-ot-to-ot",
+      "reverse": true,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-rabin-ot-to-ot"
+    ],
+    "reverseSteps": [
+     "red-rabin-ot-to-ot"
+    ],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "ntru-pke",
+   "start": [
+    "ntru"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-ntru-to-pke-hps98",
+      "reverse": false,
+      "status": "heuristic"
+     }
+    ],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "isis-crhf",
+   "start": [
+    "inhomogeneous-sis"
+   ],
+   "target": "crhf",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-isis-inhomogeneous-sis-to-sis",
+     "red-sis-to-hash-function-ajt96"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-isis-inhomogeneous-sis-to-sis:inhomogeneous-sis"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "sis-isis",
+   "start": [
+    "sis"
+   ],
+   "target": "inhomogeneous-sis",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-isis-inhomogeneous-sis-to-sis",
+      "reverse": true,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-isis-inhomogeneous-sis-to-sis"
+    ],
+    "reverseSteps": [
+     "red-isis-inhomogeneous-sis-to-sis"
+    ],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "dlog-bqp",
+   "start": [
+    "dlog"
+   ],
+   "target": "bqp",
+   "includeIdealised": false,
+   "stable": [
+    "supported"
+   ],
+   "expect": {
+    "supported": false
+   }
+  },
+  {
+   "id": "owf-ip-czk",
+   "start": [
+    "owf",
+    "ip"
+   ],
+   "target": "czk",
+   "includeIdealised": false,
+   "stable": [
+    "supported"
+   ],
+   "expect": {
+    "supported": false
+   }
+  },
+  {
+   "id": "stub-default",
+   "start": [
+    "lpn-high-noise"
+   ],
+   "target": "sk-depir",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-noise-level-to-depir-cimr25-2",
+      "reverse": false,
+      "status": "stub"
+     }
+    ],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "unknown"
+     ],
+     "usesStub": true
+    }
+   }
+  },
+  {
+   "id": "stub-all",
+   "start": [
+    "lpn-high-noise"
+   ],
+   "target": "sk-depir",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-noise-level-to-depir-cimr25-2",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [
+     "unknown"
+    ],
+    "scoped": true,
+    "chainClass": "unstated",
+    "edges": [
+     "red-noise-level-to-depir-cimr25-2"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "fac-rsa",
+   "start": [
+    "fac"
+   ],
+   "target": "rsa",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-rsa-to-fac-dlo24",
+      "reverse": true,
+      "status": "idealised-model"
+     }
+    ],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "other"
+     ],
+     "usesStub": false
+    }
+   }
+  },
+  {
+   "id": "fac-rsa-all",
+   "start": [
+    "fac"
+   ],
+   "target": "rsa",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-rsa-to-fac-dlo24",
+      "reverse": true,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [
+     "other"
+    ],
+    "scoped": true,
+    "chainClass": "free",
+    "edges": [
+     "red-rsa-to-fac-dlo24"
+    ],
+    "reverseSteps": [
+     "red-rsa-to-fac-dlo24"
+    ],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "dlog-cdh",
+   "start": [
+    "dlog"
+   ],
+   "target": "cdh",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-dlog-to-cdh-fkl18",
+      "reverse": false,
+      "status": "idealised-model"
+     }
+    ],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "algebraic-group"
+     ],
+     "usesStub": false
+    }
+   }
+  },
+  {
+   "id": "dlog-cdh-all",
+   "start": [
+    "dlog"
+   ],
+   "target": "cdh",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-dlog-to-cdh-fkl18",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [
+     "algebraic-group"
+    ],
+    "scoped": true,
+    "chainClass": "unstated",
+    "edges": [
+     "red-dlog-to-cdh-fkl18"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "cdh-dlog",
+   "start": [
+    "cdh"
+   ],
+   "target": "dlog",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-cdh-to-dlog",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-cdh-to-dlog"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "rom-ot",
+   "start": [
+    "rom"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "modelStart": [
+     "rom"
+    ],
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "rom-oihf-all",
+   "start": [
+    "rom"
+   ],
+   "target": "oblivious-interactive-hash-function",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-rom-to-oihf-bh26",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [
+     "rom"
+    ],
+    "scoped": true,
+    "chainClass": "free",
+    "edges": [
+     "red-rom-to-oihf-bh26"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "rom-ot-all",
+   "start": [
+    "rom"
+   ],
+   "target": "ot",
+   "includeIdealised": true,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-oihf-to-ot-bh26",
+      "reverse": false,
+      "reasons": [
+       "idealised-composition"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "rom-mpc-all",
+   "start": [
+    "rom"
+   ],
+   "target": "mpc",
+   "includeIdealised": true,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-oihf-to-ot-bh26",
+      "reverse": false,
+      "reasons": [
+       "idealised-composition"
+      ]
+     },
+     {
+      "edge": "red-ot-to-mpc-kil88",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "rom-ke-all",
+   "start": [
+    "rom"
+   ],
+   "target": "ke",
+   "includeIdealised": true,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-rom-to-ke-hmo-19",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "fac-pke",
+   "start": [
+    "fac"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "io"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [
+     "kem"
+    ],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "fac-pke-all",
+   "start": [
+    "fac"
+   ],
+   "target": "pke",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "io"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [
+     "kem"
+    ],
+    "refusedSteps": [
+     {
+      "edge": "red-rsa-to-pke-rsa78",
+      "reverse": false,
+      "reasons": [
+       "idealised-composition"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "ggm-pke-all",
+   "start": [
+    "ggm"
+   ],
+   "target": "pke",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 2,
+    "models": [
+     "generic-group"
+    ],
+    "scoped": true,
+    "chainClass": "free",
+    "edges": [
+     "red-ddh-to-pke-elgamal85",
+     "red-ggm-to-ddh-sho97"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "ggm-ot-all",
+   "start": [
+    "ggm"
+   ],
+   "target": "ot",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-cpir-to-ot-dmo00",
+      "reverse": false,
+      "reasons": [
+       "idealised-composition"
+      ]
+     },
+     {
+      "edge": "red-ddh-to-tdh-dgi-19",
+      "reverse": false,
+      "reasons": [
+       "idealised-composition"
+      ]
+     },
+     {
+      "edge": "red-tdh-to-cpir-amr25",
+      "reverse": false,
+      "reasons": [
+       "idealised-composition"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "owf-pke",
+   "start": [
+    "owf"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-hash-function-to-pke-gkm-00",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-owp-to-ke-ir89",
+      "hypotheses": [
+       "owf"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-owp-to-hash-function"
+       ]
+      },
+      "down": [
+       "red-pke-to-ke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "bar-hash-function-to-pke-gkm-00"
+      ]
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "io"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [
+     "kem"
+    ],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "owf-prg-pke",
+   "start": [
+    "owf",
+    "prg"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-hash-function-to-pke-gkm-00",
+      "hypotheses": [
+       "owf",
+       "prg"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [],
+       "prg": [
+        "red-owf-to-prg-hill99"
+       ]
+      },
+      "down": [],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     },
+     {
+      "barrier": "bar-owp-to-ke-ir89",
+      "hypotheses": [
+       "owf",
+       "prg"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-owp-to-hash-function"
+       ],
+       "prg": [
+        "red-owp-to-hash-function",
+        "red-owf-to-prg-hill99"
+       ]
+      },
+      "down": [
+       "red-pke-to-ke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "derived:bar-hash-function-to-pke-gkm-00"
+      ]
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "io"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [
+     "kem"
+    ],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "pke-ot",
+   "start": [
+    "pke"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-pke-to-ot-gkm-00",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [
+     "bar-ot-to-pke-gkm-00"
+    ],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "oihf-ot",
+   "start": [
+    "oblivious-interactive-hash-function"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [
+     {
+      "id": "bar-oihf-to-ot-bh26",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-oihf-to-ot-bh26",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-oihf-to-ot-bh26"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "oihf-rabin-ot",
+   "start": [
+    "oblivious-interactive-hash-function"
+   ],
+   "target": "rabin-ot",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-oihf-to-ot-bh26",
+      "hypotheses": [
+       "oblivious-interactive-hash-function"
+      ],
+      "class": "fully-black-box",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "oblivious-interactive-hash-function": []
+      },
+      "down": [
+       "red-rabin-ot-to-ot"
+      ],
+      "circumventedBy": [
+       "red-oihf-to-ot-bh26"
+      ],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-oihf-to-ot-bh26",
+     "red-rabin-ot-to-ot"
+    ],
+    "reverseSteps": [
+     "red-rabin-ot-to-ot"
+    ],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "oihf-etdp",
+   "start": [
+    "oblivious-interactive-hash-function"
+   ],
+   "target": "enhanced-trapdoor-permutation",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-oihf-to-ot-bh26",
+      "hypotheses": [
+       "oblivious-interactive-hash-function"
+      ],
+      "class": "fully-black-box",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "oblivious-interactive-hash-function": []
+      },
+      "down": [
+       "red-enhanced-trapdoor-permutations-to-ot-gkm-00"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [
+       "red-oihf-to-ot-bh26"
+      ],
+      "redundantWith": []
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "owf-ot",
+   "start": [
+    "owf"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-pke-to-ot-gkm-00",
+      "hypotheses": [
+       "owf"
+      ],
+      "class": "fully-black-box",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-pke-to-hash-function"
+       ]
+      },
+      "down": [],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "owf-crhf",
+   "start": [
+    "owf"
+   ],
+   "target": "crhf",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-owp-to-crhf-sim98",
+      "hypotheses": [
+       "owf"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-owp-to-hash-function"
+       ]
+      },
+      "down": [],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "com-pke",
+   "start": [
+    "com"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-hash-function-to-pke-gkm-00",
+      "hypotheses": [
+       "com"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "com": [
+        "red-owf-to-prg-hill99",
+        "red-prg-to-com-naor91"
+       ]
+      },
+      "down": [],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     },
+     {
+      "barrier": "bar-owp-to-ke-ir89",
+      "hypotheses": [
+       "com"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "com": [
+        "red-owp-to-hash-function",
+        "red-owf-to-prg-hill99",
+        "red-prg-to-com-naor91"
+       ]
+      },
+      "down": [
+       "red-pke-to-ke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "derived:bar-hash-function-to-pke-gkm-00"
+      ]
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "com-tdp",
+   "start": [
+    "com"
+   ],
+   "target": "tdp",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-hash-function-to-pke-gkm-00",
+      "hypotheses": [
+       "com"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "com": [
+        "red-owf-to-prg-hill99",
+        "red-prg-to-com-naor91"
+       ]
+      },
+      "down": [
+       "red-tdp-to-pke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     },
+     {
+      "barrier": "bar-owp-to-ke-ir89",
+      "hypotheses": [
+       "com"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "com": [
+        "red-owp-to-hash-function",
+        "red-owf-to-prg-hill99",
+        "red-prg-to-com-naor91"
+       ]
+      },
+      "down": [
+       "red-tdp-to-pke",
+       "red-pke-to-ke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "derived:bar-hash-function-to-pke-gkm-00"
+      ]
+     },
+     {
+      "barrier": "bar-pke-to-tdp-gkm-00",
+      "hypotheses": [
+       "com"
+      ],
+      "class": "fully-black-box",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "com": [
+        "red-pke-to-hash-function",
+        "red-owf-to-prg-hill99",
+        "red-prg-to-com-naor91"
+       ]
+      },
+      "down": [],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "derived:bar-hash-function-to-pke-gkm-00"
+      ]
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "ot-tdp",
+   "start": [
+    "ot"
+   ],
+   "target": "tdp",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-ot-to-tdp-gkm-00",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-ot-to-pke-gkm-00",
+      "hypotheses": [
+       "ot"
+      ],
+      "class": "fully-black-box",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "ot": []
+      },
+      "down": [
+       "red-tdp-to-pke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "bar-ot-to-tdp-gkm-00"
+      ]
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "zkp-argument",
+   "start": [
+    "zkp"
+   ],
+   "target": "constant-round-zk-argument",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-zkp-to-argument-systems",
+      "qualifier": "unclassified"
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "cpa-cca1",
+   "start": [
+    "pke-cpa-security"
+   ],
+   "target": "pke-cca1-security",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-pke-cpa-security-to-pke-cca1-security-bdpr98",
+      "qualifier": "fixed-construction"
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "agm-ggm-all",
+   "start": [
+    "agm"
+   ],
+   "target": "ggm",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-agm-to-ggm-kz22",
+      "qualifier": "unclassified"
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "tdp-etdp",
+   "start": [
+    "tdp"
+   ],
+   "target": "enhanced-trapdoor-permutation",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     {
+      "id": "bar-tdp-to-enhanced-trapdoor-permutation-haj18",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "lpn-pke",
+   "start": [
+    "lpn"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [
+      "lpn-low-noise",
+      "lpn-mid-noise"
+     ],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "lwe-ring-lwe",
+   "start": [
+    "lwe"
+   ],
+   "target": "ring-lwe",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [
+      "module-lwe-rank-1"
+     ],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "kem-pke",
+   "start": [
+    "kem"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [
+     "ske"
+    ],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "crhf-ds",
+   "start": [
+    "crhf"
+   ],
+   "target": "ds",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [
+     "bar-owp-to-crhf-sim98:relativizing"
+    ],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [
+     "one-time-signature"
+    ],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "ddh-she",
+   "start": [
+    "ddh"
+   ],
+   "target": "somewhat-homomorphic-encryption",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "sparse-lpn"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "ddh-sparse-lpn-she",
+   "start": [
+    "ddh",
+    "sparse-lpn"
+   ],
+   "target": "somewhat-homomorphic-encryption",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-ddh-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-ddh-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "jls21-given",
+   "start": [
+    "sxdh",
+    "lwe",
+    "lpn",
+    "prg-in-nc0"
+   ],
+   "target": "io",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:lpn",
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:lwe",
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:prg-in-nc0",
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:sxdh"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "jls21-deniable-encryption",
+   "start": [
+    "sxdh",
+    "lwe",
+    "lpn",
+    "prg-in-nc0"
+   ],
+   "target": "deniable-encryption",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+     "red-hash-function-and-io-to-deniable-encryption-sw14",
+     "red-lwe-to-pke-reg05",
+     "red-pke-to-hash-function"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:lpn",
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:lwe",
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:prg-in-nc0",
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:sxdh"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "jls21-lsn",
+   "start": [
+    "sxdh",
+    "lwe",
+    "learning-subspace-with-noise",
+    "prg-in-nc0"
+   ],
+   "target": "io",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "jls21-gapsvp",
+   "start": [
+    "sxdh",
+    "gapsvp",
+    "lpn",
+    "prg-in-nc0"
+   ],
+   "target": "io",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "gapsvp-leveled-fhe",
+   "start": [
+    "gapsvp"
+   ],
+   "target": "leveled-fully-homomorphic-encryption",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-lwe-to-leveled-fully-homomorphic-encryption-bgv12",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "lwe-leveled-fhe",
+   "start": [
+    "lwe"
+   ],
+   "target": "leveled-fully-homomorphic-encryption",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-lwe-to-leveled-fully-homomorphic-encryption-bgv12",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-lwe-to-leveled-fully-homomorphic-encryption-bgv12"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-lwe-to-leveled-fully-homomorphic-encryption-bgv12:lwe"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "lpn-low-noise-ot",
+   "start": [
+    "lpn-low-noise"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-cpir-to-ot-dmo00",
+     "red-noise-level-to-tdh-amr25",
+     "red-tdh-to-cpir-amr25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-noise-level-to-tdh-amr25:lpn-low-noise"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "fe-io",
+   "start": [
+    "functional-encryption"
+   ],
+   "target": "io",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-fe-to-io",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-fe-to-io"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-fe-to-io:functional-encryption"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "dcr-fe-deniable",
+   "start": [
+    "dcr",
+    "functional-encryption"
+   ],
+   "target": "deniable-encryption",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-dcr-to-pke-pai99",
+     "red-fe-to-io",
+     "red-hash-function-and-io-to-deniable-encryption-sw14",
+     "red-pke-to-hash-function"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-fe-to-io:functional-encryption"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "tdp-nizk",
+   "start": [
+    "tdp"
+   ],
+   "target": "nizk",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-tdp-to-nizk-bfm88",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [
+     "crs"
+    ],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-tdp-to-nizk-bfm88"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-tdp-to-nizk-bfm88:tdp"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "rsa-nizk",
+   "start": [
+    "rsa"
+   ],
+   "target": "nizk",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "io",
+     "snark"
+    ],
+    "completionCount": 2,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-tdp-to-nizk-bfm88",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "ddh-prg",
+   "start": [
+    "ddh"
+   ],
+   "target": "prg",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-ddh-to-pke-elgamal85",
+     "red-owf-to-prg-hill99",
+     "red-pke-to-hash-function"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "lwe-com",
+   "start": [
+    "lwe"
+   ],
+   "target": "com",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 4,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-lwe-to-pke-reg05",
+     "red-owf-to-prg-hill99",
+     "red-pke-to-hash-function",
+     "red-prg-to-com-naor91"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "etdp-mpc",
+   "start": [
+    "enhanced-trapdoor-permutation"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-ot-to-mpc-kil88",
+      "reverse": false,
+      "reasons": [
+       "requires"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "bdh-abe",
+   "start": [
+    "bdh"
+   ],
+   "target": "abe",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-bdh-to-abe-gpsw06",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-bdh-to-abe-gpsw06"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": "red-bdh-to-abe-gpsw06"
+   }
+  },
+  {
+   "id": "bdh-ibe",
+   "start": [
+    "bdh"
+   ],
+   "target": "ibe",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-bdh-to-ibe-bf01",
+      "reverse": false,
+      "status": "idealised-model"
+     }
+    ],
+    "completions": [
+     "decisional-linear"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-abe-to-ibe",
+      "reverse": false,
+      "reasons": [
+       "weakened"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [
+      "k-linear-assumption"
+     ],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "rom"
+     ],
+     "usesStub": false
+    }
+   }
+  },
+  {
+   "id": "bdh-range-query",
+   "start": [
+    "bdh"
+   ],
+   "target": "range-query-encryption",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-bdh-to-hve-bw07",
+      "reverse": false,
+      "reasons": [
+       "quarantined"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "evasive-lwe-be",
+   "start": [
+    "evasive-lwe"
+   ],
+   "target": "be",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-evasive-lwe-to-be-wee22",
+      "reverse": false,
+      "status": "quarantined"
+     }
+    ],
+    "completions": [
+     "lwe",
+     "module-lwe-rank-n"
+    ],
+    "completionCount": 2,
+    "questionBecomes": [],
+    "refusedSteps": [
+     {
+      "edge": "red-evasive-lwe-to-be-wee22",
+      "reverse": false,
+      "reasons": [
+       "quarantined"
+      ]
+     }
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   }
+  },
+  {
+   "id": "subexp-lpn-crhf",
+   "start": [
+    "subexponential-lpn"
+   ],
+   "target": "crhf",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-subexponential-lpn-to-crhf-yzw-19",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-subexponential-lpn-to-crhf-yzw-19"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-subexponential-lpn-to-crhf-yzw-19:subexponential-lpn"
+    ],
+    "weakened": null
+   }
+  },
+  {
+   "id": "circular-evasive-lwe-pke",
+   "start": [
+    "circular-evasive-lwe"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "vacuous": [
+     "circular-evasive-lwe"
+    ],
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-abe-to-ibe",
+     "red-evasive-lwe-to-abe",
+     "red-ibe-to-pke"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "ssddh-ke",
+   "start": [
+    "ssddh"
+   ],
+   "target": "ke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "vacuous": [
+     "ssddh"
+    ],
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-sidh-to-ke-jdf11",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-sidh-to-ke-jdf11"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  }
+ ],
+ "mutations": [
+  {
+   "id": "strongest-chain-conflict",
+   "patch": {
+    "objects": [
+     {
+      "id": "syn-x",
+      "kind": "object",
+      "type": "assumption",
+      "page": "",
+      "slug": "syn-x",
+      "graphSlug": "",
+      "title": "syn-x",
+      "aliases": [],
+      "unlisted": false
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-pke-to-x",
+      "kind": "implication",
+      "hypotheses": [
+       "pke"
+      ],
+      "conclusion": "syn-x",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-pke-to-x",
+      "graphSlug": "",
+      "title": "red-syn-pke-to-x"
+     },
+     {
+      "id": "red-syn-x-to-tdp",
+      "kind": "implication",
+      "hypotheses": [
+       "syn-x"
+      ],
+      "conclusion": "tdp",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-x-to-tdp",
+      "graphSlug": "",
+      "title": "red-syn-x-to-tdp"
+     },
+     {
+      "id": "red-syn-pke-to-tdp",
+      "kind": "implication",
+      "hypotheses": [
+       "pke"
+      ],
+      "conclusion": "tdp",
+      "class": "unstated",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-pke-to-tdp",
+      "graphSlug": "",
+      "title": "red-syn-pke-to-tdp"
+     }
+    ]
+   },
+   "start": [
+    "pke"
+   ],
+   "target": "tdp",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [
+     {
+      "id": "bar-pke-to-tdp-gkm-00",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-syn-pke-to-tdp",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-syn-pke-to-tdp"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [
+     {
+      "barrier": "bar-pke-to-tdp-gkm-00",
+      "consequence": 0,
+      "chainClass": "fully-black-box"
+     }
+    ],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null,
+    "strongest": {
+     "chainClass": "fully-black-box",
+     "depth": 2,
+     "edges": [
+      "red-syn-pke-to-x",
+      "red-syn-x-to-tdp"
+     ]
+    }
+   },
+   "derivedBarrierCount": 406,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": false,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   }
+  },
+  {
+   "id": "derived-barrier-conflict",
+   "patch": {
+    "objects": [
+     {
+      "id": "syn-y",
+      "kind": "object",
+      "type": "primitive",
+      "page": "",
+      "slug": "syn-y",
+      "graphSlug": "",
+      "title": "syn-y",
+      "aliases": [],
+      "unlisted": false
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-owf-to-y",
+      "kind": "implication",
+      "hypotheses": [
+       "owf"
+      ],
+      "conclusion": "syn-y",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-owf-to-y",
+      "graphSlug": "",
+      "title": "red-syn-owf-to-y"
+     },
+     {
+      "id": "red-syn-y-to-ot",
+      "kind": "implication",
+      "hypotheses": [
+       "syn-y"
+      ],
+      "conclusion": "ot",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-y-to-ot",
+      "graphSlug": "",
+      "title": "red-syn-y-to-ot"
+     }
+    ]
+   },
+   "start": [
+    "owf"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-pke-to-ot-gkm-00",
+      "hypotheses": [
+       "owf"
+      ],
+      "class": "fully-black-box",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-pke-to-hash-function"
+       ]
+      },
+      "down": [],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     }
+    ],
+    "derivedReverseBarriers": [
+     "bar-pke-to-ot-gkm-00:fully-black-box"
+    ],
+    "recordedOnPair": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-syn-owf-to-y",
+     "red-syn-y-to-ot"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [
+     {
+      "barrier": "derived:bar-pke-to-ot-gkm-00",
+      "consequence": 0,
+      "chainClass": "fully-black-box"
+     }
+    ],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   },
+   "derivedBarrierCount": 753,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": false,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": false,
+    "noDerivedBarrierContradictsRecordedReduction": false,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   }
+  },
+  {
+   "id": "quantum-chain-is-context",
+   "patch": {
+    "reductions": [
+     {
+      "id": "red-syn-owf-to-pke-quantum",
+      "kind": "implication",
+      "hypotheses": [
+       "owf"
+      ],
+      "conclusion": "pke",
+      "class": "fully-black-box",
+      "model": "quantum",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-owf-to-pke-quantum",
+      "graphSlug": "",
+      "title": "red-syn-owf-to-pke-quantum"
+     }
+    ]
+   },
+   "start": [
+    "owf"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [
+     {
+      "id": "bar-hash-function-to-pke-gkm-00",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-owp-to-ke-ir89",
+      "hypotheses": [
+       "owf"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-owp-to-hash-function"
+       ]
+      },
+      "down": [
+       "red-pke-to-ke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "bar-hash-function-to-pke-gkm-00"
+      ]
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-syn-owf-to-pke-quantum",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [
+     "quantum"
+    ],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-syn-owf-to-pke-quantum"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null,
+    "barrierScopeNote": [
+     "quantum"
+    ]
+   },
+   "derivedBarrierCount": 406,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   }
+  },
+  {
+   "id": "rom-chain-is-context",
+   "patch": {
+    "reductions": [
+     {
+      "id": "red-syn-owf-to-pke-rom",
+      "kind": "implication",
+      "hypotheses": [
+       "owf"
+      ],
+      "conclusion": "pke",
+      "class": "fully-black-box",
+      "model": "rom",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-owf-to-pke-rom",
+      "graphSlug": "",
+      "title": "red-syn-owf-to-pke-rom"
+     }
+    ]
+   },
+   "start": [
+    "owf"
+   ],
+   "target": "pke",
+   "includeIdealised": true,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [
+     {
+      "id": "bar-hash-function-to-pke-gkm-00",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-owp-to-ke-ir89",
+      "hypotheses": [
+       "owf"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-owp-to-hash-function"
+       ]
+      },
+      "down": [
+       "red-pke-to-ke"
+      ],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": [
+       "bar-hash-function-to-pke-gkm-00"
+      ]
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-syn-owf-to-pke-rom",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [
+     "rom"
+    ],
+    "scoped": true,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-syn-owf-to-pke-rom"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null,
+    "barrierScopeNote": [
+     "rom"
+    ]
+   },
+   "derivedBarrierCount": 406,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   }
+  },
+  {
+   "id": "believed-true-consequence-not-propagated",
+   "patch": {
+    "barrierPatches": [
+     {
+      "id": "bar-owp-to-ke-ir89",
+      "appendConsequences": [
+       {
+        "kind": "complexity",
+        "target": "p-neq-np",
+        "class": "fully-black-box"
+       }
+      ]
+     }
+    ]
+   },
+   "start": [
+    "owf"
+   ],
+   "target": "ke",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [
+     {
+      "barrier": "bar-owp-to-ke-ir89",
+      "hypotheses": [
+       "owf"
+      ],
+      "class": "relativizing",
+      "consequence": {
+       "kind": "contradiction",
+       "target": ""
+      },
+      "strength": "unconditional",
+      "up": {
+       "owf": [
+        "red-owp-to-hash-function"
+       ]
+      },
+      "down": [],
+      "circumventedBy": [],
+      "circumventsOriginalOnly": [],
+      "redundantWith": []
+     }
+    ],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "io"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   },
+   "derivedBarrierCount": 406,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   }
+  },
+  {
+   "id": "free-barrier-meets-unstated-chain",
+   "patch": {
+    "objects": [
+     {
+      "id": "syn-a",
+      "kind": "object",
+      "type": "primitive",
+      "page": "",
+      "slug": "syn-a",
+      "graphSlug": "",
+      "title": "syn-a",
+      "aliases": [],
+      "unlisted": false
+     },
+     {
+      "id": "syn-b",
+      "kind": "object",
+      "type": "primitive",
+      "page": "",
+      "slug": "syn-b",
+      "graphSlug": "",
+      "title": "syn-b",
+      "aliases": [],
+      "unlisted": false
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-a-to-b",
+      "kind": "implication",
+      "hypotheses": [
+       "syn-a"
+      ],
+      "conclusion": "syn-b",
+      "class": "unstated",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-a-to-b",
+      "graphSlug": "",
+      "title": "red-syn-a-to-b"
+     }
+    ],
+    "barriers": [
+     {
+      "id": "bar-syn-a-to-b",
+      "hypotheses": [
+       "syn-a"
+      ],
+      "conclusion": "syn-b",
+      "class": "free",
+      "consequences": [
+       {
+        "kind": "contradiction",
+        "target": "",
+        "class": "free"
+       }
+      ],
+      "strength": "unconditional",
+      "conditionalOn": [],
+      "circumventedBy": [],
+      "source": [
+       "folklore"
+      ],
+      "status": "draft",
+      "page": "",
+      "slug": "bar-syn-a-to-b",
+      "graphSlug": "",
+      "title": "bar-syn-a-to-b"
+     }
+    ]
+   },
+   "start": [
+    "syn-a"
+   ],
+   "target": "syn-b",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [
+     {
+      "id": "bar-syn-a-to-b",
+      "qualifier": null
+     }
+    ],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [
+     "bar-syn-a-to-b:free"
+    ],
+    "recordedOnPair": [
+     {
+      "edge": "red-syn-a-to-b",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-syn-a-to-b"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [
+     {
+      "barrier": "bar-syn-a-to-b",
+      "consequence": 0,
+      "chainClass": "unstated"
+     }
+    ],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   },
+   "derivedBarrierCount": 407,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": false,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   }
+  },
+  {
+   "id": "stub-barrier-not-propagated",
+   "patch": {
+    "barrierPatches": [
+     {
+      "id": "bar-owp-to-ke-ir89",
+      "set": {
+       "status": "stub"
+      }
+     }
+    ]
+   },
+   "start": [
+    "owf"
+   ],
+   "target": "ke",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [
+     "io"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   },
+   "derivedBarrierCount": 253,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   }
+  }
+ ]
+}

@@ -26,6 +26,11 @@ final class WebController: NSObject {
     var onNavigate: ((CCwikiURL.Destination, _ modified: Bool) -> Void)?
     /// The page's own address on the site, for the page context menu.
     var siteURLProvider: (() -> URL?)?
+    /// What "Explore From This Page…" would ask, for the page context menu;
+    /// `nil` leaves the item out (relations-explorer.md §2.11).
+    var exploreHere: (() -> ExplorerQuery?)?
+    /// Asks that question, when the item is chosen.
+    var onExplore: ((ExplorerQuery) -> Void)?
     /// What the page reported under the last right-click, for the menu.
     @ObservationIgnored fileprivate var contextTarget: ReaderContextTarget?
 
@@ -375,12 +380,22 @@ final class ReaderWebView: WKWebView {
             menu.insertItem(.separator(), at: copyItems.count)
         }
         // The page itself, wherever the click was.
-        if let url = controller?.siteURLProvider?() {
+        let siteURL = controller?.siteURLProvider?()
+        if let url = siteURL {
             menu.addItem(.separator())
             menu.addItem(ClosureMenuItem("Open Page on cryptology.city") {
                 NSWorkspace.shared.open(url)
             })
             menu.addItem(ClosureMenuItem("Copy Link to Page") { Self.copy(url.absoluteString) })
+        }
+        // What this page's objects derive, in the Relations Explorer. Only on
+        // a page with something to explore: an object, a reduction or a
+        // barrier, never a complexity class. It joins the page's group, and
+        // without one it starts its own, apart from WebKit's Copy and Look Up.
+        if let query = controller?.exploreHere?() {
+            if siteURL == nil { menu.addItem(.separator()) }
+            let onExplore = controller?.onExplore
+            menu.addItem(ClosureMenuItem("Explore From This Page…") { onExplore?(query) })
         }
         // No leading, trailing or doubled separators once the items are gone.
         var cleaned: [NSMenuItem] = []

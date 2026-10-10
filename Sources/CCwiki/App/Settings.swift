@@ -17,6 +17,7 @@ struct CCwikiSettings: Sendable {
     private static let lastUpdateCheckKey = "ccwiki.lastUpdateCheck"
     private static let installsUpdatesAutomaticallyKey = "ccwiki.installsUpdatesAutomatically"
     private static let showsMaintenanceNoticesKey = "ccwiki.showsMaintenanceNotices"
+    private static let showsLinkPreviewsKey = "ccwiki.showsLinkPreviews"
     private static let lastPageKey = "ccwiki.lastPage"
     private static let recentPagesKey = "ccwiki.recentPages"
     private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
@@ -56,6 +57,17 @@ struct CCwikiSettings: Sendable {
     static var showsMaintenanceNotices: Bool {
         get { UserDefaults.standard.bool(forKey: showsMaintenanceNoticesKey) }
         set { UserDefaults.standard.set(newValue, forKey: showsMaintenanceNoticesKey) }
+    }
+
+    /// A card with the target's title and first paragraph when the pointer
+    /// rests on a link to another page. On by default: it is how a reader
+    /// finds out what "PRG" or "BH26" is without leaving the page.
+    static var showsLinkPreviews: Bool {
+        get {
+            UserDefaults.standard.object(forKey: showsLinkPreviewsKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: showsLinkPreviewsKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: showsLinkPreviewsKey) }
     }
 
     /// When the daily check finds a release, download, verify and install it
