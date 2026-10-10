@@ -588,6 +588,29 @@ struct DerivationTests {
         #expect(fromZ == ["c", "d"])
     }
 
+    // MARK: The Statement lint (§2a)
+
+    @Test("the Statement lint reads a page whatever its line endings")
+    func statementLintLineEndings() throws {
+        let manifest = try Fx.manifest(
+            objects: [Fx.object("a"), Fx.object("b"), Fx.object("lwe", type: "assumption")],
+            reductions: [Fx.reduction("red-a-to-b", ["a"], "b")])
+        let derivation = Derivation(manifest: manifest, curation: .empty)
+        let page = "## Statement\nIf [[a]] and [[lwe]] hold, so does [[b]] \u{2014} [@X].\n\n"
+            + "## Proof\nOmitted.\n"
+
+        // The reference engine reports LWE on all three, since Python's text
+        // mode reads "\r\n" and "\r" as "\n".
+        for ending in ["\n", "\r\n", "\r"] {
+            let text = page.replacingOccurrences(of: "\n", with: ending)
+            let hits = derivation.statementLint { _ in text }
+            let relationIDs = hits.map { $0.relationID }
+            let unlisted = hits.map { $0.unlisted }
+            #expect(relationIDs == ["red-a-to-b"], "line ending \(ending.debugDescription)")
+            #expect(unlisted == [["lwe"]], "line ending \(ending.debugDescription)")
+        }
+    }
+
     // MARK: The curation file
 
     @Test("the shipped curation decodes, with every table the spec lists")

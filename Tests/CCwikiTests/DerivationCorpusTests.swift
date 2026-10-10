@@ -39,7 +39,8 @@ struct DerivationCorpusTests {
 
     private struct CorpusUnavailable: Error {}
 
-    @Test("every golden query", .enabled(if: DerivationCorpusTests.state.runs))
+    @Test("every golden query",
+          .enabled(if: DerivationCorpusTests.state.runs, DerivationCorpusTests.state.skipComment))
     func goldenQueries() throws {
         let corpus = try loadedCorpus()
         let records = corpus.golden["queries"]?.array ?? []
@@ -87,7 +88,8 @@ struct DerivationCorpusTests {
             + "derived barriers; \(corpus.derivation.steps.count) eligible steps")
     }
 
-    @Test("the review's counterexamples, replayed as patches", .enabled(if: DerivationCorpusTests.state.runs))
+    @Test("the review's counterexamples, replayed as patches",
+          .enabled(if: DerivationCorpusTests.state.runs, DerivationCorpusTests.state.skipComment))
     func goldenMutations() throws {
         let corpus = try loadedCorpus()
         let mutations = corpus.golden["mutations"]?.array ?? []
@@ -145,11 +147,24 @@ struct DerivationCorpusTests {
         print("derivations corpus, \(corpus.modeName): \(replayed) of \(mutations.count) mutations replayed")
     }
 
-    @Test("closure sizes, backward summaries, counts and policy", .enabled(if: DerivationCorpusTests.state.isExact))
+    @Test("closure sizes, backward summaries, counts and policy",
+          .enabled(if: DerivationCorpusTests.state.isExact, DerivationCorpusTests.state.exactSkipComment))
     func goldenSummaries() throws {
         let corpus = try loadedCorpus()
         let golden = corpus.golden
         let derivation = corpus.derivation
+
+        // The bytes are the golden file's, so a count that differs means the
+        // decoder dropped a row the reference engine keeps, such as one of
+        // an unknown kind or an inclusion with two hypotheses, or kept two
+        // rows that share an id where the reference keeps the last.
+        let counts = golden["counts"]
+        let objects = corpus.manifest.objectsByID.count
+        let reductions = corpus.manifest.reductions.count
+        let barriers = corpus.manifest.barriers.count
+        #expect(objects == counts?["objects"]?.int, "objects")
+        #expect(reductions == counts?["reductions"]?.int, "reductions")
+        #expect(barriers == counts?["barriers"]?.int, "barriers")
 
         if case .object(let sizes)? = golden["closureSizes"] {
             for object in sizes.keys.sorted() {
@@ -215,11 +230,23 @@ struct DerivationCorpusTests {
         #expect(policy?["unmetPrecondition"]?.string == "refuse")
     }
 
-    @Test("the invariants and sentinels hold", .enabled(if: DerivationCorpusTests.state.runs))
+    @Test("the invariants and sentinels hold",
+          .enabled(if: DerivationCorpusTests.state.runs, DerivationCorpusTests.state.skipComment))
     func goldenInvariants() throws {
         let corpus = try loadedCorpus()
         let invariants = corpus.derivation.invariants()
         let sentinels = corpus.derivation.sentinels()
+
+        // The engine reads the manifest through the app's decoder, which
+        // drops what it cannot read where the reference engine keeps it: a
+        // consequence or circumvention that does not resolve (which shifts
+        // every later consequence index), a row of unknown kind. Each drop is
+        // an anomaly, so a split between the two fails here by name rather
+        // than as a field mismatch, or not at all in drifted mode.
+        let anomalies = corpus.manifest.anomalies
+        #expect(anomalies.isEmpty, "the decoder dropped what the reference engine keeps: \(anomalies)")
+        let defaulted = DerivationGoldenCorpus.silentDefaults(in: corpus.rawManifest)
+        #expect(defaulted.isEmpty, "the decoder reads these differently from the reference engine: \(defaulted)")
 
         for name in invariants.byName.keys.sorted() {
             let holds = invariants.byName[name] ?? false
@@ -244,7 +271,8 @@ struct DerivationCorpusTests {
             + ", sentinels " + (sentinels.byName.values.allSatisfy { $0 } ? "hold" : "warn"))
     }
 
-    @Test("the Statement lint finds no unreviewed dropped conjunct", .enabled(if: DerivationCorpusTests.state.runs))
+    @Test("the Statement lint finds no unreviewed dropped conjunct",
+          .enabled(if: DerivationCorpusTests.state.runs, DerivationCorpusTests.state.skipComment))
     func goldenStatementLint() throws {
         let corpus = try loadedCorpus()
         let content = corpus.cloneRoot.appending(path: "content")
@@ -276,6 +304,29 @@ enum DerivationCorpusState: Sendable {
     var isExact: Bool {
         if case .ready(let corpus) = self { return corpus.isExact }
         return false
+    }
+
+    /// Why the suites are off, for the test report: a bare `.enabled(if:)`
+    /// shows a skip with no reason, and the drift message is otherwise only
+    /// printed once, during discovery (derivations.md §8).
+    var skipComment: Comment? {
+        switch self {
+        case .noClone:
+            return Comment(rawValue: "CCWIKI_WIKI does not name a wiki clone with "
+                + "\(RelationsManifest.displayPath)")
+        case .beyondTolerance(let message):
+            return Comment(rawValue: message)
+        case .unreadable, .ready:
+            return nil
+        }
+    }
+
+    /// The same for the suite that runs only on the golden file's bytes.
+    var exactSkipComment: Comment? {
+        guard case .ready(let corpus) = self else { return skipComment }
+        if corpus.isExact { return nil }
+        return Comment(rawValue: "Closure sizes, backward summaries and counts are compared only "
+            + "when relations.json and the curation hash to the golden file's SHA-256s.")
     }
 
     static func load() -> DerivationCorpusState {
@@ -357,6 +408,29 @@ struct DerivationGoldenCorpus: Sendable {
     let cloneRoot: URL
 
     var modeName: String { isExact ? "exact" : "drifted within tolerance" }
+
+    /// Values the decoder reads with a default instead of dropping, so they
+    /// leave no anomaly, though the reference engine reads them differently:
+    /// an unknown barrier strength is unconditional to the decoder and ranks
+    /// as conditional in the reference, and a proposition without a boolean
+    /// `believed` is believed false to the decoder, where the reference
+    /// gives a consequence naming it no effect at all.
+    static func silentDefaults(in raw: GoldenJSON) -> [String] {
+        var found: [String] = []
+        for barrier in raw["barriers"]?.array ?? [] {
+            let strength = barrier["strength"]?.string ?? ""
+            if Barrier.Strength(rawValue: strength) == nil {
+                let id = barrier["id"]?.string ?? "?"
+                found.append("barrier \(id) has strength “\(strength)”")
+            }
+        }
+        if case .object(let propositions)? = raw["propositions"] {
+            for key in propositions.keys.sorted() where propositions[key]?["believed"]?.bool == nil {
+                found.append("proposition \(key) has no boolean believed")
+            }
+        }
+        return found
+    }
 }
 
 // MARK: - The reference engine's record shape

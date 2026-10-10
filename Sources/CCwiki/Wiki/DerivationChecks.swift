@@ -242,11 +242,17 @@ extension Derivation {
 
     /// The text under the first `## Statement` heading, trimmed.
     static func statement(in page: String) -> String {
-        let range = NSRange(page.startIndex..<page.endIndex, in: page)
-        guard let match = statementPattern.firstMatch(in: page, range: range),
-              let body = Range(match.range(at: 1), in: page)
+        // The reference engine reads a page in Python's text mode, which turns
+        // "\r\n" and a lone "\r" into "\n". Without the same here the heading
+        // would never match on a page saved with other line endings, and the
+        // lint would pass it silently where the reference reports a hit.
+        let text = page.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = statementPattern.firstMatch(in: text, range: range),
+              let body = Range(match.range(at: 1), in: text)
         else { return "" }
-        return String(page[body]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(text[body]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Wikilink targets, then markdown-link targets, as (slug, anchor).
