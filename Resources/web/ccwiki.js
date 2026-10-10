@@ -409,46 +409,70 @@
   }
 
   /** `source` with the wiki's macros written out, for a LaTeX document that
-   *  does not have the preamble. One pass over the table, as on the site
-   *  (quartz pseudocode.ts:159), which is exact while no macro's body uses
-   *  another macro, as none does. A name matches only as a whole control
-   *  word, so `\st` leaves `\stA` alone. */
+   *  does not have the preamble. The site makes one pass over the table in
+   *  the order of macros.ts (quartz pseudocode.ts:159). Here the order is
+   *  whatever the Swift dictionary gave this launch, so passes repeat until
+   *  nothing changes: the result does not depend on the order, and a macro
+   *  whose body uses another would come out fully written. Today no body
+   *  does, so the first pass is the last and the result is the site's. The
+   *  cap stops a self-referring macro, which KaTeX would reject anyway. A
+   *  name matches only as a whole control word, so `\st` leaves `\stA`
+   *  alone. */
   function expandMacros(source, macros) {
-    var result = stripAlgname(source);
-    Object.keys(macros).forEach(function (name) {
-      var pattern = new RegExp(
-        name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![a-zA-Z@*])", "g");
-      var body = macros[name];
-      // A function, so a `$` in the body is never read as a replacement
-      // pattern.
-      result = result.replace(pattern, function () { return body; });
+    var patterns = Object.keys(macros).map(function (name) {
+      return {
+        pattern: new RegExp(
+          name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![a-zA-Z@*])", "g"),
+        body: macros[name],
+      };
     });
+    var result = stripAlgname(source);
+    for (var pass = 0; pass < 10; pass++) {
+      var before = result;
+      patterns.forEach(function (macro) {
+        // A function, so a `$` in the body is never read as a replacement
+        // pattern.
+        result = result.replace(macro.pattern, function () { return macro.body; });
+      });
+      if (result === before) break;
+    }
     return result;
   }
 
   /** A small button that puts `text()` on the pasteboard through the app,
    *  and says so for two seconds, as the site's buttons do. The text is
-   *  worked out on click, from the page as rendered. */
+   *  worked out on click, from the page as rendered.
+   *
+   *  The label is generated content (`.copy-button::before` in app.css),
+   *  not text in the DOM: the buttons sit faded out on every algorithm, and
+   *  find in page would otherwise match "LaTeX" or "macros" in them and
+   *  could jump to one above the real hit. `aria-label` names the button
+   *  for VoiceOver. */
   function copyButton(label, text) {
     var button = document.createElement("button");
     button.type = "button";
     button.className = "copy-button";
-    button.textContent = label;
+    setButtonLabel(button, label);
     var timer = null;
     button.addEventListener("click", function () {
       post({ type: "copy", text: text() });
       // Hold the width, so the row does not shift while the label is short.
       button.style.minWidth = button.getBoundingClientRect().width + "px";
-      button.textContent = "Copied!";
+      setButtonLabel(button, "Copied!");
       button.classList.add("copied");
       clearTimeout(timer);
       timer = setTimeout(function () {
-        button.textContent = label;
+        setButtonLabel(button, label);
         button.classList.remove("copied");
         button.style.minWidth = "";
       }, 2000);
     });
     return button;
+  }
+
+  function setButtonLabel(button, label) {
+    button.setAttribute("data-label", label);
+    button.setAttribute("aria-label", label);
   }
 
   /** The site's pair of buttons under an algorithm (quartz pseudocode.ts:182):
@@ -734,8 +758,10 @@
     scratch.className = "copy-scratch";
     scratch.setAttribute("aria-hidden", "true");
     scratch.appendChild(range.cloneContents());
-    // The copy buttons' labels are not page text, whatever WebKit makes of
-    // their user-select: none.
+    // The copy buttons are not page text. Their labels are generated content,
+    // but the buttons themselves, whatever WebKit makes of their
+    // user-select: none, could still reach the copied HTML, so a selection
+    // across them is copied here, without them.
     if (!scratch.querySelector("[data-tex], .katex, .copy-row")) return;
     scratch.querySelectorAll(".copy-row").forEach(function (row) { row.remove(); });
     texify(scratch);

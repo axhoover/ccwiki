@@ -114,6 +114,8 @@ side. The game takes the width it needs and the oracle column keeps a 12rem
 minimum; `% oracle-split: N` in the game's source fixes the oracles' share at
 N% (quartz pseudocode.ts:245), through a `split` class and an
 `--oracle-share` property so the narrow-window rules can still override it.
+Anything else added inside a box must not widen it, or it moves the split;
+the copy buttons (see "Copying LaTeX") are the case in point.
 At 760px and below the group stacks, and every box takes its content's
 height: a zero flex basis there collapsed the game box, which scrolls
 sideways and so has no minimum height of its own.
@@ -171,7 +173,13 @@ simply do not appear.
 **Buttons.** Under each algorithm, as on the site (quartz
 pseudocode.ts:182): **Copy LaTeX (macros)** and **Copy LaTeX (no macros)**,
 faded in on hover or keyboard focus, never selectable, not printed, and
-reading "Copied!" for two seconds after a click. Glossary/latex-macros has
+reading "Copied!" for two seconds after a click. The faded row is still
+laid out, so it is `width: 0; min-width: 100%` and wraps its buttons: as
+plain flow content its two buttons (about 310px) became the oracle column's
+flex basis and pulled most game groups back to an even split. The labels
+are generated content (`::before { content: attr(data-label) }`, with an
+`aria-label` for VoiceOver), so find in page never matches a hidden button.
+Glossary/latex-macros has
 an empty `<div id="macros-copy-area">` that the site's script fills;
 `fillMacrosCopyArea` fills it the same way, with **Copy LaTeX preamble**
 (one `\newcommand` per macro) and **Copy KaTeX/MathJax JSON**. Both are
@@ -186,12 +194,17 @@ it fills the copy event's own `clipboardData`.)
 
 **Macro expansion** ports the site's helpers (quartz pseudocode.ts:155-167).
 `stripAlgname` removes `\algname{…}`, which only the wiki's fork of
-pseudocode.js understands. `expandMacros` makes one pass over the table
-being rendered with, replacing each name only as a whole control word
-(`\st` leaves `\stA` alone). One pass is exact while no macro's body uses
-another macro and none takes arguments, which holds for all 126 in
-`macros.ts` as of 2026-10. If that changes, the site and the app both
-expand wrongly, in the same way.
+pseudocode.js understands. `expandMacros` replaces each name in the table
+being rendered with, only as a whole control word (`\st` leaves `\stA`
+alone). The site makes a single pass in `macros.ts` order. The app gets the
+table as a Swift dictionary, serialised without sorted keys, so its order
+can change from one launch to the next; it therefore repeats the pass until
+the text stops changing, at most 10 times, and the result does not depend
+on the order. No macro's body uses another and none takes arguments (all
+126 in `macros.ts` as of 2026-10), so today the first pass is the last and
+the app's output is the site's. If a body ever uses another macro, the app
+still writes it out in full, where the site's single pass may not; a macro
+with arguments would be expanded wrongly on both sides.
 
 ## 4. Serving content: a custom scheme, not `file://`
 

@@ -291,8 +291,19 @@ pre {
 }
 
 /* Tucked into the algorithm's bottom margin, so the block grows by little
- * more than the buttons' height. */
+ * more than the buttons' height.
+ *
+ * The row is laid out while faded, so it must not widen its box: in a game
+ * group that width becomes the oracle column's flex basis, and the two
+ * buttons' 310px or so pulled most groups back to an even split. A zero
+ * width with a 100% minimum counts as nothing when the box's width is
+ * worked out (a percentage of a width still being found counts as zero)
+ * and spans the box once it is known. The buttons wrap in a box narrower
+ * than the pair. */
 .pseudocode-container > .copy-row {
+  width: 0;
+  min-width: 100%;
+  flex-wrap: wrap;
   margin-top: -0.3rem;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -326,6 +337,10 @@ pre {
   text-align: center;
   transition: color 120ms ease, border-color 120ms ease;
 }
+
+/* The label, set by ccwiki.js in `data-label`. Generated content is not in
+ * the DOM, so find in page does not match the faded buttons. */
+.copy-button::before { content: attr(data-label); }
 
 .copy-button:hover { color: var(--text); border-color: var(--text-tertiary); }
 .copy-button:active { background: var(--bg-sunken); }
