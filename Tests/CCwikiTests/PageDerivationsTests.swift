@@ -49,10 +49,40 @@ struct PageDerivationsTests {
         let page = try Self.derivations("Primitives/hash-function.md")
         let ids = page.blocks.map { $0.id }
         #expect(ids == ["crhf/implies", "owf/implies"])
-        #expect(page.needsObjectNames(.implies))
+        #expect(page.needsObjectNames)
         let crhf = try #require(page.blocks.first)
         let targets = crhf.rows.map { $0.link.objectID }
         #expect(targets == ["prg", "prf", "ske"])
+    }
+
+    @Test("a page hosting several objects names them even when only one has derived rows")
+    func namesTheOnlyObjectWithRows() throws {
+        let objects: [[String: Any]] = [
+            ExplorerFixture.object("host", title: "Host"),
+            ExplorerFixture.object("first", title: "First section", of: "host", anchor: "first"),
+            ExplorerFixture.object("second", title: "Second section", of: "host", anchor: "second"),
+            ExplorerFixture.object("p", title: "Pi"),
+            ExplorerFixture.object("q", title: "Rho"),
+        ]
+        let reductions: [[String: Any]] = [
+            ExplorerFixture.reduction("red-first-to-p", ["first"], "p", title: "First ⇒ Pi",
+                                      source: "FP01"),
+            ExplorerFixture.reduction("red-p-to-q", ["p"], "q", title: "Pi ⇒ Rho", source: "PQ02"),
+        ]
+        let derivation = try ExplorerFixture.derivation(objects: objects, reductions: reductions)
+        let manifest = derivation.manifest
+        let page = PageDerivations(path: "Primitives/host.md", manifest: manifest,
+                                   derivation: derivation,
+                                   labels: ExplorerFixture.labels(manifest))
+        // Only the first section derives anything; unnamed, its rows would
+        // read as the host's.
+        let ids = page.blocks.map { $0.id }
+        #expect(ids == ["first/implies"])
+        #expect(page.objectCount == 3)
+        #expect(page.needsObjectNames)
+
+        let single = try Self.derivations("Primitives/prg.md")
+        #expect(!single.needsObjectNames)
     }
 
     @Test("a reduction page or a barrier page gets none")

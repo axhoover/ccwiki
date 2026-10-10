@@ -380,7 +380,8 @@ final class ReaderWebView: WKWebView {
             menu.insertItem(.separator(), at: copyItems.count)
         }
         // The page itself, wherever the click was.
-        if let url = controller?.siteURLProvider?() {
+        let siteURL = controller?.siteURLProvider?()
+        if let url = siteURL {
             menu.addItem(.separator())
             menu.addItem(ClosureMenuItem("Open Page on cryptology.city") {
                 NSWorkspace.shared.open(url)
@@ -389,8 +390,10 @@ final class ReaderWebView: WKWebView {
         }
         // What this page's objects derive, in the Relations Explorer. Only on
         // a page with something to explore: an object, a reduction or a
-        // barrier, never a complexity class.
+        // barrier, never a complexity class. It joins the page's group, and
+        // without one it starts its own, apart from WebKit's Copy and Look Up.
         if let query = controller?.exploreHere?() {
+            if siteURL == nil { menu.addItem(.separator()) }
             let onExplore = controller?.onExplore
             menu.addItem(ClosureMenuItem("Explore From This Page…") { onExplore?(query) })
         }

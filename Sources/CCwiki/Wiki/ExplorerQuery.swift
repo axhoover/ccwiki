@@ -159,7 +159,8 @@ struct ExplorerQuery: Codable, Hashable, Sendable {
     ///   opens the answer for the edge it rules out with the barrier in it;
     /// - a complexity class, a page the manifest does not know, or an edge
     ///   with a class endpoint: `nil`, since classes are related by
-    ///   containment and never derived (R2).
+    ///   containment and never derived (R2);
+    /// - any page, when the derivation has no participants at all: `nil`.
     ///
     /// The toggle is left off; the caller passes the explorer's own through.
     static func seed(
@@ -167,6 +168,10 @@ struct ExplorerQuery: Codable, Hashable, Sendable {
         manifest: RelationsManifest, derivation: Derivation
     ) -> ExplorerQuery? {
         let participants = derivation.participants(.all)
+        // Nothing takes part when nothing can be derived, as without the
+        // bundled curation: every entry point is then disabled, rather than
+        // opening a window that can only say so.
+        guard !participants.isEmpty else { return nil }
         func takesPart(_ id: String) -> Bool {
             participants.contains(id) && manifest.object(id)?.type != Derivation.excludedType
         }

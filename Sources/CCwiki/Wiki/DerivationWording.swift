@@ -121,6 +121,15 @@ enum DerivationWording {
         return nil
     }
 
+    /// The same scope as a line under a recorded result, which keeps its
+    /// own title: "Holds in the random oracle model only." The stub form
+    /// already says "only", so it is not said twice.
+    static func modelScopeLine(_ models: Set<String>) -> String? {
+        guard let scope = modelScope(models) else { return nil }
+        let idealised = models.contains { Derivation.idealisedModels.contains($0) }
+        return idealised ? scope + " only." : scope + "."
+    }
+
     /// The default models, as the explorer's Models row reads them.
     static let defaultModels = "Standard, quantum and CRS"
 
@@ -154,6 +163,13 @@ enum DerivationWording {
     /// Under everything-from and everything-to.
     static let listFooter = "Derived by CCwiki from the reductions the wiki records. Something "
         + "missing here is not evidence that it does not follow."
+    /// Under an empty everything-from, which has no footer: an empty list is
+    /// no more evidence than a short one.
+    static let nothingDerivedCaveat = "The wiki's record is incomplete, so this is not evidence "
+        + "that nothing follows."
+    /// Under an empty everything-to, likewise.
+    static let noSourcesCaveat = "The wiki's record is incomplete, so this is not evidence that "
+        + "nothing derives it."
     /// R10's footer under no derivation: fixed, never collapsible, and the
     /// engine's own text, so the two cannot drift.
     static var noPathFooter: String { Derivation.NoPathAnswer.footer }

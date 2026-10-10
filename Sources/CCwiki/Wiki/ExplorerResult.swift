@@ -94,15 +94,33 @@ struct ExplorerResult: Sendable, Hashable {
 
     /// R6: "A fully black-box derivation exists in 3 steps", with that
     /// proof, which Show It swaps in for the shortest.
+    ///
+    /// It carries its own verdict chrome, because the two proofs can differ
+    /// in kind: beside a one-step recorded result, the stronger proof is
+    /// usually a chain, which is CCwiki's composition and must read `⇒*`,
+    /// "Derivable" and the derived footer, never as the wiki's own result.
     struct Stronger: Sendable, Hashable {
         let line: String
         /// Replaces the section with the same id.
         let proof: ExplorerSection
-        /// Replace the verdict lines with the same ids: the provenance and
-        /// the chain class describe whichever proof is shown.
+        /// Replace the verdict lines that describe the proof shown (see
+        /// `proofLineIDs`), in their place at the head of the verdict.
         let lines: [Verdict.Line]
         let copy: ProofCopy
+        let title: String
+        /// The question restated with this proof's arrow.
+        let statement: String
+        /// The non-standard models this proof uses: a subset of the
+        /// shortest's (R6 looks only among those).
+        let models: [String]
+        let footer: String
+        let explainsRules: Bool
     }
+
+    /// The verdict lines that say what the proof shown is: its model scope,
+    /// where it came from and its chain class. Show It replaces them with
+    /// the stronger proof's own.
+    static let proofLineIDs: Set<String> = ["scope", "provenance", "class"]
 
     /// The sections, with the stronger proof swapped in when it is shown.
     func sections(showingStronger: Bool) -> [ExplorerSection] {
@@ -110,13 +128,45 @@ struct ExplorerResult: Sendable, Hashable {
         return sections.map { $0.id == stronger.proof.id ? stronger.proof : $0 }
     }
 
-    /// The verdict's lines, likewise.
+    /// The verdict's lines, likewise. The shortest proof's own lines come
+    /// first, so the stronger proof's take their place there, every one of
+    /// them: a recorded result has no chain class line, and the chain shown
+    /// in its place must still state its class.
     func verdictLines(showingStronger: Bool) -> [Verdict.Line] {
         let lines = verdict?.lines ?? []
         guard showingStronger, let stronger else { return lines }
-        var replacements: [String: Verdict.Line] = [:]
-        for line in stronger.lines { replacements[line.id] = line }
-        return lines.map { replacements[$0.id] ?? $0 }
+        let kept = lines.filter { !Self.proofLineIDs.contains($0.id) }
+        return stronger.lines + kept
+    }
+
+    /// The verdict's title, for whichever proof is shown.
+    func verdictTitle(showingStronger: Bool) -> String? {
+        guard showingStronger, let stronger else { return verdict?.title }
+        return stronger.title
+    }
+
+    /// The question restated with the arrow of whichever proof is shown.
+    func verdictStatement(showingStronger: Bool) -> String? {
+        guard showingStronger, let stronger else { return verdict?.statement }
+        return stronger.statement
+    }
+
+    /// The model tags of whichever proof is shown.
+    func verdictModels(showingStronger: Bool) -> [String] {
+        guard showingStronger, let stronger else { return verdict?.models ?? [] }
+        return stronger.models
+    }
+
+    /// The footer under whichever proof is shown.
+    func footer(showingStronger: Bool) -> String? {
+        guard showingStronger, let stronger else { return footer }
+        return stronger.footer
+    }
+
+    /// Whether the footer offers the rules, for whichever proof is shown.
+    func explainsRules(showingStronger: Bool) -> Bool {
+        guard showingStronger, let stronger else { return explainsRules }
+        return stronger.explainsRules
     }
 
     // MARK: Finding rows

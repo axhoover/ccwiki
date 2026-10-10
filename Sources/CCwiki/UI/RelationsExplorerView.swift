@@ -1,4 +1,7 @@
 import SwiftUI
+// `AccessibilityNotification` lives in the Accessibility framework, which
+// SwiftUI does not re-export.
+import Accessibility
 
 /// The Relations Explorer: does A imply B? (relations-explorer.md §2)
 ///
@@ -96,10 +99,12 @@ struct RelationsExplorerView: View {
                         .controlSize(.small)
                 }
             }
-        } else if model.derivation.steps.isEmpty && !model.relations.isEmpty {
-            // `Derivation(manifest:)` derives nothing without the bundled
-            // curation: chaining without its corrections would prove claims
-            // the cited theorems do not.
+            .task { await openReaderIfAlone() }
+        } else if model.derivation.manifest.isEmpty && !model.relations.isEmpty {
+            // `Derivation(manifest:)` keeps an empty manifest exactly when
+            // the bundled curation is missing: chaining without its
+            // corrections would prove claims the cited theorems do not. A
+            // manifest that merely has nothing to chain is not this.
             ContentUnavailableView(
                 "Derivations Unavailable", systemImage: "arrow.triangle.branch",
                 description: Text("This copy of CCwiki is missing its reviewed corrections, "
@@ -137,9 +142,12 @@ struct RelationsExplorerView: View {
             }
             GridRow(alignment: .top) {
                 fieldLabel("To")
+                // To takes one object, so typing into a filled To replaces
+                // its token; the placeholder says so rather than claim the
+                // question is open.
                 ObjectTokenField(
                     field: .to, tokens: tokens(query.to.map { [$0] } ?? []), text: $toText,
-                    placeholder: "Anything: show everything derivable",
+                    placeholder: query.to == nil ? "Anything: show everything derivable" : "Replace…",
                     accessibilityName: "To", isConjunction: false,
                     selectedTokenID: selectedToken, focus: $focus,
                     onSelect: { select($0, in: .to) }, onRemove: { remove($0, from: .to) })
@@ -452,6 +460,8 @@ struct RelationsExplorerView: View {
         .onTapGesture { commit(item.id, into: focus ?? editingField) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isHighlighted ? [.isButton, .isSelected] : .isButton)
+        // A tap gesture gives VoiceOver nothing to press; this does.
+        .accessibilityAction(.default) { commit(item.id, into: focus ?? editingField) }
     }
 
     private func keycap(_ key: String, _ label: String) -> some View {
@@ -514,7 +524,7 @@ struct RelationsExplorerView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if let footer = result.footer {
+                if let footer = result.footer(showingStronger: showsStronger) {
                     footerBar(footer)
                 }
             }
@@ -523,26 +533,29 @@ struct RelationsExplorerView: View {
 
     // MARK: The verdict
 
+    /// The title, statement, models, lines and footer all describe the proof
+    /// shown, so Show It swaps every one of them with the proof.
     private func verdictBand(_ verdict: ExplorerResult.Verdict) -> some View {
-        VStack(alignment: .leading, spacing: Theme.tight) {
+        let title = result.verdictTitle(showingStronger: showsStronger) ?? verdict.title
+        return VStack(alignment: .leading, spacing: Theme.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.small) {
                 Image(systemName: verdict.symbol)
                     .foregroundStyle(symbolStyle(verdict.tone))
                     .accessibilityHidden(true)
-                Text(verdict.title)
+                Text(title)
                     .font(Theme.Fonts.verdict)
                     .lineLimit(2)
-                    .help(verdict.help ?? verdict.title)
+                    .help(verdict.help ?? title)
                 if showsProgress {
                     ProgressView()
                         .controlSize(.small)
                 }
                 Spacer(minLength: Theme.small)
-                ForEach(verdict.models, id: \.self) { model in
+                ForEach(result.verdictModels(showingStronger: showsStronger), id: \.self) { model in
                     ModelTag(model: model)
                 }
             }
-            if let statement = verdict.statement {
+            if let statement = result.verdictStatement(showingStronger: showsStronger) {
                 Text(statement)
                     .font(Theme.Fonts.row)
                     .fixedSize(horizontal: false, vertical: true)
@@ -757,7 +770,7 @@ struct RelationsExplorerView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: Theme.small)
-                if result.explainsRules {
+                if result.explainsRules(showingStronger: showsStronger) {
                     Button {
                         showsRules.toggle()
                     } label: {
@@ -875,6 +888,18 @@ struct RelationsExplorerView: View {
         try? await Task.sleep(for: .milliseconds(150))
         guard !Task.isCancelled, isComputing else { return }
         showsProgress = true
+    }
+
+    /// State restoration can bring this window back alone, and only a
+    /// reader window's launch task loads the library: with no reader on
+    /// screen after a moment, open one, so "Loading the Wiki" ends
+    /// (SWIFTUI-RULES §6.5).
+    private func openReaderIfAlone() async {
+        try? await Task.sleep(for: .seconds(1))
+        guard !Task.isCancelled, model.libraryGeneration == 0, model.mainWindowCount == 0 else {
+            return
+        }
+        openWindow(id: CCwikiApp.mainWindowID)
     }
 
     private func rebuildMatcher() {

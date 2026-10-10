@@ -10,8 +10,12 @@ struct ExplorerResultTests {
 
     private static func compute(_ query: ExplorerQuery) throws -> ExplorerResult {
         let derivation = try ExplorerFixture.derivation()
-        return ExplorerResult.compute(query, derivation: derivation,
-                                      labels: ExplorerFixture.labels(derivation.manifest))
+        return compute(query, over: derivation)
+    }
+
+    private static func compute(_ query: ExplorerQuery, over derivation: Derivation) -> ExplorerResult {
+        ExplorerResult.compute(query, derivation: derivation,
+                               labels: ExplorerFixture.labels(derivation.manifest))
     }
 
     /// Every sentence the result shows or copies, but the footer.
@@ -82,6 +86,10 @@ struct ExplorerResultTests {
         #expect(lines[1] == "Derived by CCwiki from 4 recorded reductions (relations.json at 0123456789ab)")
         #expect(lines[2] == "Public key encryption ⇐ KEM + SKE ⇒ PKE [CS03; fully black-box; standard model]")
         #expect(lines[3] == "  Key encapsulation mechanism (given)")
+
+        // Any step of the proof offers the same copy, not only the root.
+        let inner = try #require(root.children.last)
+        #expect(inner.proof == copy)
     }
 
     // MARK: One recorded step
@@ -104,6 +112,74 @@ struct ExplorerResultTests {
             #expect(!text.lowercased().contains("derived"), "\(text)")
             #expect(!text.contains("⇒*"), "\(text)")
         }
+    }
+
+    /// QR ⇒ COM recorded with no class beside a fully black-box chain
+    /// through factoring: the real manifest's QR ⇒ COM in miniature, where
+    /// the reference engine reports the stronger chain in 2 steps.
+    private static func strongerFixture() throws -> Derivation {
+        let objects: [[String: Any]] = [
+            ExplorerFixture.object("qr", title: "Quadratic residuosity", type: "assumption"),
+            ExplorerFixture.object("fac", title: "Factoring", type: "assumption"),
+            ExplorerFixture.object("com", title: "Commitment scheme"),
+        ]
+        let reductions: [[String: Any]] = [
+            ExplorerFixture.reduction("red-qr-to-com", ["qr"], "com", title: "QR ⇒ COM",
+                                      source: "GM84", reductionClass: "unstated"),
+            ExplorerFixture.reduction("red-qr-to-fac", ["qr"], "fac", title: "QR ⇒ Factoring",
+                                      source: "Rab79"),
+            ExplorerFixture.reduction("red-fac-to-com", ["fac"], "com", title: "Factoring ⇒ COM",
+                                      source: "Nao91"),
+        ]
+        return try ExplorerFixture.derivation(objects: objects, reductions: reductions)
+    }
+
+    @Test("Show It beside a recorded result swaps in the chain's own title, arrow, lines and footer")
+    func strongerChainBesideRecordedResult() throws {
+        let derivation = try Self.strongerFixture()
+        let result = Self.compute(ExplorerQuery(from: ["qr"], to: "com"), over: derivation)
+
+        // As first shown: the wiki's own one-step result.
+        let shortestTitle = result.verdictTitle(showingStronger: false)
+        let shortestStatement = result.verdictStatement(showingStronger: false)
+        let shortestFooter = result.footer(showingStronger: false)
+        #expect(shortestTitle == "Recorded in the wiki")
+        #expect(shortestStatement == "Quadratic residuosity ⇒ Commitment scheme")
+        #expect(shortestFooter == DerivationWording.recordedFooter)
+        #expect(!result.explainsRules(showingStronger: false))
+        let stronger = try #require(result.stronger)
+        #expect(stronger.line == "A fully black-box derivation exists in 2 steps")
+
+        // Shown: CCwiki's composition, which never reads as the wiki's.
+        let title = result.verdictTitle(showingStronger: true)
+        let statement = result.verdictStatement(showingStronger: true)
+        let footer = result.footer(showingStronger: true)
+        #expect(title == "Derivable")
+        #expect(statement == "Quadratic residuosity ⇒* Commitment scheme")
+        #expect(footer == DerivationWording.derivedFooter)
+        #expect(result.explainsRules(showingStronger: true))
+        let lines = result.verdictLines(showingStronger: true).map { $0.text }
+        #expect(lines == ["Derived by CCwiki from 2 recorded reductions · 2 steps",
+                          "Fully black-box: every step is"])
+
+        let sections = result.sections(showingStronger: true)
+        let root = try #require(sections.first?.rows.first)
+        #expect(root.statement == "Quadratic residuosity ⇒* Commitment scheme "
+            + "(derived by CCwiki from 2 recorded reductions)")
+        let step = try #require(root.children.first)
+        let copy = try #require(step.proof)
+        #expect(copy.depth == 2)
+        #expect(copy.statement == "Quadratic residuosity ⇒* Commitment scheme")
+    }
+
+    @Test("a recorded result's model line says only once")
+    func modelScopeLine() {
+        let idealised = DerivationWording.modelScopeLine(["rom"])
+        let stub = DerivationWording.modelScopeLine(["unknown"])
+        let standard = DerivationWording.modelScopeLine(["quantum"])
+        #expect(idealised == "Holds in the random oracle model only.")
+        #expect(stub == "Holds only through a stub reduction.")
+        #expect(standard == nil)
     }
 
     @Test("the second and third premises of a three-premise step carry ∧")
@@ -193,6 +269,15 @@ struct ExplorerResultTests {
             + "the random oracle model, and Oblivious interactive hash function ⇒ Oblivious "
             + "transfer (BH26) is a free (non-black-box) step, which need not carry over into "
             + "that model.")
+
+        // The recorded reductions do chain ROM ⇒ OIHF ⇒ OT, so the verdict
+        // never says that no chain exists.
+        let verdict = try #require(result.verdict)
+        let sentence = try #require(verdict.lines.first?.text)
+        #expect(!sentence.contains("no chain"))
+        #expect(sentence.hasPrefix("CCwiki finds no derivation it can use from "))
+        #expect(sentence.hasSuffix("The wiki's recorded reductions do chain here, through a step "
+            + "CCwiki does not apply in this case; see Refused steps."))
     }
 
     @Test("a complexity class in the question is turned away, never derived")
@@ -286,6 +371,63 @@ struct ExplorerResultTests {
             #expect(!lowered.contains("minimal"), "\(text)")
             #expect(!lowered.contains("neither alone"), "\(text)")
         }
+    }
+
+    @Test("backward with nothing found is never read as unconditional, and names a source in a model")
+    func backwardNothingFound() throws {
+        let result = try Self.compute(ExplorerQuery(to: "oihf"))
+        guard case .nothing(let title, let description) = result.state else {
+            Issue.record("expected an empty state, got \(result.state)")
+            return
+        }
+        #expect(title == "No Sources Found")
+        #expect(description.contains("The wiki records it in the random oracle model (BH26); models "
+            + "are not listed as sources."))
+        #expect(description.hasSuffix(DerivationWording.noSourcesCaveat))
+        #expect(!description.contains("from nothing"))
+        #expect(result.offersIdealisedModels)
+    }
+
+    /// A three-hypothesis edge, and one more step beyond its conclusion.
+    private static func largerFixture() throws -> Derivation {
+        let objects: [[String: Any]] = [
+            ExplorerFixture.object("a", title: "Alpha"),
+            ExplorerFixture.object("b", title: "Beta"),
+            ExplorerFixture.object("c", title: "Gamma"),
+            ExplorerFixture.object("d", title: "Delta"),
+            ExplorerFixture.object("e", title: "Epsilon"),
+        ]
+        let reductions: [[String: Any]] = [
+            ExplorerFixture.reduction("red-abc-to-d", ["a", "b", "c"], "d", title: "A + B + C ⇒ D",
+                                      source: "ABC20"),
+            ExplorerFixture.reduction("red-d-to-e", ["d"], "e", title: "D ⇒ E", source: "DE21"),
+        ]
+        return try ExplorerFixture.derivation(objects: objects, reductions: reductions)
+    }
+
+    @Test("backward: a larger conjunction is recorded at its own conclusion and derived beyond it")
+    func largerConjunctions() throws {
+        let derivation = try Self.largerFixture()
+
+        let atEdge = Self.compute(ExplorerQuery(to: "d"), over: derivation)
+        let edgeSection = atEdge.sections.first { $0.id == "larger" }
+        let edgeRow = try #require(edgeSection?.rows.first)
+        #expect(edgeRow.title == "Alpha ∧ Beta ∧ Gamma ⇒ Delta")
+        #expect(edgeRow.badge == "recorded")
+        #expect(edgeRow.statement == "Alpha ∧ Beta ∧ Gamma ⇒ Delta (recorded in the wiki: ABC20)")
+
+        // JLS21's shape: the edge gives D and D gives E, so E is CCwiki's
+        // chain, 2 steps deep, and never the wiki's ⇒.
+        let beyond = Self.compute(ExplorerQuery(to: "e"), over: derivation)
+        let ids = beyond.sections.map { $0.id }
+        #expect(ids == ["singles", "larger"])
+        let row = try #require(beyond.sections.last?.rows.first)
+        #expect(row.title == "Alpha ∧ Beta ∧ Gamma ⇒* Epsilon")
+        #expect(row.badge == "2 steps")
+        #expect(row.statement == "Alpha ∧ Beta ∧ Gamma ⇒* Epsilon "
+            + "(derived by CCwiki from 2 recorded reductions)")
+        #expect(row.help == "Derived by CCwiki from 2 recorded reductions; 2 steps.")
+        #expect(row.ask == ExplorerQuery(from: ["a", "b", "c"], to: "e"))
     }
 
     @Test("every outcome but a premise given back carries a footer")

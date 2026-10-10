@@ -1123,10 +1123,12 @@ final class AppModel {
     /// A question the explorer can ask about these objects, or `nil` when it
     /// would only be turned away: a complexity class is related by
     /// containment, never derived (R2), and an id the manifest does not have
-    /// is no question at all. For "Explore From Here…" on recorded rows.
+    /// is no question at all. Nor is any question when nothing can be
+    /// derived, as without the bundled curation. For "Explore From Here…" on
+    /// recorded rows.
     func explorerQuestion(from: [String], to: String? = nil) -> ExplorerQuery? {
         let named = from + (to.map { [$0] } ?? [])
-        guard !named.isEmpty, named.allSatisfy({ id in
+        guard !named.isEmpty, !derivation.participants(.all).isEmpty, named.allSatisfy({ id in
             relations.object(id).map { $0.type != Derivation.excludedType } ?? false
         }) else { return nil }
         return ExplorerQuery(from: from, to: to,

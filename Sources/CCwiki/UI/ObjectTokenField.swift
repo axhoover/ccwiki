@@ -143,6 +143,8 @@ private struct TokenView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        // A tap gesture gives VoiceOver nothing to press; this does.
+        .accessibilityAction(.default, onSelect)
         .accessibilityAction(named: "Remove", onRemove)
     }
 

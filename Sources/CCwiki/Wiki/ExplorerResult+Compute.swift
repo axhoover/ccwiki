@@ -104,11 +104,12 @@ extension ExplorerResult {
 
         // The title of a model-scoped result names the model, never a bare
         // "holds". A recorded one keeps its title and says so on a line.
-        let scope = DerivationWording.modelScope(fact.models)
-        if fact.isModelScoped, let scope {
+        if fact.isModelScoped {
             if recorded {
-                verdict.lines.append(Verdict.Line(id: "scope", text: scope + " only."))
-            } else {
+                if let line = DerivationWording.modelScopeLine(fact.models) {
+                    verdict.lines.append(Verdict.Line(id: "scope", text: line))
+                }
+            } else if let scope = DerivationWording.modelScope(fact.models) {
                 verdict.title = scope
             }
         }
@@ -130,10 +131,14 @@ extension ExplorerResult {
         for (index, conflict) in (answer.conflicts + answer.majorResults).enumerated() {
             let barrier = writer.manifest.barriers.first { $0.id == conflict.barrierID }
             let name = barrier.map { writer.barrierTitle($0) } ?? conflict.barrierID
+            // R8's qualifier goes wherever the barrier's title does.
+            let qualifier = barrier.flatMap { writer.qualifierSentence($0) }.map { " " + $0 } ?? ""
+            let kind = DerivationWording.chainClassShort(conflict.chainClass)
+            let derivedFrom: String = conflict.isDerived ? "a barrier derived from " : ""
             verdict.lines.append(Verdict.Line(
                 id: "conflict-\(index)",
-                text: "The record is inconsistent here: a \(DerivationWording.chainClassShort(conflict.chainClass)) "
-                    + "derivation meets \(conflict.isDerived ? "a barrier derived from " : "")\(name).",
+                text: "The record is inconsistent here: a \(kind) derivation meets \(derivedFrom)\(name)."
+                    + qualifier,
                 style: .caution))
         }
         if let note = answer.scopeNote {
@@ -143,47 +148,21 @@ extension ExplorerResult {
         var result = ExplorerResult(query: query, state: .answer)
         result.verdict = verdict
 
-        // The proof, expanded.
-        let proofSection = ExplorerSection(
-            id: "proof",
-            rows: ProofOutline.rows(answer.proof, idPrefix: "proof", writer: writer),
-            note: stubNote(answer.proof))
-        result.sections.append(proofSection)
+        // The proof, expanded, with Copy Proof as Text on every step.
         let copy = ProofCopy(statement: statement, relationCount: answer.proof.relationIDs.count,
                              depth: fact.depth,
                              lines: ProofOutline.copyLines(answer.proof, writer: writer))
-        result.sections[0].rows = result.sections[0].rows.map { (root) -> ExplorerRow in
-            var root = root
-            root.proof = copy
-            root.statement = writer.factStatement(from: start, to: answer.target, depth: fact.depth,
-                                                  relationIDs: answer.proof.relationIDs)
-            return root
-        }
+        let proofRows = ProofOutline.rows(answer.proof, idPrefix: "proof", writer: writer)
+        result.sections.append(ExplorerSection(
+            id: "proof",
+            rows: rootStatements(ProofOutline.attaching(copy, to: proofRows), start: start,
+                                 target: answer.target, depth: fact.depth,
+                                 proof: answer.proof, writer: writer),
+            note: stubNote(answer.proof)))
 
         if let stronger = answer.stronger {
-            let strongerStatement = "\(writer.conjunction(start)) \(DerivationWording.derivedArrow) "
-                + writer.label(answer.target)
-            let strongerCopy = ProofCopy(
-                statement: strongerStatement, relationCount: stronger.proof.relationIDs.count,
-                depth: stronger.depth, lines: ProofOutline.copyLines(stronger.proof, writer: writer))
-            let rows = ProofOutline.rows(stronger.proof, idPrefix: "stronger", writer: writer)
-                .map { (root) -> ExplorerRow in
-                    var root = root
-                    root.proof = strongerCopy
-                    root.statement = writer.factStatement(
-                        from: start, to: answer.target, depth: stronger.depth,
-                        relationIDs: stronger.proof.relationIDs)
-                    return root
-                }
-            let lines: [Verdict.Line] = [
-                Verdict.Line(id: "provenance", text: DerivationWording.provenance(
-                    relationCount: stronger.proof.relationIDs.count, depth: stronger.depth)),
-                chainClassLine(stronger.chainClass, proof: stronger.proof, writer: writer),
-            ]
-            result.stronger = Stronger(
-                line: DerivationWording.strongerChain(stronger.chainClass, depth: stronger.depth),
-                proof: ExplorerSection(id: "proof", rows: rows, note: stubNote(stronger.proof)),
-                lines: lines, copy: strongerCopy)
+            result.stronger = strongerProof(stronger, start: start, target: answer.target,
+                                            writer: writer)
         }
 
         result.sections += recordedOnPairSections(answer.recordedOnPair, start: start,
@@ -211,6 +190,76 @@ extension ExplorerResult {
             : "Derivable in \(DerivationWording.steps(fact.depth))"
         result.initiallyCollapsed = collapsedByDefault(result.sections)
         return result
+    }
+
+    /// The proof's root states the whole claim when copied, with where it
+    /// came from; the steps under it state their own reductions.
+    private static func rootStatements(_ rows: [ExplorerRow], start: [String], target: String,
+                                       depth: Int, proof: Derivation.ProofTree,
+                                       writer: ExplorerWriter) -> [ExplorerRow] {
+        let statement = writer.factStatement(from: start, to: target, depth: depth,
+                                             relationIDs: proof.relationIDs)
+        return rows.map { (root) -> ExplorerRow in
+            var root = root
+            root.statement = statement
+            return root
+        }
+    }
+
+    /// R6's stronger proof, with the verdict it reads under. Its own depth
+    /// decides its words, as the shortest proof's does: beside a recorded
+    /// result it is usually a chain, which is CCwiki's composition and must
+    /// never pass for the wiki's own result.
+    private static func strongerProof(_ stronger: Derivation.StrongerChain, start: [String],
+                                      target: String, writer: ExplorerWriter) -> Stronger {
+        let proof = stronger.proof
+        let recorded = stronger.depth <= 1
+        let arrow = recorded ? DerivationWording.recordedArrow : DerivationWording.derivedArrow
+        let statement = "\(writer.conjunction(start)) \(arrow) \(writer.label(target))"
+
+        // The models its own steps use, which may be fewer than the
+        // shortest proof's: R6 looks only among those.
+        var models: Set<String> = []
+        for row in proof.rows {
+            guard let step = row.step, step.model != Derivation.standardModel else { continue }
+            models.insert(step.model)
+        }
+
+        var lines: [Verdict.Line] = []
+        let title: String
+        if recorded {
+            title = DerivationWording.recordedTitle
+            if let line = DerivationWording.modelScopeLine(models) {
+                lines.append(Verdict.Line(id: "scope", text: line))
+            }
+            let stepID = proof.relationIDs.first ?? ""
+            lines.append(Verdict.Line(
+                id: "provenance", text: "A result the wiki records: \(writer.reductionName(stepID))"))
+        } else {
+            title = DerivationWording.modelScope(models) ?? DerivationWording.derivableTitle
+            lines.append(Verdict.Line(
+                id: "provenance",
+                text: DerivationWording.provenance(relationCount: proof.relationIDs.count,
+                                                   depth: stronger.depth)))
+            lines.append(chainClassLine(stronger.chainClass, proof: proof, writer: writer))
+        }
+
+        let copy = ProofCopy(statement: statement, relationCount: proof.relationIDs.count,
+                             depth: stronger.depth,
+                             lines: ProofOutline.copyLines(proof, writer: writer))
+        let outline = ProofOutline.attaching(
+            copy, to: ProofOutline.rows(proof, idPrefix: "stronger", writer: writer))
+        let section = ExplorerSection(
+            id: "proof",
+            rows: rootStatements(outline, start: start, target: target, depth: stronger.depth,
+                                 proof: proof, writer: writer),
+            note: stubNote(proof))
+        return Stronger(
+            line: DerivationWording.strongerChain(stronger.chainClass, depth: stronger.depth),
+            proof: section, lines: lines, copy: copy, title: title, statement: statement,
+            models: models.sorted(by: Derivation.precedes),
+            footer: recorded ? DerivationWording.recordedFooter : DerivationWording.derivedFooter,
+            explainsRules: !recorded)
     }
 
     /// The chain class line, muted when unstated, as `unstated` is
@@ -311,12 +360,27 @@ extension ExplorerResult {
             let from = writer.conjunction(start)
             let to = writer.label(target)
             // Never "no chain of recorded reductions" when the wiki records
-            // one on this very pair that CCwiki may not use.
-            let sentence: String = unusable.isEmpty
-                ? "CCwiki finds no chain of the wiki's recorded reductions from \(from) to \(to) \(models)."
-                : "CCwiki finds no derivation it can use from \(from) to \(to) \(models). The wiki "
-                    + "records \(unusable.count == 1 ? "a reduction" : "reductions") on this pair "
-                    + "that CCwiki does not use here; see below."
+            // one on this very pair that CCwiki may not use, or when the
+            // recorded reductions do chain here through a step CCwiki
+            // refused (R5, R13): ROM ⇒ OIHF ⇒ OT is a chain the wiki
+            // records, which CCwiki does not apply inside the model.
+            let sentence: String
+            if unusable.isEmpty && answer.refused.isEmpty {
+                sentence = "CCwiki finds no chain of the wiki's recorded reductions from \(from) "
+                    + "to \(to) \(models)."
+            } else {
+                var parts = ["CCwiki finds no derivation it can use from \(from) to \(to) \(models)."]
+                if !unusable.isEmpty {
+                    parts.append("The wiki records \(unusable.count == 1 ? "a reduction" : "reductions") "
+                        + "on this pair that CCwiki does not use here; see below.")
+                }
+                if !answer.refused.isEmpty {
+                    let steps: String = answer.refused.count == 1 ? "a step" : "steps"
+                    parts.append("The wiki's recorded reductions do chain here, through \(steps) "
+                        + "CCwiki does not apply in this case; see Refused steps.")
+                }
+                sentence = parts.joined(separator: " ")
+            }
             verdict.lines.append(Verdict.Line(id: "sentence", text: sentence))
         }
         verdict.lines += startLines(refuted: answer.refutedStarts, settings: answer.settingStarts,

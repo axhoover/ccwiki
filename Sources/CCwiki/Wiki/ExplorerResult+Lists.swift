@@ -29,9 +29,11 @@ extension ExplorerResult {
             if let model = modelStart, !query.includesIdealisedModels {
                 description = DerivationWording.modelStart(model)
             } else {
+                // An empty list has no footer to say it, so it says so here.
                 description = "CCwiki derives nothing from \(from) "
                     + DerivationWording.modelPhrase(includesIdealisedModels: query.includesIdealisedModels)
-                    + " with the reductions the wiki records."
+                    + " with the reductions the wiki records. "
+                    + DerivationWording.nothingDerivedCaveat
             }
             var result = ExplorerResult(query: query, state: .nothing(title: "Nothing Derived",
                                                                      description: description))
@@ -125,13 +127,19 @@ extension ExplorerResult {
         let isEmpty = backward.singles.isEmpty && backward.groups.isEmpty
             && backward.settings.isEmpty && backward.largerConjunctions.isEmpty
         guard !isEmpty else {
-            let description: String = "CCwiki derives \(name) from nothing else "
-                + DerivationWording.modelPhrase(includesIdealisedModels: query.includesIdealisedModels)
-                + " with the reductions the wiki records."
-            var result = ExplorerResult(query: query, state: .nothing(title: "No Recorded Sources",
-                                                                     description: description))
+            // Never "from nothing", which reads as unconditional, and never
+            // "no recorded sources": the wiki may record one in a model, or
+            // in a model the toggle leaves out, which R11 does not list.
+            let phrase = DerivationWording.modelPhrase(
+                includesIdealisedModels: query.includesIdealisedModels)
+            var sentences = ["Through the reductions the wiki records, CCwiki finds no object or "
+                + "combination of objects that derives \(name) \(phrase)."]
+            if let inModel = modelSourceSentence(target, writer: writer) { sentences.append(inModel) }
+            sentences.append(DerivationWording.noSourcesCaveat)
+            var result = ExplorerResult(query: query, state: .nothing(
+                title: "No Sources Found", description: sentences.joined(separator: " ")))
             result.offersIdealisedModels = !query.includesIdealisedModels
-            result.announcement = "No recorded sources"
+            result.announcement = "No sources found"
             return result
         }
 
@@ -201,29 +209,12 @@ extension ExplorerResult {
 
         if !backward.largerConjunctions.isEmpty {
             let rows = backward.largerConjunctions.map { (conjunction) -> ExplorerRow in
-                let statement = "\(writer.conjunction(conjunction.hypotheses)) "
-                    + "\(DerivationWording.recordedArrow) \(name)"
-                var row = ExplorerRow(id: "larger/\(conjunction.relationID)", title: statement,
-                                      accessibilityLabel: statement)
-                row.wraps = true
-                row.detail = writer.reductionName(conjunction.relationID)
-                row.models = conjunction.fact.models.sorted(by: Derivation.precedes)
-                if let relation = writer.manifest.reduction(conjunction.relationID) {
-                    row.page = ExplorerRow.PageLink(
-                        kind: "Reduction", title: writer.reductionName(conjunction.relationID),
-                        path: relation.path)
-                }
-                let ask = ExplorerQuery(from: conjunction.hypotheses, to: target,
-                                        includesIdealisedModels: query.includesIdealisedModels)
-                row.primary = .ask(ask)
-                row.ask = ask
-                row.exploreFrom = conjunction.hypotheses
-                row.statement = statement
-                return row
+                largerConjunctionRow(conjunction, target: target, query: query, writer: writer)
             }
             result.sections.append(ExplorerSection(
                 id: "larger", title: "Larger conjunctions",
-                help: "Recorded reductions with three or more hypotheses, shown as the edge itself.",
+                help: "Recorded reductions with three or more hypotheses, shown as the edge "
+                    + "itself. Depth-1 rows are recorded results.",
                 rows: rows))
         }
 
@@ -249,6 +240,74 @@ extension ExplorerResult {
         result.announcement = "\(singles) objects alone, \(pairs) pairs"
         result.initiallyCollapsed = collapsedByDefault(result.sections)
         return result
+    }
+
+    /// "The wiki records it in the random oracle model (BH26); models are not
+    /// listed as sources." `nil` unless a recorded reduction concludes the
+    /// target from a model alone, which R11 never lists as a source.
+    private static func modelSourceSentence(_ target: String, writer: ExplorerWriter) -> String? {
+        var models: [String] = []
+        var keys: [String] = []
+        for relation in writer.manifest.relations(touching: target).asConclusion
+        where relation.hypotheses.count == 1 && relation.kind != .inclusion && !relation.heuristic {
+            guard let model = Derivation.modelOfNode(relation.hypotheses[0], in: writer.manifest)
+            else { continue }
+            if !models.contains(model) { models.append(model) }
+            for key in writer.citations(relation.source) where !keys.contains(key) { keys.append(key) }
+        }
+        guard !models.isEmpty else { return nil }
+        let names = DerivationWording.list(models.map { DerivationWording.modelName($0) })
+        let cited = keys.isEmpty ? "" : " (" + keys.joined(separator: ", ") + ")"
+        return "The wiki records it in the \(names)\(cited); models are not listed as sources."
+    }
+
+    /// A conjunction of three or more, shown as the edge it starts from, with
+    /// the same tags and provenance as any other fact: when the target lies
+    /// beyond the edge's own conclusion (JLS21's four hypotheses give iO,
+    /// and iO gives FE), the row is CCwiki's chain, drawn `⇒*` and badged
+    /// with its depth, never the wiki's `⇒`.
+    private static func largerConjunctionRow(
+        _ conjunction: Derivation.BackwardClosure.Conjunction, target: String,
+        query: ExplorerQuery, writer: ExplorerWriter
+    ) -> ExplorerRow {
+        let fact = conjunction.fact
+        let recorded = fact.depth <= 1
+        let arrow = recorded ? DerivationWording.recordedArrow : DerivationWording.derivedArrow
+        let title = "\(writer.conjunction(conjunction.hypotheses)) \(arrow) \(writer.label(target))"
+        let proof = writer.derivation.closure(from: Set(conjunction.hypotheses), options: query.options)
+            .proof(of: target)
+        let relationIDs = proof?.relationIDs ?? [conjunction.relationID]
+
+        var row = ExplorerRow(id: "larger/\(conjunction.relationID)", title: title,
+                              accessibilityLabel: "")
+        row.wraps = true
+        row.detail = writer.reductionName(conjunction.relationID)
+        row.badge = recorded ? "recorded" : DerivationWording.steps(fact.depth)
+        row.models = fact.models.sorted(by: Derivation.precedes)
+        if let assumed = writer.assuming(fact.assumes.map { $0.notion }) { row.notes.append(assumed) }
+        if let weakening = fact.weakening { row.notes.append("only " + weakening.notion) }
+        row.help = recorded
+            ? "A result the wiki records: \(writer.reductionName(conjunction.relationID))."
+            : DerivationWording.derivedBy(relationIDs.count) + "; "
+                + DerivationWording.steps(fact.depth) + "."
+        let how: String = recorded
+            ? "recorded in the wiki"
+            : "derived in \(DerivationWording.steps(fact.depth))"
+        let models = row.models.map(DerivationWording.modelName)
+        row.accessibilityLabel = ([title, how] + models).joined(separator: ", ")
+        if let relation = writer.manifest.reduction(conjunction.relationID) {
+            row.page = ExplorerRow.PageLink(
+                kind: "Reduction", title: writer.reductionName(conjunction.relationID),
+                path: relation.path)
+        }
+        let ask = ExplorerQuery(from: conjunction.hypotheses, to: target,
+                                includesIdealisedModels: query.includesIdealisedModels)
+        row.primary = .ask(ask)
+        row.ask = ask
+        row.exploreFrom = conjunction.hypotheses
+        row.statement = writer.factStatement(from: conjunction.hypotheses, to: target,
+                                             depth: fact.depth, relationIDs: relationIDs)
+        return row
     }
 
     /// One group of pairs, headed by the edge where they meet: "Through OWF ∧
@@ -308,7 +367,15 @@ extension ExplorerResult {
         nestsTarget: Bool = false
     ) -> ExplorerRow? {
         guard let proof = closure.proof(of: target) else { return nil }
-        let outline = ProofOutline.rows(proof, idPrefix: id + "/proof", writer: writer)
+        let recorded = fact.depth <= 1
+        let statement = "\(writer.conjunction(start)) "
+            + (recorded ? DerivationWording.recordedArrow : DerivationWording.derivedArrow)
+            + " \(writer.label(target))"
+        // Copy Proof as Text on the row and on every step of its proof.
+        let copy = ProofCopy(statement: statement, relationCount: proof.relationIDs.count,
+                             depth: fact.depth, lines: ProofOutline.copyLines(proof, writer: writer))
+        let outline = ProofOutline.attaching(
+            copy, to: ProofOutline.rows(proof, idPrefix: id + "/proof", writer: writer))
         guard let root = outline.first else { return nil }
 
         var row: ExplorerRow
@@ -319,7 +386,6 @@ extension ExplorerResult {
             row = root
             row.emphasis = .normal
         }
-        let recorded = fact.depth <= 1
         row.badge = recorded ? "recorded" : DerivationWording.steps(fact.depth)
         row.models = fact.models.sorted(by: Derivation.precedes)
         var notes: [String] = []
@@ -334,11 +400,7 @@ extension ExplorerResult {
                                 includesIdealisedModels: query.includesIdealisedModels)
         row.statement = writer.factStatement(from: start, to: target, depth: fact.depth,
                                              relationIDs: proof.relationIDs)
-        let statement = "\(writer.conjunction(start)) "
-            + (recorded ? DerivationWording.recordedArrow : DerivationWording.derivedArrow)
-            + " \(writer.label(target))"
-        row.proof = ProofCopy(statement: statement, relationCount: proof.relationIDs.count,
-                              depth: fact.depth, lines: ProofOutline.copyLines(proof, writer: writer))
+        row.proof = copy
         let how: String = recorded
             ? "recorded in the wiki"
             : "derived in \(DerivationWording.steps(fact.depth))"

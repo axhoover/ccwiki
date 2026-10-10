@@ -54,6 +54,18 @@ enum ProofOutline {
         proof.rows.map { writer.proofCopyLine($0) }
     }
 
+    /// The outline with Copy Proof as Text on every row, so the context menu
+    /// of any step offers it, not only the root's (relations-explorer.md
+    /// §2.6).
+    static func attaching(_ copy: ProofCopy, to rows: [ExplorerRow]) -> [ExplorerRow] {
+        rows.map { (row) -> ExplorerRow in
+            var row = row
+            row.proof = copy
+            row.children = attaching(copy, to: row.children)
+            return row
+        }
+    }
+
     private static func rowID(_ prefix: String, _ row: Derivation.ProofTree.Row) -> String {
         "\(prefix)/\(row.id)"
     }

@@ -186,6 +186,17 @@ struct ExplorerWriter: Sendable {
             return made
         }
 
+        // R1, R2: the engine never chains an inclusion, a heuristic
+        // candidate or a step touching a complexity class. Rendering one as
+        // a proof step would present a non-theorem as a step of a proof, so
+        // a debug build stops here (relations-explorer.md §1).
+        let isTheorem = manifest.reduction(step.relationID)
+            .map { $0.kind != .inclusion && !$0.heuristic } ?? true
+        assert(isTheorem, "\(step.relationID) is an inclusion or a heuristic candidate")
+        assert((step.hypotheses + [step.conclusion]).allSatisfy {
+            manifest.object($0)?.type != Derivation.excludedType
+        }, "\(step.relationID) touches a complexity class")
+
         var made = ExplorerRow(id: id, title: name, accessibilityLabel: "")
         made.conjunct = conjunct
         made.emphasis = isRoot ? .strong : .normal
@@ -280,8 +291,17 @@ struct ExplorerWriter: Sendable {
             + label(barrier.conclusion) : title
     }
 
+    /// R8's qualifier as a sentence, for anywhere a barrier's title is
+    /// printed in running text: the wiki writes every title as an
+    /// unqualified "No reduction from A to B", and an unclassified,
+    /// fixed-construction or stub barrier must never read as more.
+    func qualifierSentence(_ barrier: Barrier) -> String? {
+        Derivation.qualifier(of: barrier, in: manifest)?.explanation
+    }
+
     func barrierHelp(_ barrier: Barrier) -> String {
         var lines = [barrierTitle(barrier)]
+        if let qualifier = qualifierSentence(barrier) { lines.append(qualifier) }
         let name = className(barrier.reductionClass)
         let phrase = name == Derivation.unstatedClass
             ? "a reduction of unstated class" : "a \(name) reduction"
@@ -380,8 +400,9 @@ struct ExplorerWriter: Sendable {
         row.glyph = .derivedBarrier
         row.wraps = true
         row.notes = notes
-        row.help = barrierTitle(barrier) + "\nDerived by CCwiki from this barrier and the side "
-            + "reductions it names, each of its class, standard-model and clean."
+        let qualifier = qualifierSentence(barrier).map { "\n" + $0 } ?? ""
+        row.help = barrierTitle(barrier) + qualifier + "\nDerived by CCwiki from this barrier and "
+            + "the side reductions it names, each of its class, standard-model and clean."
         row.primary = .page(barrier.path)
         row.page = ExplorerRow.PageLink(kind: "Barrier", title: barrierTitle(barrier), path: barrier.path)
         row.statement = sentence
@@ -438,10 +459,16 @@ struct ExplorerWriter: Sendable {
             guard let barrier = manifest.barriers.first(where: { $0.id == barrierID }) else { continue }
             let title = barrierTitle(barrier)
             let keys = citations(barrier.source).joined(separator: ", ")
-            sentences.append("The wiki records a barrier here: \(title)"
-                + (keys.isEmpty ? "." : " (\(keys))."))
-            links.append(ExplorerRow.Link(id: id + "/" + barrierID, title: title,
-                                          target: .page(barrier.path)))
+            var sentence = "The wiki records a barrier here: \(title)"
+                + (keys.isEmpty ? "." : " (\(keys)).")
+            // R8: the qualifier wherever the title appears. The link is
+            // named by its citation, as a derived barrier's is, so the title
+            // is never shown without it.
+            if let qualifier = qualifierSentence(barrier) { sentence += " " + qualifier }
+            sentences.append(sentence)
+            links.append(ExplorerRow.Link(
+                id: id + "/" + barrierID, title: keys.isEmpty ? "Barrier" : keys + " barrier",
+                target: .page(barrier.path)))
         }
 
         let sentence = sentences.joined(separator: " ")

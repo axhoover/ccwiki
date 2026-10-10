@@ -47,7 +47,7 @@ struct DerivedRelationsSections: View {
         return Section {
             if isExpanded {
                 ForEach(derivations.blocks(role)) { block in
-                    blockRows(block, namesObject: derivations.needsObjectNames(role))
+                    blockRows(block, namesObject: derivations.needsObjectNames)
                 }
             }
         } header: {

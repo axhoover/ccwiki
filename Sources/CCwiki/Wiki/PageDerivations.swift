@@ -101,12 +101,15 @@ struct PageDerivations: Sendable {
     /// Refuted objects on the page (R14), with the wiki's sentence: their
     /// implications are vacuous, and the inspector says so over its groups.
     let refutations: [String: String]
+    /// The objects the page hosts, whether or not they derive anything.
+    let objectCount: Int
 
-    static let empty = PageDerivations(blocks: [], refutations: [:])
+    static let empty = PageDerivations(blocks: [], refutations: [:], objectCount: 0)
 
-    private init(blocks: [Block], refutations: [String: String]) {
+    private init(blocks: [Block], refutations: [String: String], objectCount: Int) {
         self.blocks = blocks
         self.refutations = refutations
+        self.objectCount = objectCount
     }
 
     var isEmpty: Bool { blocks.isEmpty }
@@ -122,9 +125,11 @@ struct PageDerivations: Sendable {
     /// A page hosting several objects names the object over each block, in
     /// the inspector's secondary name style; a page with one does not need
     /// to, since the title bar already says which object you are reading.
-    func needsObjectNames(_ role: Role) -> Bool {
-        Set(blocks(role).map { $0.objectID }).count > 1
-    }
+    ///
+    /// Counted over the page, not over the blocks of a role: when only one
+    /// of the hash function page's objects derives anything, its rows are
+    /// still OWF's, and unnamed they would read as the host's.
+    var needsObjectNames: Bool { objectCount > 1 }
 
     // MARK: Building
 
@@ -132,7 +137,7 @@ struct PageDerivations: Sendable {
     /// its endpoints derive is on their own pages.
     init(path: String, manifest: RelationsManifest, derivation: Derivation, labels: RelationLabels) {
         guard manifest.relation(onPage: path) == nil, manifest.barrier(onPage: path) == nil else {
-            self.init(blocks: [], refutations: [:])
+            self.init(blocks: [], refutations: [:], objectCount: 0)
             return
         }
         let ids = manifest.objectIDs(onPage: path)
@@ -164,7 +169,7 @@ struct PageDerivations: Sendable {
                                     groups: Self.grouped(rows)))
             }
         }
-        self.init(blocks: blocks, refutations: refutations)
+        self.init(blocks: blocks, refutations: refutations, objectCount: ordered.count)
     }
 
     /// By depth, then by label as a reader sorts names, then by id.

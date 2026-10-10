@@ -158,4 +158,19 @@ struct ExplorerQueryTests {
         #expect(inclusion == nil)
         #expect(unknown == nil)
     }
+
+    @Test("nothing on any page when nothing can be derived, as without the bundled curation")
+    func seedsNothingWithoutDerivations() throws {
+        let manifest = try ExplorerFixture.manifest()
+        // What `Derivation(manifest:)` builds when the curation is missing.
+        let derivation = Derivation.empty
+        let paths = ["Primitives/hash-function.md", "Reductions/red-kem-and-ske-to-pke.md",
+                     "Barriers/bar-owf-to-pke.md"]
+        for path in paths {
+            let subject = PageRelations(path: path, manifest: manifest).subject
+            let query = ExplorerQuery.seed(for: subject, activeAnchor: nil, manifest: manifest,
+                                           derivation: derivation)
+            #expect(query == nil, "\(path)")
+        }
+    }
 }

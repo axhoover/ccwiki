@@ -70,6 +70,13 @@ enum ExplorerFixture {
             barrier("bar-owf-to-pke", ["owf"], "pke", title: "No relativizing reduction from OWF to PKE",
                     source: "IR89", reductionClass: "relativizing"),
         ]
+        return try manifest(objects: objects, reductions: reductions, barriers: barriers)
+    }
+
+    /// A manifest of just these, for a test that needs a shape the shared
+    /// graph does not have.
+    static func manifest(objects: [[String: Any]], reductions: [[String: Any]],
+                         barriers: [[String: Any]] = []) throws -> RelationsManifest {
         let root: [String: Any] = [
             "version": 1,
             "classes": classes,
@@ -87,6 +94,13 @@ enum ExplorerFixture {
     /// one, and the engine's own tests cover it.
     static func derivation() throws -> Derivation {
         Derivation(manifest: try manifest(), curation: .empty)
+    }
+
+    /// The derivation over a graph of just these, likewise uncurated.
+    static func derivation(objects: [[String: Any]], reductions: [[String: Any]],
+                           barriers: [[String: Any]] = []) throws -> Derivation {
+        let manifest = try manifest(objects: objects, reductions: reductions, barriers: barriers)
+        return Derivation(manifest: manifest, curation: .empty)
     }
 
     static func labels(_ manifest: RelationsManifest) -> RelationLabels {
