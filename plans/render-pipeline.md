@@ -91,7 +91,17 @@ before `rehype-katex` in the site's chain.
 renders it. Passing it through is safe here because the CSP forbids inline
 script (§5), so markup coming out of the wiki cannot execute.
 
-**Not** reproduced, deliberately: popovers, the SPA router and the graph view.
+**Not** reproduced, deliberately: the SPA router and the graph view.
+
+**Reproduced differently: popovers.** The site fetches the target page and
+shows all of it in a scrollable box. The reader is offline and exists to avoid
+a second full render, so it shows a summary card instead, computed in Swift
+with the page (`LinkPreviews`, `PreviewExcerpt`) and sent as
+`payload.previews`, keyed by each link's resolved href; `ccwiki.js` lays a card
+out after 450 ms on an internal link and never asks Swift for anything.
+Settings → Reading turns it off. See
+[relations-explorer.md](relations-explorer.md) §4.
+
 The site's clipboard buttons were left out at first in favour of a native
 right-click (2026-09-27). They are back since 2026-10, because they are what
 people know from the site; see "Copying LaTeX" below.

@@ -158,6 +158,19 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Show link previews on hover", isOn: Binding(
+                    get: { model.showsLinkPreviews },
+                    set: { model.showsLinkPreviews = $0 }))
+            } header: {
+                Text("Links")
+            } footer: {
+                Text("A card with the target's title and first paragraph, or a reduction's "
+                    + "statement and how it holds. Hover over a link for half a second.")
+                .font(Theme.Fonts.meta)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Show wiki maintenance notices", isOn: Binding(
                     get: { model.showsMaintenanceNotices },
                     set: { model.showsMaintenanceNotices = $0 }))

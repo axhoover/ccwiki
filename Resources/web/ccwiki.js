@@ -225,8 +225,8 @@
 
   // ============================================================== factory ==
 
-  function createMarkdown(macros) {
-    var katexOptions = {
+  function katexOptionsFor(macros) {
+    return {
       macros: macros || {},
       throwOnError: false,
       strict: "ignore",
@@ -234,6 +234,10 @@
       trust: false,
       maxExpand: 1000,
     };
+  }
+
+  function createMarkdown(macros) {
+    var katexOptions = katexOptionsFor(macros);
 
     var md = global.markdownit({
       // The corpus contains exactly one raw HTML block (the macros-copy anchor
@@ -364,6 +368,27 @@
     md.renderer.rules.table_close = function () { return "</table></div>\n"; };
 
     return md;
+  }
+
+  /** The renderer for link-preview cards: inline markdown and its math only.
+   *  Swift has already reduced each part to text, emphasis, code and `$…$`,
+   *  so this instance knows nothing else. `html: false` escapes anything
+   *  Swift missed rather than injecting it, and links and images are off, so
+   *  a stray `[text](url)` stays text: a card is never clicked. Same macro
+   *  table as the page, so the site's macros render in cards. */
+  function createPreviewMarkdown(macros) {
+    var katexOptions = katexOptionsFor(macros);
+    var pm = global.markdownit({ html: false, linkify: false, typographer: true });
+    pm.disable(["link", "image", "autolink"], true);
+    pm.inline.ruler.before("escape", "math_inline", mathInline);
+    pm.renderer.rules.math_inline = function (tokens, idx) {
+      try {
+        return global.katex.renderToString(tokens[idx].content, katexOptions);
+      } catch (e) {
+        return '<code class="math-error">' + pm.utils.escapeHtml(tokens[idx].content) + "</code>";
+      }
+    };
+    return pm;
   }
 
   function noticeHTML(notices) {
@@ -629,6 +654,7 @@
   var currentMacros = null;
   var currentMacrosKey = null;
   var md = null;
+  var previewMarkdown = null;
 
   /** A canonical string for a macro table, so two tables compare by content
    *  whatever order their keys arrived in. */
@@ -656,6 +682,7 @@
     currentMacrosKey = key;
     installKatexMacros();
     md = createMarkdown(macros);
+    previewMarkdown = createPreviewMarkdown(macros);
     return md;
   }
 
@@ -670,6 +697,9 @@
    *                                this render
    *   html     : string            (optional) pre-built HTML, used for
    *                                synthetic folder pages
+   *   previews : { href: {kind, title, meta, note, excerpt, label} }
+   *                                (optional) a card per internal link
+   *                                target, keyed by the href the link carries
    * }
    */
   // Where each page was left, so Back and Forward return to the same place,
@@ -690,6 +720,9 @@
       ? scrollPositions[payload.path] : null;
     shownPath = payload.path;
     lastReportedHeading = undefined;
+    dismissPreview();
+    previews = payload.previews || {};
+    renderedPreviews = {};
 
     try {
       var markdown = ensureMarkdown(payload.macros);
@@ -911,12 +944,306 @@
     });
   }, { passive: true });
 
+  // ======================================================= link previews ==
+  // A summary card for an internal link once the pointer has rested on it
+  // (relations-explorer.md §4). Swift computes every card with the page and
+  // sends them as `payload.previews`, keyed by the href each link carries;
+  // this file only lays a card out. JS never asks Swift for anything, and a
+  // link with no entry (external, asset, folder, same page) gets no card.
+
+  // Between the site's 200 ms and a macOS tooltip's second or so: long enough
+  // that a pointer crossing a dense paragraph does not flash cards.
+  var PREVIEW_DELAY = 450;
+  // A card asked for this soon after the last one closed opens at once, so
+  // reading along a row of links does not wait each time.
+  var PREVIEW_WARM = 400;
+  // A link that wraps onto a second line fires `mouseout` between its line
+  // boxes; the close waits long enough for the `mouseover` that follows.
+  var PREVIEW_CLOSE_DELAY = 100;
+  var PREVIEW_GAP = 8;
+  var PREVIEW_INSET = 12;
+  // RelationMeta.separator: a no-break space keeps the dot with the part
+  // before it, so a wrapped line never starts with one.
+  var PREVIEW_SEPARATOR = "\u00A0\u00B7 ";
+
+  var previews = {};
+  var renderedPreviews = {};
+  var previewCard = null;
+  var previewAnchor = null;     // the link whose card is showing
+  var pendingAnchor = null;     // the link waiting out the delay
+  var previewOpenTimer = null;
+  var previewCloseTimer = null;
+  var lastPreviewClosed = 0;
+  var lastPointerY = null;
+  // The test hook scrolls its link into view; that scroll must not close
+  // the card it is about to open.
+  var ignoreScrollUntil = 0;
+
+  function hasPreview(href) {
+    return Object.prototype.hasOwnProperty.call(previews, href);
+  }
+
+  /** The internal link `node` is part of, when it has a card. */
+  function previewLink(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    var anchor = el && el.closest ? el.closest("a.internal") : null;
+    return anchor && hasPreview(anchor.getAttribute("href") || "") ? anchor : null;
+  }
+
+  /** One card element for the document, outside `#page`: a selection in the
+   *  page never includes it, `render` never replaces it, and with
+   *  `pointer-events: none` it never takes a click. Hidden means `hidden`,
+   *  never a zero opacity, so find in page cannot match a card's text. */
+  function ensurePreviewCard() {
+    if (previewCard) return previewCard;
+    var card = document.createElement("div");
+    card.className = "link-preview";
+    card.id = "ccwiki-link-preview";
+    card.setAttribute("role", "tooltip");
+    card.hidden = true;
+    ["kind", "title", "meta", "note", "excerpt"].forEach(function (part) {
+      var el = document.createElement("div");
+      el.className = "link-preview-" + part;
+      card.appendChild(el);
+    });
+    document.body.appendChild(card);
+    previewCard = card;
+    return card;
+  }
+
+  /** A card's parts as HTML, rendered once per page. Every word is Swift's;
+   *  the kind and the note are plain text, the rest inline markdown. */
+  function renderedPreview(href) {
+    if (Object.prototype.hasOwnProperty.call(renderedPreviews, href)) {
+      return renderedPreviews[href];
+    }
+    if (!previewMarkdown) ensureMarkdown();
+    var data = previews[href] || {};
+    function inline(text) {
+      if (!text) return "";
+      try {
+        return previewMarkdown.renderInline(String(text));
+      } catch (e) {
+        return previewMarkdown.utils.escapeHtml(String(text));
+      }
+    }
+    var rendered = {
+      kind: data.kind || "",
+      title: inline(data.title),
+      meta: (data.meta || []).map(inline).filter(Boolean).join(PREVIEW_SEPARATOR),
+      note: data.note || "",
+      excerpt: inline(data.excerpt),
+      label: data.label || "",
+    };
+    renderedPreviews[href] = rendered;
+    return rendered;
+  }
+
+  function setPreviewPart(card, part, content, isHTML) {
+    var el = card.querySelector(".link-preview-" + part);
+    if (isHTML) el.innerHTML = content; else el.textContent = content;
+    el.hidden = !content;
+  }
+
+  /** Show `anchor`'s card under the line box the pointer is on, or under the
+   *  link's first line box when it came by keyboard. */
+  function showPreview(anchor, pointerY) {
+    var href = anchor.getAttribute("href") || "";
+    if (!hasPreview(href)) return false;
+    clearTimeout(previewOpenTimer);
+    clearTimeout(previewCloseTimer);
+    previewOpenTimer = previewCloseTimer = null;
+    pendingAnchor = null;
+
+    var card = ensurePreviewCard();
+    var data = renderedPreview(href);
+    setPreviewPart(card, "kind", data.kind, false);
+    setPreviewPart(card, "title", data.title, true);
+    setPreviewPart(card, "meta", data.meta, true);
+    setPreviewPart(card, "note", data.note, false);
+    setPreviewPart(card, "excerpt", data.excerpt, true);
+    // KaTeX's HTML is not readable by VoiceOver, so the card is described by
+    // Swift's plain-text label, and the link points at the card.
+    card.setAttribute("aria-label", data.label);
+    if (previewAnchor && previewAnchor !== anchor) previewAnchor.removeAttribute("aria-describedby");
+    previewAnchor = anchor;
+    anchor.setAttribute("aria-describedby", card.id);
+
+    card.hidden = false;
+    positionPreview(card, anchor, pointerY);
+    return true;
+  }
+
+  /** Under the line box the pointer is on (the first, by keyboard), lined up
+   *  with its start, as floating-ui's `inline` middleware places the site's
+   *  popover; but 8 px clear of the whole link, so a link that wraps onto
+   *  the next line is not covered. Above the link when it would cross the
+   *  bottom of the window; 12 px inside the left and right edges. When
+   *  neither side has room it takes the larger and shortens, so it never
+   *  covers the link it describes. */
+  function positionPreview(card, anchor, pointerY) {
+    var rects = anchor.getClientRects();
+    if (!rects.length) { hidePreview(); return; }
+    var rect = rects[0];
+    if (pointerY !== null && pointerY !== undefined) {
+      for (var i = 0; i < rects.length; i++) {
+        if (pointerY >= rects[i].top && pointerY <= rects[i].bottom) { rect = rects[i]; break; }
+      }
+    }
+    var link = anchor.getBoundingClientRect();
+    var viewWidth = document.documentElement.clientWidth;
+    var viewHeight = document.documentElement.clientHeight;
+
+    card.style.maxHeight = "";
+    card.style.left = "0px";
+    card.style.top = "0px";
+    var width = card.offsetWidth;
+    var height = card.offsetHeight;
+    var below = viewHeight - link.bottom - PREVIEW_GAP - PREVIEW_INSET;
+    var above = link.top - PREVIEW_GAP - PREVIEW_INSET;
+
+    var top;
+    if (height <= below || below >= above) {
+      if (height > below) card.style.maxHeight = Math.max(below, 0) + "px";
+      top = link.bottom + PREVIEW_GAP;
+    } else {
+      if (height > above) card.style.maxHeight = Math.max(above, 0) + "px";
+      top = link.top - PREVIEW_GAP - card.offsetHeight;
+    }
+    var left = Math.max(PREVIEW_INSET, Math.min(rect.left, viewWidth - PREVIEW_INSET - width));
+    card.style.left = left + "px";
+    card.style.top = top + "px";
+    // The fade at the bottom is for a card cut short, which the caps in
+    // Swift make rare.
+    card.classList.toggle("is-clipped", card.scrollHeight > card.clientHeight + 1);
+  }
+
+  function hidePreview() {
+    clearTimeout(previewOpenTimer);
+    clearTimeout(previewCloseTimer);
+    previewOpenTimer = previewCloseTimer = null;
+    pendingAnchor = null;
+    if (!previewCard || previewCard.hidden) return;
+    previewCard.hidden = true;
+    previewCard.style.maxHeight = "";
+    if (previewAnchor) previewAnchor.removeAttribute("aria-describedby");
+    previewAnchor = null;
+    lastPreviewClosed = Date.now();
+  }
+
+  /** Close at once and forget the last card, so the next one waits out the
+   *  delay: what follows a scroll, a click or Escape is not reading along a
+   *  row of links. Without this, links passing under a still pointer while
+   *  the page scrolls would each flash a card. */
+  function dismissPreview() {
+    hidePreview();
+    lastPreviewClosed = 0;
+  }
+
+  function schedulePreview(anchor, pointerY) {
+    clearTimeout(previewCloseTimer);
+    previewCloseTimer = null;
+    // Back on the link showing, from another of its line boxes; or still
+    // waiting on this one.
+    if (anchor === previewAnchor || anchor === pendingAnchor) return;
+    clearTimeout(previewOpenTimer);
+    var warm = (previewCard && !previewCard.hidden) ||
+      Date.now() - lastPreviewClosed < PREVIEW_WARM;
+    if (warm) {
+      showPreview(anchor, pointerY);
+      return;
+    }
+    pendingAnchor = anchor;
+    previewOpenTimer = setTimeout(function () {
+      previewOpenTimer = null;
+      pendingAnchor = null;
+      if (anchor.isConnected) showPreview(anchor, pointerY === null ? null : lastPointerY);
+    }, PREVIEW_DELAY);
+  }
+
+  function scheduleClose() {
+    clearTimeout(previewOpenTimer);
+    previewOpenTimer = null;
+    pendingAnchor = null;
+    clearTimeout(previewCloseTimer);
+    previewCloseTimer = setTimeout(hidePreview, PREVIEW_CLOSE_DELAY);
+  }
+
+  document.addEventListener("mouseover", function (event) {
+    lastPointerY = event.clientY;
+    var anchor = previewLink(event.target);
+    if (!anchor) return;
+    // A selection drag passes over links; no card while a button is down.
+    if (event.buttons) return;
+    schedulePreview(anchor, event.clientY);
+  });
+
+  document.addEventListener("mousemove", function (event) {
+    lastPointerY = event.clientY;
+  }, { passive: true });
+
+  document.addEventListener("mouseout", function (event) {
+    var anchor = previewLink(event.target);
+    if (!anchor) return;
+    if (event.relatedTarget && anchor.contains(event.relatedTarget)) return;
+    scheduleClose();
+  });
+
+  // Keyboard focus opens a card as hover does, once WebKit Tab-focuses
+  // links at all (Safari's "Press Tab to highlight each item", or Keyboard
+  // Navigation). A click that focuses a link is not keyboard focus.
+  document.addEventListener("focusin", function (event) {
+    var anchor = previewLink(event.target);
+    if (!anchor) return;
+    var byKeyboard = true;
+    try { byKeyboard = anchor.matches(":focus-visible"); } catch (e) { /* older WebKit */ }
+    if (byKeyboard) schedulePreview(anchor, null);
+  });
+
+  document.addEventListener("focusout", function (event) {
+    if (previewLink(event.target)) hidePreview();
+  });
+
+  // Anything that means the reader has moved on closes the card at once.
+  document.addEventListener("mousedown", dismissPreview, true);
+  document.addEventListener("contextmenu", dismissPreview, true);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") dismissPreview();
+  }, true);
+  document.addEventListener("scroll", function () {
+    if (Date.now() >= ignoreScrollUntil) dismissPreview();
+  }, { passive: true, capture: true });
+  window.addEventListener("blur", dismissPreview);
+  window.addEventListener("beforeprint", dismissPreview);
+
+  /** For the visual gate (`make shots`): open the card on the first link in
+   *  the page whose href is `href`, scrolling it into view if it is not.
+   *  True when a card opened. */
+  function showPreviewFor(href) {
+    var links = document.querySelectorAll("#page a.internal");
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].getAttribute("href") !== href) continue;
+      dismissPreview();
+      var rect = links[i].getBoundingClientRect();
+      if (rect.top < 0 || rect.bottom > document.documentElement.clientHeight) {
+        ignoreScrollUntil = Date.now() + 250;
+        links[i].scrollIntoView({ block: "center", behavior: "auto" });
+      }
+      return showPreview(links[i], null);
+    }
+    return false;
+  }
+
   global.CCwiki = {
     render: render,
     scrollToAnchor: scrollToAnchor,
     currentHeading: currentHeading,
     // Exposed for the unit-test harness in scripts/.
     createMarkdown: createMarkdown,
+    // For the visual gate, and exposed for the same reason.
+    createPreviewMarkdown: createPreviewMarkdown,
+    showPreview: showPreviewFor,
+    hidePreview: dismissPreview,
   };
 
   post({ type: "ready" });
