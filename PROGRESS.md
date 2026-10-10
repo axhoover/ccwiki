@@ -5,7 +5,7 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
-## 2026-10-11 — The explorer, derived relations and link previews, built
+## 2026-10-10 — The explorer, derived relations and link previews, built
 
 Built on `claude/relations-explorer` in three tracks, each in its own
 worktree with compile and behaviour reviews before merging: the engine (a
