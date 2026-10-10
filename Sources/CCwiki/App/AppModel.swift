@@ -78,6 +78,47 @@ final class AppModel {
     /// When the checked-out commit was made: "the wiki as of".
     private(set) var headDate: Date?
 
+    // MARK: Derivations
+
+    /// What CCwiki may conclude by chaining the recorded reductions
+    /// (plans/derivations.md). Built with the manifest, in the same detached
+    /// task, and assigned beside it, so nothing ever sees a manifest and
+    /// closures from different commits (SWIFTUI-RULES §3.1: rebuilt from
+    /// source, never patched).
+    private(set) var derivation = Derivation.empty
+    /// Bumped whenever the library is replaced, so a view keyed on it
+    /// recomputes: the explorer's answer is computed off the main actor and
+    /// held in view state, which would otherwise outlive a sync.
+    private(set) var libraryGeneration = 0
+
+    // MARK: Relations explorer
+
+    /// The explorer's question. Persisted, and restored at launch with the
+    /// models toggle off (relations-explorer.md §2.4): nobody comes back
+    /// days later to idealised results without having asked for them.
+    var explorerQuery: ExplorerQuery =
+        CCwikiSettings.explorerQuery.map { $0.launching() } ?? ExplorerQuery() {
+        didSet {
+            guard explorerQuery != oldValue else { return }
+            CCwikiSettings.explorerQuery = explorerQuery
+        }
+    }
+    /// Earlier questions, newest first, each with its toggle.
+    private(set) var explorerRecents: [ExplorerQuery] = CCwikiSettings.explorerRecents
+    static let explorerRecentsLimit = 10
+    /// Bumped to ask a reader window to open the explorer: `openWindow` is an
+    /// environment action, so only a view can call it, and the reader's
+    /// context menu is AppKit. The same pattern as `jobsWindowRequests`.
+    private(set) var explorerWindowRequests = 0
+    /// Reader windows on screen. At 0 a page the explorer opens would be
+    /// shown nowhere, so it opens a reader window first.
+    var mainWindowCount = 0
+    /// The inspector's derived sections left open, by role.
+    private(set) var derivedSectionsExpanded: Set<String> =
+        Set(CCwikiSettings.derivedSectionsExpanded) {
+        didSet { CCwikiSettings.derivedSectionsExpanded = derivedSectionsExpanded.sorted() }
+    }
+
     // MARK: Navigation
 
     /// A page that ships with the app rather than with the wiki.
@@ -373,6 +414,14 @@ final class AppModel {
         webController.siteURLProvider = { [weak self] in
             self?.currentSiteURL
         }
+        // "Explore From This Page…" in the reader's context menu, which is
+        // AppKit: it asks for the question, and hands it back to `explore`.
+        webController.exploreHere = { [weak self] in
+            self?.currentPageExplorerQuery
+        }
+        webController.onExplore = { [weak self] query in
+            self?.explore(query)
+        }
 
         refreshMacrosWarning()
     }
@@ -487,19 +536,25 @@ final class AppModel {
             // 303 KB of JSON, and the labels need every hosting page's
             // headings — both cheap, but neither belongs on the main actor.
             let manifest = RelationsManifest.load(cloneRoot: cloneRoot)
-            return (
-                index,
-                index.backlinkMap(),
-                manifest,
-                RelationLabels(manifest: manifest, index: index),
-                TextGrep(pages: index.allPages))
+            return LoadedLibrary(
+                index: index,
+                backlinks: index.backlinkMap(),
+                manifest: manifest,
+                labels: RelationLabels(manifest: manifest, index: index),
+                textGrep: TextGrep(pages: index.allPages),
+                // Every single-object closure in both model settings, the
+                // derived barriers and the inspector's lookups: a few
+                // milliseconds, and it must match this manifest exactly.
+                derivation: Derivation(manifest: manifest))
         }.value
 
-        index = loaded.0
-        backlinks = loaded.1
-        relations = loaded.2
-        relationLabels = loaded.3
-        unlistedPaths = loaded.2.unlistedPaths
+        index = loaded.index
+        backlinks = loaded.backlinks
+        relations = loaded.manifest
+        relationLabels = loaded.labels
+        derivation = loaded.derivation
+        libraryGeneration += 1
+        unlistedPaths = loaded.manifest.unlistedPaths
         rebuildBrowseState()
         macros = MacroTable.load(cloneRoot: paths.clone)
         refreshMacrosWarning()
@@ -526,9 +581,9 @@ final class AppModel {
         // The push credential helper is configured by `refreshPushCapability`
         // below; doing it here as well cost a second git call per load.
 
-        let pages = loaded.0.allPages
-        let links = loaded.1
-        textGrep = loaded.4
+        let pages = loaded.index.allPages
+        let links = loaded.backlinks
+        textGrep = loaded.textGrep
         let searchIndex = self.searchIndex
         Task.detached(priority: .utility) {
             do {
@@ -1015,6 +1070,106 @@ final class AppModel {
               index?.pages[destination.path] != nil
         else { return }
         openPage(destination.path, anchor: destination.anchor)
+    }
+
+    /// The inspector's derived sections for the page being read: what each
+    /// of its objects implies, and what implies it, in two or more steps.
+    ///
+    /// Computed rather than cached, for the reason `currentRelations` gives:
+    /// every row is a lookup into closures `Derivation` built at load.
+    var currentDerivations: PageDerivations {
+        guard let path = location.path else { return .empty }
+        return PageDerivations(path: path, manifest: relations, derivation: derivation,
+                               labels: relationLabels)
+    }
+
+    func isDerivedSectionExpanded(_ role: PageDerivations.Role) -> Bool {
+        derivedSectionsExpanded.contains(role.rawValue)
+    }
+
+    func toggleDerivedSection(_ role: PageDerivations.Role) {
+        if derivedSectionsExpanded.contains(role.rawValue) {
+            derivedSectionsExpanded.remove(role.rawValue)
+        } else {
+            derivedSectionsExpanded.insert(role.rawValue)
+        }
+    }
+
+    // MARK: Relations explorer
+
+    /// Every way into the explorer ends here: the menu commands, the reader's
+    /// context menu, the inspector's rows and the explorer's own. The current
+    /// question goes onto Recent when the new one differs, the new one is
+    /// set with its toggle as given, and a reader window is asked to open
+    /// the explorer, which is the one path that works from AppKit as well as
+    /// from SwiftUI.
+    func explore(_ query: ExplorerQuery) {
+        if !query.isSameQuestion(as: explorerQuery) {
+            rememberExplorerQuery()
+        }
+        explorerQuery = query
+        explorerWindowRequests += 1
+    }
+
+    /// `explore(_:)` with the explorer's own models toggle, so a click from
+    /// the inspector or a context menu never turns it on or off. Under R4's
+    /// phases a fact derivable in the default models keeps its default proof
+    /// either way.
+    func explore(from: [String], to: String? = nil) {
+        explore(ExplorerQuery(from: from, to: to,
+                              includesIdealisedModels: explorerQuery.includesIdealisedModels))
+    }
+
+    /// A question the explorer can ask about these objects, or `nil` when it
+    /// would only be turned away: a complexity class is related by
+    /// containment, never derived (R2), and an id the manifest does not have
+    /// is no question at all. For "Explore From Here…" on recorded rows.
+    func explorerQuestion(from: [String], to: String? = nil) -> ExplorerQuery? {
+        let named = from + (to.map { [$0] } ?? [])
+        guard !named.isEmpty, named.allSatisfy({ id in
+            relations.object(id).map { $0.type != Derivation.excludedType } ?? false
+        }) else { return nil }
+        return ExplorerQuery(from: from, to: to,
+                             includesIdealisedModels: explorerQuery.includesIdealisedModels)
+    }
+
+    /// Put the current question on Recent, newest first, once. Called when a
+    /// question is replaced and when the explorer closes: two clear moments,
+    /// rather than a debounce on every edit.
+    func rememberExplorerQuery() {
+        let current = explorerQuery
+        guard current.mode != .empty else { return }
+        var recents = explorerRecents.filter { !$0.isSameQuestion(as: current) }
+        recents.insert(current, at: 0)
+        if recents.count > Self.explorerRecentsLimit {
+            recents.removeLast(recents.count - Self.explorerRecentsLimit)
+        }
+        explorerRecents = recents
+        CCwikiSettings.explorerRecents = recents
+    }
+
+    /// What "Explore From This Page" asks on the page being read: the
+    /// section being read when it is an object, so scrolling to *Collision
+    /// resistance* and pressing ⌥⇧⌘E asks about CRHF. `nil` disables it.
+    var currentPageExplorerQuery: ExplorerQuery? {
+        guard case .page(_, let anchor) = location else { return nil }
+        let reading = webController.activeHeadingID ?? anchor
+        guard var query = ExplorerQuery.seed(
+            for: currentRelations.subject, activeAnchor: reading,
+            manifest: relations, derivation: derivation)
+        else { return nil }
+        query.includesIdealisedModels = explorerQuery.includesIdealisedModels
+        return query
+    }
+
+    /// Whether the page being read has anything to explore. The same test
+    /// without the section being read, so a menu's enabled state does not
+    /// re-evaluate on every scroll.
+    var canExploreCurrentPage: Bool {
+        guard location.path != nil else { return false }
+        return ExplorerQuery.seed(
+            for: currentRelations.subject, activeAnchor: nil,
+            manifest: relations, derivation: derivation) != nil
     }
 
     func title(forPath path: String) -> String {
@@ -1633,4 +1788,17 @@ final class AppModel {
         NSWorkspace.shared.open(
             [directory], withApplicationAt: terminal, configuration: configuration)
     }
+}
+
+/// What `AppModel.loadLibrary()` builds off the main actor, assigned in one
+/// main-actor block so no view sees half a library. Named fields rather than
+/// a tuple: the manifest, the labels and the derivations built from it must
+/// all come from the same load.
+private struct LoadedLibrary: Sendable {
+    let index: WikiIndex
+    let backlinks: [String: [WikiIndex.Backlink]]
+    let manifest: RelationsManifest
+    let labels: RelationLabels
+    let textGrep: TextGrep
+    let derivation: Derivation
 }

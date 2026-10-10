@@ -86,6 +86,9 @@ struct RelationsView: View {
                     .help(group.role.explanation)
                 }
             }
+            // What CCwiki derives by chaining the groups above. Object pages
+            // only; on any other page this is empty and draws nothing.
+            DerivedRelationsSections(derivations: model.currentDerivations)
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
@@ -114,14 +117,17 @@ struct RelationsView: View {
         case .relation(let relation):
             relationRow(
                 relation,
-                edge: edge(relation, role: group.role, focus: group.objectID))
+                edge: edge(relation, role: group.role, focus: group.objectID),
+                exploring: exploring(relation, role: group.role, focus: group.objectID))
         case .barrier(let barrier):
             barrierRow(
                 barrier,
                 edge: edge(barrier, focus: group.objectID),
                 contradictsSubject: contradictsSubject(barrier, of: page),
                 // Under "Circumvents" the heading already says it.
-                showsCircumvention: group.role != .circumvents)
+                showsCircumvention: group.role != .circumvents,
+                // The edge it rules out, with the barrier in the answer.
+                exploring: model.explorerQuestion(from: barrier.hypotheses, to: barrier.conclusion))
         case .object(let id):
             objectRow(id)
         case .fact(let fact):
@@ -247,7 +253,27 @@ struct RelationsView: View {
 
     // MARK: Rows
 
-    private func relationRow(_ relation: Relation, edge: Edge) -> some View {
+    /// What "Explore From Here…" asks of a recorded row: the objects the row
+    /// names (relations-explorer.md §2.11). The far end of a Builds on,
+    /// Contained in or Equivalent to row; the whole conjunction of a Produces
+    /// or Contains row, never one hypothesis of it. `nil` when that would be
+    /// a complexity class, which is never derived.
+    private func exploring(_ relation: Relation, role: RelationRole, focus: String?) -> ExplorerQuery? {
+        switch role {
+        case .buildsOn, .containedIn:
+            return model.explorerQuestion(from: [relation.conclusion])
+        case .equivalentTo:
+            guard let focus else { return model.explorerQuestion(from: relation.hypotheses) }
+            let other = relation.conclusion == focus
+                ? (relation.hypotheses.first ?? relation.conclusion)
+                : relation.conclusion
+            return model.explorerQuestion(from: [other])
+        default:
+            return model.explorerQuestion(from: relation.hypotheses)
+        }
+    }
+
+    private func relationRow(_ relation: Relation, edge: Edge, exploring: ExplorerQuery?) -> some View {
         Button {
             model.openPage(relation.path)
         } label: {
@@ -275,11 +301,13 @@ struct RelationsView: View {
             pageMenu(relation.path,
                      copyTitle: "Copy Statement",
                      copyText: model.relationLabels.statement(relation))
+            exploreItem(exploring)
         }
     }
 
     private func barrierRow(
-        _ barrier: Barrier, edge: Edge, contradictsSubject: Bool, showsCircumvention: Bool
+        _ barrier: Barrier, edge: Edge, contradictsSubject: Bool, showsCircumvention: Bool,
+        exploring: ExplorerQuery?
     ) -> some View {
         Button {
             model.openPage(barrier.path)
@@ -309,6 +337,7 @@ struct RelationsView: View {
             pageMenu(barrier.path,
                      copyTitle: "Copy Statement",
                      copyText: model.relationLabels.statement(barrier))
+            exploreItem(exploring)
         }
     }
 
@@ -355,6 +384,7 @@ struct RelationsView: View {
                 pageMenu(destination.path, anchor: destination.anchor,
                          copyTitle: "Copy Name", copyText: label)
             }
+            exploreItem(model.explorerQuestion(from: [id]))
         }
     }
 
@@ -506,6 +536,16 @@ struct RelationsView: View {
         }
         Divider()
         Button(copyTitle) { model.copyToPasteboard(copyText) }
+    }
+
+    /// "Explore From Here…", through `AppModel.explore(_:)`, which opens the
+    /// Relations Explorer on the question.
+    @ViewBuilder
+    private func exploreItem(_ query: ExplorerQuery?) -> some View {
+        if let query {
+            Divider()
+            Button("Explore From Here…") { model.explore(query) }
+        }
     }
 
     /// The page's own wikilink, pointed at a section when the row is one.
