@@ -227,9 +227,19 @@ struct WikiIndex: Sendable {
         return .unresolved(reason: "no page, alias or folder named “\(targetCanonical)”")
     }
 
-    /// Every wikilink on a page, paired with what it resolves to.
+    /// Every link on a page, paired with what it resolves to.
     func links(on page: WikiPage) -> [(link: Wikilink, target: Target)] {
-        WikilinkParser.links(in: page.body).map { ($0, resolve($0, from: page.path)) }
+        Self.outgoingLinks(in: page.body).map { ($0, resolve($0, from: page.path)) }
+    }
+
+    /// The links in a page body that name a wiki target, in source order: its
+    /// `[[wikilinks]]`, and its markdown links to wiki pages as the wikilinks
+    /// they stand for. The wiki writes the second kind wherever a link's text
+    /// holds math, so a page reached only that way is still linked to.
+    static func outgoingLinks(in body: String) -> [Wikilink] {
+        let markdownLinks = MarkdownLinkParser.links(in: body).map(\.wikilink)
+        return (WikilinkParser.links(in: body) + markdownLinks)
+            .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
     // MARK: Backlinks
@@ -241,7 +251,7 @@ struct WikiIndex: Sendable {
         var result: [String: [Backlink]] = [:]
         for page in pages.values.sorted(by: { $0.path < $1.path }) {
             var seen: Set<String> = []
-            for link in WikilinkParser.links(in: page.body) {
+            for link in Self.outgoingLinks(in: page.body) {
                 guard case .page(let targetPath, _) = resolve(link, from: page.path),
                       targetPath != page.path,
                       seen.insert(targetPath).inserted

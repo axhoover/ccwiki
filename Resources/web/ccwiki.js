@@ -310,6 +310,46 @@
         md.utils.escapeHtml(label) + "</a>";
     };
 
+    // Markdown links. The wiki writes `[text](slug#anchor)` wherever the text
+    // holds math, because a wikilink's alias cannot (remark-math splits it
+    // first). Swift resolved each destination like a wikilink and keyed it by
+    // the destination as parsed; markdown-it keeps only the normalized href,
+    // so normalizeLink remembers which destination each href came from.
+    var linkDestinations = Object.create(null);
+    var normalizeLink = md.normalizeLink;
+    md.normalizeLink = function (url) {
+      var href = normalizeLink.call(md, url);
+      linkDestinations[href] = url;
+      return href;
+    };
+
+    var defaultLinkOpen = md.renderer.rules.link_open || function (tokens, idx, options, env, self) {
+      return self.renderToken(tokens, idx, options);
+    };
+    md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
+      var token = tokens[idx];
+      var href = token.attrGet("href") || "";
+      // URLs and same-page anchors are the click handler's; a reference-style
+      // link names no destination Swift has seen.
+      if (!href || href.charAt(0) === "#" || /^[A-Za-z][A-Za-z0-9+.\-]*:/.test(href) ||
+          (token.meta && token.meta.label)) {
+        return defaultLinkOpen(tokens, idx, options, env, self);
+      }
+      var destination = linkDestinations[href] !== undefined ? linkDestinations[href] : href;
+      var links = env.links || {};
+      var resolved = Object.prototype.hasOwnProperty.call(links, destination) ? links[destination] : null;
+      // A miss is a dead link, shown as a dead wikilink is.
+      if (!resolved || !resolved.href) {
+        token.attrs = [["class", "broken"],
+          ["title", "Nothing resolves to \u201c" + destination + "\u201d"]];
+      } else {
+        token.attrSet("href", resolved.href);
+        token.attrJoin("class", resolved.external ? "external"
+          : "internal" + (resolved.kind === "folder" ? " folder" : ""));
+      }
+      return defaultLinkOpen(tokens, idx, options, env, self);
+    };
+
     // Pseudocode fences are handed to pseudocode.js verbatim after render.
     var defaultFence = md.renderer.rules.fence;
     md.renderer.rules.fence = function (tokens, idx, options, env, self) {
@@ -439,6 +479,25 @@
     }
   }
 
+  /** The line of relation fields Swift splices under a reduction or barrier
+   *  H1 (RelationMeta.swift) ends in a marker comment, as on the site: the
+   *  comment goes, and its paragraph takes the `relation-meta` class. */
+  function markRelationMeta(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+    var markers = [];
+    while (walker.nextNode()) {
+      if (walker.currentNode.data.trim() === "relation-meta") markers.push(walker.currentNode);
+    }
+    markers.forEach(function (marker) {
+      var paragraph = marker.parentNode;
+      if (!paragraph || paragraph.tagName !== "P" || paragraph.lastChild !== marker) return;
+      var before = marker.previousSibling;
+      paragraph.removeChild(marker);
+      if (before && before.nodeType === Node.TEXT_NODE) before.data = before.data.replace(/\s+$/, "");
+      paragraph.classList.add("relation-meta");
+    });
+  }
+
   // ================================================================= API ===
 
   var currentMacros = null;
@@ -479,7 +538,8 @@
    *
    * payload = {
    *   markdown : string,           body with frontmatter already stripped
-   *   links    : { "[[raw]]": {href, kind, external} },
+   *   links    : { "[[raw]]": {href, kind, external} }, plus a markdown
+   *                link's destination ("slug#anchor") for each of those
    *   macros   : { "\\calA": "\\mathcal{A}" },   KaTeX macros, current as of
    *                                this render
    *   html     : string            (optional) pre-built HTML, used for
@@ -527,6 +587,7 @@
       groupGames(page);
     }
     markByline(page);
+    markRelationMeta(page);
 
     if (keepY !== null) {
       window.scrollTo(0, keepY);
