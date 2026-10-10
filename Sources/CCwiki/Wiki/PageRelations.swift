@@ -227,6 +227,9 @@ struct PageRelations: Sendable {
     /// model, because neither axis applies to `IP ⊆ PSPACE`. `unstated`, which
     /// the site leaves out, is shown as itself: here it is the honest answer
     /// to a question the summary visibly asks.
+    ///
+    /// Every field the record can give a reason for carries that reason as
+    /// its tooltip, read through `Relation.why(_:)`.
     static func facts(for relation: Relation, manifest: RelationsManifest) -> [RelationFact] {
         var list = FactList()
 
@@ -237,36 +240,42 @@ struct PageRelations: Sendable {
         case .inclusion: "Containment, not implication."
         case .equivalence: "Holds in both directions."
         }
+        // The relation's own arrow, so a heuristic edge's kind reads `⇢`, as
+        // its rows do, rather than a solid `⇒` above "Heuristic candidate".
         list.add(.kind, "Kind", .text(relation.kind.title),
-                 symbol: relation.kind.arrow, help: kindHelp)
+                 symbol: relation.arrow, help: lines(kindHelp, relation.why("kind")))
 
         if relation.heuristic {
             list.add(.heuristic, "Proof", .text("Heuristic candidate"),
-                     help: lines(Relation.heuristicExplanation, relation.rationale["heuristic"]))
+                     help: lines(Relation.heuristicExplanation, relation.why("heuristic")))
         }
 
         let containment = manifest.isComplexityContainment(relation)
         if relation.status != .stub {
             if !containment {
                 list.addClass(.reductionClass, "Class", relation.reductionClass, noun: nil,
-                              rationale: relation.rationale["class"], manifest: manifest)
+                              rationale: relation.why("class"), manifest: manifest)
             }
             if !relation.model.isEmpty, !(containment && relation.model == "standard") {
                 list.add(.model, "Model",
                          .text(sentenceCased(RelationVocabulary.modelName(relation.model))),
-                         help: relation.rationale["model"],
+                         help: relation.why("model"),
                          link: RelationVocabulary.modelPage(relation.model).map { "[[\($0)]]" })
             }
         }
 
         for entry in relation.via {
-            list.add(.via, "Via", .text(RelationText.linkText(entry)), link: entry)
+            list.add(.via, "Via", .text(RelationText.linkText(entry)),
+                     help: relation.why("via"), link: entry)
         }
-        list.addSources(relation.source)
+        list.addSources(relation.source, rationale: relation.why("source"))
 
         if !relation.securityLoss.isEmpty {
             let loss = RelationText.plain(relation.securityLoss)
-            list.add(.securityLoss, "Security loss", .text(loss))
+            // The loss itself first: a long one is cut short in the grid, and
+            // its tooltip is where it can be read in full.
+            list.add(.securityLoss, "Security loss", .text(loss),
+                     help: lines(loss, relation.why("securityLoss")))
         }
         return list.facts
     }
@@ -281,11 +290,15 @@ struct PageRelations: Sendable {
         let conditional: String? = barrier.strength == .conditional
             ? "The barrier rests on an unproven assumption." : nil
         list.add(.strength, "Strength", .text(barrier.strength.title),
-                 help: lines(conditional, barrier.rationale["strength"]))
+                 help: lines(conditional, barrier.why("strength")))
 
         if barrier.status != .stub {
+            // An oracle separation's oracle is carried by its class
+            // (`relativizing`) and described in `oracle`, so that reason
+            // belongs beside the class.
             list.addClass(.against, "Against", barrier.reductionClass, noun: "reductions",
-                          rationale: barrier.rationale["class"], manifest: manifest)
+                          rationale: lines(barrier.why("class"), barrier.why("oracle")),
+                          manifest: manifest)
         }
 
         for entry in barrier.conditionalOn {
@@ -293,7 +306,7 @@ struct PageRelations: Sendable {
             // is the wiki's free text, kept as written.
             let value: RelationFact.Value = manifest.object(entry) != nil
                 ? .object(entry) : .text(RelationText.plain(entry))
-            list.add(.assuming, "Assuming", value)
+            list.add(.assuming, "Assuming", value, help: barrier.why("conditionalOn"))
         }
 
         for consequence in barrier.consequences {
@@ -323,7 +336,7 @@ struct PageRelations: Sendable {
             }
         }
 
-        list.addSources(barrier.source)
+        list.addSources(barrier.source, rationale: barrier.why("source"))
         return list.facts
     }
 
@@ -382,18 +395,21 @@ struct PageRelations: Sendable {
 
         /// One row per citation, each opening its reference page, with the
         /// paper's title as the tooltip. `folklore` is a provenance label like
-        /// any key, never a warning.
-        mutating func addSources(_ source: [String]) {
+        /// any key, never a warning. The record's reason for its sources, if
+        /// it gives one, is about the field as a whole, so every row carries
+        /// it under the title.
+        mutating func addSources(_ source: [String], rationale: String?) {
             let entries = source.compactMap { entry in
                 RelationText.citationKey(entry).map { (entry: entry, key: $0) }
             }
             for (entry, key) in entries {
                 let isFolklore = entry == "folklore"
-                let help: String? = isFolklore
+                let title: String? = isFolklore
                     ? "Folklore: the wiki has no attribution for this claim."
                     : WikilinkParser.links(in: entry).first?.target
                 add(.source, entries.count > 1 ? "Sources" : "Source", .text(key),
-                    help: help, link: isFolklore ? nil : entry)
+                    help: PageRelations.lines(title, rationale),
+                    link: isFolklore ? nil : entry)
             }
         }
     }

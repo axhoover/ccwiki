@@ -21,8 +21,10 @@ import SwiftUI
 ///
 /// **A heuristic edge is never shown as a theorem.** Two reductions in the
 /// corpus are candidate constructions with no security reduction behind them.
-/// Their rows say "heuristic candidate", draw a dashed arrow, as the site's
-/// graph draws such an edge, and lead their tooltip with what that means.
+/// Their rows say "heuristic candidate", as the site's line does, and lead
+/// their tooltip with what that means. Their arrow is dashed, `⇢`, in the row,
+/// the statement and the summary alike: CCwiki's own mark, since the site
+/// draws no heuristic edge differently.
 ///
 /// **A reduction or barrier page leads with its own record**, under "This
 /// result": the kind, class, model, sources and loss that the site prints
@@ -193,8 +195,8 @@ struct RelationsView: View {
     }
 
     /// The arrow a row draws, pointing from the page's object to the far end
-    /// or back towards it. A heuristic implication is dashed, as the site's
-    /// graph draws it: an edge of the graph that no theorem backs.
+    /// or back towards it. A heuristic implication is dashed, as in
+    /// `Relation.arrow`: an edge of the graph that no theorem backs.
     private func arrow(_ relation: Relation, awayFromFocus: Bool) -> String {
         switch relation.kind {
         case .inclusion: awayFromFocus ? "⊆" : "⊇"
@@ -414,8 +416,6 @@ struct RelationsView: View {
         } else {
             factText(fact)
                 .font(Theme.Fonts.meta)
-                .foregroundStyle(fact.isTentative
-                    ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 .lineLimit(4)
                 .truncationMode(.tail)
                 .multilineTextAlignment(.leading)
@@ -426,8 +426,16 @@ struct RelationsView: View {
 
     /// The value as text, with the kind's arrow de-emphasized before it and a
     /// proposition's believed status de-emphasized after it.
+    ///
+    /// A tentative value, `unstated`, is secondary on the text itself, so it
+    /// stays muted inside a link too: the innermost style wins over the link
+    /// colour (`SWIFTUI-RULES.md` §5.6), and `[[reduction-classes#unstated]]`
+    /// always resolves, so `unstated` is nearly always a link.
     private func factText(_ fact: RelationFact) -> Text {
         var text = Text(verbatim: factString(fact))
+        if fact.isTentative {
+            text = text.foregroundStyle(.secondary)
+        }
         if let symbol = fact.symbol {
             text = Text(verbatim: symbol + " ").foregroundStyle(.secondary) + text
         }
@@ -620,12 +628,14 @@ struct RelationsView: View {
 
     // MARK: Tooltips
 
+    /// Every rationale shown here goes through `why(_:)`, which reduces its
+    /// TeX to plain text as the summary's tooltips do.
     private func helpText(for relation: Relation) -> String {
-        var lines = [model.relationLabels.statement(relation)]
-        if relation.heuristic {
-            lines.append(Relation.heuristicExplanation)
-            if let why = relation.rationale["heuristic"] { lines.append(why) }
-        }
+        var lines: [String] = []
+        // A candidate construction says so before it says anything else.
+        if relation.heuristic { lines.append(Relation.heuristicExplanation) }
+        lines.append(model.relationLabels.statement(relation))
+        if relation.heuristic, let why = relation.why("heuristic") { lines.append(why) }
         switch relation.kind {
         case .implication where relation.hasMultipleHypotheses:
             lines.append("A conjunction: the theorem needs every hypothesis, "
@@ -647,11 +657,11 @@ struct RelationsView: View {
         } else {
             // The wiki's reasons, which the page body does not repeat.
             if !model.relations.isComplexityContainment(relation),
-               let why = relation.rationale["class"],
+               let why = relation.why("class"),
                let classLabel = classLabel(relation.reductionClass) {
                 lines.append("Why \(classLabel.lowercased()): \(why)")
             }
-            if let why = relation.rationale["model"], !relation.model.isEmpty {
+            if let why = relation.why("model"), !relation.model.isEmpty {
                 lines.append("Why \(RelationVocabulary.modelName(relation.model)): \(why)")
             }
         }
@@ -674,7 +684,7 @@ struct RelationsView: View {
                 + model.relationLabels.consequence(consequence, manifest: model.relations)
                 + ".")
         }
-        if let why = barrier.rationale["class"], let classLabel = classLabel(barrier.reductionClass) {
+        if let why = barrier.why("class"), let classLabel = classLabel(barrier.reductionClass) {
             lines.append("Why \(classLabel.lowercased()): \(why)")
         }
         if !barrier.conditionalOn.isEmpty {
@@ -682,7 +692,7 @@ struct RelationsView: View {
                 .map { model.relationLabels.assumption($0) }
                 .joined(separator: ", "))
         }
-        if let why = barrier.rationale["strength"] {
+        if let why = barrier.why("strength") {
             lines.append("Why \(barrier.strength.rawValue): \(why)")
         }
         for relation in model.relations.reductions(circumventing: barrier) {

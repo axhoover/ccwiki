@@ -559,10 +559,11 @@ struct Relation: Sendable, Identifiable, Hashable {
     /// theorem**: the manifest's contract says to skip it when deriving
     /// anything, and the UI never shows one as if it were proved.
     let heuristic: Bool
-    /// Why a field holds its value, keyed by field (`class`, `model`,
-    /// `heuristic`). The page body does not repeat these sentences, so this is
-    /// the only place the wiki keeps them. Purely explanatory: a rationale
-    /// never changes what a value means.
+    /// Why a field holds its value, keyed by field (`kind`, `class`, `model`,
+    /// `source`, `via`, `heuristic`, `securityLoss`). The page body does not
+    /// repeat these sentences, so this is the only place the wiki keeps them.
+    /// Purely explanatory: a rationale never changes what a value means. Wiki
+    /// source, so the chrome reads it through `why(_:)`.
     let rationale: [String: String]
     let status: PageStatus
     let path: String
@@ -571,6 +572,12 @@ struct Relation: Sendable, Identifiable, Hashable {
 
     var isFolklore: Bool { source == ["folklore"] }
     var hasMultipleHypotheses: Bool { hypotheses.count > 1 }
+
+    /// The arrow this relation is stated with. A heuristic implication gets a
+    /// dashed `⇢`, CCwiki's own mark for an edge no theorem backs (the site
+    /// prints "heuristic candidate" but draws no such edge differently), so
+    /// it is never read as `⇒`.
+    var arrow: String { heuristic && kind == .implication ? "⇢" : kind.arrow }
 
     /// What a heuristic edge is, in the words the inspector uses wherever one
     /// appears.
@@ -618,7 +625,9 @@ struct Barrier: Sendable, Identifiable, Hashable {
     /// Ids of reductions that reach the conclusion outside the class or scope
     /// this barrier rules out. Only ids that resolve are kept.
     let circumventedBy: [String]
-    /// As on `Relation`: why `class` and `strength` hold, keyed by field.
+    /// As on `Relation`, keyed by `class`, `strength`, `conditionalOn`,
+    /// `source`, and `oracle`, which describes the oracle an oracle separation
+    /// is relative to and has no field of its own.
     let rationale: [String: String]
     let source: [String]
     let status: PageStatus

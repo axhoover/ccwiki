@@ -9,9 +9,9 @@ import Foundation
 ///
 /// The vocabulary that actually appears is small and closed (twenty commands
 /// across the 610 titles in the manifest, plus a few more in the 75 security
-/// losses), so the substitution below is exact rather than a guess. Anything
-/// outside it loses its backslash and keeps its letters, which degrades to a
-/// readable word rather than to `\classFOO`.
+/// losses and the rationales), so the substitution below is exact rather
+/// than a guess. Anything outside it loses its backslash and keeps its
+/// letters, which degrades to a readable word rather than to `\classFOO`.
 enum RelationText {
 
     /// Commands whose plain-text form is a real symbol. Longest key first at
@@ -31,9 +31,10 @@ enum RelationText {
         #"\alpha"#: "α", #"\beta"#: "β", #"\delta"#: "δ", #"\sigma"#: "σ",
         #"\mu"#: "μ", #"\nu"#: "ν", #"\ell"#: "ℓ", #"\poly"#: "poly", #"\negl"#: "negl",
         #"\secpar"#: "λ", #"\bits"#: "{0,1}",
-        // Operator names and the site's advantage macro, which the security
-        // losses use. Spelled out although the fallback would produce the
-        // same words, so the table says what the losses need.
+        // Operator names and the site's advantage macro: the security losses
+        // use `\Adv`, `\log` and `\min`, and one rationale uses `\bmod` (and
+        // `\mapsto`, above). Spelled out although the fallback would produce
+        // the same words, so the table says what the manifest needs.
         #"\Adv"#: "Adv", #"\log"#: "log", #"\min"#: "min", #"\bmod"#: "mod",
     ]
 
@@ -68,8 +69,31 @@ enum RelationText {
     /// only. (No heading in the corpus uses the commands the table gained for
     /// security losses, so search names are unchanged too.)
     static func plain(_ source: String) -> String {
+        reduced(source, mathNeedsEvidence: false)
+    }
+
+    /// Plain text for a sentence of the wiki's prose, such as a `rationale`.
+    ///
+    /// A rationale is prose with the odd math token in it (`$r_i$`,
+    /// `level-$(j-1)$`, `$\Gen$`), and the site never renders one, so there
+    /// is no site rule for its dollars to follow. The pairing rule alone is
+    /// not enough here: one rationale says a counterexample "refutes only the
+    /// claim that every CPA-secure scheme is itself IND$-CPA-secure; building
+    /// some other IND$-CPA-secure scheme …", and its two literal dollars pair,
+    /// which would turn both mentions into IND-CPA. So in a sentence a paired
+    /// span counts as math only when it looks like math: it uses a command,
+    /// or it is one token with no space in it. Anything else is two literal
+    /// dollars. Titles keep the site's rule, through `plain`.
+    static func sentence(_ source: String) -> String {
+        reduced(source, mathNeedsEvidence: true)
+    }
+
+    /// The reduction `plain` and `sentence` share. `mathNeedsEvidence` only
+    /// decides which paired dollars delimit math; everything after that is
+    /// the same for both.
+    private static func reduced(_ source: String, mathNeedsEvidence: Bool) -> String {
         guard !source.isEmpty else { return "" }
-        var text = protectingLiteralDollars(source)
+        var text = protectingLiteralDollars(source, mathNeedsEvidence: mathNeedsEvidence)
 
         // `\classPpoly` is the one class macro whose name is not its rendering.
         text = text.replacingOccurrences(of: #"\classPpoly"#, with: "P/poly")
@@ -109,7 +133,13 @@ enum RelationText {
     /// `escapeOutsideMath`, without its backtick case: titles have no code
     /// spans, and a `$` inside one would only stay a `$` here anyway if it
     /// were unpaired.
-    private static func protectingLiteralDollars(_ source: String) -> String {
+    ///
+    /// With `mathNeedsEvidence`, a run that pairs is still literal unless the
+    /// span it would open looks like math (see `sentence`), and the scan goes
+    /// on from just after it, so its would-be partner can still pair later.
+    private static func protectingLiteralDollars(
+        _ source: String, mathNeedsEvidence: Bool
+    ) -> String {
         guard source.contains("$") else { return source }
         let characters = Array(source)
         var output = ""
@@ -141,7 +171,8 @@ enum RelationText {
                     if k - j == run { close = j }
                     j = k
                 }
-                if let close {
+                if let close,
+                   !mathNeedsEvidence || looksLikeMath(characters[end..<close]) {
                     output += String(characters[i..<(close + run)])
                     i = close + run
                 } else {
@@ -154,6 +185,13 @@ enum RelationText {
             }
         }
         return output
+    }
+
+    /// Whether a paired span in prose is math: it uses a command, or it is a
+    /// single token. `$r_i$` and `$\mathbf{z} \mapsto \mathbf{A}\mathbf{z}$`
+    /// are; the words between the dollars of two IND$-CPA mentions are not.
+    private static func looksLikeMath(_ span: ArraySlice<Character>) -> Bool {
+        span.contains(where: { $0 == "\\" }) || !span.contains(where: \.isWhitespace)
     }
 
     /// The citation key a `source` entry is shown by, read the way the site's
@@ -182,6 +220,35 @@ enum RelationText {
         guard let link = WikilinkParser.links(in: entry).first else { return plain(entry) }
         if let alias = link.alias, !alias.isEmpty { return plain(alias) }
         return plain(link.target)
+    }
+}
+
+// MARK: - Rationale, for the chrome
+//
+// A `rationale` is wiki prose, and five in the corpus carry TeX (`$\classBPP$`,
+// `level-$j$`, `$\mathbf{z} \mapsto \mathbf{A}\mathbf{z} \bmod q$`), which a
+// tooltip cannot render. Every place the inspector shows one asks for it here,
+// so none can be shown raw.
+
+extension Relation {
+    /// The record's reason for `field` (`class`, `model`, `via`, …), as plain
+    /// text for the chrome; `nil` when it gives none.
+    func why(_ field: String) -> String? {
+        guard let sentence = rationale[field].map(RelationText.sentence),
+              !sentence.isEmpty
+        else { return nil }
+        return sentence
+    }
+}
+
+extension Barrier {
+    /// The record's reason for `field` (`class`, `strength`, `oracle`, …), as
+    /// plain text for the chrome; `nil` when it gives none.
+    func why(_ field: String) -> String? {
+        guard let sentence = rationale[field].map(RelationText.sentence),
+              !sentence.isEmpty
+        else { return nil }
+        return sentence
     }
 }
 
@@ -340,10 +407,12 @@ struct RelationLabels: Sendable {
     ///
     /// Built from the endpoint ids rather than from the relation's own `title`,
     /// so a multi-hypothesis edge is guaranteed to show **every** hypothesis.
-    /// The title is free text; this is derived from the data.
+    /// The title is free text; this is derived from the data. A heuristic
+    /// edge reads `Multilinear maps ⇢ iO`, here as in its row, so neither its
+    /// tooltip nor Copy Statement states it as a theorem.
     func statement(_ relation: Relation) -> String {
         let left = relation.hypotheses.map(label).joined(separator: " ∧ ")
-        return "\(left) \(relation.kind.arrow) \(label(relation.conclusion))"
+        return "\(left) \(relation.arrow) \(label(relation.conclusion))"
     }
 
     /// A barrier names the hyperedge it rules out, so it reads the same way.

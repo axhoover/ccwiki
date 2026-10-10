@@ -117,7 +117,10 @@ struct RelationsTests {
           "via": ["[[hybrid-argument|Hybrid argument]]"],
           "securityLoss": "$\\\\Adv^{\\\\mathrm{prf}} \\\\le q/|\\\\calD|$",
           "heuristic": false,
-          "rationale": { "class": "HILL99 use the OWF only as an oracle.", "bogus": 3 },
+          "rationale": { "class": "HILL99 use the OWF only as an oracle.", "bogus": 3,
+                         "via": "One hybrid per output block.",
+                         "securityLoss": "A union bound over $q$ queries.",
+                         "source": "HILL99 give both the construction and the proof." },
           "status": "draft",
           "page": "content/Reductions/owf-to-prg.md", "slug": "owf-to-prg",
           "title": "OWF ⇒ PRG" },
@@ -135,7 +138,10 @@ struct RelationsTests {
           "slug": "ddh-and-owf-to-ot", "title": "DDH + OWF ⇒ OT" },
         { "id": "red-free-owf-to-ot", "kind": "implication", "hypotheses": ["owf"],
           "conclusion": "ot", "class": "free", "model": "standard",
-          "source": ["folklore"], "via": [], "securityLoss": "", "status": "draft",
+          "source": ["folklore"], "via": [], "securityLoss": "",
+          "rationale": { "kind": "Only this direction is known.",
+                         "class": "It calls $\\\\Gen$ as an oracle on level-$(j-1)$ keys." },
+          "status": "draft",
           "page": "content/Reductions/free-owf-to-ot.md", "slug": "free-owf-to-ot",
           "title": "OWF ⇒ OT" },
         { "id": "red-ip-in-pspace", "kind": "inclusion", "hypotheses": ["ip"],
@@ -168,8 +174,10 @@ struct RelationsTests {
           "consequences": [{ "kind": "contradiction", "target": "",
                              "class": "fully-black-box" }],
           "strength": "unconditional", "conditionalOn": [],
-          "circumventedBy": ["red-free-owf-to-ot", "red-does-not-exist"],
+          "circumventedBy": ["red-free-owf-to-ot", "red-never-written"],
           "source": ["[[IR89|IR89]]"],
+          "rationale": { "class": "It refutes only that every scheme is IND$-CPA-secure; some other IND$-CPA-secure scheme is not ruled out.",
+                         "oracle": "A random permutation and a $\\\\classPSPACE$ oracle." },
           "status": "draft", "page": "content/Barriers/no-owf-to-ot.md",
           "slug": "no-owf-to-ot", "title": "No fully black-box reduction from OWF to OT" },
         { "id": "bar-relativizing-owf-to-prg", "hypotheses": ["owf"], "conclusion": "prg",
@@ -191,7 +199,9 @@ struct RelationsTests {
           "circumventedBy": ["red-ddh-and-owf-to-ot"],
           "source": ["[[XY20 - On DDH and OT|XY20]]", "[[ZW21 - More on OT|ZW21]]"],
           "rationale": { "class": "Only the named construction is refuted.",
-                         "strength": "XY20 assume one-way functions exist." },
+                         "strength": "XY20 assume one-way functions exist.",
+                         "conditionalOn": "Both are XY20's own assumptions.",
+                         "source": "ZW21 repair XY20's proof." },
           "status": "draft", "page": "content/Barriers/no-ddh-to-ot.md",
           "slug": "no-ddh-to-ot", "title": "No fixed-construction reduction from DDH to OT" }
         """
@@ -326,7 +336,11 @@ struct RelationsTests {
         // the shape of the one real dangling reference upstream today.
         #expect(barrier.consequences.count == 1)
         #expect(barrier.consequences.first?.kind == .complexity)
-        #expect(m.anomalies.contains { $0.contains("does-not-exist") })
+        // Pinned to this barrier, so no other dropped id can stand in for it.
+        let dropped = m.anomalies.filter {
+            $0.contains("bar-relativizing-owf-to-prg") && $0.contains("does-not-exist")
+        }
+        #expect(dropped.count == 1, "\(m.anomalies)")
     }
 
     @Test("consequence text resolves each kind against the right table")
@@ -544,12 +558,35 @@ struct RelationsTests {
         #expect(!proved.heuristic)
     }
 
+    /// The statement is what a row's tooltip leads with and what Copy
+    /// Statement puts on the clipboard, so it must not say `⇒` either.
+    @Test("a heuristic edge is stated with a dashed arrow, everywhere")
+    func heuristicStatement() throws {
+        let m = Self.manifest()
+        let labels = RelationLabels(manifest: m, index: nil)
+        let candidate = try #require(m.reduction("red-ddh-to-pke-candidate"))
+        #expect(candidate.arrow == "⇢")
+        #expect(labels.statement(candidate) == "Decisional Diffie-Hellman ⇢ Public key encryption")
+
+        // A proved implication keeps the solid arrow, and the other kinds
+        // keep theirs.
+        let proved = try #require(m.reduction("red-owf-to-prg"))
+        #expect(proved.arrow == "⇒")
+        let inclusion = try #require(m.reduction("red-ip-in-pspace"))
+        #expect(inclusion.arrow == "⊆")
+    }
+
     @Test("`rationale` is read entry by entry, and a bad one costs nothing else")
     func rationaleIsLenient() throws {
         let m = Self.manifest()
         let relation = try #require(m.reduction("red-owf-to-prg"))
-        // The string survives; the number beside it is dropped, not fatal.
-        #expect(relation.rationale == ["class": "HILL99 use the OWF only as an oracle."])
+        // The strings survive; the number beside them is dropped, not fatal.
+        #expect(relation.rationale == [
+            "class": "HILL99 use the OWF only as an oracle.",
+            "via": "One hybrid per output block.",
+            "securityLoss": "A union bound over $q$ queries.",
+            "source": "HILL99 give both the construction and the proof.",
+        ])
 
         // A rationale that is not an object at all costs only itself.
         let stub = m.barrier(onPage: "Barriers/no-owf-to-prg.md")
@@ -564,7 +601,7 @@ struct RelationsTests {
         let barrier = try #require(m.barrier(onPage: "Barriers/no-owf-to-ot.md"))
         // The dangling id is dropped and counted; the barrier survives.
         #expect(barrier.circumventedBy == ["red-free-owf-to-ot"])
-        let dangling = m.anomalies.filter { $0.contains("red-does-not-exist") }
+        let dangling = m.anomalies.filter { $0.contains("red-never-written") }
         #expect(dangling.count == 1)
         #expect(m.reductions(circumventing: barrier).map(\.id) == ["red-free-owf-to-ot"])
 
@@ -624,17 +661,42 @@ struct RelationsTests {
 
         let kind = facts[0]
         #expect(kind.symbol == "⇒")
+        #expect(kind.help == nil)
         // The class carries the wiki's reason, and leads to the glossary.
         let classFact = facts[1]
         #expect(classFact.help == "HILL99 use the OWF only as an oracle.")
         #expect(classFact.link == "[[reduction-classes#fully-black-box]]")
         #expect(!classFact.isTentative)
-        // A citation leads to its reference, with the paper as its tooltip.
+        // So does every other field the record gives a reason for.
+        #expect(facts[3].help == "One hybrid per output block.")
+        // A citation leads to its reference, with the paper as its tooltip,
+        // then the record's reason for its sources.
         let source = facts[4]
         #expect(source.link == "[[HILL99 - A pseudorandom generator from any one-way function|HILL99]]")
-        #expect(source.help == "HILL99 - A pseudorandom generator from any one-way function")
+        let sourceHelp = "HILL99 - A pseudorandom generator from any one-way function"
+            + "\nHILL99 give both the construction and the proof."
+        #expect(source.help == sourceHelp)
+        // The loss leads its own tooltip, where a long one can be read whole,
+        // and its reason is plain text like any other.
+        #expect(facts[5].help == "Adv^prf ≤ q/|D|\nA union bound over q queries.")
         let ids = facts.map(\.id)
         #expect(ids.count == Set(ids).count)
+    }
+
+    /// Five corpus rationales carry TeX, such as `$\classBPP$` and
+    /// `level-$j$`, and a tooltip cannot render it.
+    @Test("a rationale reaches the summary as plain text")
+    func summaryRationaleIsPlain() throws {
+        let m = Self.manifest()
+        let free = try #require(m.reduction("red-free-owf-to-ot"))
+        #expect(free.why("class") == "It calls Gen as an oracle on level-(j-1) keys.")
+        #expect(free.why("model") == nil)
+
+        let facts = PageRelations.facts(for: free, manifest: m)
+        #expect(facts.map(\.field) == [.kind, .reductionClass, .model, .source])
+        #expect(facts[0].help == "Only this direction is known.")
+        #expect(facts[1].help == "It calls Gen as an oracle on level-(j-1) keys.")
+        #expect(facts[3].help == "Folklore: the wiki has no attribution for this claim.")
     }
 
     @Test("a heuristic edge is never summarized as a theorem")
@@ -643,6 +705,9 @@ struct RelationsTests {
         let candidate = try #require(m.reduction("red-ddh-to-pke-candidate"))
         let facts = PageRelations.facts(for: candidate, manifest: m)
         #expect(facts.map(\.field) == [.kind, .heuristic, .reductionClass, .model, .source])
+        // The kind's arrow is dashed too, as in the rows, never a solid `⇒`
+        // above "Heuristic candidate".
+        #expect(facts[0].symbol == "⇢")
 
         let heuristic = facts[1]
         #expect(heuristic.value == .text("Heuristic candidate"))
@@ -699,9 +764,14 @@ struct RelationsTests {
         #expect(against.value == .text("Fixed construction reductions"))
         #expect(against.help == "Only the named construction is refuted.")
 
-        // An object id opens the object; free text is kept as written.
+        // An object id opens the object; free text is kept as written. The
+        // record's reason for its assumptions is on each of them.
         #expect(facts[2].value == .object("owf"))
         #expect(facts[3].value == .text("the language has a hard subset-membership problem"))
+        #expect(facts[2].help == "Both are XY20's own assumptions.")
+        #expect(facts[3].help == "Both are XY20's own assumptions.")
+        #expect(facts[5].help == "XY20 - On DDH and OT\nZW21 repair XY20's proof.")
+        #expect(facts[6].help == "ZW21 - More on OT\nZW21 repair XY20's proof.")
 
         // The consequence is shown with the community's belief about it, and
         // leads to the proposition's page.
@@ -722,6 +792,13 @@ struct RelationsTests {
         #expect(facts.map(\.field) == [.strength, .against, .consequence, .source])
         #expect(facts[1].value == .text("Fully black-box reductions"))
         #expect(facts[2].believed == nil)
+        // The class's reason, then the oracle's, which has no field of its
+        // own. A sentence keeps its literal dollars (IND$-CPA, twice) but
+        // loses its TeX.
+        let againstHelp = "It refutes only that every scheme is IND$-CPA-secure; some other "
+            + "IND$-CPA-secure scheme is not ruled out."
+            + "\nA random permutation and a PSPACE oracle."
+        #expect(facts[1].help == againstHelp)
 
         // A stub keeps its strength and sources, never its class.
         let stub = try #require(m.barrier(onPage: "Barriers/no-owf-to-prg.md"))
@@ -786,6 +863,34 @@ struct RelationsTests {
         // Heading text arrives with every `$` already stripped; without a
         // dollar the reduction is the one it always was, braces and all.
         #expect(RelationText.plain("\\mathrm{NC}^1") == "NC^1")
+    }
+
+    /// The corpus's five TeX-bearing rationales, and the one whose literal
+    /// dollars would pair under the site's rule.
+    @Test("a rationale sentence loses its TeX and keeps its literal dollars")
+    func rationaleSentences() {
+        #expect(RelationText.sentence("an IPPE key may reveal the coefficients $r_i$.")
+            == "an IPPE key may reveal the coefficients r_i.")
+        #expect(RelationText.sentence("level-$j$ key material under the level-$(j-1)$ key")
+            == "level-j key material under the level-(j-1) key")
+        #expect(RelationText.sentence("calls $\\Gen$ and $\\Eval$ only as oracles")
+            == "calls Gen and Eval only as oracles")
+        #expect(RelationText.sentence(
+            "One fixed construction, $\\mathbf{z} \\mapsto \\mathbf{A}\\mathbf{z} \\bmod q$ keyed by")
+            == "One fixed construction, z ↦ Az mod q keyed by")
+        #expect(RelationText.sentence("a language outside $\\classBPP$, is")
+            == "a language outside BPP, is")
+
+        // Two IND$-CPA mentions pair under the site's rule, which `plain`
+        // keeps for titles; in a sentence the words between them are not
+        // math, so both dollars stay.
+        let indDollar = "is itself IND$-CPA-secure; building some other IND$-CPA-secure scheme"
+        #expect(RelationText.sentence(indDollar) == indDollar)
+        #expect(RelationText.plain(indDollar)
+            == "is itself IND-CPA-secure; building some other IND-CPA-secure scheme")
+        // A dollar left literal does not swallow a later math span.
+        #expect(RelationText.sentence("IND$-CPA and $x$") == "IND$-CPA and x")
+        #expect(RelationText.sentence("") == "")
     }
 
     @Test("a citation reads as its key, as the site's `renderSource` reads it")
@@ -975,10 +1080,31 @@ struct RelationsTests {
             guard let relation = m.reduction(id) else { continue }
             #expect(relation.heuristic, "\(id) is a candidate construction")
         }
-        // Every circumvention resolves, so none was dropped as an anomaly.
+        // Every circumvention resolves. One that did not would already be
+        // gone from `circumventedBy`, dropped at decode and counted, so the
+        // anomalies are the only place to look.
+        let droppedCircumventions = m.anomalies.filter { $0.contains("circumventedBy") }
+        #expect(droppedCircumventions.isEmpty, "\(droppedCircumventions)")
+        let circumventionCount = m.barriers.reduce(0) { $0 + $1.circumventedBy.count }
+        #expect(circumventionCount >= 2, "got \(circumventionCount) circumventions")
+
+        // No rationale reaches the chrome with TeX in it, and the one with
+        // two literal dollars keeps them.
+        for relation in m.reductions {
+            for field in relation.rationale.keys {
+                let why = relation.why(field) ?? ""
+                #expect(!why.contains("\\"), "\(relation.id) \(field): \(why)")
+            }
+        }
         for barrier in m.barriers {
-            let circumventing = m.reductions(circumventing: barrier)
-            #expect(circumventing.count == barrier.circumventedBy.count, "\(barrier.id)")
+            for field in barrier.rationale.keys {
+                let why = barrier.why(field) ?? ""
+                #expect(!why.contains("\\"), "\(barrier.id) \(field): \(why)")
+            }
+        }
+        let indDollar = m.barriers.first { $0.id == "bar-cpa-security-to-ind-cpa-security" }
+        if let why = indDollar?.why("class") {
+            #expect(why.contains("IND$-CPA"), "got \(why)")
         }
 
         print("relations.json: \(m.reductions.count) reductions, \(m.barriers.count) barriers, "

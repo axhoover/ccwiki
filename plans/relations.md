@@ -104,9 +104,9 @@ every addition is additive and the decoder reads each one with a default.
 
 | Field | On | n | What the app does |
 |---|---|---|---|
-| `heuristic` | reductions | 2 true | **Never shown as a theorem.** The row says "heuristic candidate", draws a dashed `⇢`/`⇠`, and its tooltip leads with "Candidate construction: the source gives no security reduction." The contract says to skip these edges when deriving anything; the app derives nothing yet. |
+| `heuristic` | reductions | 2 true | **Never shown as a theorem.** The row says "heuristic candidate", as the site's line does, and its tooltip leads with "Candidate construction: the source gives no security reduction." Its arrow is a dashed `⇢`/`⇠` in the row, in the statement (tooltip, Copy Statement, the full-statement rows on reduction and barrier pages) and in the summary's Kind row, all through `Relation.arrow`. The dash is CCwiki's own mark: the site's graph dashes only conditional barriers. The contract says to skip these edges when deriving anything; the app derives nothing yet. |
 | `circumventedBy` | barriers | 2 non-empty | Shown wherever the barrier appears: "circumvented by BH26" in its row on an object page, a **Circumvented by** group on the barrier's page, a **Circumvents** group on the reduction's page. The circumventing reduction need not share the barrier's hyperedge (BAR01 gets around a barrier about {zkp} from {crhf}), so these are lookups by id. |
-| `rationale` | both | 198 reductions, 32 barriers | Short sentences keyed by field (`class`, `model`, `heuristic`, `strength`). The page body does not repeat them, so the inspector shows each as the tooltip of the value it justifies, and in row tooltips as "Why fully black-box: …". The site does not show them at all. |
+| `rationale` | both | 198 reductions, 32 barriers | Short sentences keyed by field. The corpus uses `class`, `model`, `heuristic` and `strength`; the contract also allows `kind`, `source`, `via`, `securityLoss` on a reduction and `conditionalOn`, `source`, `oracle` on a barrier, and every one is wired. The page body does not repeat them, so the inspector shows each as the tooltip of the value it justifies (`oracle`, which has no field, beside the barrier's class), and in row tooltips as "Why fully black-box: …". The site does not show them at all. They are wiki prose, five with TeX in them (`$\classBPP$`, `level-$j$`), so every one is read through `Relation.why(_:)` / `Barrier.why(_:)`, which reduce it with `RelationText.sentence` (§9). |
 | class `fixed-construction` | classes | 9 barriers | Read from `classes` like any class. It implies only `free`, so such a barrier bites no RTV04-classed reduction. |
 
 `graphSlug` is still ignored (see §2), and `formal` is documented upstream but
@@ -264,10 +264,10 @@ unstated · CHKV25
 here are variants, so both are named by their host page and section.
 
 That same edge is also the clearest illustration of why disjunction is never
-inferred: CHKV25 gives **three** entries — `{dcr, sparse-lpn}`,
-`{ddh, sparse-lpn}` and `{linearly-homomorphic-pke, sparse-lpn}`, all concluding
-SHE. Three independently sufficient partners, already split into three
-conjunctions by the wiki. Nothing has to guess.
+inferred: CHKV25 gives **two** entries — `{ddh, sparse-lpn}` and
+`{additively-homomorphic-encryption, sparse-lpn}`, both concluding SHE. Two
+independently sufficient partners, already split into two conjunctions by the
+wiki. Nothing has to guess.
 
 A conjunction in
 the *primary* line (the "Produces" direction) gets four lines rather than two,
@@ -288,20 +288,33 @@ is a label–value grid in the manner of a Get Info panel, built purely in
 
 | Reduction | Barrier |
 |---|---|
-| Kind, with its arrow | Strength |
+| Kind, with its arrow (`⇢` if heuristic) | Strength |
 | Proof: "Heuristic candidate", only if heuristic | Against: "Fully black-box reductions" |
 | Class (not on a stub or a containment) | Assuming: each `conditionalOn`, an object or free text |
 | Model, named as the site names it (not on a stub; not "standard" on a containment) | Would imply: each consequence, with "believed true/false" for a proposition |
 | Via, Sources, Security loss | Sources |
 
-Each value's tooltip is the record's `rationale` for it when there is one,
-else its full text. A value that leads somewhere the clone has is a link: the
+Each value's tooltip is the record's `rationale` for it when there is one
+(under the paper's title on a source, under the loss itself on a security
+loss), else its full text. `unstated` stays muted even as a link: its
+secondary style is set on the text, which wins over the link colour. A value
+that leads somewhere the clone has is a link: the
 class to its section of `Glossary/reduction-classes`, an idealised model to its
 glossary page, a source to its reference page, an assumption to its object, a
 proposition to its page. Security loss goes through `RelationText.plain`,
-whose table now covers the losses' macros (`\Adv`, `\calX`, `\ell`, `\mapsto`,
-`\bmod`); the rendered page will carry the same loss as real KaTeX once the
-site's meta line is reproduced in the reader.
+whose table covers the losses' macros (`\Adv`, `\calX`, `\ell`, `\log`,
+`\min`) and the two only a rationale uses (`\mapsto`, `\bmod`); the rendered
+page will carry the same loss as real KaTeX once the site's meta line is
+reproduced in the reader.
+
+A rationale goes through `RelationText.sentence` instead, which differs from
+`plain` in one rule. A rationale is prose, and the site never renders one, so
+its dollars have no site rule to follow; under the pairing rule alone,
+`bar-cpa-security-to-ind-cpa-security`'s "…is itself IND$-CPA-secure; building
+some other IND$-CPA-secure scheme…" pairs its two literal dollars and names
+IND-CPA twice. So in a sentence a paired span is math only when it uses a
+command or is a single token (`$r_i$`, `level-$(j-1)$`); words between two
+dollars are two literal dollars. Titles keep the site's rule.
 
 Model names follow the site everywhere, rows included: "random oracle model",
 "CRS model", "generic group model", "quantum setting", and "non-standard model"
@@ -339,12 +352,12 @@ Sources/CCwiki/Wiki/
 Sources/CCwiki/UI/
 └── RelationsView.swift       the inspector tab
 Tests/CCwikiTests/
-└── RelationsTests.swift      44 tests; corpus checks gated on CCWIKI_WIKI
+└── RelationsTests.swift      47 tests; corpus checks gated on CCWIKI_WIKI
 ```
 
 `RelationText.plain` exists because manifest titles are wiki source carrying
 `$…$` math written with the site's KaTeX macros, and a SwiftUI `Text` has
 neither KaTeX nor the macro table. The vocabulary is small and closed — 20
 commands across the manifest's 610 titles, plus a handful more in the 75
-security losses — so the substitution is exact rather than a guess; anything
-outside it loses its backslash and keeps its letters.
+security losses and five rationales — so the substitution is exact rather than
+a guess; anything outside it loses its backslash and keeps its letters.
