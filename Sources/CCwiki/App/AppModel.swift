@@ -44,6 +44,17 @@ final class AppModel {
         }
     }
 
+    /// The card shown when the pointer rests on a link to another page.
+    /// Persisted, on by default. Off, the render payload carries no cards.
+    var showsLinkPreviews: Bool = CCwikiSettings.showsLinkPreviews {
+        didSet {
+            guard showsLinkPreviews != oldValue else { return }
+            CCwikiSettings.showsLinkPreviews = showsLinkPreviews
+            webController.invalidate()
+            renderCurrent(preservingScroll: true)
+        }
+    }
+
     /// Hide stub pages in the sidebar and on folder listings. Persisted.
     var hidesStubs: Bool = CCwikiSettings.hidesStubs {
         didSet {
@@ -70,6 +81,8 @@ final class AppModel {
     /// variant's `title` is just its id, so its name comes from the host page's
     /// heading.
     private(set) var relationLabels = RelationLabels.empty
+    /// Every page's hover card, built with the labels; see `LinkPreviews`.
+    private(set) var linkPreviews = LinkPreviews.empty
     /// Pages the manifest marks `unlisted`. Real nodes — they take part in
     /// relations and in the closure — kept out of browse and navigation only.
     private(set) var unlistedPaths: Set<String> = []
@@ -536,16 +549,18 @@ final class AppModel {
             // 303 KB of JSON, and the labels need every hosting page's
             // headings — both cheap, but neither belongs on the main actor.
             let manifest = RelationsManifest.load(cloneRoot: cloneRoot)
+            let labels = RelationLabels(manifest: manifest, index: index)
             return LoadedLibrary(
                 index: index,
                 backlinks: index.backlinkMap(),
                 manifest: manifest,
-                labels: RelationLabels(manifest: manifest, index: index),
+                labels: labels,
                 textGrep: TextGrep(pages: index.allPages),
                 // Every single-object closure in both model settings, the
                 // derived barriers and the inspector's lookups: a few
                 // milliseconds, and it must match this manifest exactly.
-                derivation: Derivation(manifest: manifest))
+                derivation: Derivation(manifest: manifest),
+                linkPreviews: LinkPreviews(index: index, manifest: manifest, labels: labels))
         }.value
 
         index = loaded.index
@@ -553,6 +568,7 @@ final class AppModel {
         relations = loaded.manifest
         relationLabels = loaded.labels
         derivation = loaded.derivation
+        linkPreviews = loaded.linkPreviews
         libraryGeneration += 1
         unlistedPaths = loaded.manifest.unlistedPaths
         rebuildBrowseState()
@@ -811,6 +827,8 @@ final class AppModel {
         }
         var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
         renderer.reportsBrokenLinks = false
+        renderer.linkPreviews = linkPreviews
+        renderer.buildsPreviews = showsLinkPreviews
         return renderer.request(for: page, anchor: nil, notices: notices)
     }
 
@@ -938,6 +956,8 @@ final class AppModel {
         renderer.reportsBrokenLinks = showsMaintenanceNotices
         renderer.relations = relations
         renderer.relationLabels = relationLabels
+        renderer.linkPreviews = linkPreviews
+        renderer.buildsPreviews = showsLinkPreviews
         var notices: [RenderRequest.Notice] = []
         if macros.isEmpty {
             notices.append(RenderRequest.Notice(
@@ -1803,4 +1823,5 @@ private struct LoadedLibrary: Sendable {
     let labels: RelationLabels
     let textGrep: TextGrep
     let derivation: Derivation
+    let linkPreviews: LinkPreviews
 }
