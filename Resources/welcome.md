@@ -36,8 +36,10 @@ its **backlinks** (every page that links to it, and why), and its
 **relations** — for a primitive or assumption, what it implies, what implies
 it, and the barriers known between them.
 
-Right-click a formula to copy its TeX. Right-click anywhere on a page to open
-it on cryptology.city or copy a link to it.
+Select text with formulas and press ⌘C to copy them as LaTeX, or right-click a
+formula for Copy LaTeX. Hover an algorithm to copy its LaTeX source, as on the
+website. Right-click anywhere on a page to open it on cryptology.city or copy a
+link to it.
 
 ## Staying current
 
