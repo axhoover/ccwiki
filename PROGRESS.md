@@ -5,6 +5,48 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-10 — The final-form wiki, LaTeX copying, and right-aligned comments
+
+0.1.2 shipped (tag v0.1.2 on 610de81) and the wiki merged its final-form
+reductions (ab81f02, 2026-10-04: 867 files, 283 reductions, 32 barriers,
+430 references). The maintainer reported two things: LaTeX copying "wasn't
+there", and pseudocode comments were not right-aligned.
+
+**Investigated before building**, six readers in parallel and a critic over
+their findings, all read-only. Learned:
+
+- Copy TeX worked, but only as a right-click on prose math. The site's
+  visible copy affordances are elsewhere: hover buttons under every
+  algorithm and a preamble/JSON area on the macros page, both deliberately
+  not ported in August. ⌘C copied glyph soup. The site's own KaTeX copy-tex
+  is a no-op on prose math (Quartz renders `output: "html"`, no MathML), so
+  ⌘C on the site only gives TeX inside algorithms.
+- The comment alignment is one CSS rule in the site's Quartz plugin
+  (`.ps-comment { float: right }`), not part of pseudocode.js.
+- The new manifest still decodes (version 1, additive fields), but it broke
+  what the app assumed: every variant now has a real heading title, so
+  labels lost their host (21 edges touch `owf`, a variant); a lone `$` was
+  stripped (IND$-CPA → IND-CPA, a false barrier statement); the contract's
+  `heuristic` and `circumventedBy` were ignored; 35 new markdown-style links
+  did nothing; and reduction pages showed no class, model or loss, because
+  the site now injects that line at build time. CI's corpus step went red on
+  one floor (more than 300 reductions; there are 283), with every search
+  number holding.
+
+**Built in three isolated tracks**, each reviewed for compile-correctness and
+behaviour by separate reviewers before merging; the reviews caught the copy
+row undoing the game-group width fix, raw TeX in rationale tooltips, and a
+dead class link on older clones. Web: the copy handler, context menu,
+hover copy row, macros copy area, right-aligned comments and the game-group
+fix. Relations: the new fields, "Host § Title" labels, paired-`$` text, a
+summary of the page's own record. Rendering: `RelationMeta`, a port of the
+site's relation-meta line spliced under the H1, and markdown links resolved
+like wikilinks and counted as backlinks.
+
+**Not verifiable here** (no Swift toolchain, no WebKit): AppKit still calling
+`willOpenMenu`, WebKit firing the DOM `copy` event with `clipboardData`, and
+the float and flow-root layout in WebKit (measured in Chromium).
+
 ## 2026-09-27 — Search v2: ⌘S for concepts, ⇧⌘R for papers, ⇧⌘F for text
 
 On `claude/search-v2`, cut from the QoL branch. The maintainer's decisions

@@ -68,8 +68,9 @@ redesign, not a refactor.
 ├── CCwiki/                CCwiki.entitlements (NOT sandboxed — see §5)
 ├── Sources/CCwiki/
 │   ├── App/                 CCwikiApp, AppModel, AppPaths, Theme, ScreenshotRunner
-│   ├── Wiki/                pure, testable: slugs, wikilinks, frontmatter, macros,
-│   │                        index, and the relations manifest
+│   ├── Wiki/                pure, testable: slugs, wikilinks and markdown links,
+│   │                        frontmatter, macros, index, the relations manifest,
+│   │                        and the site's relation-meta line (RelationMeta)
 │   ├── Reader/              the WKWebView, its scheme handler, and the render request
 │   ├── Search/              SQLite FTS5, the ⌘S and ⇧⌘R rankers, ⇧⌘F grep, the quick switcher
 │   ├── Jobs/                subprocess plumbing, tool discovery, git, ingestion
@@ -85,18 +86,19 @@ redesign, not a refactor.
   resolution, the frontmatter subset, and the macro table. **The fiddliest code
   in the app and the most heavily tested.**
 - [plans/render-pipeline.md](plans/render-pipeline.md) — the vendored JS, why
-  each package, the `ccwiki://` scheme handler, and the CSP.
+  each package, the `ccwiki://` scheme handler, the CSP, and how LaTeX is
+  copied (⌘C, the context menu, the pseudocode copy row).
 - [plans/search.md](plans/search.md) — the FTS5 schema, tokenizer choices,
   query escaping, and the ranking backlog.
-- [plans/search-v2.md](plans/search-v2.md) — **decided, being built on
-  `claude/search-v2`**: three searches (⌘S concepts, ⇧⌘F literal, ⇧⌘R
+- [plans/search-v2.md](plans/search-v2.md) — **shipped in 0.1.2**: three searches (⌘S concepts, ⇧⌘F literal, ⇧⌘R
   references), the generated relevance test set CI reports on, the ranking
   rules and measurements for ⌘S (§6.4) and ⇧⌘R (§6.5), ⇧⌘F's literal
   search (§6.6), ⌘S's typo correction (§6.7), and joined or split words
   (§6.8).
 - [plans/relations.md](plans/relations.md) — how `relations.json` is consumed:
-  the hyperedge rule, the class partial order and which way it points, variants,
-  and how every "we do not know" value is displayed honestly.
+  the hyperedge rule, the class partial order and which way it points, variants
+  ("Host § Title"), heuristic candidates, circumventions, rationale, and how
+  every "we do not know" value is displayed honestly.
 - [plans/ingestion.md](plans/ingestion.md) — the worktree lifecycle, the prompt
   composition rule, and what CCwiki checks before and after the agent runs.
 - [plans/build-system.md](plans/build-system.md) — `make` / `build.sh`, the

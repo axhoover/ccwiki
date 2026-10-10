@@ -7,11 +7,17 @@ import Foundation
 /// it stays in Swift; markdown, KaTeX and pseudocode.js only exist in
 /// JavaScript, so rendering stays there. The bridge between them is this
 /// `links` map, keyed by the exact raw `[[…]]` text — both sides parse
-/// wikilinks with the same regex, so the keys line up by construction.
+/// wikilinks with the same regex, so the keys line up by construction. A
+/// markdown link `[text](slug#anchor)` is keyed by its destination, which is
+/// the string markdown-it hands to `normalizeLink` and `ccwiki.js` recovers.
 ///
-/// Notably, the markdown is *not* rewritten before it crosses. Splicing
+/// Notably, the links are *not* rewritten before they cross. Splicing
 /// `[text](url)` into the source would mean editing a string that also contains
-/// `$…$` and fenced TeX, which is where escaping bugs live.
+/// `$…$` and fenced TeX, which is where escaping bugs live. The one addition is
+/// the site's relation-meta line under the H1 of a reduction or barrier page
+/// (`RelationMeta`): a whole paragraph inserted between lines, never an edit
+/// inside one, and spliced before the links are collected, so its own links
+/// go through this map like the body's.
 struct RenderRequest: Sendable {
 
     struct ResolvedLink: Sendable {
@@ -25,7 +31,8 @@ struct RenderRequest: Sendable {
 
     let path: String
     let title: String
-    /// The page body, frontmatter already stripped.
+    /// The page body, frontmatter already stripped, with the relation-meta
+    /// line spliced in on a reduction or barrier page.
     let markdown: String
     /// Pre-built HTML, used instead of `markdown` for synthetic pages.
     let html: String?
@@ -93,6 +100,12 @@ struct PageRenderer: Sendable {
     /// Add the "N links have no target" notice. The links are styled as
     /// broken either way; the banner is for someone maintaining the wiki.
     var reportsBrokenLinks = true
+    /// What the relation-meta line under a reduction or barrier page's H1 is
+    /// built with: the manifest names the conclusion's type and the objects a
+    /// barrier assumes, and the labels name a variant in a clone too old to
+    /// title it. Both empty, the line comes from the frontmatter alone.
+    var relations = RelationsManifest.empty
+    var relationLabels = RelationLabels.empty
 
     /// Image extensions the reader inlines for `![[…]]` embeds.
     private static let imageExtensions: Set<String> = [
@@ -101,11 +114,35 @@ struct PageRenderer: Sendable {
 
     func request(for page: WikiPage, anchor: String? = nil, notices: [RenderRequest.Notice] = [])
         -> RenderRequest {
+        // The site's line of relation fields goes in first, so its links are
+        // collected and resolved with the body's. Only into a clone that has
+        // the reduction-classes page: it arrived in the same wiki commit as the
+        // site's line, so a clone without it predates the line. The site built
+        // from that clone showed none, and here the line's class links would
+        // go nowhere and raise the broken-link notice on every page with one.
+        var markdown = page.body
+        let classPage = Wikilink(
+            target: RelationMeta.classPage, rawAnchor: nil, alias: nil, isEmbed: false,
+            range: page.body.startIndex..<page.body.startIndex)
+        if index.resolve(classPage, from: page.path).isResolved,
+           let line = RelationMeta.line(
+               for: page.frontmatter, manifest: relations, labels: relationLabels) {
+            markdown = RelationMeta.insertUnderH1(line, into: markdown)
+        }
+
         var links: [String: RenderRequest.ResolvedLink] = [:]
         var brokenCount = 0
 
-        for link in WikilinkParser.links(in: page.body) {
-            let raw = String(page.body[link.range])
+        // A wikilink is keyed by its raw `[[…]]` text, a markdown link by its
+        // destination: the strings `ccwiki.js` looks each one up by.
+        var keyed: [(raw: String, link: Wikilink)] = WikilinkParser.links(in: markdown).map {
+            (raw: String(markdown[$0.range]), link: $0)
+        }
+        keyed += MarkdownLinkParser.links(in: markdown).map {
+            (raw: $0.destination, link: $0.wikilink)
+        }
+
+        for (raw, link) in keyed {
             guard links[raw] == nil else { continue }
 
             switch index.resolve(link, from: page.path) {
@@ -146,7 +183,7 @@ struct PageRenderer: Sendable {
         return RenderRequest(
             path: page.path,
             title: page.displayTitle,
-            markdown: page.body,
+            markdown: markdown,
             html: nil,
             links: links,
             anchor: anchor,

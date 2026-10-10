@@ -881,6 +881,8 @@ final class AppModel {
         guard let index else { return }
         var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
         renderer.reportsBrokenLinks = showsMaintenanceNotices
+        renderer.relations = relations
+        renderer.relationLabels = relationLabels
         var notices: [RenderRequest.Notice] = []
         if macros.isEmpty {
             notices.append(RenderRequest.Notice(

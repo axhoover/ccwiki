@@ -12,6 +12,42 @@
   code. Commit messages are for the code.
 -->
 
+## 0.1.3 — unreleased
+
+**Copy LaTeX the way the website lets you.** Hover any algorithm for Copy
+LaTeX (macros) and Copy LaTeX (no macros), as on cryptology.city. Select text
+with formulas in it and press ⌘C, and the formulas come out as their LaTeX
+source, `$…$` and `$$…$$`, instead of a jumble of glyphs. Right-click a
+formula, in prose or in an algorithm, for Copy LaTeX; right-click an
+algorithm for Copy Algorithm as LaTeX (hold Option to expand the macros). The
+LaTeX macros page has its Copy LaTeX preamble and Copy KaTeX/MathJax JSON
+buttons.
+
+**Comments in algorithms sit on the right**, as on the website. A comment too
+long to share its line gets a line of its own beneath it rather than drifting
+next to the following step. Games with their oracles beside them keep the
+game wide enough to read, and no longer collapse in a narrow window.
+
+**Reductions and barriers say what kind of result they are.** Under the
+title of every reduction and barrier page, the line the website shows: the
+reduction class, the model, the sources and the security loss, or for a
+barrier its strength, what it rules out and what it assumes.
+
+**The Relations inspector reads the wiki's final-form reductions.**
+
+- A page's own record comes first: kind, class, model, sources, loss, and
+  the wiki's one-sentence reason for each class and model (hover to read it).
+  A barrier shows its consequences and whether they are believed or open.
+- Heuristic candidates, such as NTRU ⇒ PKE, are marked as candidates with a
+  dashed arrow, never shown as theorems.
+- A barrier that a later result works around says so, wherever it appears.
+- Sections of a page are named with their page, "Hash function § Preimage
+  resistance (one-wayness)", so two "CPA Security" sections can no longer be
+  confused, and IND$-CPA keeps its dollar sign.
+
+**Links written in the wiki's newer link style work.** About 35 links that
+did nothing when clicked now open their page, and they count as backlinks.
+
 ## 0.1.2 — 2026-09-28
 
 **⌘S finds the page you mean.** Search now puts the page named for what you
