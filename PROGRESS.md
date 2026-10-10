@@ -5,6 +5,63 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-10 — The derivation engine, revised after a red team
+
+Two reviewers ran `scripts/derivations_reference.py` against the real
+manifest and found unsound derivations the first spec allowed. Every finding
+was reproduced with the engine first. All but one were accepted, and
+[plans/derivations.md](plans/derivations.md) §11 records each disposition.
+The engine, the golden file and the spec were revised together. Nothing was
+compiled; this machine is Linux.
+
+**What changed.**
+
+- **The record's nodes are coarser than its theorems.** JLS21 needs
+  sub-exponential LPN over Z_p, but CIMR25 supplies binary LPN. BGV12 needs a
+  large modulus, but Reg05 gives a polynomial one. Kil88 needs malicious OT,
+  but the OT page and EGL are semi-honest. GPSW06 is selective, and BM84 needs
+  Z_p\*. A new rule, R13, reads these from
+  `Resources/derivation-curation.json`, where every entry cites the wiki's
+  own Statement. A requirement on a hypothesis is met by a given start (the
+  claim then reads "assuming …"), or by a listed producer; otherwise the step
+  is refused and named. A weakened conclusion is kept apart from the node's
+  full fact. BW07 and both Wee22 edges are quarantined, since their
+  hypotheses do not match their Statements.
+- **R14**: circular evasive LWE, SIDH and SSDDH are refuted (AMYY25, CD22).
+  Implications from them are marked vacuous and never listed as sources. The
+  honest-majority MPC variants are settings, not assumptions.
+- **Equivalence directions are classed separately (R1).** ISIS ⇒ SIS is the
+  conditional direction.
+- **Conflicts are checked against any derivation**, standard-model and
+  precondition-clean, not just the shown chain (R8). This applies to derived
+  barriers too, and an unstated chain counts against a `free` barrier.
+  Quantum, CRS and idealised chains are context, never conflicts.
+- **Derived barriers (R12)** now propagate only consequences that rule
+  something out. Side edges with preconditions are excluded, barriers apply
+  to start sets, circumventions are inherited only when they reach the pair,
+  and redundancy covers derived barriers too.
+- **Answers say more and claim less.** Recorded barriers carry qualifiers
+  (unclassified, fixed-construction, stub). An answer lists what is recorded
+  on its exact pair. A completion the target gives back becomes "the question
+  becomes A ⇒ Z". Implied-by pairs carry tags and are never "minimal". The
+  host hint never names the premise.
+- **Tests**: `--selftest` runs 45 checks, one per finding: 38 on the
+  manifest, 7 on patched copies. The golden file has 72 queries and 7
+  mutation records the Swift test replays, plus sentinels that fail CI when
+  the wiki moves under the curation. `--lint WIKI_ROOT` flags possible
+  dropped conjuncts.
+
+**What it cost on the data.** 1,084 default pairs became 1,022: 62 removed,
+none added, and 45 now carry an assumption. BDH lost 26 and CDH 16, because
+the record has no DLOG ⇒ OWF and BM84 needs Z_p\*. MPC lost the sources
+whose OT is not stated to be malicious-secure. Derived barriers went from 451
+records over 297 pairs to 406 over 272. Every true result lost is a record
+gap; §2a lists the upstream asks that would recover them.
+
+**Rejected.** GM's Z₂ encryption feeding BDOZ11 is likely wrong, but the
+wiki's Statement does not state BDOZ11's field size, and the curation admits
+only the wiki's text. It is an upstream ask and a residual risk (§10).
+
 ## 2026-10-10 — The explorer, derived sections and link previews, specified
 
 [plans/relations-explorer.md](plans/relations-explorer.md) is the UI and

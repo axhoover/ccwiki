@@ -66,6 +66,8 @@ redesign, not a refactor.
 │   └── make-icon.swift      generates build/AppIcon.icns
 ├── Resources/
 │   ├── Info.plist
+│   ├── derivation-curation.json  reviewed corrections to relations.json that
+│   │                        the derivation engine reads (plans/derivations.md §2a)
 │   └── web/                 the reader: index.html, app.css, ccwiki.js, vendor/
 ├── CCwiki/                CCwiki.entitlements (NOT sandboxed — see §5)
 ├── Sources/CCwiki/
@@ -101,13 +103,17 @@ redesign, not a refactor.
   the hyperedge rule, the class partial order and which way it points, variants
   ("Host § Title"), heuristic candidates, circumventions, rationale, and how
   every "we do not know" value is displayed honestly.
-- [plans/derivations.md](plans/derivations.md) — **specified, not built**:
-  what CCwiki may conclude by chaining recorded reductions. Twelve rules
-  (conjunction-respecting Horn closure, the default model filter, no free or
-  unstated step after an idealised-model step, chain class by composition,
-  derived barriers only when sound), the Swift `Derivation` API, UI wording,
-  and the golden file the corpus test checks. Reference implementation:
-  `scripts/derivations_reference.py`.
+- [plans/derivations.md](plans/derivations.md) — **specified, not built;
+  revised after a red team**: what CCwiki may conclude by chaining recorded
+  reductions. Fourteen rules (conjunction-respecting Horn closure, the default
+  model filter, no free or unstated step after an idealised-model step, chain
+  class by composition, conflicts checked against any derivation, derived
+  barriers only when sound, preconditions and weakened notions the manifest
+  does not record, refuted assumptions), the curation file that supplies
+  them (§2a), the Swift `Derivation` API, UI wording, residual risks (§10),
+  the review's dispositions (§11), and the golden file the corpus test
+  checks. Reference implementation: `scripts/derivations_reference.py`
+  (`--selftest`, `--lint WIKI_ROOT`).
 - [plans/relations-explorer.md](plans/relations-explorer.md) — **specified,
   not built**: the UI and integration half of derivations. The *Does A imply
   B?* explorer window (⇧⌘E), the inspector's collapsed "Derived" sections, and

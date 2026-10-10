@@ -1,0 +1,247 @@
+{
+ "about": "CCwiki's reviewed corrections for deriving relations from the wiki's relations.json. The manifest does not record hardness regimes, scoped notions, refutations or per-direction equivalence classes; these entries supply them until it does. Every entry cites the wiki's own text (a reduction's Statement or securityLoss, or an assumption page). Spec: plans/derivations.md section 2a. Read by scripts/derivations_reference.py and by the Swift Derivation type; the corpus test fails if an id here no longer resolves.",
+ "reviewedAgainst": {
+  "wikiCommit": "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157",
+  "manifestSHA256": "b0c3fb657570d678d1d8bf69ca60d05ded9ade2b0bba05169d597767b4c0e3ee"
+ },
+ "refuted": [
+  {
+   "object": "circular-evasive-lwe",
+   "source": "AMYY25",
+   "text": "Public-coin circular evasive LWE is false (AMYY25).",
+   "evidence": "content/Assumptions/learning-with-errors.md:113, :272"
+  },
+  {
+   "object": "sidh",
+   "source": "CD22",
+   "text": "SIDH is broken classically in polynomial time (CD22).",
+   "evidence": "content/Assumptions/supersingular-isogeny-diffie-hellman.md:16, :62-65"
+  },
+  {
+   "object": "ssddh",
+   "source": "CD22",
+   "text": "SSDDH is the decisional variant of SIDH, which CD22 breaks classically in polynomial time from the same transcript.",
+   "evidence": "content/Assumptions/supersingular-isogeny-diffie-hellman.md:16, :33, :64-65"
+  }
+ ],
+ "settings": [
+  {
+   "object": "honest-majority-t-lt-n-over-2",
+   "text": "A corruption setting, not an assumption: MPC with t < n/2 exists unconditionally given broadcast (RB89).",
+   "evidence": "content/Primitives/secure-multi-party-computation.md:56-58"
+  },
+  {
+   "object": "honest-majority-t-lt-n-over-3",
+   "text": "A corruption setting, not an assumption: MPC with t < n/3 exists unconditionally (BGW88).",
+   "evidence": "content/Primitives/secure-multi-party-computation.md:52-54"
+  }
+ ],
+ "quarantine": [
+  {
+   "edge": "red-bdh-to-hve-bw07",
+   "reason": "The Statement needs composite-order groups and three assumptions jointly (DBDH, bilinear subgroup decision, C3DH); the record has the single prime-order hypothesis bdh.",
+   "evidence": "content/Reductions/bdh-to-hve-bw07.md § Statement"
+  },
+  {
+   "edge": "red-evasive-lwe-to-be-wee22",
+   "reason": "The Statement assumes evasive LWE together with LWE; the record drops the LWE conjunct. Evasive LWE is an implication-form assumption and does not imply LWE.",
+   "evidence": "content/Reductions/evasive-lwe-to-be-wee22.md § Statement"
+  },
+  {
+   "edge": "red-evasive-lwe-to-abe-wee22",
+   "reason": "The Statement assumes evasive LWE, tensor LWE and LWE; the record drops the LWE conjunct.",
+   "evidence": "content/Reductions/evasive-lwe-to-abe-wee22.md § Statement"
+  }
+ ],
+ "equivalences": {
+  "red-cpa-security-to-cpa-security": {"forward": "record", "reverse": "record", "note": "GM84 and MRS88 prove the two directions; both are black-box."},
+  "red-isis-inhomogeneous-sis-to-sis": {"forward": "unstated", "reverse": "record", "note": "SIS => ISIS is immediate; ISIS => SIS holds only under conditions on the column count and norm bound (requires entry below)."},
+  "red-linear-secret-sharing-schemes-lsss-to-msp": {"forward": "record", "reverse": "record", "note": "KW93 and Bei96: both directions are size-preserving translations."},
+  "red-module-lwe-to-lwe-ls15": {"forward": "record", "reverse": "record", "note": "Degree-1 module LWE is LWE with the same parameters."},
+  "red-module-lwe-to-ring-lwe-ls15": {"forward": "record", "reverse": "record", "note": "Rank-1 module LWE is Ring LWE with the same parameters."},
+  "red-rabin-ot-to-ot": {"forward": "record", "reverse": "record", "note": "Cre87: each direction is an information-theoretic protocol."},
+  "red-rsa-to-fac-dlo24": {"forward": "record", "reverse": "record", "note": "RSA => FAC is trivial in the standard model, FAC => RSA is DLO24's generic-ring theorem; the recorded model 'other' is kept for both, which only under-claims the trivial direction."}
+ },
+ "requires": [
+  {
+   "edge": "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+   "hypothesis": "sxdh",
+   "notion": "SXDH sub-exponentially hard, on asymmetric bilinear groups of prime order p = O(2^lambda)",
+   "metBy": [],
+   "evidence": "Statement: 'Assume sub-exponential hardness of the following: SXDH on asymmetric bilinear groups of prime order p = O(2^lambda)'; securityLoss: 'requires sub-exponential hardness of all four hypotheses'"
+  },
+  {
+   "edge": "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+   "hypothesis": "lwe",
+   "notion": "LWE sub-exponentially hard over Z_p (p the SXDH group order), with modulus-to-noise ratio 2^(k^eps)",
+   "metBy": [],
+   "evidence": "Statement: 'LWE over Z_p with secret dimension k and modulus-to-noise ratio 2^{k^eps}'"
+  },
+  {
+   "edge": "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+   "hypothesis": "lpn",
+   "notion": "LPN sub-exponentially hard over the field Z_p (not binary LPN), with polynomially many samples and error rate l^(-delta)",
+   "metBy": [],
+   "evidence": "Statement: 'LPN over Z_p (the field generalization, not binary LPN) with secret dimension l, polynomially many samples and error rate l^{-delta}'"
+  },
+  {
+   "edge": "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+   "hypothesis": "prg-in-nc0",
+   "notion": "a sub-exponentially secure Boolean PRG in NC0 with stretch n^(1+tau)",
+   "metBy": [],
+   "evidence": "Statement: 'a Boolean PRG in NC0 with stretch n^{1+tau} on n-bit seeds', under sub-exponential hardness"
+  },
+  {
+   "edge": "red-lwe-to-leveled-fully-homomorphic-encryption-bgv12",
+   "hypothesis": "lwe",
+   "notion": "decision LWE with modulus-to-noise ratio exponential in the depth bound L",
+   "metBy": [],
+   "evidence": "Statement: 'IND-CPA-secure if decision LWE is hard with modulus-to-noise ratio exponential in L'. Reg05 gives prime poly(n) modulus only (red-gapsvp-to-lwe-reg05 Statement)."
+  },
+  {
+   "edge": "red-noise-level-to-tdh-amr25",
+   "hypothesis": "lpn-low-noise",
+   "notion": "quasi-polynomial hardness of low-noise LPN with noise rate O(log^(1+beta)(k)/k)",
+   "metBy": [],
+   "evidence": "Statement: 'Quasi-polynomial hardness of low-noise LPN in dimension k with noise rate O(log^{1+beta}(k)/k)'"
+  },
+  {
+   "edge": "red-fe-to-io",
+   "hypothesis": "functional-encryption",
+   "notion": "public-key FE for P/poly that is single-key, sub-exponentially secure and weakly compact",
+   "metBy": [],
+   "evidence": "Statement: 'A public-key FE scheme for P/poly that is single-key, sub-exponentially secure and weakly compact'; securityLoss: 'requires sub-exponentially secure FE'. SW14 (red-hash-function-and-io-to-fe-sw14) gives selectively secure IND-based FE."
+  },
+  {
+   "edge": "red-isis-inhomogeneous-sis-to-sis",
+   "direction": "forward",
+   "hypothesis": "inhomogeneous-sis",
+   "notion": "ISIS with the column count and norm bound under which ISIS hardness implies SIS hardness",
+   "metBy": [],
+   "evidence": "Statement: 'The other, ISIS hardness implying SIS hardness ... holds only under conditions on the column count and norm bound.'"
+  },
+  {
+   "edge": "red-tdp-to-nizk-bfm88",
+   "hypothesis": "tdp",
+   "notion": "a doubly enhanced, certified trapdoor permutation family",
+   "metBy": [],
+   "evidence": "Statement: 'A family of doubly enhanced, certified trapdoor permutations ... yields a NIZK proof system'. RSA78's TDP (red-rsa-to-tdp-rsa78) is not stated to be certified."
+  },
+  {
+   "edge": "red-subexponential-lpn-to-crhf-yzw-19",
+   "hypothesis": "subexponential-lpn",
+   "notion": "constant-noise LPN that is 2^(k^(1/2+delta))-hard, or 2^(Omega(k/log k))-hard with poly(k) samples",
+   "metBy": [],
+   "evidence": "Statement: '2^{k^{1/2+delta}}-hard for a constant delta > 0 (subexponential LPN with exponent above 1/2)'. The variant is defined as 2^{omega(k^eps)} for some eps > 0 (learning-parity-with-noise.md:83)."
+  },
+  {
+   "edge": "red-subexponential-lpn-to-ot-yz16",
+   "hypothesis": "subexponential-lpn",
+   "notion": "constant-noise LPN that is 2^(omega(n^(1/2)))-hard with advantage at most 1/T",
+   "metBy": [],
+   "evidence": "Statement: 'Constant-noise LPN that is 2^{omega(n^{1/2})}-hard'. The variant fixes only some eps > 0."
+  },
+  {
+   "edge": "red-subexponential-lpn-to-pke-yz16",
+   "hypothesis": "subexponential-lpn",
+   "notion": "constant-noise LPN that is 2^(omega(n^(1/2)))-hard with advantage at most 1/T",
+   "metBy": [],
+   "evidence": "Statement: 'Constant-noise LPN that is 2^{omega(n^{1/2})}-hard'. The variant fixes only some eps > 0."
+  },
+  {
+   "edge": "red-subexponential-lpn-to-prc-cg24",
+   "hypothesis": "subexponential-lpn",
+   "notion": "LPN that is 2^(O(sqrt n))-hard",
+   "metBy": [],
+   "evidence": "Statement: '2^{O(sqrt n)}-hardness of LPN'. The variant fixes only some eps > 0."
+  },
+  {
+   "edge": "red-lwe-to-zero-bit-prc-cg24",
+   "hypothesis": "subexponential-lpn",
+   "notion": "LPN that is 2^(O(sqrt n))-hard",
+   "metBy": [],
+   "evidence": "Statement: '2^{O(sqrt n)}-hardness of LPN'. The variant fixes only some eps > 0."
+  },
+  {
+   "edge": "red-dlog-to-prg-bm84",
+   "hypothesis": "dlog",
+   "notion": "DLOG hard in Z_p^* (p prime, g a generator)",
+   "metBy": [],
+   "evidence": "Statement: 'If DLOG is hard in Z_p^* (p prime, g a generator), the Blum-Micali generator is a PRG'. DLOG derived from CDH, DDH or BDH lives in their group, not Z_p^*."
+  },
+  {
+   "edge": "red-pke-to-com",
+   "hypothesis": "pke",
+   "notion": "a perfectly correct CPA-secure PKE with certifiable keys",
+   "metBy": [],
+   "evidence": "Statement: 'turns any perfectly correct CPA-secure PKE into a non-interactive commitment ... A malicious committer may choose a malformed pk unless keys are certifiable'. Notes (pke-to-com.md:30) give the route without either: PKE => OWF => PRG => COM."
+  },
+  {
+   "edge": "red-abe-to-be",
+   "hypothesis": "abe",
+   "notion": "a CP-IND-CPA-secure ciphertext-policy ABE whose policy class contains disjunctions",
+   "metBy": ["red-k-linear-assumption-to-abe-rw13", "red-succinct-lwe-to-abe-wee25"],
+   "evidence": "Statement: 'Take a CP-ABE scheme ... If the scheme is CP-IND-CPA-secure'. KW19 (rw13 edge) and Wee25 state CP-ABE; GPSW06 is KP-ABE."
+  },
+  {
+   "edge": "red-ot-to-mpc-kil88",
+   "hypothesis": "ot",
+   "notion": "OT secure against malicious parties (it instantiates Kil88's ideal OT)",
+   "metBy": ["red-cpir-to-ot-dmo00"],
+   "evidence": "Statement: 'in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties'. The OT page's definitions are semi-honest (oblivious-transfer.md:107); EGL's OT is semi-honest. DMO00's Statement: 'single-server PIR is therefore complete for secure two-party and multi-party computation'."
+  },
+  {
+   "edge": "red-ot-to-com",
+   "hypothesis": "ot",
+   "notion": "OT secure against malicious parties (it instantiates Kil88's ideal OT)",
+   "metBy": ["red-cpir-to-ot-dmo00"],
+   "evidence": "Statement: 'in the OT-hybrid model there is a bit commitment that is statistically hiding and statistically binding'. The OT page's definitions are semi-honest (oblivious-transfer.md:107)."
+  },
+  {
+   "edge": "red-bdh-to-ibe-wat09",
+   "hypothesis": "bdh",
+   "notion": "DBDH in the same symmetric prime-order pairing group as DLIN",
+   "metBy": [],
+   "evidence": "Statement: 'If DBDH and DLIN hold in a symmetric prime-order pairing group'"
+  },
+  {
+   "edge": "red-bdh-to-ibe-wat09",
+   "hypothesis": "decisional-linear",
+   "notion": "DLIN in the same symmetric prime-order pairing group as DBDH",
+   "metBy": [],
+   "evidence": "Statement: 'If DBDH and DLIN hold in a symmetric prime-order pairing group'"
+  },
+  {
+   "edge": "red-bdh-to-hibe-wat09",
+   "hypothesis": "bdh",
+   "notion": "DBDH in the same symmetric prime-order pairing group as DLIN",
+   "metBy": [],
+   "evidence": "Statement: 'If DBDH and DLIN hold in a symmetric prime-order pairing group'"
+  },
+  {
+   "edge": "red-bdh-to-hibe-wat09",
+   "hypothesis": "decisional-linear",
+   "notion": "DLIN in the same symmetric prime-order pairing group as DBDH",
+   "metBy": [],
+   "evidence": "Statement: 'If DBDH and DLIN hold in a symmetric prime-order pairing group'"
+  }
+ ],
+ "statementLint": {
+  "red-evasive-lwe-to-abe": "Reviewed: the Statement names evasive LWE as the family circular evasive LWE belongs to, not as a second hypothesis.",
+  "red-partially-homomorphic-encryption-phe-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25": "Reviewed: DDH and DCR are named as examples of linearly homomorphic PKE, not as hypotheses."
+ },
+ "weakens": [
+  {
+   "edge": "red-bdh-to-abe-gpsw06",
+   "notion": "selectively secure key-policy ABE only",
+   "acceptedBy": [],
+   "evidence": "Statement: 'a key-policy ABE ... that is selectively KP-IND-CPA-secure'. The ABE page defines adaptive security; selective is a variant (attribute-based-encryption.md:110-112)."
+  },
+  {
+   "edge": "red-prp-to-invertible-prf",
+   "notion": "an invertible PRF for the forward-oracle game only, over a super-polynomial domain",
+   "acceptedBy": ["red-invertible-prfs-to-prf"],
+   "evidence": "Statement: 'is an invertible PRF for the traditional (forward-oracle) game ... Strong security under Game^iprf ... fails for every permutation'. The forward game is the PRF game, so iPRF => PRF accepts it."
+  }
+ ]
+}
