@@ -661,7 +661,8 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* The relation-meta vocabulary: class, model, sources, or a paper's
  * authors and venue. The note is a barrier's qualifier, which must travel
- * with its title, so it is the meta's size and colour rather than quieter. */
+ * with its title, so it is the meta's size and colour rather than quieter,
+ * and sits under the title, a little closer to it than the meta does. */
 .link-preview-meta,
 .link-preview-note {
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -671,6 +672,8 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--text-secondary);
   margin-top: 0.25rem;
 }
+
+.link-preview-note { margin-top: 0.2rem; }
 
 .link-preview-excerpt {
   font-family: ui-serif, "New York", Georgia, "Times New Roman", serif;

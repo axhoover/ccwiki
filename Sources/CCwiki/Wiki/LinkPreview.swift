@@ -45,13 +45,15 @@ struct LinkPreview: Hashable, Sendable {
             kind: kind, title: title, meta: meta, note: note, excerpt: excerpt)
     }
 
-    /// The card read aloud: each part a sentence, the meta parts a list.
+    /// The card read aloud, in the order it is laid out: each part a
+    /// sentence, the meta parts a list. The note comes straight after the
+    /// title it qualifies.
     private static func spokenLabel(
         kind: String, title: String, meta: [String], note: String?, excerpt: String?
     ) -> String {
-        let metaText = meta.map(PreviewExcerpt.plainText).joined(separator: ", ")
-        var sentences: [String] = [kind, PreviewExcerpt.plainText(title), metaText]
+        var sentences: [String] = [kind, PreviewExcerpt.plainText(title)]
         if let note { sentences.append(note) }
+        sentences.append(meta.map(PreviewExcerpt.plainText).joined(separator: ", "))
         if let excerpt { sentences.append(PreviewExcerpt.plainText(excerpt)) }
         let text = sentences
             .filter { !$0.isEmpty }
@@ -360,6 +362,11 @@ struct LinkPreviews: Sendable {
     /// the anchor names, else by the heading, with the section's first
     /// paragraph. Nil when no heading has that id, or it is the page's own
     /// H1, and the page's card serves.
+    ///
+    /// The host's title is the page's own words, so a reduction's or a
+    /// barrier's keeps the rules its page card follows: never cut, since a
+    /// cut can drop a conjunct or a barrier's conclusion, and a barrier's
+    /// with R8's qualifier, which goes wherever its title does.
     static func sectionCard(
         for page: WikiPage, anchor: String, manifest: RelationsManifest
     ) -> LinkPreview? {
@@ -376,10 +383,17 @@ struct LinkPreviews: Sendable {
         } else {
             title = PreviewExcerpt.inlineWithoutLinks(heading)
         }
-        let host = PreviewExcerpt.capped(RelationText.plain(page.title), at: LinkPreview.metaLimit)
+        let plainHost = RelationText.plain(page.title)
+        let isRelationPage = page.kind == .reduction || page.kind == .barrier
+        let host = isRelationPage
+            ? plainHost : PreviewExcerpt.capped(plainHost, at: LinkPreview.metaLimit)
+        let note: String? = page.kind == .barrier
+            ? qualifier(page, barrier: manifest.barrier(onPage: page.path), manifest: manifest)
+            : nil
         return LinkPreview(
             kind: "Section of \(host)",
             title: PreviewExcerpt.capped(title, at: LinkPreview.titleLimit),
+            note: note,
             excerpt: excerpt(PreviewExcerpt.firstParagraph(inLines: scope.lines)))
     }
 

@@ -52,6 +52,12 @@ struct LinkPreviewTests {
         let withoutTodo = PreviewExcerpt.firstParagraph(in: trailing, anchor: nil)
         #expect(withoutTodo == "Introduced by [[DGI+19 - Trapdoor|DGI+19]].")
 
+        // Inside a sentence, TODO is a word: cutting there would show half a
+        // sentence as if it were whole.
+        let midSentence = "# Title\n\nThere are stubs and TODO, so read on."
+        let wholeSentence = PreviewExcerpt.firstParagraph(in: midSentence, anchor: nil)
+        #expect(wholeSentence == "There are stubs and TODO, so read on.")
+
         let onlyTodo = "# Title\n\nTODO — abstract."
         #expect(PreviewExcerpt.firstParagraph(in: onlyTodo, anchor: nil) == nil)
     }
@@ -660,7 +666,10 @@ struct LinkPreviewTests {
         #expect(stub.kind == "Barrier · stub")
         #expect(stub.note == "Stub: its class and consequences are not evidence.")
         #expect(stub.excerpt == nil)
-        #expect(stub.label.contains("Stub: its class and consequences are not evidence."))
+        // The qualifier is read straight after the title it qualifies.
+        let spokenStart: String = "Barrier · stub. No relativizing reduction from DDH to PRG. "
+            + "Stub: its class and consequences are not evidence."
+        #expect(stub.label.hasPrefix(spokenStart))
     }
 
     @Test("a reference's card: title, authors, venue and the abstract, never a TODO")
@@ -705,6 +714,17 @@ struct LinkPreviewTests {
         #expect(unknown.kind == "Primitive · stub")
         let title = try #require(previews.preview(path: path, anchor: "pseudorandom-generator"))
         #expect(title.kind == "Primitive · stub")
+
+        // A barrier's title in the kind line carries R8's qualifier there too.
+        let barrierPath = "Barriers/no-prg-to-ot.md"
+        let statement = try #require(previews.preview(path: barrierPath, anchor: "statement"))
+        #expect(statement.kind == "Section of No fixed-construction reduction from PRG to OT")
+        #expect(statement.title == "Statement")
+        #expect(statement.note == "Refutes only the construction named on its page; building the "
+            + "target another way is not ruled out.")
+        #expect(statement.excerpt == "One construction fails.")
+        let objectSection = try #require(previews.preview(path: path, anchor: "selective-security"))
+        #expect(objectSection.note == nil)
     }
 
     @Test("caps: a title at 160, a meta part at 120, the label at 700, the excerpt at 420")
@@ -836,12 +856,21 @@ struct LinkPreviewTests {
             }
             guard card.excerpt == nil else { continue }
             withoutExcerpt.append(page.path)
-            let noAbstract = page.kind == .reference
-                && (page.body.contains("TODO") || !page.body.contains("## Abstract"))
+            // A reference is excused only by its abstract itself: none, or
+            // one that opens with a TODO. A TODO elsewhere on the page does
+            // not excuse a real abstract the rules failed to find.
+            let abstract = PreviewExcerpt.scope(of: page.body, anchor: "abstract")
+            let abstractLines: [String] = (abstract?.lines ?? [])
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            let abstractStart: String? = abstractLines.first(where: { !$0.isEmpty })
+            let abstractIsPlaceholder = abstractStart?.hasPrefix("TODO") ?? true
+            let noAbstract = page.kind == .reference && abstractIsPlaceholder
             if page.status != .stub, !noAbstract { unexplained.append(page.path) }
         }
         // 239 at wiki ab81f02: 238 references with a TODO abstract or none,
-        // and one stub. The number moves as abstracts land; a draft page
+        // and one stub. The number is not pinned: CI reads the wiki as it is
+        // today, and it moves as abstracts and references land. The rule is
+        // what holds: a draft page, or a reference with a real abstract,
         // losing its excerpt is a regression in the paragraph rules.
         #expect(unexplained.isEmpty, "cards with no excerpt:\n  \(unexplained.joined(separator: "\n  "))")
         print("link previews: \(previews.count) page cards, \(withoutExcerpt.count) without an excerpt")

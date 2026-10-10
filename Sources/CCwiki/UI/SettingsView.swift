@@ -24,7 +24,9 @@ struct SettingsView: View {
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 560, height: 420)
+        // Tall enough for the Reading tab's four sections and their footers
+        // without scrolling, so "Hide stub pages" is never below the fold.
+        .frame(width: 560, height: 480)
     }
 
     // MARK: Tools
@@ -162,7 +164,7 @@ struct SettingsView: View {
                     get: { model.showsLinkPreviews },
                     set: { model.showsLinkPreviews = $0 }))
             } header: {
-                Text("Links")
+                Text("Link previews")
             } footer: {
                 Text("A card with the target's title and first paragraph, or a reduction's "
                     + "statement and how it holds. Hover over a link for half a second.")

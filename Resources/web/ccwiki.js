@@ -1001,7 +1001,9 @@
     card.id = "ccwiki-link-preview";
     card.setAttribute("role", "tooltip");
     card.hidden = true;
-    ["kind", "title", "meta", "note", "excerpt"].forEach(function (part) {
+    // The note is R8's qualifier, which goes beside the title it qualifies
+    // (derivations.md §7), so it comes before a meta line that may wrap.
+    ["kind", "title", "note", "meta", "excerpt"].forEach(function (part) {
       var el = document.createElement("div");
       el.className = "link-preview-" + part;
       card.appendChild(el);
@@ -1059,8 +1061,8 @@
     var data = renderedPreview(href);
     setPreviewPart(card, "kind", data.kind, false);
     setPreviewPart(card, "title", data.title, true);
-    setPreviewPart(card, "meta", data.meta, true);
     setPreviewPart(card, "note", data.note, false);
+    setPreviewPart(card, "meta", data.meta, true);
     setPreviewPart(card, "excerpt", data.excerpt, true);
     // KaTeX's HTML is not readable by VoiceOver, so the card is described by
     // Swift's plain-text label, and the link points at the card.
@@ -1215,6 +1217,11 @@
   }, { passive: true, capture: true });
   window.addEventListener("blur", dismissPreview);
   window.addEventListener("beforeprint", dismissPreview);
+  // The card is placed once, when it opens. Resizing the window, or the
+  // inspector or sidebar opening beside the page, reflows the text under it,
+  // and a card left where it was could cover its link or point at the wrong
+  // line.
+  window.addEventListener("resize", dismissPreview);
 
   /** For the visual gate (`make shots`): open the card on the first link in
    *  the page whose href is `href`, scrolling it into view if it is not.

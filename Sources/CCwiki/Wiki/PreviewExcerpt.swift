@@ -184,9 +184,16 @@ enum PreviewExcerpt {
     }
 
     /// "Introduced by DGI+19. TODO": a placeholder that ends a paragraph goes,
-    /// with whatever follows it.
+    /// with whatever follows it, and the sentence before it keeps its stop.
+    ///
+    /// Only a `TODO` that opens a sentence (after a stop, a colon or a dash)
+    /// is a placeholder. One inside a sentence ("a lot of stubs and TODO, so
+    /// if you…") is a word, and cutting there would pass half a sentence off
+    /// as a whole excerpt, with no ellipsis to say so. A paragraph that starts
+    /// with one never gets here: `isSkippedParagraph` drops it.
     private static func withoutTrailingPlaceholder(_ paragraph: String) -> String {
-        guard let range = paragraph.range(of: #"(^|\s)TODO\b"#, options: .regularExpression)
+        guard let range = paragraph.range(
+            of: #"(?<=[.!?:—])\s+TODO\b"#, options: .regularExpression)
         else { return paragraph }
         return paragraph[..<range.lowerBound].trimmingCharacters(in: .whitespaces)
     }
