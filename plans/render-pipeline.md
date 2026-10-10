@@ -91,14 +91,107 @@ before `rehype-katex` in the site's chain.
 renders it. Passing it through is safe here because the CSP forbids inline
 script (§5), so markup coming out of the wiki cannot execute.
 
-**Not** reproduced, deliberately: popovers, the SPA router, the graph view, and
-the site's clipboard buttons. The last of those is replaced by a native
-right-click (built 2026-09-27): every formula carries its source in
-`data-tex`, a capturing `contextmenu` listener reports what is under the
-pointer, and `ReaderWebView.willOpenMenu` adds **Copy TeX** when it was a
-formula. The report travels on the same WebKit connection as, and ahead of,
-the menu request, which is why it is there in time; if that ordering ever
-changes, the item simply does not appear.
+**Not** reproduced, deliberately: popovers, the SPA router and the graph view.
+The site's clipboard buttons were left out at first in favour of a native
+right-click (2026-09-27). They are back since 2026-10, because they are what
+people know from the site; see "Copying LaTeX" below.
+
+### Pseudocode after render
+
+`renderPseudocode` puts a `.pseudocode-container` in place first, moves the
+`<pre>` into it and renders there, so each box holds its own block. (Finding
+the output afterwards as the i-th `.ps-root` misaligned every block after a
+failed one, which leaves no `.ps-root`.) A failed block replaces its box with
+a `pre.pseudocode-error`.
+
+Per-block facts live on the box: `data-source` (the source with
+`\algname{…}` removed, for copying) and `data-oracle-split`. Never put a
+`data-*` attribute on the `<pre>`: `pseudocode.renderElement` copies the
+element's `dataset` into its renderer options.
+
+`groupGames` then puts a Game block and the blocks straight after it side by
+side. The game takes the width it needs and the oracle column keeps a 12rem
+minimum; `% oracle-split: N` in the game's source fixes the oracles' share at
+N% (quartz pseudocode.ts:245), through a `split` class and an
+`--oracle-share` property so the narrow-window rules can still override it.
+At 760px and below the group stacks, and every box takes its content's
+height: a zero flex basis there collapsed the game box, which scrolls
+sideways and so has no minimum height of its own.
+
+`\Comment{…}` floats right with a 2em pad, as on the site (quartz
+pseudocode.ts:69), in `--text-secondary` for contrast. Each `.ps-line` is
+`display: flow-root`, so a comment too long to share its statement's row
+drops to a row of its own under that statement instead of hanging beside the
+next one, which is what the site does.
+
+### Copying LaTeX
+
+The page shows glyphs: copied as they stand, `\frac{1}{2}` reads "21",
+zero-width spaces turn up, and every macro is lost. So the reader puts LaTeX
+on the pasteboard in four ways.
+
+**Where the source comes from.** Markdown math carries it in `data-tex`.
+Prose math is rendered with `output: "html"`, like the site, so it has no
+MathML. pseudocode.js calls `katex.renderToString` with no options, so its
+math gets KaTeX's default `htmlAndMathml`, and the source is in the MathML
+`<annotation encoding="application/x-tex">`. Keep both as they are: prose
+MathML would double the math DOM and differ from the site, and the
+annotation is pseudocode math's only copy of its source.
+
+**⌘C.** A capturing `copy` listener in `ccwiki.js` clones the selection,
+widens it to whole formulas, and replaces each formula with its LaTeX:
+`$…$` inline, and display math as `$$`, the source and `$$` on lines of
+their own (a one-line `$$x$$` is inline math to remark-math). It drops the
+copy buttons, turns each `p.ps-line` into a `div` (`innerText` gives a `<p>`
+a blank line after it), lays the result out in an attached off-screen
+`.copy-scratch` box and reads its `innerText`, falling back to
+`textContent`. Both `text/plain` and `text/html` get the LaTeX, so Notes and
+Mail paste it too; KaTeX's own copy-tex keeps the original HTML instead.
+The handler steps in only when the selection holds math or the app's
+buttons; otherwise WebKit's copy runs untouched. ⌘C, Edit › Copy and the
+context menu's Copy all reach it, because the app does not replace the
+pasteboard command group.
+
+copy-tex itself is not vendored: it only reads `.katex-mathml` and does
+nothing on HTML-only math. That is also why, on the site, ⌘C gives LaTeX
+inside pseudocode blocks only.
+
+**Right-click.** A capturing `contextmenu` listener posts `contextTarget`
+with `tex` (the formula under the pointer), `algorithm` (its block's
+`data-source`) and `algorithmExpanded` (the same with the macros written
+out). `ReaderContextTarget` turns that into the menu's copy items, which
+`ReaderWebView.willOpenMenu` puts at the top: **Copy LaTeX** for the
+formula, then **Copy Algorithm as LaTeX** with **Copy Algorithm as LaTeX (No
+Macros)** as its Option-key alternate. Each item captures its text by value,
+so `didCloseMenu` clearing the target cannot break a copy. The report
+travels on the same WebKit connection as, and ahead of, the menu request,
+which is why it is there in time; if that ordering ever changes, the items
+simply do not appear.
+
+**Buttons.** Under each algorithm, as on the site (quartz
+pseudocode.ts:182): **Copy LaTeX (macros)** and **Copy LaTeX (no macros)**,
+faded in on hover or keyboard focus, never selectable, not printed, and
+reading "Copied!" for two seconds after a click. Glossary/latex-macros has
+an empty `<div id="macros-copy-area">` that the site's script fills;
+`fillMacrosCopyArea` fills it the same way, with **Copy LaTeX preamble**
+(one `\newcommand` per macro) and **Copy KaTeX/MathJax JSON**. Both are
+sorted by name: the table crosses from Swift as a dictionary, so the order
+of `macros.ts` is gone.
+
+Every button's text goes over the bridge, `post({type: "copy", text})`, to
+`WebController.handle`, which writes it to `NSPasteboard`. Not
+`navigator.clipboard`: whether a page on `ccwiki://` counts as a secure
+context in `WKWebView` is not something to depend on. (⌘C needs no bridge:
+it fills the copy event's own `clipboardData`.)
+
+**Macro expansion** ports the site's helpers (quartz pseudocode.ts:155-167).
+`stripAlgname` removes `\algname{…}`, which only the wiki's fork of
+pseudocode.js understands. `expandMacros` makes one pass over the table
+being rendered with, replacing each name only as a whole control word
+(`\st` leaves `\stA` alone). One pass is exact while no macro's body uses
+another macro and none takes arguments, which holds for all 126 in
+`macros.ts` as of 2026-10. If that changes, the site and the app both
+expand wrongly, in the same way.
 
 ## 4. Serving content: a custom scheme, not `file://`
 
