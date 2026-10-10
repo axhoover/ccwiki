@@ -5,6 +5,90 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-10 — The explorer, derived sections and link previews, specified
+
+[plans/relations-explorer.md](plans/relations-explorer.md) is the UI and
+integration half of derivations. It is grounded in the app's code and run
+against the reference engine and the real manifest. Nothing was compiled.
+
+**The decisions it makes.**
+
+- **The explorer** is a `Window` scene like Jobs, opened with ⇧⌘E;
+  ⌥⇧⌘E is Explore From This Page. Both are free after enumerating every
+  shortcut in `CCwikiApp.swift`, and `RootView.swift` declares none.
+- **From is a SwiftUI token field** with `∧` between its tokens. Its
+  suggestions replace the results palette-style, rather than floating over
+  an AppKit `List`. It is matched by `FuzzyMatcher` over labels, aliases and
+  ids.
+- **Proofs are a disclosure outline**, expanded by default.
+- **A one-reduction answer says "Recorded", not "derived"**, which is the
+  one place it departs from derivations.md §7.
+- **The inspector gets one collapsed pair of sections per page**, "Derived:
+  implies" and "Derived: implied by", in the default models only and at
+  depth ≥ 2. Rows are `⇒*`, secondary, with a step badge.
+- **Link previews are a Swift-computed card per resolved `href`**, shown by
+  `ccwiki.js` after 450 ms with no round trip. Math renders through a second,
+  `html: false` markdown-it instance. Previews skip external links, the
+  relation-meta paragraph, the reference byline and `TODO` placeholders. A
+  barrier's card is titled by the page and says when it is circumvented.
+- **The work lands as a Phase 0 PR of seams**, after which four tracks own
+  disjoint files: engine, explorer, inspector and previews.
+
+**Learned on the data.**
+
+- DDH gets 27 derived rows and GapSVP 32. PKE has 18 derived sources.
+- 236 of the 430 reference pages have no abstract to preview.
+- The busiest page (LWE) links 55 distinct targets, about 70 KB of preview
+  payload at worst.
+- The site's Quartz popover renders the whole target page; CCwiki
+  deliberately renders a summary card.
+
+## 2026-10-10 — The derivation engine, specified and proved on the data
+
+The maintainer decided that CCwiki will show derived relations: proof trees
+labelled "derived by CCwiki from N recorded reductions", the default model
+filter set to standard + quantum + CRS, and three features (a *Does A imply
+B?* explorer, transitive groups in the inspector, link previews). Before any
+Swift, the engine is specified in
+[plans/derivations.md](plans/derivations.md) as twelve rules, R1–R12, and
+implemented in Python as `scripts/derivations_reference.py`. The script was
+run on the real manifest (wiki `ab81f02`) and wrote
+`Tests/CCwikiTests/Fixtures/derivations-golden.json`: 40 query records plus
+invariants, for the Swift corpus test to assert. Nothing was compiled; this
+machine is Linux. `Package.swift` now excludes `Fixtures/` from the test
+target.
+
+**What the data decided.**
+
+- **No free or unstated step after an idealised-model step (R5).** Steps
+  after one must relativize. This blocks ROM ⇒ OIHF ⇒ OT ⇒ MPC at BH26's
+  non-black-box step, which matches the wiki's own prose. With idealised
+  models on, ROM derives exactly {OIHF, Merkle puzzles}. Allowing unstated
+  steps with a caveat would add 45 facts from 9 starts, some of them true
+  (GGM ⇒ OT, FAC ⇒ PKE against generic ring adversaries). The refusal loses
+  them rather than risk a false one, and the answer names the step that
+  blocked them.
+- **The "standard model" filter is two phases, not a filter on edges.** The
+  toggle only adds model-scoped facts. It never changes how a default fact
+  is justified.
+- **The minimal-depth chain is not always the strongest.** In 55 derived
+  pairs, a longer fully black-box chain exists (DDH ⇒ iPRF: 2 unstated steps
+  or 3 fully black-box ones), so an answer reports both.
+- **Derived barriers have to be stricter than proposed.** The side edges must
+  be standard-model only, not just in the default models: a quantum or CRS
+  side reduction escapes the barrier it composes with. The rule gives 451
+  records over 297 primitive pairs from 9 barriers, and none is contradicted
+  by a recorded reduction.
+- **Complexity classes are out entirely (R2).** All 45 inclusions have a
+  class endpoint, five of them assumption-in-class facts such as Shor's
+  `dlog ⊆ bqp`. Four more mixed edges (`{owf, ip} ⇒ czk`, …) conclude
+  statements about classes.
+
+**Surprises.** OT's closure is four objects, and nothing conjunctive reaches
+OT, so *everything implying OT* has 22 single sources and no pairs. The R9
+hint "a section of the target is derived" applies to 229 (start, section)
+pairs, mostly because `owf` is a section of the hash function page.
+
 ## 2026-10-10 — The final-form wiki, LaTeX copying, and right-aligned comments
 
 0.1.2 shipped (tag v0.1.2 on 610de81) and the wiki merged its final-form

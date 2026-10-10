@@ -22,7 +22,10 @@ let package = Package(
         .testTarget(
             name: "CCwikiTests",
             dependencies: ["CCwiki"],
-            path: "Tests/CCwikiTests"
+            path: "Tests/CCwikiTests",
+            // Data the tests read through #filePath (derivations-golden.json),
+            // not resources: excluded so SwiftPM does not warn about it.
+            exclude: ["Fixtures"]
         ),
     ]
 )

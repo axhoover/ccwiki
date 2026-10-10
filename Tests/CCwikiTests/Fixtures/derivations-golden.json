@@ -1,0 +1,1267 @@
+{
+ "about": "Expected answers of CCwiki's derivation engine on one wiki manifest. Written by scripts/derivations_reference.py; spec in plans/derivations.md. Exact when manifestSHA256 matches the clone's .reductions/relations.json; otherwise only each record's `stable` fields and `invariants` are asserted, and only while every count is within `tolerance` of `counts`.",
+ "generator": "scripts/derivations_reference.py",
+ "wikiCommit": "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157",
+ "manifestSHA256": "b0c3fb657570d678d1d8bf69ca60d05ded9ade2b0bba05169d597767b4c0e3ee",
+ "counts": {
+  "objects": 262,
+  "reductions": 283,
+  "barriers": 32
+ },
+ "tolerance": 0.1,
+ "policy": {
+  "defaultModels": [
+   "crs",
+   "quantum",
+   "standard"
+  ],
+  "idealisedModels": [
+   "algebraic-group",
+   "generic-group",
+   "other",
+   "rom"
+  ],
+  "modelNodes": {
+   "rom": "rom",
+   "ggm": "generic-group",
+   "agm": "algebraic-group"
+  },
+  "composableClasses": [
+   "fully-black-box",
+   "relativizing",
+   "free"
+  ],
+  "unstatedAfterIdealised": "refuse",
+  "completionCap": 8
+ },
+ "eligibleSteps": {
+  "default": 204,
+  "all": 239
+ },
+ "excluded": {
+  "complexity-class-endpoint": 4,
+  "heuristic": 2,
+  "inclusion": 45
+ },
+ "closureSizes": {
+  "owf": {
+   "default": 15,
+   "all": 15
+  },
+  "ddh": {
+   "default": 33,
+   "all": 37
+  },
+  "lwe": {
+   "default": 29,
+   "all": 29
+  },
+  "dcr": {
+   "default": 29,
+   "all": 31
+  },
+  "fac": {
+   "default": 16,
+   "all": 17
+  },
+  "rsa": {
+   "default": 23,
+   "all": 29
+  },
+  "gapsvp": {
+   "default": 34,
+   "all": 37
+  },
+  "dlog": {
+   "default": 19,
+   "all": 24
+  },
+  "rom": {
+   "default": 0,
+   "all": 2
+  },
+  "ggm": {
+   "default": 0,
+   "all": 29
+  },
+  "pke": {
+   "default": 19,
+   "all": 19
+  },
+  "ot": {
+   "default": 4,
+   "all": 4
+  }
+ },
+ "impliedBy": {
+  "pke": {
+   "singleCount": 29,
+   "pairCount": 43,
+   "groups": {
+    "red-hash-function-and-io-to-pke-sw14": 24,
+    "red-kem-and-ske-to-pke": 16,
+    "red-evasive-lwe-to-abe-wee22": 1,
+    "red-noisy-k-lin-and-pc-to-pke-ghjs25": 1,
+    "red-pc-and-search-noisy-k-lin-to-pke-ghjs25": 1
+   }
+  },
+  "ot": {
+   "singleCount": 22,
+   "pairCount": 0,
+   "groups": {}
+  }
+ },
+ "derivedBarrierCount": 451,
+ "invariants": {
+  "noIneligibleEdges": true,
+  "defaultHasNoIdealisedModels": true,
+  "noChainContradictsRecordedBarrier": true,
+  "romDoesNotReachOT": true,
+  "romDoesNotReachKE": true,
+  "noDerivedBarrierContradictsRecordedReduction": true
+ },
+ "queries": [
+  {
+   "id": "ddh-ot",
+   "start": [
+    "ddh"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-cpir-to-ot-dmo00",
+     "red-ddh-to-tdh-dgi-19",
+     "red-tdh-to-cpir-amr25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "owf-kem-pke",
+   "start": [
+    "owf",
+    "kem"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 4,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-kem-and-ske-to-pke",
+     "red-owf-to-prg-hill99",
+     "red-prf-to-ske",
+     "red-prg-to-prf-ggm86"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "owf-io-pke",
+   "start": [
+    "owf",
+    "io"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-hash-function-and-io-to-pke-sw14"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "jls21-deniable-encryption",
+   "start": [
+    "sxdh",
+    "lwe",
+    "lpn",
+    "prg-in-nc0"
+   ],
+   "target": "deniable-encryption",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21",
+     "red-hash-function-and-io-to-deniable-encryption-sw14",
+     "red-lwe-to-pke-reg05",
+     "red-pke-to-hash-function"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "gapsvp-pke",
+   "start": [
+    "gapsvp"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 2,
+    "models": [
+     "quantum"
+    ],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-gapsvp-to-lwe-reg05",
+     "red-lwe-to-pke-reg05"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "tdp-nizk",
+   "start": [
+    "tdp"
+   ],
+   "target": "nizk",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [
+     "crs"
+    ],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-tdp-to-nizk-bfm88"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "oihf-mpc",
+   "start": [
+    "oblivious-interactive-hash-function"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-oihf-to-ot-bh26",
+     "red-ot-to-mpc-kil88"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "ddh-invertible-prf",
+   "start": [
+    "ddh"
+   ],
+   "target": "invertible-prf",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-ddh-to-prf-nr97",
+     "red-prf-to-invertible-prf-hppy25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "strongest": {
+     "chainClass": "fully-black-box",
+     "depth": 3,
+     "edges": [
+      "red-ddh-to-prf-nr97",
+      "red-prf-to-prp-lr88",
+      "red-prp-to-invertible-prf"
+     ]
+    }
+   }
+  },
+  {
+   "id": "rabin-ot-mpc",
+   "start": [
+    "rabin-ot"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-ot-to-mpc-kil88",
+     "red-rabin-ot-to-ot"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "ot-rabin-ot",
+   "start": [
+    "ot"
+   ],
+   "target": "rabin-ot",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-rabin-ot-to-ot"
+    ],
+    "reverseSteps": [
+     "red-rabin-ot-to-ot"
+    ],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "ntru-pke",
+   "start": [
+    "ntru"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "dlog-bqp",
+   "start": [
+    "dlog"
+   ],
+   "target": "bqp",
+   "includeIdealised": false,
+   "stable": [
+    "supported"
+   ],
+   "expect": {
+    "supported": false
+   }
+  },
+  {
+   "id": "owf-ip-czk",
+   "start": [
+    "owf",
+    "ip"
+   ],
+   "target": "czk",
+   "includeIdealised": false,
+   "stable": [
+    "supported"
+   ],
+   "expect": {
+    "supported": false
+   }
+  },
+  {
+   "id": "stub-default",
+   "start": [
+    "lpn-high-noise"
+   ],
+   "target": "sk-depir",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "unknown"
+     ]
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "stub-all",
+   "start": [
+    "lpn-high-noise"
+   ],
+   "target": "sk-depir",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [
+     "unknown"
+    ],
+    "scoped": true,
+    "chainClass": "unstated",
+    "edges": [
+     "red-noise-level-to-depir-cimr25-2"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "fac-rsa",
+   "start": [
+    "fac"
+   ],
+   "target": "rsa",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "other"
+     ]
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "fac-rsa-all",
+   "start": [
+    "fac"
+   ],
+   "target": "rsa",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [
+     "other"
+    ],
+    "scoped": true,
+    "chainClass": "free",
+    "edges": [
+     "red-rsa-to-fac-dlo24"
+    ],
+    "reverseSteps": [
+     "red-rsa-to-fac-dlo24"
+    ],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "dlog-cdh",
+   "start": [
+    "dlog"
+   ],
+   "target": "cdh",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "algebraic-group"
+     ]
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "dlog-cdh-all",
+   "start": [
+    "dlog"
+   ],
+   "target": "cdh",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [
+     "algebraic-group"
+    ],
+    "scoped": true,
+    "chainClass": "unstated",
+    "edges": [
+     "red-dlog-to-cdh-fkl18"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "cdh-dlog",
+   "start": [
+    "cdh"
+   ],
+   "target": "dlog",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-cdh-to-dlog"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "rom-ot",
+   "start": [
+    "rom"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "modelStart": [
+     "rom"
+    ]
+   }
+  },
+  {
+   "id": "rom-oihf-all",
+   "start": [
+    "rom"
+   ],
+   "target": "oblivious-interactive-hash-function",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [
+     "rom"
+    ],
+    "scoped": true,
+    "chainClass": "free",
+    "edges": [
+     "red-rom-to-oihf-bh26"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "rom-ot-all",
+   "start": [
+    "rom"
+   ],
+   "target": "ot",
+   "includeIdealised": true,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [
+     "red-oihf-to-ot-bh26"
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "rom-mpc-all",
+   "start": [
+    "rom"
+   ],
+   "target": "mpc",
+   "includeIdealised": true,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [
+     "red-oihf-to-ot-bh26"
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "rom-ke-all",
+   "start": [
+    "rom"
+   ],
+   "target": "ke",
+   "includeIdealised": true,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     "bar-rom-to-ke-hmo-19"
+    ],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "fac-pke",
+   "start": [
+    "fac"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [
+     "io",
+     "kem"
+    ],
+    "completionCount": 2,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "fac-pke-all",
+   "start": [
+    "fac"
+   ],
+   "target": "pke",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [
+     "io",
+     "kem"
+    ],
+    "completionCount": 2,
+    "refusedSteps": [
+     "red-rsa-to-pke-rsa78"
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "ggm-pke-all",
+   "start": [
+    "ggm"
+   ],
+   "target": "pke",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 2,
+    "models": [
+     "generic-group"
+    ],
+    "scoped": true,
+    "chainClass": "free",
+    "edges": [
+     "red-ddh-to-pke-elgamal85",
+     "red-ggm-to-ddh-sho97"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "ggm-ot-all",
+   "start": [
+    "ggm"
+   ],
+   "target": "ot",
+   "includeIdealised": true,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [
+     "red-cpir-to-ot-dmo00",
+     "red-ddh-to-tdh-dgi-19",
+     "red-tdh-to-cpir-amr25"
+    ],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "owf-pke",
+   "start": [
+    "owf"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     "bar-hash-function-to-pke-gkm-00"
+    ],
+    "reverseBarriers": [],
+    "completions": [
+     "io",
+     "kem"
+    ],
+    "completionCount": 2,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "pke-ot",
+   "start": [
+    "pke"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     "bar-pke-to-ot-gkm-00"
+    ],
+    "reverseBarriers": [
+     "bar-ot-to-pke-gkm-00"
+    ],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "oihf-ot",
+   "start": [
+    "oblivious-interactive-hash-function"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [
+     "bar-oihf-to-ot-bh26"
+    ],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "free",
+    "edges": [
+     "red-oihf-to-ot-bh26"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  },
+  {
+   "id": "owf-ot",
+   "start": [
+    "owf"
+   ],
+   "target": "ot",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [
+     "bar-pke-to-ot-gkm-00"
+    ],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "owf-crhf",
+   "start": [
+    "owf"
+   ],
+   "target": "crhf",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [
+     "bar-owp-to-crhf-sim98"
+    ],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "com-pke",
+   "start": [
+    "com"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [
+     "bar-ot-to-pke-gkm-00",
+     "bar-hash-function-to-pke-gkm-00",
+     "bar-owp-to-ke-ir89"
+    ],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "ot-tdp",
+   "start": [
+    "ot"
+   ],
+   "target": "tdp",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [
+     "bar-ot-to-tdp-gkm-00"
+    ],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "lpn-pke",
+   "start": [
+    "lpn"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [
+      "lpn-low-noise",
+      "lpn-mid-noise"
+     ],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "lwe-ring-lwe",
+   "start": [
+    "lwe"
+   ],
+   "target": "ring-lwe",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [],
+    "completionCount": 0,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": "lwe",
+     "startVariantsDerive": [
+      "module-lwe-rank-1"
+     ],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "ddh-she",
+   "start": [
+    "ddh"
+   ],
+   "target": "somewhat-homomorphic-encryption",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "completions": [
+     "sparse-lpn"
+    ],
+    "completionCount": 1,
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    },
+    "derivedBarriers": [],
+    "derivedReverseBarriers": []
+   }
+  },
+  {
+   "id": "ddh-sparse-lpn-she",
+   "start": [
+    "ddh",
+    "sparse-lpn"
+   ],
+   "target": "somewhat-homomorphic-encryption",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-ddh-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": []
+   }
+  }
+ ]
+}

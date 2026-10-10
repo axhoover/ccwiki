@@ -61,6 +61,8 @@ redesign, not a refactor.
 │   ├── vendor-web.sh        fetch the pinned offline render pipeline (run once)
 │   ├── shots.sh             drive the app and capture screenshots
 │   ├── window-id.swift      helper for shots.sh
+│   ├── derivations_reference.py  the derivation engine's spec, executable;
+│   │                        writes Tests/CCwikiTests/Fixtures/derivations-golden.json
 │   └── make-icon.swift      generates build/AppIcon.icns
 ├── Resources/
 │   ├── Info.plist
@@ -99,6 +101,20 @@ redesign, not a refactor.
   the hyperedge rule, the class partial order and which way it points, variants
   ("Host § Title"), heuristic candidates, circumventions, rationale, and how
   every "we do not know" value is displayed honestly.
+- [plans/derivations.md](plans/derivations.md) — **specified, not built**:
+  what CCwiki may conclude by chaining recorded reductions. Twelve rules
+  (conjunction-respecting Horn closure, the default model filter, no free or
+  unstated step after an idealised-model step, chain class by composition,
+  derived barriers only when sound), the Swift `Derivation` API, UI wording,
+  and the golden file the corpus test checks. Reference implementation:
+  `scripts/derivations_reference.py`.
+- [plans/relations-explorer.md](plans/relations-explorer.md) — **specified,
+  not built**: the UI and integration half of derivations. The *Does A imply
+  B?* explorer window (⇧⌘E), the inspector's collapsed "Derived" sections, and
+  link previews on hover. It covers the honesty contract the UI enforces, the
+  existing shortcut map, and a Phase 0 of shared seams. Four parallel tracks
+  (engine, explorer, inspector, previews) then own disjoint files, with exact
+  Swift interfaces. §6.7 lists where it differs from derivations.md.
 - [plans/ingestion.md](plans/ingestion.md) — the worktree lifecycle, the prompt
   composition rule, and what CCwiki checks before and after the agent runs.
 - [plans/build-system.md](plans/build-system.md) — `make` / `build.sh`, the
