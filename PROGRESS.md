@@ -5,6 +5,25 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-11 — The explorer, derived relations and link previews, built
+
+Built on `claude/relations-explorer` in three tracks, each in its own
+worktree with compile and behaviour reviews before merging: the engine (a
+Swift port of `scripts/derivations_reference.py`: `Derivation*.swift`, with
+18 rule tests and a corpus test that replays the 72 golden queries exactly
+when `relations.json` and the curation match the golden file's hashes, and
+otherwise checks the invariants), link previews (`LinkPreview.swift`,
+`PreviewExcerpt.swift`, a hover card in `ccwiki.js`), and the explorer
+window with the inspector's derived sections (`RelationsExplorerView`,
+`ObjectTokenField`, `ExplorerResult`, `ExplorerWriter`, `PageDerivations`).
+The reviews caught an accessibility API that needed an import, explorer rows
+that mishandled JLS21's four-way conjunction, and a missing `believed` on a
+proposition decoding as "believed false" (which would let a barrier count as
+ruling something out); a belief the manifest does not state is now unknown.
+Wording follows the lead's ruling on the specs' one disagreement: a one-step
+answer is "Recorded in the wiki", a longer chain "Derived by CCwiki from N
+recorded reductions". Nothing was compiled here; CI is the compiler.
+
 ## 2026-10-10 — The derivation engine, revised after a red team
 
 Two reviewers ran `scripts/derivations_reference.py` against the real

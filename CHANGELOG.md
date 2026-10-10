@@ -12,6 +12,40 @@
   code. Commit messages are for the code.
 -->
 
+## 0.2.0 — unreleased
+
+**Ask whether one thing implies another.** Wiki → Relations Explorer (⇧⌘E)
+takes one or more assumptions, which together form a conjunction, and an
+optional target. It answers with a proof: a tree of the wiki's own
+reductions, each step opening its page. A one-step answer is the wiki's
+claim and says so; a longer chain is labelled "derived by CCwiki from N
+recorded reductions". When nothing connects them it says "No derivation
+found", never "impossible". It shows the barriers the wiki records, what
+other assumption would make the target derivable, and a reminder that the
+record is incomplete. Leave the target empty to see everything the
+assumptions give; leave the assumptions empty to see everything that gives
+the target.
+
+Chains use standard, quantum and CRS reductions by default. "Include
+idealised models" adds the random oracle, generic group and algebraic group
+models, tagged on every result, and never lets an idealised step lead into a
+reduction whose class doesn't survive it. CCwiki also knows where a
+reduction needs more than its page says, for example sub-exponential
+hardness, a large modulus, or malicious rather than semi-honest OT, and
+where an assumption is known to be broken, and it won't chain past those.
+Each such correction cites the wiki's own statement.
+
+**Every primitive's Relations tab shows what it reaches.** Below the
+recorded relations, "Derived: implies" and "Derived: implied by" list what
+follows in two or more steps, marked as derived, with the number of steps.
+Click one to see its proof in the explorer. Right-click a row or a page for
+Explore From Here.
+
+**Hover a link to preview it.** After a moment, a link shows its page's
+title and opening paragraph, math included; a link to a reduction shows the
+full statement with its class, model and sources. Turn it off in Settings →
+Reading.
+
 ## 0.1.3 — unreleased
 
 **Copy LaTeX the way the website lets you.** Hover any algorithm for Copy

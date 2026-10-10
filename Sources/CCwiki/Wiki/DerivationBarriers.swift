@@ -78,10 +78,13 @@ extension Derivation {
             case .contradiction:
                 effect = .rulesOut
             case .complexity:
-                if let proposition = manifest.propositions[consequence.target] {
-                    effect = proposition.believed ? .majorResult : .rulesOut
-                } else {
-                    effect = nil
+                // A proposition whose belief the manifest does not state has
+                // no effect, as in the reference: it neither rules anything
+                // out nor counts as a major result.
+                switch manifest.propositions[consequence.target]?.believed {
+                case true?: effect = .majorResult
+                case false?: effect = .rulesOut
+                case nil: effect = nil
                 }
             case .object, .reduction:
                 effect = nil

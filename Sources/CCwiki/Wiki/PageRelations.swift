@@ -319,11 +319,11 @@ struct PageRelations: Sendable {
             case .complexity:
                 let proposition = manifest.propositions[consequence.target]
                 let page = proposition?.page ?? ""
-                var help: String?
-                if let proposition {
-                    help = proposition.believed
-                        ? "Believed true, but open: such a reduction would prove it."
-                        : "Believed false: such a reduction would be a major result."
+                let help: String?
+                switch proposition?.believed {
+                case true?: help = "Believed true, but open: such a reduction would prove it."
+                case false?: help = "Believed false: such a reduction would be a major result."
+                case nil: help = nil
                 }
                 list.add(.consequence, "Would imply", .consequence(consequence),
                          help: help,

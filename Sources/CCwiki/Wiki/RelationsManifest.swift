@@ -649,8 +649,10 @@ struct Proposition: Sendable, Hashable {
     let title: String
     /// The community's working belief. Upstream uses it for a soft lint flag,
     /// never as an error. CCwiki shows it beside a barrier's consequence, as
-    /// context for what the barrier's conclusion would cost.
-    let believed: Bool
+    /// context for what the barrier's conclusion would cost. Nil when the
+    /// manifest does not say: an unknown belief must not be read as "false",
+    /// which would let a barrier's consequence count as ruling something out.
+    let believed: Bool?
     let page: String?
 }
 
@@ -732,7 +734,7 @@ private struct DTO: Decodable {
 
     struct RawProposition: Decodable {
         var title: String
-        var believed: Bool
+        var believed: Bool?
         var page: String?
 
         enum CodingKeys: String, CodingKey { case title, believed, page }
@@ -740,7 +742,7 @@ private struct DTO: Decodable {
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             title = c.value(.title, or: "")
-            believed = c.value(.believed, or: false)
+            believed = c.optional(.believed)
             page = c.optional(.page)
         }
     }
