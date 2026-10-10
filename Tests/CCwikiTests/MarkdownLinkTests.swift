@@ -88,6 +88,23 @@ struct MarkdownLinkTests {
         }
     }
 
+    @Test("unmatched brackets do not make the scan blow up")
+    func unmatchedBrackets() {
+        // Each `[` here searches the rest of the paragraph for its `]`. Without
+        // the scanner's cache, forty of them take some hundred million label
+        // scans, and this test does not finish.
+        let unmatched = destinations(String(repeating: "[a ", count: 40) + "[x](y)")
+        let intervals = destinations(String(repeating: "[0, 1) ", count: 12) + "[t](d)")
+        #expect(unmatched == ["y"])
+        #expect(intervals == ["d"])
+
+        // A label holding a link is no link, however many brackets come
+        // first: an answer found near the depth limit, where nesting is no
+        // longer looked into, is not reused at the top level.
+        let nested = destinations(String(repeating: "[a ", count: 9) + "[x [y](z)](w)")
+        #expect(nested == ["z"])
+    }
+
     @Test("math stops where its block does")
     func mathStopsAtBlocks() {
         // Two list items are two blocks, so the `$`s cannot pair.

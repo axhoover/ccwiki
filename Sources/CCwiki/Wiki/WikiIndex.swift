@@ -310,7 +310,51 @@ struct WikiIndex: Sendable {
             of: #"(?<![A-Za-z0-9])_([^_]+)_(?![A-Za-z0-9])"#, with: "$1",
             options: .regularExpression)
         text = text.replacingOccurrences(of: "`", with: "")
-        text = text.replacingOccurrences(of: "$", with: "")
+        text = droppingMathDelimiters(text)
         return text.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// `text` with the delimiters of its math dropped and, outside the math,
+    /// its backslash escapes resolved: `$x^2$` reads `x^2`, and `IND\$-CPA`
+    /// reads `IND$-CPA` rather than `IND\-CPA`. Inside math a backslash is
+    /// TeX (`\,`, `\{`) and stays. A run of n dollars closes at the next run
+    /// of exactly n, as `RelationMeta.escapeOutsideMath` reads it; a run that
+    /// closes nothing is a literal dollar, which is how the page shows it.
+    private static func droppingMathDelimiters(_ text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        var out = String.UnicodeScalarView()
+        var i = 0
+        while i < scalars.count {
+            let c = scalars[i]
+            if c == "\\", i + 1 < scalars.count,
+               MarkdownLinkParser.isASCIIPunctuation(scalars[i + 1].value) {
+                out.append(scalars[i + 1])
+                i += 2
+            } else if c == "$" {
+                var end = i
+                while end < scalars.count, scalars[end] == "$" { end += 1 }
+                let length = end - i
+                var close: Int?
+                var j = end
+                while j < scalars.count, close == nil {
+                    guard scalars[j] == "$" else { j += 1; continue }
+                    var k = j
+                    while k < scalars.count, scalars[k] == "$" { k += 1 }
+                    if k - j == length { close = j }
+                    j = k
+                }
+                if let close {
+                    out.append(contentsOf: scalars[end..<close])
+                    i = close + length
+                } else {
+                    out.append(contentsOf: scalars[i..<end])
+                    i = end
+                }
+            } else {
+                out.append(c)
+                i += 1
+            }
+        }
+        return String(out)
     }
 }

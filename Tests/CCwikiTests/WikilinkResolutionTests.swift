@@ -528,6 +528,14 @@ struct WikilinkResolutionTests {
             ("See [the site](https://cryptology.city) for more",
              "See the site for more"),
             ("An embed ![[Minicrypt.png]] inline", "An embed Minicrypt.png inline"),
+            // An escaped dollar is a literal one, not a stray backslash.
+            ("- [IND\\$-CPA Security ⇒ CPA Security](ind-dollar-cpa-security-to-cpa-security)",
+             "IND$-CPA Security ⇒ CPA Security"),
+            // Inside math a backslash is TeX, and stays.
+            ("One construction, $\\exists G\\, \\exists S$, fixed in advance",
+             "One construction, \\exists G\\, \\exists S, fixed in advance"),
+            // A dollar that closes nothing is no math.
+            ("Costs $5 per query", "Costs $5 per query"),
         ]
         for (input, expected) in cases {
             #expect(WikiIndex.plainText(input) == expected, "plainText(\(input))")

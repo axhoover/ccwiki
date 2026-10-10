@@ -427,10 +427,10 @@ struct RelationMetaTests {
             """,
     ]
 
-    static func makeIndex() throws -> (WikiIndex, URL) {
+    static func makeIndex(omitting omitted: Set<String> = []) throws -> (WikiIndex, URL) {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "ccwiki-relation-meta-\(UUID().uuidString)")
-        for (path, contents) in fixture {
+        for (path, contents) in fixture where !omitted.contains(path) {
             let url = root.appending(path: path)
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -471,6 +471,21 @@ struct RelationMetaTests {
         #expect(markdownHref == CCwikiURL.page(path: "Primitives/b-page.md", anchor: "sec"))
         #expect(markdownKind == "page")
         #expect(request.links["missing-page"] == nil)
+        #expect(request.notices.map(\.text) == ["1 link on this page has no target."])
+    }
+
+    @Test("a clone without the reduction-classes page predates the line, and gets none")
+    func olderCloneUntouched() throws {
+        let (index, root) = try Self.makeIndex(omitting: ["Glossary/reduction-classes.md"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let page = try #require(index.pages["Reductions/a-to-b.md"])
+
+        var renderer = PageRenderer(index: index)
+        renderer.relations = Self.manifest
+        renderer.relationLabels = Self.labels
+        let request = renderer.request(for: page)
+        #expect(request.markdown == page.body)
+        // Only the body's own dead link is reported, not the line's class link.
         #expect(request.notices.map(\.text) == ["1 link on this page has no target."])
     }
 

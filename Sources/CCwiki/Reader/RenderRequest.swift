@@ -115,10 +115,18 @@ struct PageRenderer: Sendable {
     func request(for page: WikiPage, anchor: String? = nil, notices: [RenderRequest.Notice] = [])
         -> RenderRequest {
         // The site's line of relation fields goes in first, so its links are
-        // collected and resolved with the body's.
+        // collected and resolved with the body's. Only into a clone that has
+        // the reduction-classes page: it arrived in the same wiki commit as the
+        // site's line, so a clone without it predates the line. The site built
+        // from that clone showed none, and here the line's class links would
+        // go nowhere and raise the broken-link notice on every page with one.
         var markdown = page.body
-        if let line = RelationMeta.line(
-            for: page.frontmatter, manifest: relations, labels: relationLabels) {
+        let classPage = Wikilink(
+            target: RelationMeta.classPage, rawAnchor: nil, alias: nil, isEmbed: false,
+            range: page.body.startIndex..<page.body.startIndex)
+        if index.resolve(classPage, from: page.path).isResolved,
+           let line = RelationMeta.line(
+               for: page.frontmatter, manifest: relations, labels: relationLabels) {
             markdown = RelationMeta.insertUnderH1(line, into: markdown)
         }
 

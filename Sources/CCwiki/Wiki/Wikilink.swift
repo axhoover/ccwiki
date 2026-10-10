@@ -358,6 +358,23 @@ private struct LinkScanner {
     /// looking; markdown-it's own nesting limit is far above anything real.
     private static let maxDepth = 8
 
+    /// What `parseLink` has found in the current block, by start offset.
+    /// Without it every unmatched `[` rescans the brackets after it, nested up
+    /// to `maxDepth` deep: twenty in one paragraph cost hundreds of thousands
+    /// of label scans and forty some hundred million, which would freeze a
+    /// render. markdown-it keeps the same search in bounds with a cache of its
+    /// own (`state.cache`). A class, so the scan's methods stay non-mutating.
+    private final class Cache {
+        /// The `limit` of the block the entries belong to.
+        var limit = -1
+        /// Start offset → the depth the link was looked for at, and what was
+        /// found. A search nearer `maxDepth` looks into fewer levels of
+        /// nesting, so its answer is reused only at the same depth or deeper.
+        var links: [Int: (depth: Int, link: (end: Int, destination: Range<Int>?)?)] = [:]
+    }
+
+    private let cache = Cache()
+
     init(_ text: String) {
         let bytes = Array(text.utf8)
         let utf8 = text.utf8
@@ -439,7 +456,24 @@ private struct LinkScanner {
     /// and the bytes of its destination — nil for an empty or invalid one,
     /// which markdown-it still renders as a link, to nowhere. Nil when
     /// markdown-it would not read a link here at all.
+    ///
+    /// A start is scanned again only when it is asked about at a shallower
+    /// depth than before, so at most `maxDepth + 1` times a block: see `Cache`.
     private func parseLink(
+        at start: Int, limit: Int, depth: Int
+    ) -> (end: Int, destination: Range<Int>?)? {
+        if cache.limit != limit {
+            cache.limit = limit
+            cache.links.removeAll(keepingCapacity: true)
+        }
+        if let known = cache.links[start], known.depth <= depth { return known.link }
+        let link = scanLink(at: start, limit: limit, depth: depth)
+        cache.links[start] = (depth: depth, link: link)
+        return link
+    }
+
+    /// `parseLink` without the cache.
+    private func scanLink(
         at start: Int, limit: Int, depth: Int
     ) -> (end: Int, destination: Range<Int>?)? {
         guard let labelEnd = parseLabel(at: start, limit: limit, depth: depth) else { return nil }
