@@ -775,13 +775,17 @@ final class AppModel {
     }
 
     /// Called once at launch, before the library loads, so Welcome can be
-    /// read while the wiki downloads. Records this version as seen.
+    /// read while the wiki downloads. Records this version as seen, unless a
+    /// newer one already was.
     func openLaunchDocumentIfNeeded() {
         guard ScreenshotRunner.directory == nil else { return }
         let current = appVersion
-        let decision = Self.launchDocument(
-            lastSeen: CCwikiSettings.lastSeenVersion, current: current, changelog: changelog)
-        CCwikiSettings.lastSeenVersion = current
+        let lastSeen = CCwikiSettings.lastSeenVersion
+        let decision = Self.launchDocument(lastSeen: lastSeen, current: current, changelog: changelog)
+        // Forward only: an older copy opened by mistake must not bring What's
+        // New back at the next launch of this one.
+        CCwikiSettings.lastSeenVersion = InstallationCheck.nextSeenVersion(
+            lastSeen: lastSeen, current: current)
         guard let decision else { return }
         if decision.document == .whatsNew { whatsNewSince = decision.since }
         open(.document(decision.document))
@@ -1540,6 +1544,214 @@ final class AppModel {
             // needs and report no strays at all.
             await Task { @MainActor in await self.refreshOrphanedWorktrees() }.value
         }
+    }
+
+    // MARK: Other copies
+
+    /// Every reader window runs the launch task; the check belongs to the
+    /// launch, so it runs for the first one only.
+    @ObservationIgnored private var hasCheckedInstallation = false
+
+    /// The launch check of `plans/update-integrity.md` §2.3, from the launch
+    /// task, before the update check: logs which copy this is, then, in a
+    /// release, looks for the other copies LaunchServices could start instead
+    /// of this one and says at most one thing about them. The updater can
+    /// only ever replace this copy; a stale one elsewhere is dealt with here.
+    func checkInstallation() async {
+        guard !hasCheckedInstallation else { return }
+        hasCheckedInstallation = true
+        let bundle = Bundle.main.bundleURL
+        let running = InstalledCopy(url: bundle, version: appVersion, build: Bundle.main.buildNumber)
+        InstallationCheck.logLaunch(of: running)
+        guard BuildIdentity.isRelease, ScreenshotRunner.directory == nil else { return }
+
+        // Off the main actor: LaunchServices, a plist per copy, and perhaps
+        // deleting a bundle an older updater left behind.
+        let identifier = BuildIdentity.releaseBundleIdentifier
+        let others = await Task.detached(priority: .utility) {
+            UpdateInstaller.removeLegacyLeftovers(besides: bundle, identifier: identifier)
+            return InstallationCheck.otherCopies(of: identifier, besides: bundle)
+        }.value
+        let advice = InstallationCheck.advice(
+            running: running,
+            runningInApplicationsFolder: BundleLocation.isInApplicationsFolder(bundle),
+            others: others,
+            ignoredPaths: Set(CCwikiSettings.ignoredCopies))
+        switch advice {
+        case .none: break
+        case .openNewer(let newer): await offerNewerCopy(newer, running: running)
+        case .replaceOlder(let installed): await offerReplacing(installed, running: running)
+        case .removeOthers(let copies): offerRemoving(copies)
+        }
+    }
+
+    /// Another copy is newer: open it and quit this one, or keep going. The
+    /// downgrade guard, too: when the Dock starts an older copy that has this
+    /// check, it points to the newer one.
+    private func offerNewerCopy(_ newer: InstalledCopy, running: InstalledCopy) async {
+        let (here, there) = InstallationCheck.displayLocations(running.url, newer.url)
+        let alert = NSAlert()
+        alert.messageText = "A newer version of CCwiki is on this Mac."
+        alert.informativeText = "This is CCwiki \(running.version), in \(here). "
+            + "CCwiki \(newer.version) is in \(there)."
+        alert.addButton(withTitle: "Open CCwiki \(newer.version)")
+        alert.addButton(withTitle: "Keep Using This Version").keyEquivalent = "\u{1b}"
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try await UpdateInstaller.relaunch(newer.url)
+        } catch {
+            showInstallationFailure(
+                "CCwiki \(newer.version) could not be started.",
+                detail: "\(error.localizedDescription) This window keeps running the version "
+                    + "you have.")
+            return
+        }
+        NSApp.terminate(nil)
+    }
+
+    /// This copy runs from outside Applications, and an older one sits in
+    /// Applications, where the Dock and Spotlight find it: put this one in its
+    /// place, trash this one, and start the one in Applications. The LetsMove
+    /// idiom, kept to the case that causes the confusion.
+    ///
+    /// Every step before the relaunch either completes or leaves things as
+    /// they were, and this window quits only once the new one has started.
+    private func offerReplacing(_ installed: InstalledCopy, running: InstalledCopy) async {
+        // A same-version copy is replaced all the same: what matters is
+        // which one the Dock starts. Only the wording changes.
+        let isOlder = UpdateChecker.isDevelopmentVersion(installed.version)
+            || UpdateChecker.isNewer(running.version, than: installed.version)
+        let (there, here) = InstallationCheck.displayLocations(installed.url, running.url)
+        let alert = NSAlert()
+        alert.messageText = isOlder
+            ? "Replace the older CCwiki in Applications?"
+            : "Replace the other CCwiki in Applications?"
+        alert.informativeText = "CCwiki \(installed.version) is in \(there), and this copy, "
+            + "\(running.version), is in \(here). Opening CCwiki from the Dock or Spotlight "
+            + (isOlder
+                ? "can start the older copy, which won't update itself."
+                : "can start that copy instead of this one.")
+        alert.addButton(withTitle: "Replace and Relaunch")
+        alert.addButton(withTitle: "Not Now").keyEquivalent = "\u{1b}"
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Don't ask again"
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            if alert.suppressionButton?.state == .on { ignoreCopies([installed]) }
+            return
+        }
+
+        let bundle = Bundle.main.bundleURL
+        do {
+            try await InstallationCheck.installCopy(of: bundle, over: installed.url)
+        } catch {
+            showInstallationFailure(
+                "The CCwiki in \(there) was not replaced.",
+                detail: "\(error.localizedDescription) Nothing was changed, and this window "
+                    + "keeps running the version you have.")
+            return
+        }
+        // LaunchServices does not start an app from the Trash. Where this
+        // copy cannot go there (a disk image, a folder that is not yours),
+        // the copy in Applications finds it at launch and offers it again.
+        var trashed = true
+        do {
+            try FileManager.default.trashItem(at: bundle, resultingItemURL: nil)
+        } catch {
+            trashed = false
+        }
+        do {
+            try await UpdateInstaller.relaunch(installed.url)
+        } catch {
+            showInstallationFailure(
+                "CCwiki \(running.version) is in \(there), but could not be started.",
+                detail: "\(error.localizedDescription) Open it from the Applications folder. "
+                    + (trashed ? "This copy is in the Trash; its " : "This ")
+                    + "window keeps running until you quit it.")
+            return
+        }
+        NSApp.terminate(nil)
+    }
+
+    /// Older or same-version copies elsewhere: name each, and offer the
+    /// Trash or the Finder.
+    private func offerRemoving(_ copies: [InstalledCopy]) {
+        let one = copies.count == 1
+        let alert = NSAlert()
+        alert.messageText = one
+            ? "Another copy of CCwiki is on this Mac."
+            : "Other copies of CCwiki are on this Mac."
+        let list = copies
+            .map { "CCwiki \($0.version) — \(InstallationCheck.abbreviatedPath($0.url))" }
+            .joined(separator: "\n")
+        let which = one ? "it" : "one of these"
+        alert.informativeText = list + "\n\nOpening CCwiki from the Dock, Spotlight or a link "
+            + "can start \(which) instead of this copy, and it won't update itself."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Show in Finder")
+        alert.addButton(withTitle: "Not Now").keyEquivalent = "\u{1b}"
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Don't ask again"
+        let choice = alert.runModal()
+        let dontAskAgain = alert.suppressionButton?.state == .on
+        switch choice {
+        case .alertFirstButtonReturn:
+            moveToTrash(copies, ignoringFailures: dontAskAgain)
+        case .alertSecondButtonReturn:
+            if dontAskAgain { ignoreCopies(copies) }
+            NSWorkspace.shared.activateFileViewerSelecting(copies.map(\.url))
+        default:
+            if dontAskAgain { ignoreCopies(copies) }
+        }
+    }
+
+    /// Trashes each copy, and names the ones that would not go. Those are
+    /// remembered too when the person said not to be asked again; a trashed
+    /// path is not, since a later copy at that path is news.
+    private func moveToTrash(_ copies: [InstalledCopy], ignoringFailures: Bool) {
+        var kept: [InstalledCopy] = []
+        var reasons: [String] = []
+        for copy in copies {
+            do {
+                try FileManager.default.trashItem(at: copy.url, resultingItemURL: nil)
+            } catch {
+                kept.append(copy)
+                reasons.append("CCwiki \(copy.version) — "
+                    + "\(InstallationCheck.abbreviatedPath(copy.url)): \(error.localizedDescription)")
+            }
+        }
+        guard !kept.isEmpty else { return }
+        if ignoringFailures { ignoreCopies(kept) }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = kept.count == 1
+            ? "A copy of CCwiki could not be moved to the Trash."
+            : "\(kept.count) copies of CCwiki could not be moved to the Trash."
+        alert.informativeText = reasons.joined(separator: "\n")
+            + "\n\nThe Finder can move \(kept.count == 1 ? "it" : "them"), and asks for your "
+            + "password where it needs one."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Show in Finder")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting(kept.map(\.url))
+        }
+    }
+
+    /// "Don't ask again": the launch check leaves these paths out from now on.
+    private func ignoreCopies(_ copies: [InstalledCopy]) {
+        var ignored = CCwikiSettings.ignoredCopies
+        for copy in copies {
+            let path = InstallationCheck.path(of: copy.url)
+            if !ignored.contains(path) { ignored.append(path) }
+        }
+        CCwikiSettings.ignoredCopies = ignored
+    }
+
+    private func showInstallationFailure(_ message: String, detail: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = detail
+        alert.runModal()
     }
 
     // MARK: Update check

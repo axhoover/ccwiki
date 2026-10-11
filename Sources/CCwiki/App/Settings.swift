@@ -23,6 +23,14 @@ struct CCwikiSettings: Sendable {
     private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
     private static let showsInspectorKey = "ccwiki.showsInspector"
     private static let inspectorTabKey = "ccwiki.inspectorTab"
+    private static let ignoredCopiesKey = "ccwiki.ignoredCopies"
+
+    /// Other copies of the app that the launch check is not to mention again
+    /// ("Don't ask again"), by path in `InstallationCheck.path(of:)`'s form.
+    static var ignoredCopies: [String] {
+        get { UserDefaults.standard.stringArray(forKey: ignoredCopiesKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: ignoredCopiesKey) }
+    }
 
     /// The inspector as it was left: showing or not, and on which tab.
     static var showsInspector: Bool {
@@ -40,7 +48,8 @@ struct CCwikiSettings: Sendable {
 
     /// The app version that last launched. Absent on a first launch, which
     /// is when the Welcome page opens; older than the running version after
-    /// an update, which is when What's New opens.
+    /// an update, which is when What's New opens. It only moves forward
+    /// (`InstallationCheck.nextSeenVersion`).
     static var lastSeenVersion: String? {
         get { UserDefaults.standard.string(forKey: lastSeenVersionKey) }
         set { UserDefaults.standard.set(newValue, forKey: lastSeenVersionKey) }

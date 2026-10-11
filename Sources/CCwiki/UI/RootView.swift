@@ -72,6 +72,9 @@ struct RootView: View {
             let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
             if model.index == nil || launchFetch { model.sync() }
             ScreenshotRunner.run(model: model)
+            // Which copy this is goes to the log on every launch; the other
+            // copies are looked for in a release, and not under the harness.
+            await model.checkInstallation()
             if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in
