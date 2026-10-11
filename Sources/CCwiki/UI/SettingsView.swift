@@ -371,7 +371,7 @@ struct SettingsView: View {
                 Text(model.canInstallUpdates
                     ? "One request a day to GitHub's releases API. An update is downloaded, "
                         + "its Ed25519 signature checked against the key built into this app, "
-                        + "and the app replaced in place; the old one goes to the Trash. CCwiki "
+                        + "and the app replaced in place; the old one is deleted. CCwiki "
                         + "never relaunches on its own."
                     : "One request a day to GitHub's releases API. This build has no release "
                         + "key, so it can only tell you about an update and open its page.")

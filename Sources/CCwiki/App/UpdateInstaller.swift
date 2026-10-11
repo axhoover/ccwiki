@@ -1,5 +1,7 @@
 import AppKit
+import CoreServices
 import CryptoKit
+import Darwin
 import Foundation
 
 /// Downloads a release, proves it is ours, and puts it where this app is.
@@ -12,9 +14,13 @@ import Foundation
 /// is an Ed25519 signature over the zip, checked against `ReleaseKey`.
 ///
 /// Every step that could leave the user worse off is ordered so that it
-/// cannot: the download and the checks happen in a temporary directory,
-/// and the swap moves the old bundle aside before the new one in, and back
-/// again if that fails. The relaunch is last, and only after the swap.
+/// cannot. The download and the checks happen in a temporary directory.
+/// The new bundle is then staged on the installed one's volume and
+/// exchanged with it in one atomic step (`renamex_np` with `RENAME_SWAP`),
+/// so the app's path holds a whole bundle, old or new, at every moment.
+/// The old bundle is deleted rather than kept in the Trash as a second
+/// copy, and LaunchServices is told the path now holds the new version.
+/// The relaunch is last, and only after the swap.
 enum UpdateInstaller {
 
     enum Failure: LocalizedError, Equatable {
@@ -29,6 +35,8 @@ enum UpdateInstaller {
         case wrongBundle(found: String)
         case wrongVersion(found: String)
         case invalidSignature(String)
+        case inTrash
+        case translocated
         case notWritable(String)
         case swap(String)
 
@@ -58,6 +66,13 @@ enum UpdateInstaller {
                 "The archive says it is version \(found), not the version the release promised."
             case .invalidSignature(let why):
                 "The unpacked app's code signature is not valid: \(why)"
+            case .inTrash:
+                "This copy of CCwiki is in the Trash, so it does not replace itself. "
+                    + "Move it to Applications, open it from there, and update again."
+            case .translocated:
+                "macOS is running this copy of CCwiki from a read-only location because it "
+                    + "was opened where it was unzipped. Move it to Applications in the Finder, "
+                    + "open it from there, and update again."
             case .notWritable(let path):
                 "CCwiki cannot replace itself at \(path). Move it to a folder you can write "
                     + "to, or replace it by hand from the release page."
@@ -102,20 +117,28 @@ enum UpdateInstaller {
     }
 
     static func inspect(bundle app: URL) throws -> BundleInfo {
-        let plist = app.appending(path: "Contents/Info.plist")
-        guard let data = try? Data(contentsOf: plist),
-              let object = try? PropertyListSerialization.propertyList(from: data, format: nil),
-              let dictionary = object as? [String: Any],
+        guard let dictionary = infoDictionary(of: app),
               let identifier = dictionary["CFBundleIdentifier"] as? String,
               let version = dictionary["CFBundleShortVersionString"] as? String
         else { throw Failure.noBundle }
         return BundleInfo(url: app, identifier: identifier, version: version)
     }
 
+    /// `Contents/Info.plist`, read from disk rather than through `Bundle`,
+    /// which caches what it read the first time.
+    private static func infoDictionary(of app: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: app.appending(path: "Contents/Info.plist")),
+              let object = try? PropertyListSerialization.propertyList(from: data, format: nil)
+        else { return nil }
+        return object as? [String: Any]
+    }
+
     // MARK: The whole procedure
 
     /// Download, verify, unpack, check, swap. Returns the installed bundle's
-    /// URL, which is the same place `current` was. Does not relaunch.
+    /// URL, which is the same place `current` was. Does not relaunch. When
+    /// `current` already holds this release or a newer one, it is left as
+    /// it is and that URL is returned all the same.
     static func install(
         _ release: ReleaseInfo,
         replacing current: URL,
@@ -129,18 +152,18 @@ enum UpdateInstaller {
         guard let signatureURL = release.signatureURL else { throw Failure.noSignature }
 
         let manager = FileManager.default
-        let staging = manager.temporaryDirectory
+        let scratch = manager.temporaryDirectory
             .appending(path: "ccwiki-update-\(ProcessInfo.processInfo.processIdentifier)")
-        try? manager.removeItem(at: staging)
-        try manager.createDirectory(at: staging, withIntermediateDirectories: true)
-        defer { try? manager.removeItem(at: staging) }
+        try? manager.removeItem(at: scratch)
+        try manager.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: scratch) }
 
-        // 1. Download both files into the staging directory.
+        // 1. Download both files into a scratch directory.
         report("Downloading CCwiki \(release.version)…")
-        let archive = try await download(archiveURL, to: staging.appending(path: "release.zip"),
+        let archive = try await download(archiveURL, to: scratch.appending(path: "release.zip"),
                                          session: session)
         let signatureFile = try await download(
-            signatureURL, to: staging.appending(path: "release.zip.sig"), session: session)
+            signatureURL, to: scratch.appending(path: "release.zip.sig"), session: session)
 
         // 2. Verify before anything is unpacked, let alone run.
         report("Verifying the signature…")
@@ -153,7 +176,7 @@ enum UpdateInstaller {
         // 3. Unpack with ditto, which keeps the bundle's structure and
         //    signatures intact; then make sure nothing about it is quarantined.
         report("Unpacking…")
-        let unpacked = staging.appending(path: "unpacked")
+        let unpacked = scratch.appending(path: "unpacked")
         try manager.createDirectory(at: unpacked, withIntermediateDirectories: true)
         let ditto = await Subprocess.run(
             executable: "/usr/bin/ditto",
@@ -181,35 +204,44 @@ enum UpdateInstaller {
             environment: ProcessInfo.processInfo.environment)
         guard codesign.succeeded else { throw Failure.invalidSignature(codesign.output) }
 
-        // 5. Swap. A running bundle can be moved: the process keeps its
-        //    mapped files. Old aside, new in, old back if that fails.
+        // 5. Whether this copy can be replaced, and whether it should be.
+        //    A copy in a Trash or behind App Translocation cannot usefully
+        //    be: the error says how to fix that instead.
         report("Installing…")
+        if BundleLocation.isInTrash(current) { throw Failure.inTrash }
+        if BundleLocation.isTranslocated(current) { throw Failure.translocated }
         let parent = current.deletingLastPathComponent()
         guard manager.isWritableFile(atPath: parent.path(percentEncoded: false)) else {
             throw Failure.notWritable(parent.path(percentEncoded: false))
         }
-        let staged = parent.appending(path: current.lastPathComponent + ".update")
-        let retired = parent.appending(path: current.lastPathComponent + ".previous")
-        try? manager.removeItem(at: staged)
-        try? manager.removeItem(at: retired)
+        // Something may have put this version or a newer one here since this
+        // copy started: another copy's update, or a download by hand. That
+        // bundle stays. A development version with our identifier is a stale
+        // build from before the dev channel, and counts as older.
+        if let present = try? inspect(bundle: current), present.identifier == expectedIdentifier,
+           !UpdateChecker.isDevelopmentVersion(present.version),
+           !UpdateChecker.isNewer(release.version, than: present.version) {
+            return current
+        }
+
+        // 6. Stage the new bundle on the installed one's volume, so the swap
+        //    is a rename and never a copy, then swap it in and delete the old
+        //    one (`replace`). A running bundle can be swapped out: the
+        //    process keeps its mapped files.
+        let staging: URL
         do {
-            // Same volume as the destination, so the final rename is atomic.
+            staging = try stagingDirectory(appropriateFor: current)
+        } catch {
+            throw Failure.swap(error.localizedDescription)
+        }
+        defer { try? manager.removeItem(at: staging) }
+        let staged = staging.appending(path: current.lastPathComponent)
+        do {
             try manager.moveItem(at: info.url, to: staged)
-            try manager.moveItem(at: current, to: retired)
         } catch {
-            try? manager.removeItem(at: staged)
             throw Failure.swap(error.localizedDescription)
         }
-        do {
-            try manager.moveItem(at: staged, to: current)
-        } catch {
-            try? manager.moveItem(at: retired, to: current)
-            try? manager.removeItem(at: staged)
-            throw Failure.swap(error.localizedDescription)
-        }
-        // The old version goes to the Trash rather than nowhere; if the new
-        // one will not launch, it is one drag away.
-        try? manager.trashItem(at: retired, resultingItemURL: nil)
+        try replace(current, with: staged)
         return current
     }
 
@@ -235,5 +267,158 @@ enum UpdateInstaller {
         configuration.createsNewApplicationInstance = true
         configuration.activates = true
         _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    }
+}
+
+// MARK: - Replacing a bundle
+
+/// The swap on its own, apart from the download and the checks, so the
+/// launch check can put a newer copy over an older one the same way.
+extension UpdateInstaller {
+
+    /// A fresh, empty directory on `destination`'s volume, for a bundle that
+    /// will be swapped in: within one volume a move is a rename, across
+    /// volumes it is a copy. The system's item-replacement directory when it
+    /// gives one, else a hidden sibling of `destination`. The caller deletes
+    /// it.
+    static func stagingDirectory(appropriateFor destination: URL) throws -> URL {
+        let manager = FileManager.default
+        if let directory = try? manager.url(
+            for: .itemReplacementDirectory, in: .userDomainMask,
+            appropriateFor: destination, create: true) {
+            return directory
+        }
+        let sibling = destination.deletingLastPathComponent().appending(
+            path: ".\(destination.lastPathComponent).staging-\(UUID().uuidString)",
+            directoryHint: .isDirectory)
+        try manager.createDirectory(at: sibling, withIntermediateDirectories: false)
+        return sibling
+    }
+
+    /// Puts the bundle at `replacement` where `installed` is, and deletes the
+    /// one that was there.
+    ///
+    /// The two are exchanged in one step, so `installed`'s path never stands
+    /// empty, and the result is read back: unless the path now reports the
+    /// replacement's identifier and version, the exchange is undone. The old
+    /// bundle, now at `replacement`'s path, is deleted and never moved to the
+    /// Trash. If it cannot be deleted it stays there, which is a temporary
+    /// directory when `replacement` came from `stagingDirectory`. Last,
+    /// LaunchServices hears about the new bundle; tests pass `false` so as
+    /// not to register their fake apps.
+    ///
+    /// `replacement` must be on `installed`'s volume. Throws `Failure.swap`,
+    /// leaving `installed` as it was.
+    static func replace(_ installed: URL, with replacement: URL,
+                        refreshingLaunchServices refresh: Bool = true) throws {
+        let incoming: BundleInfo
+        do {
+            incoming = try inspect(bundle: replacement)
+        } catch {
+            throw Failure.swap("The new copy has no readable Info.plist.")
+        }
+        try exchange(installed, replacement)
+        let present = try? inspect(bundle: installed)
+        guard present?.identifier == incoming.identifier, present?.version == incoming.version else {
+            try? exchange(installed, replacement)
+            throw Failure.swap("After the swap, \(installed.lastPathComponent) did not report "
+                + "version \(incoming.version), so the swap was undone.")
+        }
+        try? FileManager.default.removeItem(at: replacement)
+        if refresh { refreshLaunchServices(installed) }
+    }
+
+    /// Exchanges the items at two paths on one volume: in one step where the
+    /// file system can (`renamex_np` with `RENAME_SWAP`, which APFS supports),
+    /// else in three renames that undo themselves if one fails.
+    static func exchange(_ first: URL, _ second: URL) throws {
+        let code: Int32 = first.withUnsafeFileSystemRepresentation { from in
+            second.withUnsafeFileSystemRepresentation { to in
+                // errno straight after the call, before anything can reset it.
+                renamex_np(from, to, UInt32(RENAME_SWAP)) == 0 ? 0 : errno
+            }
+        }
+        switch code {
+        case 0:
+            return
+        case ENOTSUP, EINVAL:
+            // A volume that cannot swap, such as HFS+ or a network share.
+            try exchangeByRenaming(first, second)
+        case EXDEV:
+            throw Failure.swap("The new copy is not on the same volume as the installed one.")
+        default:
+            throw Failure.swap(describe(code))
+        }
+    }
+
+    /// The exchange in three renames, through a temporary name beside
+    /// `first`: `first` aside, `second` into its place, the aside into
+    /// `second`'s. A failure undoes the renames already made. Unlike the
+    /// one-step swap, it leaves `first`'s path empty for a moment.
+    static func exchangeByRenaming(_ first: URL, _ second: URL) throws {
+        let aside = first.deletingLastPathComponent()
+            .appending(path: ".\(first.lastPathComponent).swap-\(UUID().uuidString)")
+        try renameItem(at: first, to: aside)
+        do {
+            try renameItem(at: second, to: first)
+        } catch {
+            try? renameItem(at: aside, to: first)
+            throw error
+        }
+        do {
+            try renameItem(at: aside, to: second)
+        } catch {
+            try? renameItem(at: first, to: second)
+            try? renameItem(at: aside, to: first)
+            throw error
+        }
+    }
+
+    /// `rename(2)`: one step on one volume, and never the copy that
+    /// `FileManager.moveItem` falls back to across volumes.
+    private static func renameItem(at source: URL, to destination: URL) throws {
+        let code: Int32 = source.withUnsafeFileSystemRepresentation { from in
+            destination.withUnsafeFileSystemRepresentation { to in
+                rename(from, to) == 0 ? 0 : errno
+            }
+        }
+        guard code == 0 else { throw Failure.swap(describe(code)) }
+    }
+
+    /// `ENOTSUP` → "Operation not supported".
+    private static func describe(_ code: Int32) -> String {
+        String(cString: strerror(code))
+    }
+
+    /// Tells LaunchServices, and through it the Finder, Spotlight and the
+    /// Dock, that the bundle at `url` changed: a fresh modification date,
+    /// then a forced re-registration, as Sparkle does after an update.
+    /// Failures are ignored; the record would catch up by itself, later.
+    static func refreshLaunchServices(_ url: URL) {
+        try? FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: url.path(percentEncoded: false))
+        _ = LSRegisterURL(url as CFURL, true)
+    }
+
+    /// Deletes what earlier versions of the updater could leave beside the
+    /// bundle: `<name>.previous`, the old bundle when the Trash would not
+    /// take it, and `<name>.update`, the new one when a swap failed half way.
+    /// Each goes only if it is a directory whose own Info.plist names
+    /// `identifier`, so nothing else that happens to share the name is
+    /// touched. Called at launch.
+    static func removeLegacyLeftovers(besides bundle: URL, identifier: String) {
+        let manager = FileManager.default
+        let parent = bundle.deletingLastPathComponent()
+        for suffix in [".previous", ".update"] {
+            let leftover = parent.appending(path: bundle.lastPathComponent + suffix)
+            var isDirectory: ObjCBool = false
+            guard manager.fileExists(atPath: leftover.path(percentEncoded: false),
+                                     isDirectory: &isDirectory),
+                  isDirectory.boolValue,
+                  let named = infoDictionary(of: leftover)?["CFBundleIdentifier"] as? String,
+                  named == identifier
+            else { continue }
+            try? manager.removeItem(at: leftover)
+        }
     }
 }

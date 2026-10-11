@@ -1659,9 +1659,13 @@ final class AppModel {
                 alert.alertStyle = .critical
                 alert.messageText = "The new version could not be started."
                 alert.informativeText = "\(error.localizedDescription) This window keeps "
-                    + "running the version you have. The previous copy is in the Trash as "
-                    + "CCwiki.app.previous, should the new one turn out to be broken."
-                alert.runModal()
+                    + "running the version you have, and the releases page has the download."
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Open Releases Page")
+                if alert.runModal() == .alertSecondButtonReturn,
+                   let url = URL(string: UpdateChecker.releasesPage) {
+                    NSWorkspace.shared.open(url)
+                }
                 return
             }
             NSApp.terminate(nil)
@@ -1712,8 +1716,7 @@ final class AppModel {
                 let installable = canInstallUpdates && release.isInstallable && activeJobCount == 0
                 if installable {
                     alert.informativeText = "You have \(version). CCwiki will download the "
-                        + "release, verify its signature, and replace itself. The old version "
-                        + "goes to the Trash."
+                        + "release, verify its signature, and put it in place of this copy."
                     alert.addButton(withTitle: "Install and Relaunch")
                     alert.addButton(withTitle: "Open Release Page")
                     alert.addButton(withTitle: "Later")

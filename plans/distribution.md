@@ -194,11 +194,24 @@ has to be installed by hand once, carrying a new public key.
 release. If there is a newer one with a signed zip attached, and "Install
 them automatically" is on (the default), it downloads the zip and its
 `.sig`, verifies the signature against the embedded key, unpacks with
-`ditto`, checks the bundle identifier, the version and the code signature,
-moves the running bundle aside, moves the new one in, and puts the old one
-in the Trash. It then says so in the status bar and waits: CCwiki > Relaunch
-to Update. It never relaunches on its own, never installs while a job is
-running, and never installs anything whose signature does not verify.
+`ditto`, and checks the bundle identifier, the version and the code
+signature. Then it stages the new bundle in a temporary directory on the
+installed one's volume and exchanges the two in one atomic step
+(`renamex_np` with `RENAME_SWAP`; three renames with rollback on a volume
+that cannot swap). It checks that the installed path now reports the new
+version, swapping back if not, deletes the old bundle rather than putting
+it in the Trash, and re-registers the path with LaunchServices. It then says so in the
+status bar and waits: CCwiki > Relaunch to Update. It never relaunches on
+its own, never installs while a job is running, never installs anything
+whose signature does not verify, never replaces a copy that is already as
+new as the release, and refuses, with a message saying what to do, to
+update a copy running from the Trash or from App Translocation.
+
+The swap was rebuilt on 2026-10-11. Until then the updater moved the
+running bundle aside to `CCwiki.app.previous`, moved the new one in, and
+put the old one in the Trash. [update-integrity.md](update-integrity.md)
+§2.2 has the reasons. At launch, `UpdateInstaller.removeLegacyLeftovers`
+deletes any `.previous` or `.update` that procedure left beside the app.
 
 Gatekeeper assesses only files carrying the quarantine attribute, which
 browsers add to what they download. A zip the app fetches itself with
@@ -213,18 +226,25 @@ and Apple silicon alike. That is why `make install` works today. So:
    `curl` does not quarantine:
 
    ```sh
-   curl -L -o /tmp/CCwiki.zip https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-macos.zip
+   curl -L -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip"
+   rm -rf /Applications/CCwiki.app
    ditto -x -k /tmp/CCwiki.zip /Applications
    ```
+
+   The `rm` matters: `ditto` merges into a folder that already exists, so
+   without it an older `CCwiki.app` keeps files the new one does not have.
 
    Acceptable for an audience that lives in a terminal; not for a general
    one. That is the whole of what the membership buys.
 2. **Every later update is automatic and silent.** Tier 1's check finds the
    release; an installer step downloads the zip to a temporary directory,
-   verifies it, extracts it with `ditto -x -k`, swaps the bundle in place
-   (a running bundle can be moved; its mapped files stay valid), and
-   relaunches with `NSWorkspace.OpenConfiguration.createsNewApplicationInstance`
-   before terminating. No dialogs, because nothing is quarantined.
+   verifies it, extracts it with `ditto -x -k`, stages the bundle on the
+   installed app's volume, exchanges the two in one atomic rename and
+   deletes the old one (a running bundle can be swapped out; its mapped
+   files stay valid), and refreshes LaunchServices. When the user chooses
+   Relaunch to Update it relaunches with
+   `NSWorkspace.OpenConfiguration.createsNewApplicationInstance` before
+   terminating. No dialogs, because nothing is quarantined.
 
 **Verification, done properly and for free.** Sign each release zip with an
 Ed25519 key kept by the maintainer; embed the public key in the app; refuse
