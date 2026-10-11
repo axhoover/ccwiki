@@ -52,6 +52,11 @@ struct RenderRequest: Sendable {
     /// Return to where this page was last left, if it has been shown before:
     /// set for Back and Forward.
     var restoresScroll = false
+    /// A hover card per page link, keyed by the resolved `href` rather than
+    /// the raw link text: several links share a target, and the href is the
+    /// string `ccwiki.js` reads back from the link it is over. Empty when
+    /// previews are off, and then the payload carries no `previews` at all.
+    var previews: [String: LinkPreview] = [:]
 
     struct Notice: Sendable {
         let level: String  // "info" | "warning"
@@ -81,6 +86,7 @@ struct RenderRequest: Sendable {
         ]
         if let html { payload["html"] = html }
         if let anchor { payload["anchor"] = anchor }
+        if !previews.isEmpty { payload["previews"] = previews.mapValues(\.jsonObject) }
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8)
@@ -106,6 +112,11 @@ struct PageRenderer: Sendable {
     /// title it. Both empty, the line comes from the frontmatter alone.
     var relations = RelationsManifest.empty
     var relationLabels = RelationLabels.empty
+    /// The hover cards for the library, and whether to send any: cleared by
+    /// Settings → Reading → Show link previews on hover, which leaves the
+    /// payload without them, so `ccwiki.js` needs no flag of its own.
+    var linkPreviews = LinkPreviews.empty
+    var buildsPreviews = true
 
     /// Image extensions the reader inlines for `![[…]]` embeds.
     private static let imageExtensions: Set<String> = [
@@ -131,6 +142,7 @@ struct PageRenderer: Sendable {
         }
 
         var links: [String: RenderRequest.ResolvedLink] = [:]
+        var previews: [String: LinkPreview] = [:]
         var brokenCount = 0
 
         // A wikilink is keyed by its raw `[[…]]` text, a markdown link by its
@@ -147,9 +159,16 @@ struct PageRenderer: Sendable {
 
             switch index.resolve(link, from: page.path) {
             case .page(let path, let anchor):
+                let href = CCwikiURL.page(path: path, anchor: anchor)
                 links[raw] = RenderRequest.ResolvedLink(
-                    href: CCwikiURL.page(path: path, anchor: anchor),
-                    kind: "page", external: false, isImage: false)
+                    href: href, kind: "page", external: false, isImage: false)
+                // Only a link that leaves the page gets a card: one to the
+                // page itself, anchored or not, would describe what is
+                // already on screen.
+                if buildsPreviews, path != page.path, previews[href] == nil,
+                   let preview = linkPreviews.preview(path: path, anchor: anchor) {
+                    previews[href] = preview
+                }
             case .asset(let path):
                 let ext = (path as NSString).pathExtension.lowercased()
                 links[raw] = RenderRequest.ResolvedLink(
@@ -180,7 +199,7 @@ struct PageRenderer: Sendable {
                     : "\(brokenCount) links on this page have no target."))
         }
 
-        return RenderRequest(
+        var request = RenderRequest(
             path: page.path,
             title: page.displayTitle,
             markdown: markdown,
@@ -188,6 +207,8 @@ struct PageRenderer: Sendable {
             links: links,
             anchor: anchor,
             notices: allNotices)
+        request.previews = previews
+        return request
     }
 
     /// A synthetic listing for `[[Primitives]]`-style links.

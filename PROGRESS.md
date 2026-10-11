@@ -5,6 +5,166 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-10 — The explorer, derived relations and link previews, built
+
+Built on `claude/relations-explorer` in three tracks, each in its own
+worktree with compile and behaviour reviews before merging: the engine (a
+Swift port of `scripts/derivations_reference.py`: `Derivation*.swift`, with
+18 rule tests and a corpus test that replays the 72 golden queries exactly
+when `relations.json` and the curation match the golden file's hashes, and
+otherwise checks the invariants), link previews (`LinkPreview.swift`,
+`PreviewExcerpt.swift`, a hover card in `ccwiki.js`), and the explorer
+window with the inspector's derived sections (`RelationsExplorerView`,
+`ObjectTokenField`, `ExplorerResult`, `ExplorerWriter`, `PageDerivations`).
+The reviews caught an accessibility API that needed an import, explorer rows
+that mishandled JLS21's four-way conjunction, and a missing `believed` on a
+proposition decoding as "believed false" (which would let a barrier count as
+ruling something out); a belief the manifest does not state is now unknown.
+Wording follows the lead's ruling on the specs' one disagreement: a one-step
+answer is "Recorded in the wiki", a longer chain "Derived by CCwiki from N
+recorded reductions". Nothing was compiled here; CI is the compiler.
+
+## 2026-10-10 — The derivation engine, revised after a red team
+
+Two reviewers ran `scripts/derivations_reference.py` against the real
+manifest and found unsound derivations the first spec allowed. Every finding
+was reproduced with the engine first. All but one were accepted, and
+[plans/derivations.md](plans/derivations.md) §11 records each disposition.
+The engine, the golden file and the spec were revised together. Nothing was
+compiled; this machine is Linux.
+
+**What changed.**
+
+- **The record's nodes are coarser than its theorems.** JLS21 needs
+  sub-exponential LPN over Z_p, but CIMR25 supplies binary LPN. BGV12 needs a
+  large modulus, but Reg05 gives a polynomial one. Kil88 needs malicious OT,
+  but the OT page and EGL are semi-honest. GPSW06 is selective, and BM84 needs
+  Z_p\*. A new rule, R13, reads these from
+  `Resources/derivation-curation.json`, where every entry cites the wiki's
+  own Statement. A requirement on a hypothesis is met by a given start (the
+  claim then reads "assuming …"), or by a listed producer; otherwise the step
+  is refused and named. A weakened conclusion is kept apart from the node's
+  full fact. BW07 and both Wee22 edges are quarantined, since their
+  hypotheses do not match their Statements.
+- **R14**: circular evasive LWE, SIDH and SSDDH are refuted (AMYY25, CD22).
+  Implications from them are marked vacuous and never listed as sources. The
+  honest-majority MPC variants are settings, not assumptions.
+- **Equivalence directions are classed separately (R1).** ISIS ⇒ SIS is the
+  conditional direction.
+- **Conflicts are checked against any derivation**, standard-model and
+  precondition-clean, not just the shown chain (R8). This applies to derived
+  barriers too, and an unstated chain counts against a `free` barrier.
+  Quantum, CRS and idealised chains are context, never conflicts.
+- **Derived barriers (R12)** now propagate only consequences that rule
+  something out. Side edges with preconditions are excluded, barriers apply
+  to start sets, circumventions are inherited only when they reach the pair,
+  and redundancy covers derived barriers too.
+- **Answers say more and claim less.** Recorded barriers carry qualifiers
+  (unclassified, fixed-construction, stub). An answer lists what is recorded
+  on its exact pair. A completion the target gives back becomes "the question
+  becomes A ⇒ Z". Implied-by pairs carry tags and are never "minimal". The
+  host hint never names the premise.
+- **Tests**: `--selftest` runs 45 checks, one per finding: 38 on the
+  manifest, 7 on patched copies. The golden file has 72 queries and 7
+  mutation records the Swift test replays, plus sentinels that fail CI when
+  the wiki moves under the curation. `--lint WIKI_ROOT` flags possible
+  dropped conjuncts.
+
+**What it cost on the data.** 1,084 default pairs became 1,022: 62 removed,
+none added, and 45 now carry an assumption. BDH lost 26 and CDH 16, because
+the record has no DLOG ⇒ OWF and BM84 needs Z_p\*. MPC lost the sources
+whose OT is not stated to be malicious-secure. Derived barriers went from 451
+records over 297 pairs to 406 over 272. Every true result lost is a record
+gap; §2a lists the upstream asks that would recover them.
+
+**Rejected.** GM's Z₂ encryption feeding BDOZ11 is likely wrong, but the
+wiki's Statement does not state BDOZ11's field size, and the curation admits
+only the wiki's text. It is an upstream ask and a residual risk (§10).
+
+## 2026-10-10 — The explorer, derived sections and link previews, specified
+
+[plans/relations-explorer.md](plans/relations-explorer.md) is the UI and
+integration half of derivations. It is grounded in the app's code and run
+against the reference engine and the real manifest. Nothing was compiled.
+
+**The decisions it makes.**
+
+- **The explorer** is a `Window` scene like Jobs, opened with ⇧⌘E;
+  ⌥⇧⌘E is Explore From This Page. Both are free after enumerating every
+  shortcut in `CCwikiApp.swift`, and `RootView.swift` declares none.
+- **From is a SwiftUI token field** with `∧` between its tokens. Its
+  suggestions replace the results palette-style, rather than floating over
+  an AppKit `List`. It is matched by `FuzzyMatcher` over labels, aliases and
+  ids.
+- **Proofs are a disclosure outline**, expanded by default.
+- **A one-reduction answer says "Recorded", not "derived"**, which is the
+  one place it departs from derivations.md §7.
+- **The inspector gets one collapsed pair of sections per page**, "Derived:
+  implies" and "Derived: implied by", in the default models only and at
+  depth ≥ 2. Rows are `⇒*`, secondary, with a step badge.
+- **Link previews are a Swift-computed card per resolved `href`**, shown by
+  `ccwiki.js` after 450 ms with no round trip. Math renders through a second,
+  `html: false` markdown-it instance. Previews skip external links, the
+  relation-meta paragraph, the reference byline and `TODO` placeholders. A
+  barrier's card is titled by the page and says when it is circumvented.
+- **The work lands as a Phase 0 PR of seams**, after which four tracks own
+  disjoint files: engine, explorer, inspector and previews.
+
+**Learned on the data.**
+
+- DDH gets 27 derived rows and GapSVP 32. PKE has 18 derived sources.
+- 236 of the 430 reference pages have no abstract to preview.
+- The busiest page (LWE) links 55 distinct targets, about 70 KB of preview
+  payload at worst.
+- The site's Quartz popover renders the whole target page; CCwiki
+  deliberately renders a summary card.
+
+## 2026-10-10 — The derivation engine, specified and proved on the data
+
+The maintainer decided that CCwiki will show derived relations: proof trees
+labelled "derived by CCwiki from N recorded reductions", the default model
+filter set to standard + quantum + CRS, and three features (a *Does A imply
+B?* explorer, transitive groups in the inspector, link previews). Before any
+Swift, the engine is specified in
+[plans/derivations.md](plans/derivations.md) as twelve rules, R1–R12, and
+implemented in Python as `scripts/derivations_reference.py`. The script was
+run on the real manifest (wiki `ab81f02`) and wrote
+`Tests/CCwikiTests/Fixtures/derivations-golden.json`: 40 query records plus
+invariants, for the Swift corpus test to assert. Nothing was compiled; this
+machine is Linux. `Package.swift` now excludes `Fixtures/` from the test
+target.
+
+**What the data decided.**
+
+- **No free or unstated step after an idealised-model step (R5).** Steps
+  after one must relativize. This blocks ROM ⇒ OIHF ⇒ OT ⇒ MPC at BH26's
+  non-black-box step, which matches the wiki's own prose. With idealised
+  models on, ROM derives exactly {OIHF, Merkle puzzles}. Allowing unstated
+  steps with a caveat would add 45 facts from 9 starts, some of them true
+  (GGM ⇒ OT, FAC ⇒ PKE against generic ring adversaries). The refusal loses
+  them rather than risk a false one, and the answer names the step that
+  blocked them.
+- **The "standard model" filter is two phases, not a filter on edges.** The
+  toggle only adds model-scoped facts. It never changes how a default fact
+  is justified.
+- **The minimal-depth chain is not always the strongest.** In 55 derived
+  pairs, a longer fully black-box chain exists (DDH ⇒ iPRF: 2 unstated steps
+  or 3 fully black-box ones), so an answer reports both.
+- **Derived barriers have to be stricter than proposed.** The side edges must
+  be standard-model only, not just in the default models: a quantum or CRS
+  side reduction escapes the barrier it composes with. The rule gives 451
+  records over 297 primitive pairs from 9 barriers, and none is contradicted
+  by a recorded reduction.
+- **Complexity classes are out entirely (R2).** All 45 inclusions have a
+  class endpoint, five of them assumption-in-class facts such as Shor's
+  `dlog ⊆ bqp`. Four more mixed edges (`{owf, ip} ⇒ czk`, …) conclude
+  statements about classes.
+
+**Surprises.** OT's closure is four objects, and nothing conjunctive reaches
+OT, so *everything implying OT* has 22 single sources and no pairs. The R9
+hint "a section of the target is derived" applies to 229 (start, section)
+pairs, mostly because `owf` is a section of the hash function page.
+
 ## 2026-10-10 — The final-form wiki, LaTeX copying, and right-aligned comments
 
 0.1.2 shipped (tag v0.1.2 on 610de81) and the wiki merged its final-form

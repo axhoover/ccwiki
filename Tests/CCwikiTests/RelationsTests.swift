@@ -439,6 +439,21 @@ struct RelationsTests {
         #expect(m.reductions[0].rationale.isEmpty)
     }
 
+    @Test("a proposition with no stated belief is unknown, not believed false")
+    func unstatedBelief() {
+        let json = """
+        { "version": 1, "classes": {}, "classSentinels": ["unstated"],
+          "propositions": {
+            "p-eq-np": { "title": "P = NP", "believed": false },
+            "mystery": { "title": "Something open" } },
+          "objects": [], "reductions": [], "barriers": [] }
+        """
+        let m = RelationsManifest.decode(Data(json.utf8))
+        #expect(m.propositions["p-eq-np"]?.believed == false)
+        #expect(m.propositions["mystery"]?.believed == nil)
+        #expect(m.propositions["mystery"]?.title == "Something open")
+    }
+
     // MARK: Nodes
 
     @Test("`unlisted` hides a page from browse without removing the node")
