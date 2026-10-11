@@ -327,6 +327,7 @@ struct SettingsView: View {
                             .monospacedDigit()
                     }
                 }
+                locationRow
                 LabeledContent("Wiki", value: "axhoover/cryptology.city")
             }
             Section {
@@ -399,6 +400,32 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Which copy of CCwiki this is, by folder and by path: the first thing
+    /// to know when the Dock or Spotlight seems to start an old version.
+    private var locationRow: some View {
+        let bundle = Bundle.main.bundleURL
+        return LabeledContent("Location") {
+            HStack(spacing: Theme.small) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(InstallationCheck.displayLocation(bundle))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    Text(InstallationCheck.abbreviatedPath(bundle))
+                        .font(Theme.Fonts.log)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .textSelection(.enabled)
+                }
+                .help(InstallationCheck.path(of: bundle))
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([bundle])
+                }
+                .controlSize(.small)
+            }
+        }
     }
 }
 
