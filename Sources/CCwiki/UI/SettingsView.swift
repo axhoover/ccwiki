@@ -319,8 +319,8 @@ struct SettingsView: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(Bundle.main.shortVersion)
                             .textSelection(.enabled)
-                        Text(UpdateChecker.isDevelopmentVersion(Bundle.main.shortVersion)
-                            ? "Local build \(Bundle.main.buildNumber) — not a release"
+                        Text(isDevelopmentBuild
+                            ? "Development build \(Bundle.main.buildNumber) — not a release"
                             : "Build \(Bundle.main.buildNumber)")
                             .font(Theme.Fonts.meta)
                             .foregroundStyle(.secondary)
@@ -330,11 +330,14 @@ struct SettingsView: View {
                 LabeledContent("Wiki", value: "axhoover/cryptology.city")
             }
             Section {
+                // Off and disabled in CCwiki Dev, which never checks: showing
+                // the stored value would say it does.
                 Toggle("Check for updates daily", isOn: Binding(
-                    get: { model.checksForUpdates },
+                    get: { BuildIdentity.isRelease && model.checksForUpdates },
                     set: { model.checksForUpdates = $0 }))
+                    .disabled(!BuildIdentity.isRelease)
                 Toggle("Install them automatically", isOn: Binding(
-                    get: { model.installsUpdatesAutomatically },
+                    get: { BuildIdentity.isRelease && model.installsUpdatesAutomatically },
                     set: { model.installsUpdatesAutomatically = $0 }))
                     .disabled(!model.checksForUpdates || !model.canInstallUpdates)
                 LabeledContent("Status") {
@@ -368,15 +371,9 @@ struct SettingsView: View {
             } header: {
                 Text("Updates")
             } footer: {
-                Text(model.canInstallUpdates
-                    ? "One request a day to GitHub's releases API. An update is downloaded, "
-                        + "its Ed25519 signature checked against the key built into this app, "
-                        + "and the app replaced in place; the old one goes to the Trash. CCwiki "
-                        + "never relaunches on its own."
-                    : "One request a day to GitHub's releases API. This build has no release "
-                        + "key, so it can only tell you about an update and open its page.")
-                .font(Theme.Fonts.meta)
-                .foregroundStyle(.secondary)
+                Text(updatesFooter)
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.secondary)
             }
             Section {
                 LabeledContent("LaTeX macros") {
@@ -406,6 +403,27 @@ struct SettingsView: View {
 }
 
 extension SettingsView {
+    /// CCwiki Dev, or a release-id bundle with a development version (a build
+    /// from source older than the channels). Neither checks for updates.
+    fileprivate var isDevelopmentBuild: Bool {
+        !BuildIdentity.isRelease || UpdateChecker.isDevelopmentVersion(Bundle.main.shortVersion)
+    }
+
+    fileprivate var updatesFooter: String {
+        if !BuildIdentity.isRelease {
+            return "CCwiki Dev is built from source and never checks for updates. Its "
+                + "settings and wiki are its own, apart from CCwiki's."
+        }
+        if model.canInstallUpdates {
+            return "One request a day to GitHub's releases API. An update is downloaded, "
+                + "its Ed25519 signature checked against the key built into this app, "
+                + "and the app replaced in place; the old one goes to the Trash. CCwiki "
+                + "never relaunches on its own."
+        }
+        return "One request a day to GitHub's releases API. This build has no release "
+            + "key, so it can only tell you about an update and open its page."
+    }
+
     fileprivate var updateStatus: Text {
         if let progress = model.updateInstallProgress {
             return Text(progress)
@@ -416,7 +434,7 @@ extension SettingsView {
         if let update = model.availableUpdate {
             return Text("CCwiki \(update.version) is available")
         }
-        if UpdateChecker.isDevelopmentVersion(model.appVersion) {
+        if isDevelopmentBuild {
             return Text("Development build — not checked")
         }
         if let last = model.lastUpdateCheck {
@@ -427,8 +445,8 @@ extension SettingsView {
 }
 
 extension Bundle {
-    /// `CFBundleVersion`: `build.sh` stamps the build time, `yyyyMMddHHmm`,
-    /// which is what tells two builds of one version apart.
+    /// `CFBundleVersion`: `build.sh` stamps the build time in UTC,
+    /// `yyyyMMddHHmm`, which is what tells two builds of one version apart.
     var buildNumber: String {
         (object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "?"
     }

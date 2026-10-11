@@ -341,8 +341,9 @@ final class AppModel {
     private(set) var isInstallingUpdate = false
     /// What the installer is doing right now, for the status bar.
     private(set) var updateInstallProgress: String?
-    /// Whether this build can verify a download at all. See `ReleaseKey`.
-    var canInstallUpdates: Bool { ReleaseKey.isConfigured }
+    /// Whether this build may replace itself: only the release, and only
+    /// when it can verify a download at all. See `BuildIdentity`, `ReleaseKey`.
+    var canInstallUpdates: Bool { BuildIdentity.isRelease && ReleaseKey.isConfigured }
     static let updateInterval: TimeInterval = 24 * 60 * 60
     /// "X is available": replaced on every check.
     static let updateWarningPrefix = "Update: "
@@ -1546,8 +1547,11 @@ final class AppModel {
 
     /// The daily check, from the launch task. Silent whatever happens: an
     /// update is a note in the status bar, and a failure is nothing at all.
+    /// CCwiki Dev never checks, whatever its version says.
     func checkForUpdatesIfDue() async {
-        guard checksForUpdates, !UpdateChecker.isDevelopmentVersion(appVersion) else { return }
+        guard BuildIdentity.isRelease, checksForUpdates,
+              !UpdateChecker.isDevelopmentVersion(appVersion)
+        else { return }
         if let last = lastUpdateCheck, Date().timeIntervalSince(last) < Self.updateInterval {
             return
         }
@@ -1584,8 +1588,9 @@ final class AppModel {
     /// The daily check's second half: install what it found, if allowed,
     /// and say so in the status bar. Never relaunches by itself.
     private func installFoundUpdateIfAllowed(_ release: ReleaseInfo) async {
-        guard installsUpdatesAutomatically, canInstallUpdates, release.isInstallable,
-              installedUpdate?.version != release.version, activeJobCount == 0
+        guard BuildIdentity.isRelease, installsUpdatesAutomatically, canInstallUpdates,
+              release.isInstallable, installedUpdate?.version != release.version,
+              activeJobCount == 0
         else { return }
         if let error = await installUpdate(release) {
             warn(Self.updateWarningPrefix + "CCwiki \(release.version) could not be installed: "
@@ -1675,11 +1680,21 @@ final class AppModel {
             let alert = NSAlert()
             let version = appVersion
 
-            if UpdateChecker.isDevelopmentVersion(version) {
-                alert.messageText = "This is a local build."
-                alert.informativeText = "Version \(version) was built from source rather than "
-                    + "downloaded as a release, so CCwiki does not replace it. The latest "
-                    + "release is always on the releases page."
+            // CCwiki Dev never checks, whatever its version says. A release id
+            // with a development version is an older build from source.
+            if !BuildIdentity.isRelease || UpdateChecker.isDevelopmentVersion(version) {
+                if BuildIdentity.isRelease {
+                    alert.messageText = "This is a local build."
+                    alert.informativeText = "Version \(version) was built from source rather "
+                        + "than downloaded as a release, so CCwiki does not replace it. The "
+                        + "latest release is always on the releases page."
+                } else {
+                    alert.messageText = "CCwiki Dev does not update itself."
+                    alert.informativeText = "Version \(version) was built from source. It keeps "
+                        + "its own settings and wiki apart from CCwiki, and never checks for or "
+                        + "installs a release; build it again for a newer one. The latest "
+                        + "release is always on the releases page."
+                }
                 alert.addButton(withTitle: "OK")
                 alert.addButton(withTitle: "Open Releases Page")
                 if alert.runModal() == .alertSecondButtonReturn,

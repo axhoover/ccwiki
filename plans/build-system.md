@@ -8,14 +8,21 @@ provider (`swift`, `codesign`, `notarytool`, `stapler`).
 
 - **`Package.swift`** — one `executableTarget` (`CCwiki`) + one `testTarget`.
   Swift 6 language mode. Zero third-party dependencies.
-- **`build.sh`** — `swift build` → assemble `build/CCwiki.app` (Info.plist
-  with `__SHORT_VERSION__`/`__BUILD_VERSION__` substituted, `PkgInfo`, any
-  dependency `*.bundle`s copied into `Contents/Resources`, the icon) → codesign.
-  Falls back to ad-hoc signing (`-`) when no real identity is available, so
-  `make run` always works on a bare machine.
+- **`build.sh`** — stamp the Info.plist for `CHANNEL` (see "Two channels"
+  below) → `swift build` → assemble `build/CCwiki.app` (the stamped
+  Info.plist, `PkgInfo`, any dependency `*.bundle`s copied into
+  `Contents/Resources`, the icon) → codesign. Falls back to ad-hoc signing
+  (`-`) when no real identity is available, so `make run` always works on a
+  bare machine.
+- **`scripts/stamp-info-plist.sh`** — `<channel> <version> <build> <src>
+  <dst>`: fills in the Info.plist's placeholders for one channel, refuses a
+  release version that is not `X.Y.Z`, and fails if any `__PLACEHOLDER__`
+  survives. Plain bash and sed, so it also runs on Linux.
 - **`Makefile`** — the front door. `make help` lists everything.
-- **`Resources/Info.plist`** — bundle metadata. Version strings are
-  placeholders filled at build time.
+- **`Resources/Info.plist`** — bundle metadata. The identity (`__BUNDLE_ID__`,
+  `__BUNDLE_NAME__`, `__URL_NAME__`, `__URL_SCHEME__`) and the version strings
+  (`__SHORT_VERSION__`, `__BUILD_VERSION__`) are placeholders filled at build
+  time; `BuildIdentityTests` fails if one goes missing.
 - **`CCwiki/CCwiki.entitlements`** — App Sandbox **off**, deliberately. See
   "The app is not sandboxed" below; the template's default was on, and CCwiki
   cannot use it.
@@ -46,14 +53,84 @@ doing it for you:
 | `make test`   | `swift test` (swift-testing)                              |
 | `make run`    | build the `.app`, ad-hoc sign, `open` it                 |
 | `make` / build| `build/CCwiki.app` (debug)                              |
+| `make install`| build, copy to `/Applications/CCwiki Dev.app`, `lsregister -f` it |
+| `make uninstall` / `register` | remove, or re-register, that installed copy |
 | `make icon`   | regenerate `build/AppIcon.icns`                          |
 | `make clean`  | remove `build/ .build/ dist/`                            |
+
+Every app these build is CCwiki Dev. `make install CHANNEL=release` (and
+`uninstall`, `register`) act on `/Applications/CCwiki.app` instead; that
+build needs an `X.Y.Z` version, so an exact tag or `VERSION=`.
 
 ## Versioning
 
 `make` resolves the version in this order: a `VERSION=` override → an exact
-`vX.Y.Z` git tag at HEAD → the `VERSION` file. `make print-version` shows what
-resolved and from where.
+`vX.Y.Z` git tag at HEAD → the latest tag (or the `VERSION` file) plus `-dev`.
+`make print-version` shows what resolved and from where, the channel, what
+that builds and where `make install` would put it.
+
+## Two channels: CCwiki and CCwiki Dev
+
+A build's identity is chosen by `CHANNEL`, never by its version string: a
+`make` at an exact tag stamps a bare `0.1.3`, which looks like a release. The
+default is `dev`. See [update-integrity.md](update-integrity.md) §2.1 for
+why: an old local build that called itself the release, shared its bundle
+id and kept coming back is what made CCwiki seem to revert to 0.1.0.
+
+| | `CHANNEL=release` | `CHANNEL=dev` (the default) |
+|---|---|---|
+| Made by | `make package`, `make dist` (so `release.yml`) | `./build.sh`, `make`, `make run`, `make release`, `make shots`, CI's PR zip |
+| `CFBundleIdentifier` | `com.axhoover.ccwiki` | `com.axhoover.ccwiki.dev` |
+| Name (`CFBundleName`, `CFBundleDisplayName`) | CCwiki | CCwiki Dev |
+| URL scheme | `ccwiki` | `ccwiki-dev` |
+| Version | `X.Y.Z`, refused otherwise (and `0.0.0`) | gets a `-dev` suffix if it lacks one |
+| Data | `~/Library/Application Support/CCwiki`, `~/Library/Caches/CCwiki` | `…/CCwiki-Dev` in both |
+| Updates | checks, installs | never checks, never installs |
+| `make install` puts it at | `/Applications/CCwiki.app` | `/Applications/CCwiki Dev.app` |
+
+The bundle is `build/CCwiki.app` either way; only `make install` renames it.
+
+The separate bundle id keeps UserDefaults, saved window state, WebKit's data,
+URL caches and LaunchServices apart on its own: a dev build cannot win
+`ccwiki://` links, Open With or `open -b com.axhoover.ccwiki` from the
+release. The data folders are the app's business:
+`BuildIdentity.dataFolderName(for:)`, read by `AppPaths.standard()`. The dev
+one has no space because ingestion worktrees live under Caches, where a `%20`
+breaks the wiki's node tooling.
+
+So a dev build **downloads its own copy of the wiki on first launch**, into
+`Application Support/CCwiki-Dev/repo`, and builds its own search index. It
+never reads or writes the release's clone, index, jobs or settings, and the
+release never sees the dev build's. Only the release inherits a CityDesk
+folder from before the rename.
+
+In the app, `BuildIdentity.isRelease` gates the updater: the daily check, the
+automatic install and `canInstallUpdates` all require it, whatever the
+version says. Check for Updates… on CCwiki Dev explains that it does not
+update itself; Settings → About calls it a development build and disables
+the update switches. CCwiki Dev answers to `ccwiki-dev://wiki/page/…` links
+and reads them as the reader's own `ccwiki://`, which is the same on both
+channels.
+
+`CFBundleVersion` is the build time in UTC (`date -u +%Y%m%d%H%M`), so local
+and CI build numbers compare.
+
+`make test-corpus` reads the release's clone,
+`~/Library/Application Support/CCwiki/repo`, by default. The tests only read
+it, so that is safe while CCwiki runs; point `WIKI=` at
+`…/CCwiki-Dev/repo` to test against CCwiki Dev's copy instead.
+
+`make shots` drives `build/CCwiki.app`, which is CCwiki Dev: its first run
+downloads the wiki into `CCwiki-Dev` (run `make run` once first if the
+harness's wait runs out). It finds the window to capture by the pid of the
+process it started, so a release open beside it is never captured.
+
+CI checks both sides. On every push, a step that builds nothing stamps the
+release channel into a temp file and asserts `com.axhoover.ccwiki`, the
+version and the `ccwiki` scheme, and that `0.1.3-dev` and `0.0.0` are
+refused. Where CI builds the app (pull requests, `main`, manual runs), it
+asserts the result is `com.axhoover.ccwiki.dev`, a `-dev` version and
+`ccwiki-dev`.
 
 ## Release pipeline (`make dist`)
 
@@ -73,6 +150,13 @@ make notary-setup TEAM_ID=XXXXXXXXXX APPLE_ID=you@example.com
 ```
 
 `make github-release` uploads the release zip + `.sha256` to a GitHub release.
+
+`make dist` and `make package` build with `CHANNEL=release` whatever
+`CHANNEL` says on the command line. Their last step, `make verify-package`,
+reads `CCwiki.app/Contents/Info.plist` out of the zip itself and refuses the
+package unless its `CFBundleIdentifier` is `com.axhoover.ccwiki` and its
+`CFBundleShortVersionString` is the tag's version, so a CCwiki Dev build can
+never be published as the release.
 
 ## CI gate
 

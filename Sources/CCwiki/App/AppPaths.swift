@@ -5,11 +5,19 @@ import Foundation
 /// ```
 /// ~/Library/Application Support/CCwiki/
 /// ├── repo/          the pull-only clone — the reader's copy, never committed to
-/// ├── worktrees/     one git worktree per ingestion job, pruned when the PR opens
 /// ├── library/       PDFs dropped on the app; deliberately outside the repo
 /// ├── index/         search.sqlite3 — derived, safe to delete at any time
 /// └── logs/          per-job transcripts, kept after the worktree is gone
+///
+/// ~/Library/Caches/CCwiki/
+/// ├── worktrees/     one git worktree per ingestion job, pruned when the PR opens
+/// └── web/           the reader's pipeline, one copy per build (`stagedWebRoot`)
 /// ```
+///
+/// That is the release. CCwiki Dev, any build from source, keeps the same tree
+/// under `CCwiki-Dev` in both places (`BuildIdentity.dataFolderName`), so it
+/// downloads its own wiki on first launch and never reads or writes the
+/// release's clone, index, jobs or settings.
 ///
 /// The app is not sandboxed (it has to exec `git`, `gh` and `claude`), so this
 /// is the real Application Support directory rather than a container.
@@ -89,32 +97,72 @@ struct AppPaths: Sendable {
     /// after a WebContent crash would then pair the new JavaScript with the
     /// old Swift. Serving from a copy made at launch keeps them together.
     /// Falls back to the bundle if the copy cannot be made.
+    ///
+    /// Other builds' copies stay until no launch has touched them for
+    /// `stagedWebRetention`. Deleting them all at launch, as this once did,
+    /// pulled the JavaScript out from under any other copy of CCwiki that was
+    /// running at the time.
     func stagedWebRoot() -> URL {
         let source = webRoot
-        let build = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
-            .flatMap { $0.isEmpty ? nil : $0 } ?? "dev"
+        let build = Self.stagedWebBuild
         let root = cacheRoot.appending(path: "web")
         let staged = root.appending(path: build)
         let manager = FileManager.default
+        Self.pruneStagedWebCopies(
+            in: root, keeping: build,
+            olderThan: Date().addingTimeInterval(-Self.stagedWebRetention))
         if manager.fileExists(
             atPath: staged.appending(path: "index.html").path(percentEncoded: false)) {
+            Self.touch(staged)
             return staged
         }
         do {
             try manager.createDirectory(at: root, withIntermediateDirectories: true)
-            // Copies for other builds are just cache.
-            let stale = (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-            for entry in stale where entry.lastPathComponent != build {
-                try? manager.removeItem(at: entry)
-            }
             let partial = root.appending(path: build + ".partial")
             try? manager.removeItem(at: partial)
             try manager.copyItem(at: source, to: partial)
             try manager.moveItem(at: partial, to: staged)
+            // The copy keeps the bundle's dates, which can be months old.
+            Self.touch(staged)
             return staged
         } catch {
             return source
         }
+    }
+
+    /// How long a staged web copy outlives the last launch of its build.
+    static let stagedWebRetention: TimeInterval = 7 * 24 * 60 * 60
+
+    /// The name of this build's staged copy: its `CFBundleVersion`, or "dev"
+    /// where no bundle of ours is around the code (`swift run`, tests).
+    static var stagedWebBuild: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "dev"
+    }
+
+    /// Deletes every entry in `root` but `build` whose modification date is
+    /// before `cutoff`: copies for other builds, and `.partial` leftovers from
+    /// copies that never finished. Each launch touches its own copy, so a
+    /// recent date means a build that may still be running. An entry whose
+    /// date cannot be read is kept, and a missing `root` is nothing to do.
+    static func pruneStagedWebCopies(in root: URL, keeping build: String, olderThan cutoff: Date) {
+        let manager = FileManager.default
+        let entries = (try? manager.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for entry in entries where entry.lastPathComponent != build {
+            guard let modified = try? entry.resourceValues(
+                    forKeys: [.contentModificationDateKey]).contentModificationDate,
+                  modified < cutoff
+            else { continue }
+            try? manager.removeItem(at: entry)
+        }
+    }
+
+    /// Marks a staged copy as in use now. A directory's own date changes only
+    /// when its entries do, so it is set by hand.
+    private static func touch(_ url: URL) {
+        try? FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: url.path(percentEncoded: false))
     }
 
     init(support: URL, cacheRoot: URL) {
@@ -128,15 +176,23 @@ struct AppPaths: Sendable {
         self.init(support: support, cacheRoot: support)
     }
 
+    /// The real folders, named for this build's channel: `CCwiki` for the
+    /// release, `CCwiki-Dev` for a build from source.
     static func standard() -> AppPaths {
+        let channel = BuildIdentity.current
+        let folder = BuildIdentity.dataFolderName(for: channel)
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-        let support = base.appending(path: "CCwiki")
-        migrateFromEarlierName(into: support, base: base)
+        let support = base.appending(path: folder)
+        // CityDesk's data is the release's to inherit. A dev build that took
+        // it would leave the release to download everything again.
+        if channel == .release {
+            migrateFromEarlierName(into: support, base: base)
+        }
 
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Caches")
-        let paths = AppPaths(support: support, cacheRoot: caches.appending(path: "CCwiki"))
+        let paths = AppPaths(support: support, cacheRoot: caches.appending(path: folder))
         paths.migrateWorktreesOutOfSupport()
         return paths
     }
