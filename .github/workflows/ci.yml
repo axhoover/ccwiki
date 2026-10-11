@@ -118,11 +118,15 @@ jobs:
           [ "$scheme" = ccwiki-dev ] || fail "the build's URL scheme is $scheme"
           echo "✓ $id $version, $scheme://"
 
+      # Zipped as "CCwiki Dev.app", the name `make install` gives it: one
+      # that unzipped as CCwiki.app could be dragged over the release in
+      # /Applications.
       - name: Package the app
         if: github.event_name != 'push' || github.ref == 'refs/heads/main'
         run: |
           mkdir -p dist
-          ditto -c -k --keepParent build/CCwiki.app dist/CCwiki-dev.zip
+          ditto build/CCwiki.app "dist/CCwiki Dev.app"
+          ditto -c -k --keepParent "dist/CCwiki Dev.app" dist/CCwiki-dev.zip
           shasum -a 256 dist/CCwiki-dev.zip
 
       # One day: this is a build to try today, not to keep, and artifact

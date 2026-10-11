@@ -211,10 +211,18 @@ test: deps
 # by `make test` because it needs the clone to exist.
 # WIKI= points it at any clone of the wiki; CI uses a fresh one. The default is
 # the installed release's clone, which the tests only read; CCwiki Dev keeps its
-# own under "Application Support/CCwiki-Dev".
-WIKI ?= $(HOME)/Library/Application Support/CCwiki/repo
+# own under "Application Support/CCwiki-Dev". A missing clone is an error: the
+# corpus suites skip themselves without one, so the run would pass untested.
+WIKI     ?= $(HOME)/Library/Application Support/CCwiki/repo
+DEV_WIKI := $(HOME)/Library/Application Support/CCwiki-Dev/repo
 
 test-corpus: deps
+	@if [ ! -d "$(WIKI)/content" ]; then \
+	  echo "✗ no wiki clone at $(WIKI)"; \
+	  echo "  Launch CCwiki once to download it, or test CCwiki Dev's:"; \
+	  echo "  make test-corpus WIKI=\"$(DEV_WIKI)\""; \
+	  exit 1; \
+	fi
 	CCWIKI_WIKI="$(WIKI)" swift test
 	@echo "✓ tests pass against the real corpus"
 

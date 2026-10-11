@@ -118,7 +118,10 @@ and CI build numbers compare.
 `make test-corpus` reads the release's clone,
 `~/Library/Application Support/CCwiki/repo`, by default. The tests only read
 it, so that is safe while CCwiki runs; point `WIKI=` at
-`…/CCwiki-Dev/repo` to test against CCwiki Dev's copy instead.
+`…/CCwiki-Dev/repo` to test against CCwiki Dev's copy instead. It stops
+with an error when `WIKI` has no `content/` folder: the corpus suites skip
+themselves without a clone, so on a Mac with only CCwiki Dev the default
+would otherwise pass having tested nothing.
 
 `make shots` drives `build/CCwiki.app`, which is CCwiki Dev: its first run
 downloads the wiki into `CCwiki-Dev` (run `make run` once first if the
@@ -130,7 +133,9 @@ release channel into a temp file and asserts `com.axhoover.ccwiki`, the
 version and the `ccwiki` scheme, and that `0.1.3-dev` and `0.0.0` are
 refused. Where CI builds the app (pull requests, `main`, manual runs), it
 asserts the result is `com.axhoover.ccwiki.dev`, a `-dev` version and
-`ccwiki-dev`.
+`ccwiki-dev`. The zip it uploads unpacks as `CCwiki Dev.app`, the name
+`make install` uses, so dragging it into `/Applications` never offers to
+replace the release.
 
 ## Release pipeline (`make dist`)
 

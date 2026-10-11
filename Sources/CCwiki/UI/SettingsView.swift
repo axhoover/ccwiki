@@ -417,8 +417,8 @@ extension SettingsView {
         if model.canInstallUpdates {
             return "One request a day to GitHub's releases API. An update is downloaded, "
                 + "its Ed25519 signature checked against the key built into this app, "
-                + "and the app replaced in place; the old one goes to the Trash. CCwiki "
-                + "never relaunches on its own."
+                + "and the app replaced in place; the old copy is deleted. CCwiki never "
+                + "relaunches on its own."
         }
         return "One request a day to GitHub's releases API. This build has no release "
             + "key, so it can only tell you about an update and open its page."
