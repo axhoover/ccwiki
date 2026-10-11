@@ -23,6 +23,12 @@ running (`Bundle.main.shortVersion`). Nothing in Caches, Application Support
 or the preferences can change it. So each "revert" was macOS starting a
 **different bundle**. Clearing folders could not help.
 
+**Confirmed the same day:** the maintainer was typing "CCwiki" into their
+launcher, and it opened an old dev build: a local build carrying the
+release's bundle id and name, and calling itself 0.1.0. That is cause 1
+below. The ranking that follows is what the evidence said before the
+maintainer could check.
+
 Ranked, with the evidence for each:
 
 1. **A second copy with the same bundle id (most likely).**
@@ -216,10 +222,8 @@ copy can no longer bring What's New back.
 
 ## 4. Open questions for the maintainer
 
-- Which copy was the "0.1.0"? See the commands in §1.
-- How do you usually open CCwiki: the Dock, Spotlight, Launchpad or Apps,
-  Raycast or Alfred, or Finder? And how did 0.1.2 arrive? Its `.sig` was
-  never downloaded.
+- ~~Which copy was the "0.1.0"?~~ An old dev build, found by name in the
+  maintainer's launcher (§1).
 - Unproven without a Mac: that a release with a copy in Downloads launches
   without "CCwiki would like to access files in your Downloads folder" (the
   check reads that copy from Spotlight, but still checks that its path

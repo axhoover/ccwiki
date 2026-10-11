@@ -64,10 +64,13 @@ and rows instead.
 
 **For the maintainer:**
 
-- §1 of the plan lists the commands that tell which copy was the "0.1.0".
-  Run them before deleting anything.
-- Then keep one copy, in /Applications. The first launch of 0.2.0 will offer
-  to deal with the others.
+- **Confirmed:** typing "CCwiki" into the maintainer's launcher opened an
+  old dev build that had the release's name and bundle id. A dev build is
+  now named CCwiki Dev and has its own id, so the launcher lists the two
+  apart.
+- Old builds made before this change still carry the release's id. Remove
+  them with `make clean`, then rebuild. The first launch of 0.2.0 offers to
+  deal with any other copy it finds.
 - Still unproven on a real Mac: that the check never triggers the Downloads
   privacy prompt, and that an open copy quits when asked.
 
