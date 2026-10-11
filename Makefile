@@ -1,7 +1,7 @@
 # CCwiki — an offline reader for cryptology.city, and an agent job launcher
 #
 # Quick start:
-#   make           # debug-builds via SwiftPM into ./build/CCwiki.app
+#   make           # debug-builds via SwiftPM into "./build/CCwiki Dev.app"
 #   make run       # build + launch
 #   make check     # compile + unit tests — the gate after every change
 #   make shots     # drive the app and capture screenshots (the visual gate)
@@ -26,7 +26,6 @@
 # Resources/web/. Run once after cloning; the app never fetches at runtime.
 
 CONFIG       := debug
-APP          := build/CCwiki.app
 LSREGISTER   := /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister
 PLISTBUDDY   := /usr/libexec/PlistBuddy
 MIN_MACOS    := 14
@@ -45,6 +44,13 @@ endif
 endif
 RELEASE_BUNDLE_ID := com.axhoover.ccwiki
 DEV_BUNDLE_ID     := com.axhoover.ccwiki.dev
+
+# The bundle build.sh makes, named for the channel as build.sh names it:
+# Finder, the Dock and ⌘-Tab show the file name, and a dev build named
+# CCwiki.app could be dragged over the release. Quote it: the dev one has a
+# space. The release steps below run as sub-makes with CHANNEL=release, so
+# each of them finds build/CCwiki.app.
+APP           := build/$(if $(filter release,$(CHANNEL)),$(APP_NAME),$(APP_NAME) Dev).app
 
 # Where `make install` puts this channel's build. The two names differ, so a
 # dev build can never overwrite the release. Quote it: the dev one has a space.
@@ -288,17 +294,17 @@ clean:
 # The steps run as sub-makes, in this order, so `make -j` cannot reorder
 # them: several have no file prerequisites of their own.
 dist: check-version clean
-	$(MAKE) release-notes
+	$(MAKE) release-notes CHANNEL=release
 	$(MAKE) release CHANNEL=release
-	$(MAKE) sign
-	$(MAKE) zip-notary
-	$(MAKE) notarize
-	$(MAKE) staple
-	$(MAKE) zip-release
-	$(MAKE) checksum
-	$(MAKE) sign-package
-	$(MAKE) verify-release
-	$(MAKE) verify-package
+	$(MAKE) sign CHANNEL=release
+	$(MAKE) zip-notary CHANNEL=release
+	$(MAKE) notarize CHANNEL=release
+	$(MAKE) staple CHANNEL=release
+	$(MAKE) zip-release CHANNEL=release
+	$(MAKE) checksum CHANNEL=release
+	$(MAKE) sign-package CHANNEL=release
+	$(MAKE) verify-release CHANNEL=release
+	$(MAKE) verify-package CHANNEL=release
 	@echo "✓ release artifact ready: $(RELEASE_ZIP)"
 	@echo "  next: make github-release   (or upload $(RELEASE_ZIP) manually)"
 
@@ -327,12 +333,12 @@ release-keys:
 	echo "✓ embedded the public key in $(RELEASE_KEY_SOURCE) — commit it"
 
 package: check-version clean
-	$(MAKE) release-notes
+	$(MAKE) release-notes CHANNEL=release
 	$(MAKE) release CHANNEL=release
-	$(MAKE) zip-package
-	$(MAKE) checksum
-	$(MAKE) sign-package
-	$(MAKE) verify-package
+	$(MAKE) zip-package CHANNEL=release
+	$(MAKE) checksum CHANNEL=release
+	$(MAKE) sign-package CHANNEL=release
+	$(MAKE) verify-package CHANNEL=release
 	@echo "✓ package ready: $(RELEASE_ZIP), .sha256, .sig"
 	@echo "  next: make github-release"
 
@@ -490,4 +496,4 @@ PLAN      ?= home,page:Primitives/pseudorandom-function.md,page:Assumptions/lear
 
 .PHONY: shots
 shots: build
-	./scripts/shots.sh "$(PWD)/$(SHOTS_DIR)" "$(PLAN)"
+	./scripts/shots.sh "$(PWD)/$(SHOTS_DIR)" "$(PLAN)" "$(PWD)/$(APP)"

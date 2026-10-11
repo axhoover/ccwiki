@@ -2,7 +2,7 @@
 #
 # shots.sh — drive the built app through a plan of views and capture each one.
 #
-#   ./scripts/shots.sh <output-dir> "<plan>"
+#   ./scripts/shots.sh <output-dir> "<plan>" [<app>]
 #
 # The plan is a comma-separated list of steps understood by ScreenshotRunner:
 #
@@ -24,16 +24,17 @@
 # Without it `screencapture` fails and the app's own fallback capture is used
 # instead, which renders everything except the blurred backdrops.
 #
-# build/CCwiki.app is CCwiki Dev unless it was built with CHANNEL=release, so
-# it reads its own wiki under "Application Support/CCwiki-Dev", which its first
-# launch downloads; a release that is open meanwhile is left alone. Windows
-# are found by the pid of the process started here, never by name.
+# The app defaults to "build/CCwiki Dev.app", what `make` builds (`make shots`
+# passes the bundle its CHANNEL built). CCwiki Dev reads its own wiki under
+# "Application Support/CCwiki-Dev", which its first launch downloads; a release
+# that is open meanwhile is left alone. Windows are found by the pid of the
+# process started here, never by name.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/build/shots}"
 PLAN="${2:-home}"
-APP="$ROOT/build/CCwiki.app"
+APP="${3:-$ROOT/build/CCwiki Dev.app}"
 
 [ -d "$APP" ] || { echo "✗ $APP not found — run make first" >&2; exit 1; }
 APP_LABEL="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$APP/Contents/Info.plist" 2>/dev/null \

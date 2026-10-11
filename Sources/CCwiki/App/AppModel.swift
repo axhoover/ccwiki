@@ -781,12 +781,17 @@ final class AppModel {
     func openLaunchDocumentIfNeeded() {
         guard ScreenshotRunner.directory == nil else { return }
         let current = appVersion
-        let lastSeen = CCwikiSettings.lastSeenVersion
+        // Two records, because a copy from before this check still writes
+        // its own version to `lastSeenVersion` when it runs, however old.
+        let lastSeen = InstallationCheck.seenVersion(
+            recorded: CCwikiSettings.lastSeenVersion,
+            highest: CCwikiSettings.highestSeenVersion)
         let decision = Self.launchDocument(lastSeen: lastSeen, current: current, changelog: changelog)
         // Forward only: an older copy opened by mistake must not bring What's
         // New back at the next launch of this one.
-        CCwikiSettings.lastSeenVersion = InstallationCheck.nextSeenVersion(
-            lastSeen: lastSeen, current: current)
+        let seen = InstallationCheck.nextSeenVersion(lastSeen: lastSeen, current: current)
+        CCwikiSettings.lastSeenVersion = seen
+        if !UpdateChecker.isDevelopmentVersion(seen) { CCwikiSettings.highestSeenVersion = seen }
         guard let decision else { return }
         if decision.document == .whatsNew { whatsNewSince = decision.since }
         open(.document(decision.document))
@@ -1554,10 +1559,12 @@ final class AppModel {
     @ObservationIgnored private var hasCheckedInstallation = false
 
     /// The launch check of `plans/update-integrity.md` §2.3, from the launch
-    /// task, before the update check: logs which copy this is, then, in a
-    /// release, looks for the other copies LaunchServices could start instead
-    /// of this one and says at most one thing about them. The updater can
-    /// only ever replace this copy; a stale one elsewhere is dealt with here.
+    /// task, before the launch sync and the update check: logs which copy
+    /// this is, then, in a release, looks for the other copies LaunchServices
+    /// could start instead of this one and says at most one thing about them.
+    /// The updater can only ever replace this copy; a stale one elsewhere is
+    /// dealt with here. Before the sync, so that a copy about to hand over
+    /// to another never starts a fetch on the clone they share.
     func checkInstallation() async {
         guard !hasCheckedInstallation else { return }
         hasCheckedInstallation = true
@@ -1582,13 +1589,14 @@ final class AppModel {
         case .none: break
         case .openNewer(let newer): await offerNewerCopy(newer, running: running)
         case .replaceOlder(let installed): await offerReplacing(installed, running: running)
-        case .removeOthers(let copies): offerRemoving(copies, running: running)
+        case .removeOthers(let copies): offerRemoving(copies)
         }
     }
 
     /// Another copy is newer: open it and quit this one, or keep going. The
     /// downgrade guard, too: when the Dock starts an older copy that has this
-    /// check, it points to the newer one.
+    /// check, it points to the newer one. A newer copy that is already open
+    /// is brought forward rather than started a second time.
     private func offerNewerCopy(_ newer: InstalledCopy, running: InstalledCopy) async {
         let (here, there) = InstallationCheck.displayLocations(running.url, newer.url)
         let alert = NSAlert()
@@ -1597,7 +1605,16 @@ final class AppModel {
             + "CCwiki \(newer.version) is in \(there)."
         alert.addButton(withTitle: "Open CCwiki \(newer.version)")
         alert.addButton(withTitle: "Keep Using This Version").keyEquivalent = "\u{1b}"
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn,
+              mayStopJobs(then: "open CCwiki \(newer.version)", button: "Open")
+        else { return }
+        if let existing = runningInstance(of: newer.url) {
+            stopJobsBeforeQuitting()
+            _ = existing.activate(options: [])
+            NSApp.terminate(nil)
+            return
+        }
+        stopJobsBeforeQuitting()
         do {
             try await UpdateInstaller.relaunch(newer.url)
         } catch {
@@ -1616,22 +1633,33 @@ final class AppModel {
     /// idiom, kept to the case that causes the confusion.
     ///
     /// Every step before the relaunch either completes or leaves things as
-    /// they were. This window quits only once the new one has started, and
-    /// if it does not start, this copy comes back out of the Trash.
+    /// they were. The copy in Applications is quit first if it is open, so
+    /// it is never swapped out from under its own process. This window quits
+    /// only once the new one has started, and if it does not start, this
+    /// copy comes back out of the Trash.
     private func offerReplacing(_ installed: InstalledCopy, running: InstalledCopy) async {
         // A same-version copy is replaced all the same: what matters is
-        // which one the Dock starts. Only the wording changes.
+        // which one the Dock starts. Only the wording changes. An older
+        // release updates itself when it runs; only a development version,
+        // a build from source, never does.
         let isOlder = InstallationCheck.isOlder(installed.version, than: running.version)
         let (there, here) = InstallationCheck.displayLocations(installed.url, running.url)
+        let risk: String
+        if UpdateChecker.isDevelopmentVersion(installed.version) {
+            risk = "can start that copy, a build from source that won't update itself."
+        } else if isOlder {
+            risk = "can start the older version instead of this one."
+        } else {
+            risk = "can start that copy instead of this one."
+        }
         let alert = NSAlert()
         alert.messageText = isOlder
             ? "Replace the older CCwiki in Applications?"
             : "Replace the other CCwiki in Applications?"
         alert.informativeText = "CCwiki \(installed.version) is in \(there), and this copy, "
             + "\(running.version), is in \(here). Opening CCwiki from the Dock or Spotlight "
-            + (isOlder
-                ? "can start the older copy, which won't update itself."
-                : "can start that copy instead of this one.")
+            + risk + " Replace and Relaunch puts this version in \(there), moves this copy "
+            + "to the Trash, and opens CCwiki from there."
         alert.addButton(withTitle: "Replace and Relaunch")
         alert.addButton(withTitle: "Not Now").keyEquivalent = "\u{1b}"
         alert.showsSuppressionButton = true
@@ -1640,15 +1668,28 @@ final class AppModel {
             if alert.suppressionButton?.state == .on { ignoreCopies([installed]) }
             return
         }
+        guard mayStopJobs(then: "replace the CCwiki in \(there)", button: "Replace") else {
+            return
+        }
+        // Open, it would keep running from a bundle that is gone, and the
+        // relaunch would start a second process beside it.
+        guard await quitRunningInstance(of: installed.url) else {
+            showInstallationFailure(
+                "The CCwiki in \(there) is still open.",
+                detail: "Quit it, then open this copy again to put it in its place. Nothing "
+                    + "was changed, and this window keeps running the version you have.")
+            return
+        }
 
         let bundle = Bundle.main.bundleURL
         do {
             try await InstallationCheck.installCopy(of: bundle, over: installed.url)
         } catch {
+            // The error says what, if anything, changed.
             showInstallationFailure(
                 "The CCwiki in \(there) was not replaced.",
-                detail: "\(error.localizedDescription)\n\nNothing was changed, and this window "
-                    + "keeps running the version you have.")
+                detail: "\(error.localizedDescription)\n\nThis window keeps running the "
+                    + "version you have.")
             return
         }
         // LaunchServices does not start an app from the Trash, so this copy
@@ -1664,6 +1705,7 @@ final class AppModel {
         } catch {
             trashedAt = nil
         }
+        stopJobsBeforeQuitting()
         do {
             try await UpdateInstaller.relaunch(installed.url)
         } catch {
@@ -1689,7 +1731,7 @@ final class AppModel {
 
     /// Older or same-version copies elsewhere: name each, and offer the
     /// Trash or the Finder.
-    private func offerRemoving(_ copies: [InstalledCopy], running: InstalledCopy) {
+    private func offerRemoving(_ copies: [InstalledCopy]) {
         let one = copies.count == 1
         let alert = NSAlert()
         alert.messageText = one
@@ -1699,14 +1741,16 @@ final class AppModel {
             .map { "CCwiki \($0.version) — \(InstallationCheck.abbreviatedPath($0.url))" }
             .joined(separator: "\n")
         let which = one ? "it" : "one of these"
-        // A same-version release updates itself as this one does; only an
-        // older or development copy is stuck where it is.
-        let allOlder = copies.allSatisfy {
-            InstallationCheck.isOlder($0.version, than: running.version)
+        // An older release updates itself when it runs; only a development
+        // version, a build from source, never does.
+        let stuck: String
+        if !copies.allSatisfy({ UpdateChecker.isDevelopmentVersion($0.version) }) {
+            stuck = "."
+        } else {
+            stuck = one ? ", and it won't update itself." : ", and they won't update themselves."
         }
         alert.informativeText = list + "\n\nOpening CCwiki from the Dock, Spotlight or a link "
-            + "can start \(which) instead of this copy"
-            + (allOlder ? ", and it won't update itself." : ".")
+            + "can start \(which) instead of this copy" + stuck
         alert.addButton(withTitle: "Move to Trash")
         alert.addButton(withTitle: "Show in Finder")
         alert.addButton(withTitle: "Not Now").keyEquivalent = "\u{1b}"
@@ -1757,7 +1801,8 @@ final class AppModel {
         }
     }
 
-    /// "Don't ask again": the launch check leaves these paths out from now on.
+    /// "Don't ask again": the launch check never offers to replace or trash
+    /// the copies at these paths again. A newer copy at one is still news.
     private func ignoreCopies(_ copies: [InstalledCopy]) {
         var ignored = CCwikiSettings.ignoredCopies
         for copy in copies {
@@ -1773,6 +1818,63 @@ final class AppModel {
         alert.messageText = message
         alert.informativeText = detail
         alert.runModal()
+    }
+
+    // MARK: Handing over to another copy
+
+    /// Before this window hands over to another copy and quits: when jobs
+    /// are running, whether the person agrees to stop them. Asked before
+    /// anything changes, as `relaunchToUpdate` does: a "Don't Quit" at the
+    /// quit would leave two copies of the app on one clone and one search
+    /// index. True when nothing is running.
+    private func mayStopJobs(then action: String, button: String) -> Bool {
+        let running = activeJobCount
+        guard running > 0 else { return true }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = running == 1
+            ? "Stop the running job and \(action)?"
+            : "Stop \(running) running jobs and \(action)?"
+        alert.informativeText = "The agent will be stopped before it opens a pull "
+            + "request. Its worktree and transcript are kept."
+        alert.addButton(withTitle: (running == 1 ? "Stop Job and " : "Stop Jobs and ") + button)
+        alert.addButton(withTitle: "Don't \(button)").keyEquivalent = "\u{1b}"
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// Stops the jobs the person agreed to stop (`mayStopJobs`), and any
+    /// started since, just before the other copy starts, so the quit that
+    /// follows has nothing to ask.
+    private func stopJobsBeforeQuitting() {
+        if activeJobCount > 0 { cancelActiveJobs() }
+    }
+
+    /// The process running the copy at `url`, if there is one: not this one,
+    /// and not one that has quit.
+    private func runningInstance(of url: URL) -> NSRunningApplication? {
+        let target = InstallationCheck.path(of: url.resolvingSymlinksInPath())
+        let me = ProcessInfo.processInfo.processIdentifier
+        let candidates = NSRunningApplication.runningApplications(
+            withBundleIdentifier: BuildIdentity.releaseBundleIdentifier)
+        return candidates.first { app in
+            guard app.processIdentifier != me, !app.isTerminated,
+                  let bundle = app.bundleURL
+            else { return false }
+            return InstallationCheck.path(of: bundle.resolvingSymlinksInPath()) == target
+        }
+    }
+
+    /// Asks the process running the copy at `url`, if any, to quit, and
+    /// gives it ten seconds, since it may ask about its own jobs first. True
+    /// when no such process is left.
+    private func quitRunningInstance(of url: URL) async -> Bool {
+        guard let other = runningInstance(of: url) else { return true }
+        _ = other.terminate()
+        for _ in 0..<50 {
+            if other.isTerminated { return true }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return other.isTerminated
     }
 
     // MARK: Update check

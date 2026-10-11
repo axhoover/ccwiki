@@ -34,8 +34,9 @@ Ranked, with the evidence for each:
      Until 2dcf6ee (2026-09-28), every local `make` build not at an exact
      tag was stamped from the `VERSION` file, which said 0.1.0.
    - The release download counters say no copy ever fetched the `.sig` of
-     0.1.2 or 0.1.3. The installer always fetches it, before any other
-     check. So no real release copy has tried to install either version.
+     0.1.2 or 0.1.3. The installer in 0.1.0–0.1.3 fetched it right after
+     the zip, before checking anything about the copy it would replace. So
+     no real release copy has tried to install either version.
      A copy that runs every day with auto-install on would have done so.
      The copy that keeps coming back therefore has no updater, which also
      matches "0.1.0 doesn't have the quick auto updates".
@@ -104,7 +105,14 @@ not `com.axhoover.ccwiki` or whose version is not the tag.
 
 `AppPaths.stagedWebRoot()` used to delete every other build's staged web
 copy at launch. That pulled the reader's JavaScript out from under any other
-copy that was running. It now removes only copies untouched for a week.
+copy that was running. It now removes only copies untouched for a week, and
+keeps them in `Caches/CCwiki/web-builds`: releases up to 0.1.3 still clear
+out `Caches/CCwiki/web` whenever their own copy is missing, so a new build's
+copy there would go whenever one of them ran.
+
+`build.sh` names the bundle for the channel too: `build/CCwiki Dev.app`, or
+`build/CCwiki.app` for the release. Finder, the Dock and ⌘-Tab show the file
+name, and a dev build called `CCwiki.app` could be dragged over the release.
 
 ### 2.2 The updater replaces in one step and leaves nothing behind (cause 2)
 
@@ -122,44 +130,76 @@ three renames through a temporary name, with rollback. Then it:
   LaunchServices, Spotlight and Finder see the new version (Sparkle does
   the same);
 - never replaces a copy that is already as new as the release;
-- refuses, with a clear message, to update a copy running from a Trash or
-  from App Translocation.
+- refuses a release whose `LSMinimumSystemVersion` this Mac does not meet,
+  while the old bundle is still in place, since one that cannot start would
+  otherwise leave no working app;
+- refuses, before downloading anything and again just before the swap, a
+  copy running from a Trash or from App Translocation, one moved or deleted
+  since it started, and one in a folder it cannot write to, each with a
+  message saying what to do.
 
 ### 2.3 Other copies are found at launch (cause 1)
 
 A stale copy cannot detect itself, so the new version does it. At launch, a
 release build asks LaunchServices for every copy of `com.axhoover.ccwiki`
 (`NSWorkspace.urlsForApplications(withBundleIdentifier:)`). It drops itself,
-missing paths, anything in a Trash, anything on a read-only volume, and paths
-the user chose to ignore. Then it decides, in a pure, tested function
+missing paths, anything in a Trash and anything on a read-only volume. A copy
+in Desktop, Documents or Downloads is read from Spotlight
+(`kMDItemCFBundleIdentifier`, `kMDItemVersion`) rather than from its
+`Info.plist`: macOS asks before an app reads a file there, and would ask at
+launch, before CCwiki has said why. Spotlight has no build number. When
+this copy runs from App Translocation it also drops copies of its own
+version and build, or of its version and an unknown build:
+LaunchServices lists the folder the mirror was made from, which is this
+copy, and nothing public says so. That folder is offered at the next launch
+from Applications. Then it decides, in a pure, tested function
 (`InstallationCheck.advice`):
 
 - **A newer copy exists.** "A newer version of CCwiki is on this Mac", with
-  Open CCwiki X (opens it, then quits this one) or Keep Using This Version.
-  This doubles as the downgrade guard.
-- **This copy runs outside an Applications folder, and an older one sits in
-  one.** "Replace the older CCwiki in Applications?", with Replace and
-  Relaunch:
-  1. copy this bundle onto the older copy's volume;
-  2. swap it in with the updater's primitive and delete the old one;
-  3. move this copy to the Trash;
-  4. relaunch from Applications.
+  Open CCwiki X (opens it, or brings it forward if it is already open, then
+  quits this one) or Keep Using This Version. This doubles as the downgrade
+  guard, and a path the user chose to ignore still counts here: the copy
+  there may have updated itself since.
+- **This copy runs outside an Applications folder, and an older or
+  same-version one sits in one.** "Replace the older CCwiki in
+  Applications?" ("Replace the other CCwiki in Applications?" for the same
+  version), with Replace and Relaunch. `/Applications/CCwiki.app`, the copy
+  the Dock and Spotlight use, is chosen ahead of a Finder duplicate such as
+  `CCwiki 2.app` or a copy in a subfolder:
+  1. quit that copy if it is open, so it is never swapped out from under
+     its own process;
+  2. copy this bundle onto the older copy's volume;
+  3. swap it in with the updater's primitive and delete the old one;
+  4. move this copy to the Trash;
+  5. relaunch from Applications.
   This is the LetsMove idiom, limited to the case that causes confusion.
 - **Other older or duplicate copies.** "Another copy of CCwiki is on this
   Mac", listing each version and location, with Move to Trash, Show in
   Finder, or Not Now. A copy in the Trash cannot run (`kLSAppInTrashErr`),
   so moving it there is enough.
 
-Not Now with "Don't ask again" remembers those paths. A copy with the
-release id and a `-dev` version is a stale pre-channel dev build. It counts
-as older and never as newer.
+Before either of the first two hands over to another copy, it asks to stop
+any running job, as Relaunch to Update does, so the quit that follows cannot
+be refused and leave two copies on one clone. The check runs before the
+launch sync, so a copy about to hand over never starts a fetch on the clone
+they share.
 
-Settings → About shows the running copy's location with Show in Finder.
-Each launch logs one line with the version, build and path, under subsystem
+Not Now with "Don't ask again" remembers those paths: they are never
+replaced or offered to the Trash again, but a newer copy at one is still
+offered. A copy with the release id and a `-dev` version is a stale
+pre-channel dev build. It counts as older and never as newer, and only such
+a build is said not to update itself: every release since 0.1.0 does when
+it runs.
+
+Settings → About shows the running copy's location with Reveal. Each
+launch logs one line with the version, build and path, under subsystem
 `com.axhoover.ccwiki`, category `launch`. So
 `log show --last 7d --predicate 'subsystem BEGINSWITH "com.axhoover.ccwiki"'`
-answers "which copy ran when". `ccwiki.lastSeenVersion` only moves forward,
-so an older copy can no longer rewind What's New.
+answers "which copy ran when". From this version on, `ccwiki.lastSeenVersion`
+only moves forward. A copy that predates it still writes its own version
+there when it runs, so What's New compares with the newer of that and
+`ccwiki.highestSeenVersion`, which only this version on writes; an older
+copy can no longer bring What's New back.
 
 ## 3. Not done, on purpose
 
@@ -180,3 +220,8 @@ so an older copy can no longer rewind What's New.
 - How do you usually open CCwiki: the Dock, Spotlight, Launchpad or Apps,
   Raycast or Alfred, or Finder? And how did 0.1.2 arrive? Its `.sig` was
   never downloaded.
+- Unproven without a Mac: that a release with a copy in Downloads launches
+  without "CCwiki would like to access files in your Downloads folder" (the
+  check reads that copy from Spotlight, but still checks that its path
+  exists), and that an open copy in Applications quits when Replace and
+  Relaunch asks it to.

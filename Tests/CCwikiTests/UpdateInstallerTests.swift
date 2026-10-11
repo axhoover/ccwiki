@@ -283,6 +283,19 @@ struct UpdateInstallerTests {
         #expect(stillTrashed.version == "0.1.0")
     }
 
+    @Test("a release's minimum macOS is compared part by part")
+    func minimumSystemVersion() {
+        let system = OperatingSystemVersion(majorVersion: 14, minorVersion: 6, patchVersion: 1)
+        #expect(UpdateInstaller.isSystem(system, atLeast: "14.0"))
+        #expect(UpdateInstaller.isSystem(system, atLeast: "14.6.1"))
+        #expect(UpdateInstaller.isSystem(system, atLeast: "13"))
+        #expect(UpdateInstaller.isSystem(system, atLeast: "10.15"))
+        #expect(!UpdateInstaller.isSystem(system, atLeast: "14.7"))
+        #expect(!UpdateInstaller.isSystem(system, atLeast: "14.6.2"))
+        #expect(!UpdateInstaller.isSystem(system, atLeast: "15.0"))
+        #expect(UpdateInstaller.isSystem(system, atLeast: ""))
+    }
+
     // MARK: Where a copy is
 
     @Test("a copy in a Trash, behind App Translocation, or in Applications is told by its path")

@@ -48,7 +48,7 @@ struct StagedWebRootTests {
         let support = FileManager.default.temporaryDirectory
             .appending(path: "ccwiki-web-launch-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: support) }
-        let web = support.appending(path: "web")
+        let web = support.appending(path: "web-builds")
         let monthAgo = Date().addingTimeInterval(-30 * Self.day)
         let mine = web.appending(path: AppPaths.stagedWebBuild)
         let running = web.appending(path: "another-running-build")

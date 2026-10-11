@@ -9,7 +9,8 @@ provider (`swift`, `codesign`, `notarytool`, `stapler`).
 - **`Package.swift`** — one `executableTarget` (`CCwiki`) + one `testTarget`.
   Swift 6 language mode. Zero third-party dependencies.
 - **`build.sh`** — stamp the Info.plist for `CHANNEL` (see "Two channels"
-  below) → `swift build` → assemble `build/CCwiki.app` (the stamped
+  below) → `swift build` → assemble `build/CCwiki Dev.app`, or
+  `build/CCwiki.app` for the release channel (the stamped
   Info.plist, `PkgInfo`, any dependency `*.bundle`s copied into
   `Contents/Resources`, the icon) → codesign. Falls back to ad-hoc signing
   (`-`) when no real identity is available, so `make run` always works on a
@@ -52,7 +53,7 @@ doing it for you:
 | `make check`  | `swift build` only — fast compile gate for CI/agents      |
 | `make test`   | `swift test` (swift-testing)                              |
 | `make run`    | build the `.app`, ad-hoc sign, `open` it                 |
-| `make` / build| `build/CCwiki.app` (debug)                              |
+| `make` / build| `build/CCwiki Dev.app` (debug)                          |
 | `make install`| build, copy to `/Applications/CCwiki Dev.app`, `lsregister -f` it |
 | `make uninstall` / `register` | remove, or re-register, that installed copy |
 | `make icon`   | regenerate `build/AppIcon.icns`                          |
@@ -88,7 +89,13 @@ id and kept coming back is what made CCwiki seem to revert to 0.1.0.
 | Updates | checks, installs | never checks, never installs |
 | `make install` puts it at | `/Applications/CCwiki.app` | `/Applications/CCwiki Dev.app` |
 
-The bundle is `build/CCwiki.app` either way; only `make install` renames it.
+The bundle is named for the channel too: `build/CCwiki Dev.app` for dev,
+`build/CCwiki.app` for the release. Finder, the Dock and ⌘-Tab show the file
+name, and a dev build named `CCwiki.app` could be dragged over the release
+in /Applications. `build.sh` removes a CCwiki Dev bundle left at
+`build/CCwiki.app` by a build from before the rename. The release steps of
+`make package` and `make dist` run as sub-makes with `CHANNEL=release`, so
+each finds `build/CCwiki.app`.
 
 The separate bundle id keeps UserDefaults, saved window state, WebKit's data,
 URL caches and LaunchServices apart on its own: a dev build cannot win
@@ -123,7 +130,7 @@ with an error when `WIKI` has no `content/` folder: the corpus suites skip
 themselves without a clone, so on a Mac with only CCwiki Dev the default
 would otherwise pass having tested nothing.
 
-`make shots` drives `build/CCwiki.app`, which is CCwiki Dev: its first run
+`make shots` drives `build/CCwiki Dev.app`, which is CCwiki Dev: its first run
 downloads the wiki into `CCwiki-Dev` (run `make run` once first if the
 harness's wait runs out). It finds the window to capture by the pid of the
 process it started, so a release open beside it is never captured.

@@ -314,7 +314,8 @@ struct SettingsView: View {
 
     private var aboutTab: some View {
         Form {
-            Section("CCwiki") {
+            // "CCwiki Dev" in a build from source, as the menus say.
+            Section((Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "CCwiki") {
                 LabeledContent("Version") {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(Bundle.main.shortVersion)
@@ -420,7 +421,7 @@ struct SettingsView: View {
                         .textSelection(.enabled)
                 }
                 .help(InstallationCheck.path(of: bundle))
-                Button("Show in Finder") {
+                Button("Reveal") {
                     NSWorkspace.shared.activateFileViewerSelecting([bundle])
                 }
                 .controlSize(.small)

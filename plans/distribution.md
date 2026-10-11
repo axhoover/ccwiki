@@ -112,9 +112,9 @@ Rules: silent when offline (the same posture as sync), a preference to turn
 it off, no download and no install. The unauthenticated GitHub API allows 60
 requests an hour per address, which a daily check does not approach. Zero
 dependencies, no signing keys, no feed to maintain: the GitHub release *is*
-the feed. Note the version is only real on tagged builds; `make install`
-stamps `0.0.0` (`build.sh:25`), which should be treated as "development, do
-not check".
+the feed. Builds from source are CCwiki Dev (`CHANNEL=dev`), with their own
+bundle id and no updater; only `make package`/`make dist` build the release
+(see [build-system.md](build-system.md), "Two channels").
 
 ### Tier 2: Homebrew does the updating
 
@@ -198,7 +198,8 @@ message saying what to do, a copy running from the Trash or from App
 Translocation, one moved or deleted since it started, and one in a folder
 it cannot write to. Then it downloads the zip and its `.sig`, verifies the
 signature against the embedded key, unpacks with `ditto`, and checks the
-bundle identifier, the version and the code signature. It stages the new
+bundle identifier, the version, the code signature, and that this Mac meets
+the release's `LSMinimumSystemVersion`. It stages the new
 bundle in a temporary directory on the installed one's volume and
 exchanges the two in one atomic step (`renamex_np` with `RENAME_SWAP`;
 three renames with rollback on a volume that cannot swap). It checks that
@@ -293,8 +294,8 @@ EdDSA idea, at the framework-embedding cost in tier 3.
 
 Then the honest options are: distribute only through Homebrew with
 instructions to run `xattr -dr com.apple.quarantine /Applications/CCwiki.app`
-(developers will, nobody else will), or distribute source and `make install`
-(the status quo). Neither is a download for a stranger. The membership is
+(developers will, nobody else will), or distribute source and
+`make install CHANNEL=release` at a tag (the status quo). Neither is a download for a stranger. The membership is
 the cheapest part of this whole plan.
 
 ## 6. Order

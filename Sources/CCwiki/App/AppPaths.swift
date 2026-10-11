@@ -11,7 +11,7 @@ import Foundation
 ///
 /// ~/Library/Caches/CCwiki/
 /// ├── worktrees/     one git worktree per ingestion job, pruned when the PR opens
-/// └── web/           the reader's pipeline, one copy per build (`stagedWebRoot`)
+/// └── web-builds/    the reader's pipeline, one copy per build (`stagedWebRoot`)
 /// ```
 ///
 /// That is the release. CCwiki Dev, any build from source, keeps the same tree
@@ -102,10 +102,16 @@ struct AppPaths: Sendable {
     /// `stagedWebRetention`. Deleting them all at launch, as this once did,
     /// pulled the JavaScript out from under any other copy of CCwiki that was
     /// running at the time.
+    ///
+    /// The folder is `web-builds`, not the `web` that earlier builds (every
+    /// release up to 0.1.3) used: those still delete every other entry in
+    /// `web` whenever their own copy is missing, which the pruning here makes
+    /// likely, and so would delete this build's copy while it runs. `web` is
+    /// theirs; each of them clears it out the same way.
     func stagedWebRoot() -> URL {
         let source = webRoot
         let build = Self.stagedWebBuild
-        let root = cacheRoot.appending(path: "web")
+        let root = cacheRoot.appending(path: "web-builds")
         let staged = root.appending(path: build)
         let manager = FileManager.default
         Self.pruneStagedWebCopies(

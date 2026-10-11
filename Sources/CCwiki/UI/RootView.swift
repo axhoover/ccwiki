@@ -66,15 +66,17 @@ struct RootView: View {
             // Before the library: Welcome is readable while the wiki downloads.
             model.openLaunchDocumentIfNeeded()
             await model.loadLibrary()
+            // Which copy this is goes to the log on every launch; the other
+            // copies are looked for in a release, and not under the harness.
+            // Before the sync: a copy that hands over to another and quits
+            // must not leave a fetch running on the clone the two share.
+            await model.checkInstallation()
             // A launch fetch keeps the wiki current for someone who never
             // presses ⌘R. Not under the screenshot harness, whose captures
             // must not depend on the network.
             let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
             if model.index == nil || launchFetch { model.sync() }
             ScreenshotRunner.run(model: model)
-            // Which copy this is goes to the log on every launch; the other
-            // copies are looked for in a release, and not under the harness.
-            await model.checkInstallation()
             if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in

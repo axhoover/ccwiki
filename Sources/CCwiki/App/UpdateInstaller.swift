@@ -37,6 +37,7 @@ enum UpdateInstaller {
         case noBundle
         case wrongBundle(found: String)
         case wrongVersion(found: String)
+        case requiresNewerMacOS(version: String, minimum: String)
         case invalidSignature(String)
         case moved
         case inTrash
@@ -68,6 +69,8 @@ enum UpdateInstaller {
                 "The archive contains \(found), not CCwiki."
             case .wrongVersion(let found):
                 "The archive says it is version \(found), not the version the release promised."
+            case .requiresNewerMacOS(let version, let minimum):
+                "CCwiki \(version) needs macOS \(minimum) or later. Nothing was installed."
             case .invalidSignature(let why):
                 "The unpacked app's code signature is not valid: \(why)"
             case .moved:
@@ -129,6 +132,17 @@ enum UpdateInstaller {
               let version = dictionary["CFBundleShortVersionString"] as? String
         else { throw Failure.noBundle }
         return BundleInfo(url: app, identifier: identifier, version: version)
+    }
+
+    /// Whether `system` is at least `minimum`, an `LSMinimumSystemVersion`
+    /// such as "14.0", compared part by part. One with no number in it asks
+    /// for nothing.
+    static func isSystem(_ system: OperatingSystemVersion, atLeast minimum: String) -> Bool {
+        let parts = minimum.split(separator: ".").compactMap { Int($0) }
+        guard !parts.isEmpty else { return true }
+        let required = (parts + [0, 0, 0]).prefix(3)
+        let have = [system.majorVersion, system.minorVersion, system.patchVersion]
+        return !have.lexicographicallyPrecedes(required)
     }
 
     /// `Contents/Info.plist`, read from disk rather than through `Bundle`,
@@ -202,6 +216,13 @@ enum UpdateInstaller {
         }
         guard info.version == release.version else {
             throw Failure.wrongVersion(found: info.version)
+        }
+        // A release this Mac cannot run would be swapped in, the old bundle
+        // deleted, and then fail to start: refused while the old one is
+        // still in place.
+        if let minimum = infoDictionary(of: info.url)?["LSMinimumSystemVersion"] as? String,
+           !isSystem(ProcessInfo.processInfo.operatingSystemVersion, atLeast: minimum) {
+            throw Failure.requiresNewerMacOS(version: release.version, minimum: minimum)
         }
         _ = await Subprocess.run(
             executable: "/usr/bin/xattr",

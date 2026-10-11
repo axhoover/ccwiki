@@ -127,21 +127,47 @@ struct InstallationCheckTests {
             == .removeOthers([a]))
     }
 
-    @Test("an ignored path is left out before anything is decided")
+    @Test("an ignored path is never replaced or offered to the Trash")
     func ignored() {
         let running = copy("/Users/someone/Downloads/CCwiki.app", "0.1.0")
-        let newer = copy("/Users/someone/Desktop/CCwiki.app", "0.2.0")
         let installed = copy("/Applications/CCwiki.app", "0.0.9")
         let other = copy("/Volumes/Backup/CCwiki.app", "0.0.9")
-        let all = [newer, installed, other]
+        let all = [installed, other]
+        #expect(advice(running: running, inApplications: false, others: all)
+            == .replaceOlder(installed))
         #expect(advice(running: running, inApplications: false, others: all,
-                       ignoring: ["/Users/someone/Desktop/CCwiki.app"]) == .replaceOlder(installed))
-        #expect(advice(running: running, inApplications: false, others: all,
-                       ignoring: ["/Users/someone/Desktop/CCwiki.app", "/Applications/CCwiki.app/"])
-            == .removeOthers([other]))
+                       ignoring: ["/Applications/CCwiki.app/"]) == .removeOthers([other]))
         #expect(advice(running: running, inApplications: false, others: all,
                        ignoring: Set(all.map { InstallationCheck.path(of: $0.url) }))
             == InstallationAdvice.none)
+    }
+
+    @Test("a newer copy at an ignored path is still offered")
+    func ignoredButNewer() {
+        // "Don't ask again" was said about the 0.0.9 that was there; the
+        // copy there has since updated itself past this one.
+        let running = copy("/Users/someone/Downloads/CCwiki.app", "0.1.0")
+        let updated = copy("/Applications/CCwiki.app", "0.2.0")
+        let other = copy("/Volumes/Backup/CCwiki.app", "0.0.9")
+        #expect(advice(running: running, inApplications: false, others: [updated, other],
+                       ignoring: ["/Applications/CCwiki.app"]) == .openNewer(updated))
+    }
+
+    @Test("the canonical /Applications/CCwiki.app is replaced ahead of a Finder duplicate or a subfolder")
+    func canonicalFirst() {
+        let running = copy("/Users/someone/Downloads/CCwiki.app", "0.2.0")
+        let canonical = copy("/Applications/CCwiki.app", "0.1.0")
+        let duplicate = copy("/Applications/CCwiki 2.app", "0.1.0")
+        let archived = copy("/Applications/Archive/CCwiki.app", "0.1.0")
+        #expect(advice(running: running, inApplications: false,
+                       others: [duplicate, archived, canonical]) == .replaceOlder(canonical))
+        // In ~/Applications, likewise, and after anything in /Applications.
+        let yours = copy("/Users/someone/Applications/CCwiki.app", "0.1.0")
+        let yoursArchived = copy("/Users/someone/Applications/Archive/CCwiki.app", "0.1.0")
+        #expect(advice(running: running, inApplications: false, others: [yoursArchived, yours])
+            == .replaceOlder(yours))
+        #expect(advice(running: running, inApplications: false, others: [yours, duplicate])
+            == .replaceOlder(duplicate))
     }
 
     @Test("running translocated, the folder the mirror was made from is not another copy")
@@ -169,6 +195,12 @@ struct InstallationCheckTests {
         let rebuilt = copy("/Users/someone/Desktop/CCwiki.app", "0.2.0", build: "202612010000")
         #expect(advice(running: running, inApplications: false, others: [original, rebuilt])
             == .removeOthers([rebuilt]))
+        // A copy read from Spotlight has no build number; one of this
+        // version may be the original, and is left out too.
+        let unknown = copy("/Users/someone/Downloads/CCwiki.app", "0.2.0",
+                           build: InstallationCheck.unknownBuild)
+        #expect(advice(running: running, inApplications: false, others: [unknown])
+            == InstallationAdvice.none)
         // Not translocated, the same copy in Downloads is a duplicate.
         let installed = copy("/Applications/CCwiki.app", "0.2.0")
         #expect(advice(running: installed, inApplications: true, others: [original])
@@ -201,6 +233,19 @@ struct InstallationCheckTests {
         #expect(InstallationCheck.nextSeenVersion(lastSeen: "0.0.0", current: "0.1.0") == "0.1.0")
     }
 
+    @Test("What's New compares with the newer of the two records")
+    func seenVersion() {
+        #expect(InstallationCheck.seenVersion(recorded: nil, highest: nil) == nil)
+        #expect(InstallationCheck.seenVersion(recorded: "0.1.3", highest: nil) == "0.1.3")
+        // A copy from before the check wrote its own, older version.
+        #expect(InstallationCheck.seenVersion(recorded: "0.1.3", highest: "0.2.0") == "0.2.0")
+        #expect(InstallationCheck.seenVersion(recorded: "0.10.0", highest: "0.9.0") == "0.10.0")
+        // A development version gives way to the other.
+        #expect(InstallationCheck.seenVersion(recorded: "0.3.0-dev", highest: "0.2.0") == "0.2.0")
+        #expect(InstallationCheck.seenVersion(recorded: "0.1.3", highest: "0.0.0") == "0.1.3")
+        #expect(InstallationCheck.seenVersion(recorded: nil, highest: "0.2.0") == "0.2.0")
+    }
+
     // MARK: Locations
 
     @Test("a location is named the way a person names the folder")
@@ -210,7 +255,7 @@ struct InstallationCheckTests {
         }
         #expect(location("/Applications/CCwiki.app") == "Applications")
         #expect(location("/System/Volumes/Data/Applications/CCwiki.app") == "Applications")
-        #expect(location("/Users/someone/Applications/CCwiki.app") == "Applications (yours)")
+        #expect(location("/Users/someone/Applications/CCwiki.app") == "~/Applications")
         #expect(location("/Users/someone/Downloads/CCwiki.app") == "Downloads")
         #expect(location("/Users/someone/Desktop/CCwiki.app") == "Desktop")
         #expect(location("/Users/someone/src/ccwiki/build/CCwiki.app") == "~/src/ccwiki/build")
@@ -294,7 +339,7 @@ struct InstallationCheckTests {
         let installed = try makeBundle(
             "Applications/CCwiki.app", in: root, identifier: identifier, version: "0.3.0")
 
-        await #expect(throws: UpdateInstaller.Failure.self) {
+        await #expect(throws: InstallationCheck.Failure.self) {
             try await InstallationCheck.installCopy(of: running, over: installed)
         }
         #expect(try UpdateInstaller.inspect(bundle: installed).version == "0.3.0")

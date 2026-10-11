@@ -8,11 +8,13 @@
 # the compile, this script does the bundling and signing. Xcode is only a
 # toolchain provider (swift / codesign).
 #
-# The bundle is always build/CCwiki.app; what it IS comes from CHANNEL. The
-# default, dev, is "CCwiki Dev": its own bundle id, data folders and URL
-# scheme, and no updater, so it runs beside an installed release without
-# touching it. Only `make package` and `make dist` build the release channel.
-# See scripts/stamp-info-plist.sh and plans/build-system.md.
+# What the bundle IS comes from CHANNEL. The default, dev, is "CCwiki Dev":
+# its own bundle id, data folders and URL scheme, and no updater, so it runs
+# beside an installed release without touching it. It is built as
+# "build/CCwiki Dev.app", so that one dragged to Applications cannot replace
+# the release's CCwiki.app. Only `make package` and `make dist` build the
+# release channel, as build/CCwiki.app. See scripts/stamp-info-plist.sh and
+# plans/build-system.md.
 #
 # Environment:
 #   CHANNEL            dev (default) or release. Picks the bundle's identity.
@@ -29,7 +31,13 @@ CONFIG="${1:-debug}"
 CHANNEL="${CHANNEL:-dev}"
 APP_NAME="CCwiki"
 BUILD_DIR="build"
-APP="$BUILD_DIR/$APP_NAME.app"
+# Finder, the Dock and ⌘-Tab show the file name, so the two channels' bundles
+# are named apart. (The stamp below refuses any channel but these two.)
+if [ "$CHANNEL" = "release" ]; then
+	APP="$BUILD_DIR/$APP_NAME.app"
+else
+	APP="$BUILD_DIR/$APP_NAME Dev.app"
+fi
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 PROVISION_PROFILE="${PROVISION_PROFILE:-}"
 VERSION="${VERSION:-0.0.0}"
@@ -88,6 +96,15 @@ fi
 # ---------------------------------------------------------------------------
 echo "→ assembling $APP"
 rm -rf "$APP"
+# A dev build from before the bundles were named apart is "CCwiki.app", the
+# release's name: removed, so it cannot be dragged over the release either.
+# Only a CCwiki Dev bundle goes; a release built here stays.
+LEGACY_APP="$BUILD_DIR/$APP_NAME.app"
+if [ "$CHANNEL" != "release" ] && [ -f "$LEGACY_APP/Contents/Info.plist" ] \
+	&& grep -q '<string>com.axhoover.ccwiki.dev</string>' "$LEGACY_APP/Contents/Info.plist"; then
+	rm -rf "$LEGACY_APP"
+	echo "  removed $LEGACY_APP, an older CCwiki Dev build under the release's name"
+fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$EXECUTABLE" "$APP/Contents/MacOS/$APP_NAME"

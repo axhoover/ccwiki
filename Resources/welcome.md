@@ -46,7 +46,9 @@ link to it.
 CCwiki checks for a newer copy of the wiki each time it opens, and the status
 bar at the bottom says how current your copy is. It also checks once a day
 for a new version of the app itself, installs it, and asks before
-relaunching. You can change both in Settings (⌘,).
+relaunching. You can change both in Settings (⌘,). (A copy built from
+source, CCwiki Dev, never looks for a new version of the app; build it again
+for a newer one.)
 
 ## Contributing to the wiki
 

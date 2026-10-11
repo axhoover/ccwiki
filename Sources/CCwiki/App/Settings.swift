@@ -21,12 +21,14 @@ struct CCwikiSettings: Sendable {
     private static let lastPageKey = "ccwiki.lastPage"
     private static let recentPagesKey = "ccwiki.recentPages"
     private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
+    private static let highestSeenVersionKey = "ccwiki.highestSeenVersion"
     private static let showsInspectorKey = "ccwiki.showsInspector"
     private static let inspectorTabKey = "ccwiki.inspectorTab"
     private static let ignoredCopiesKey = "ccwiki.ignoredCopies"
 
-    /// Other copies of the app that the launch check is not to mention again
-    /// ("Don't ask again"), by path in `InstallationCheck.path(of:)`'s form.
+    /// Other copies of the app that the launch check is not to offer to
+    /// replace or trash again ("Don't ask again"), by path in
+    /// `InstallationCheck.path(of:)`'s form. A newer copy at one is still news.
     static var ignoredCopies: [String] {
         get { UserDefaults.standard.stringArray(forKey: ignoredCopiesKey) ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: ignoredCopiesKey) }
@@ -48,11 +50,21 @@ struct CCwikiSettings: Sendable {
 
     /// The app version that last launched. Absent on a first launch, which
     /// is when the Welcome page opens; older than the running version after
-    /// an update, which is when What's New opens. It only moves forward
-    /// (`InstallationCheck.nextSeenVersion`).
+    /// an update, which is when What's New opens. This version on, it only
+    /// moves forward (`InstallationCheck.nextSeenVersion`), but a copy that
+    /// predates that still sets it to its own version; see
+    /// `highestSeenVersion`.
     static var lastSeenVersion: String? {
         get { UserDefaults.standard.string(forKey: lastSeenVersionKey) }
         set { UserDefaults.standard.set(newValue, forKey: lastSeenVersionKey) }
+    }
+
+    /// The newest release that has launched, written only by copies that
+    /// keep it moving forward, so an older copy cannot rewind it. What's New
+    /// compares with the newer of the two (`InstallationCheck.seenVersion`).
+    static var highestSeenVersion: String? {
+        get { UserDefaults.standard.string(forKey: highestSeenVersionKey) }
+        set { UserDefaults.standard.set(newValue, forKey: highestSeenVersionKey) }
     }
 
     /// Pages opened most recently, newest first, by `content/`-relative path.
