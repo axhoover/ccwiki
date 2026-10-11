@@ -422,7 +422,7 @@ struct SettingsView: View {
                         .truncationMode(.head)
                         .textSelection(.enabled)
                 }
-                .help(bundle.path(percentEncoded: false))
+                .help(InstallationCheck.path(of: bundle))
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([bundle])
                 }

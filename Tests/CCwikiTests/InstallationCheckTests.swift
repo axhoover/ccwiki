@@ -22,6 +22,26 @@ struct InstallationCheckTests {
             ignoredPaths: ignored, home: home)
     }
 
+    /// A bundle at `relative` under `root` with only an `Info.plist`, or with
+    /// an empty `Contents` folder when `identifier` is nil.
+    private func makeBundle(_ relative: String, in root: URL, identifier: String?,
+                            version: String, build: String = "202610110900") throws -> URL {
+        let manager = FileManager.default
+        let app = root.appending(path: relative)
+        let contents = app.appending(path: "Contents")
+        try manager.createDirectory(at: contents, withIntermediateDirectories: true)
+        guard let identifier else { return app }
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": identifier,
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": build,
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: contents.appending(path: "Info.plist"))
+        return app
+    }
+
     // MARK: advice
 
     @Test("no other copy, or only this one under another spelling, is nothing to say")
@@ -124,6 +144,47 @@ struct InstallationCheckTests {
             == InstallationAdvice.none)
     }
 
+    @Test("running translocated, the folder the mirror was made from is not another copy")
+    func translocated() {
+        let mirror = "/private/var/folders/xy/abc123/T/AppTranslocation/"
+            + "0F2B4A1C-1111-2222-3333-444455556666/d/CCwiki.app"
+        let running = copy(mirror, "0.2.0")
+        // LaunchServices lists the original under its own path. Opened from
+        // Downloads, it is not offered to the Trash; opened from Applications
+        // while still quarantined, it is not replaced by itself.
+        let original = copy("/Users/someone/Downloads/CCwiki.app", "0.2.0")
+        #expect(advice(running: running, inApplications: false, others: [original])
+            == InstallationAdvice.none)
+        let installedOriginal = copy("/Applications/CCwiki.app", "0.2.0")
+        #expect(advice(running: running, inApplications: false, others: [installedOriginal])
+            == InstallationAdvice.none)
+        // Every other copy is still what it was: an older one in Applications
+        // is replaced, a newer one is opened, another build is another copy.
+        let older = copy("/Applications/CCwiki.app", "0.1.0")
+        #expect(advice(running: running, inApplications: false, others: [original, older])
+            == .replaceOlder(older))
+        let newer = copy("/Users/someone/Applications/CCwiki.app", "0.3.0")
+        #expect(advice(running: running, inApplications: false, others: [original, newer])
+            == .openNewer(newer))
+        let rebuilt = copy("/Users/someone/Desktop/CCwiki.app", "0.2.0", build: "202612010000")
+        #expect(advice(running: running, inApplications: false, others: [original, rebuilt])
+            == .removeOthers([rebuilt]))
+        // Not translocated, the same copy in Downloads is a duplicate.
+        let installed = copy("/Applications/CCwiki.app", "0.2.0")
+        #expect(advice(running: installed, inApplications: true, others: [original])
+            == .removeOthers([original]))
+    }
+
+    @Test("an older or development copy is behind; a same-version release is not")
+    func isOlder() {
+        #expect(InstallationCheck.isOlder("0.1.0", than: "0.2.0"))
+        #expect(InstallationCheck.isOlder("0.9.0", than: "0.10.0"))
+        #expect(InstallationCheck.isOlder("0.3.0-dev", than: "0.2.0"))
+        #expect(InstallationCheck.isOlder("0.0.0", than: "0.2.0"))
+        #expect(!InstallationCheck.isOlder("0.2.0", than: "0.2.0"))
+        #expect(!InstallationCheck.isOlder("0.3.0", than: "0.2.0"))
+    }
+
     // MARK: nextSeenVersion
 
     @Test("the version remembered for What's New only moves forward")
@@ -157,6 +218,8 @@ struct InstallationCheckTests {
         #expect(location("/Applications/Reading/CCwiki.app") == "/Applications/Reading")
         #expect(location("/Volumes/Backup/Apps/CCwiki.app") == "/Volumes/Backup/Apps")
         #expect(location("/Users/someoneelse/Downloads/CCwiki.app") == "/Users/someoneelse/Downloads")
+        #expect(location("/private/var/folders/xy/abc123/T/AppTranslocation/"
+            + "0F2B4A1C-1111-2222-3333-444455556666/d/CCwiki.app") == "a temporary folder")
         #expect(InstallationCheck.displayLocation(
             URL(fileURLWithPath: "/Applications/CCwiki.app", isDirectory: true), home: home)
             == "Applications")
@@ -186,29 +249,15 @@ struct InstallationCheckTests {
         defer { try? manager.removeItem(at: root) }
         let identifier = "com.axhoover.ccwiki"
 
-        func makeBundle(_ relative: String, identifier: String?, version: String,
-                        build: String = "202610110900") throws -> URL {
-            let app = root.appending(path: relative)
-            let contents = app.appending(path: "Contents")
-            try manager.createDirectory(at: contents, withIntermediateDirectories: true)
-            guard let identifier else { return app }
-            let plist: [String: Any] = [
-                "CFBundleIdentifier": identifier,
-                "CFBundleShortVersionString": version,
-                "CFBundleVersion": build,
-            ]
-            let data = try PropertyListSerialization.data(
-                fromPropertyList: plist, format: .xml, options: 0)
-            try data.write(to: contents.appending(path: "Info.plist"))
-            return app
-        }
-
-        let running = try makeBundle("Downloads/CCwiki.app", identifier: identifier, version: "0.2.0")
+        let running = try makeBundle(
+            "Downloads/CCwiki.app", in: root, identifier: identifier, version: "0.2.0")
         let installed = try makeBundle(
-            "Applications/CCwiki.app", identifier: identifier, version: "0.1.0", build: "1")
-        let trashed = try makeBundle(".Trash/CCwiki.app", identifier: identifier, version: "0.1.1")
-        let stranger = try makeBundle("Other/CCwiki.app", identifier: "org.example.other", version: "9.0")
-        let unreadable = try makeBundle("Broken/CCwiki.app", identifier: nil, version: "")
+            "Applications/CCwiki.app", in: root, identifier: identifier, version: "0.1.0", build: "1")
+        let trashed = try makeBundle(
+            ".Trash/CCwiki.app", in: root, identifier: identifier, version: "0.1.1")
+        let stranger = try makeBundle(
+            "Other/CCwiki.app", in: root, identifier: "org.example.other", version: "9.0")
+        let unreadable = try makeBundle("Broken/CCwiki.app", in: root, identifier: nil, version: "")
         let missing = root.appending(path: "Gone/CCwiki.app")
         let link = root.appending(path: "Link")
         try manager.createSymbolicLink(at: link, withDestinationURL: root.appending(path: "Applications"))
@@ -229,5 +278,26 @@ struct InstallationCheckTests {
         #expect(only.url.deletingLastPathComponent().lastPathComponent == "Applications")
         #expect(InstallationCheck.path(of: only.url)
             == InstallationCheck.path(of: installed.resolvingSymlinksInPath()))
+    }
+
+    // MARK: Replacing
+
+    @Test("a copy that became newer while the question was open is not replaced")
+    func installCopyKeepsNewer() async throws {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory
+            .appending(path: "ccwiki-install-test-\(UUID().uuidString)")
+        defer { try? manager.removeItem(at: root) }
+        let identifier = "com.axhoover.ccwiki"
+        let running = try makeBundle(
+            "Downloads/CCwiki.app", in: root, identifier: identifier, version: "0.2.0")
+        let installed = try makeBundle(
+            "Applications/CCwiki.app", in: root, identifier: identifier, version: "0.3.0")
+
+        await #expect(throws: UpdateInstaller.Failure.self) {
+            try await InstallationCheck.installCopy(of: running, over: installed)
+        }
+        #expect(try UpdateInstaller.inspect(bundle: installed).version == "0.3.0")
+        #expect(try UpdateInstaller.inspect(bundle: running).version == "0.2.0")
     }
 }

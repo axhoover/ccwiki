@@ -1581,7 +1581,7 @@ final class AppModel {
         case .none: break
         case .openNewer(let newer): await offerNewerCopy(newer, running: running)
         case .replaceOlder(let installed): await offerReplacing(installed, running: running)
-        case .removeOthers(let copies): offerRemoving(copies)
+        case .removeOthers(let copies): offerRemoving(copies, running: running)
         }
     }
 
@@ -1602,7 +1602,7 @@ final class AppModel {
         } catch {
             showInstallationFailure(
                 "CCwiki \(newer.version) could not be started.",
-                detail: "\(error.localizedDescription) This window keeps running the version "
+                detail: "\(error.localizedDescription)\n\nThis window keeps running the version "
                     + "you have.")
             return
         }
@@ -1615,12 +1615,12 @@ final class AppModel {
     /// idiom, kept to the case that causes the confusion.
     ///
     /// Every step before the relaunch either completes or leaves things as
-    /// they were, and this window quits only once the new one has started.
+    /// they were. This window quits only once the new one has started, and
+    /// if it does not start, this copy comes back out of the Trash.
     private func offerReplacing(_ installed: InstalledCopy, running: InstalledCopy) async {
         // A same-version copy is replaced all the same: what matters is
         // which one the Dock starts. Only the wording changes.
-        let isOlder = UpdateChecker.isDevelopmentVersion(installed.version)
-            || UpdateChecker.isNewer(running.version, than: installed.version)
+        let isOlder = InstallationCheck.isOlder(installed.version, than: running.version)
         let (there, here) = InstallationCheck.displayLocations(installed.url, running.url)
         let alert = NSAlert()
         alert.messageText = isOlder
@@ -1646,27 +1646,41 @@ final class AppModel {
         } catch {
             showInstallationFailure(
                 "The CCwiki in \(there) was not replaced.",
-                detail: "\(error.localizedDescription) Nothing was changed, and this window "
+                detail: "\(error.localizedDescription)\n\nNothing was changed, and this window "
                     + "keeps running the version you have.")
             return
         }
-        // LaunchServices does not start an app from the Trash. Where this
-        // copy cannot go there (a disk image, a folder that is not yours),
-        // the copy in Applications finds it at launch and offers it again.
-        var trashed = true
+        // LaunchServices does not start an app from the Trash, so this copy
+        // goes there, and comes back if the one in Applications won't start.
+        // Where it cannot go (a folder that is not yours), the copy in
+        // Applications finds it at its launch and offers it again. On a
+        // read-only volume (a disk image, App Translocation's mirror) it
+        // stays, and is never offered; the folder a mirror was made from is
+        // writable, though, so that is offered at the next launch.
+        var trashedAt: NSURL?
         do {
-            try FileManager.default.trashItem(at: bundle, resultingItemURL: nil)
+            try FileManager.default.trashItem(at: bundle, resultingItemURL: &trashedAt)
         } catch {
-            trashed = false
+            trashedAt = nil
         }
         do {
             try await UpdateInstaller.relaunch(installed.url)
         } catch {
+            let thisCopy: String
+            if let trashedAt {
+                do {
+                    try FileManager.default.moveItem(at: trashedAt as URL, to: bundle)
+                    thisCopy = "This copy is back in \(here), and this window keeps running."
+                } catch {
+                    thisCopy = "This copy is in the Trash, and this window keeps running until "
+                        + "you quit it. Put Back in the Finder returns it to \(here)."
+                }
+            } else {
+                thisCopy = "This copy is still in \(here), and this window keeps running."
+            }
             showInstallationFailure(
                 "CCwiki \(running.version) is in \(there), but could not be started.",
-                detail: "\(error.localizedDescription) Open it from the Applications folder. "
-                    + (trashed ? "This copy is in the Trash; its " : "This ")
-                    + "window keeps running until you quit it.")
+                detail: "\(error.localizedDescription)\n\n\(thisCopy)")
             return
         }
         NSApp.terminate(nil)
@@ -1674,7 +1688,7 @@ final class AppModel {
 
     /// Older or same-version copies elsewhere: name each, and offer the
     /// Trash or the Finder.
-    private func offerRemoving(_ copies: [InstalledCopy]) {
+    private func offerRemoving(_ copies: [InstalledCopy], running: InstalledCopy) {
         let one = copies.count == 1
         let alert = NSAlert()
         alert.messageText = one
@@ -1684,8 +1698,14 @@ final class AppModel {
             .map { "CCwiki \($0.version) — \(InstallationCheck.abbreviatedPath($0.url))" }
             .joined(separator: "\n")
         let which = one ? "it" : "one of these"
+        // A same-version release updates itself as this one does; only an
+        // older or development copy is stuck where it is.
+        let allOlder = copies.allSatisfy {
+            InstallationCheck.isOlder($0.version, than: running.version)
+        }
         alert.informativeText = list + "\n\nOpening CCwiki from the Dock, Spotlight or a link "
-            + "can start \(which) instead of this copy, and it won't update itself."
+            + "can start \(which) instead of this copy"
+            + (allOlder ? ", and it won't update itself." : ".")
         alert.addButton(withTitle: "Move to Trash")
         alert.addButton(withTitle: "Show in Finder")
         alert.addButton(withTitle: "Not Now").keyEquivalent = "\u{1b}"

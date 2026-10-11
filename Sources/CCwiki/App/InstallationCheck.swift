@@ -43,7 +43,12 @@ enum InstallationCheck {
     /// What to tell the person about `others`, given the copy that is running.
     ///
     /// Copies at `running`'s path or at a path in `ignoredPaths` are left out
-    /// first. Then, in order:
+    /// first. When `running` is App Translocation's read-only mirror, so are
+    /// copies of its version and build: LaunchServices lists the folder the
+    /// mirror was made from under that folder's own path, on a writable
+    /// volume, and that folder is this copy. Nothing public says which copy
+    /// it is, and a false "other copy" would be offered to the Trash, or
+    /// replaced by itself. Then, in order:
     ///
     /// 1. A newer release elsewhere wins: open it, the newest of them. A
     ///    development version (a stale build from before builds from source
@@ -61,9 +66,11 @@ enum InstallationCheck {
     ) -> InstallationAdvice {
         let runningPath = path(of: running.url)
         let ignored = Set(ignoredPaths.map { path(of: URL(fileURLWithPath: $0)) })
+        let translocated = BundleLocation.isTranslocated(running.url)
         let remaining = others.filter { copy in
             let candidate = path(of: copy.url)
-            return candidate != runningPath && !ignored.contains(candidate)
+            guard candidate != runningPath, !ignored.contains(candidate) else { return false }
+            return !(translocated && copy.version == running.version && copy.build == running.build)
         }
 
         // Applications first, /Applications before ~/Applications, then by path.
@@ -95,6 +102,14 @@ enum InstallationCheck {
 
         guard !remaining.isEmpty else { return .none }
         return .removeOthers(remaining.sorted { path(of: $0.url) < path(of: $1.url) })
+    }
+
+    /// Whether a copy of `version` is behind the running `current`: older,
+    /// or a development version, which has no order and never updates
+    /// itself. A same-version release is not: it updates itself as this
+    /// one does.
+    static func isOlder(_ version: String, than current: String) -> Bool {
+        UpdateChecker.isDevelopmentVersion(version) || UpdateChecker.isNewer(current, than: version)
     }
 
     // MARK: Finding the copies
@@ -189,7 +204,8 @@ enum InstallationCheck {
     /// been opened, and a copy still marked would run through App
     /// Translocation, from where it cannot update itself. Then the updater's
     /// own swap puts it in place in one step (`UpdateInstaller.replace`).
-    /// Throws, with `destination` as it was, if any step fails. Not on the
+    /// Throws, with `destination` as it was, if any step fails, or if
+    /// `destination` is by then a newer release than `source`. Not on the
     /// main actor: the copy takes a moment.
     static func installCopy(of source: URL, over destination: URL) async throws {
         let manager = FileManager.default
@@ -203,12 +219,25 @@ enum InstallationCheck {
             arguments: [source.path(percentEncoded: false), staged.path(percentEncoded: false)],
             environment: environment)
         guard ditto.succeeded else {
-            throw UpdateInstaller.Failure.swap("This copy could not be duplicated: \(ditto.output)")
+            let why = ditto.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw UpdateInstaller.Failure.swap("this copy could not be copied there: \(why)")
         }
         _ = await Subprocess.run(
             executable: "/usr/bin/xattr",
             arguments: ["-dr", "com.apple.quarantine", staged.path(percentEncoded: false)],
             environment: environment)
+
+        // The question may have been open a long while, and the copy there
+        // may have updated itself meanwhile: a newer release is never
+        // replaced by an older one (§2.2).
+        if let present = try? UpdateInstaller.inspect(bundle: destination),
+           let incoming = try? UpdateInstaller.inspect(bundle: staged),
+           !UpdateChecker.isDevelopmentVersion(present.version),
+           UpdateChecker.isNewer(present.version, than: incoming.version) {
+            throw UpdateInstaller.Failure.swap(
+                "the copy in \(displayLocation(destination)) is now CCwiki \(present.version), "
+                    + "newer than this one.")
+        }
         try UpdateInstaller.replace(destination, with: staged)
     }
 
@@ -231,10 +260,13 @@ enum InstallationCheck {
 
     /// The folder a bundle is in, as a person names it: "Applications",
     /// "Applications (yours)" for `~/Applications`, "Downloads", "Desktop";
-    /// otherwise the folder's path, with `~` for the home folder.
+    /// "a temporary folder" for App Translocation's mirror, whose path is
+    /// random and means nothing to them; otherwise the folder's path, with
+    /// `~` for the home folder.
     static func displayLocation(
         _ url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> String {
+        if BundleLocation.isTranslocated(url) { return "a temporary folder" }
         let folder = path(of: url.deletingLastPathComponent())
         let homePath = path(of: home)
         switch folder {
@@ -295,7 +327,7 @@ enum InstallationCheck {
         let logger = Logger(
             subsystem: Bundle.main.bundleIdentifier ?? BuildIdentity.releaseBundleIdentifier,
             category: "launch")
-        let location = copy.url.path(percentEncoded: false)
+        let location = path(of: copy.url)
         logger.notice(
             "CCwiki \(copy.version, privacy: .public) (\(copy.build, privacy: .public)) started from \(location, privacy: .public)")
     }
