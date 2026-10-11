@@ -57,7 +57,7 @@ running under App Translocation, offered its own original to the Trash. The
 combined review caught that an update needing a newer macOS would have
 deleted the only copy that could start, and that Replace and Relaunch would
 have swapped out a copy that was still open. CI compiled the merged tracks
-on the first push (371 tests). The swiftui-pro, typography-designer and
+on the first push (371 tests), and the fixes after it (375). The swiftui-pro, typography-designer and
 macos-design skills that CLAUDE.md asks for are not available in this
 session, so the alert copy and the About row follow the existing alerts
 and rows instead.
