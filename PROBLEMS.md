@@ -221,3 +221,23 @@ is in front without being key.
 asked. `CGWindowListCopyWindowInfo` (used by the external capture path) is
 already ordered the same way.
 
+
+## A second copy with the same bundle id wins silently
+
+After two updates the maintainer found CCwiki back at 0.1.0. Nothing had been
+undone. The version comes from the running bundle's own Info.plist, so the
+Dock or Spotlight had simply opened a different copy. The likeliest one was an
+old local build that also called itself 0.1.0 and had no updater. The updater
+only ever replaces the copy that is running, and the stale copy cannot know it
+is stale. Clearing caches and preferences could not help.
+
+Three things kept such copies around and made them look real:
+
+- local builds that carried the release's bundle id;
+- local builds stamped with a release's version;
+- an updater that moved the old bundle to the Trash instead of deleting it.
+
+**Rule:** a build that is not a release must not share the release's bundle
+id, name or data, and the release must look for other copies of itself
+(`plans/update-integrity.md`). When a version "reverts", ask which bundle is
+running before anything else: `pgrep -fl 'Contents/MacOS/CCwiki$'`.

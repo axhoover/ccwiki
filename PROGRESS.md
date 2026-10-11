@@ -5,6 +5,72 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-11 — Why CCwiki came back as 0.1.0, and CCwiki Dev
+
+The maintainer reported two things. After updating to 0.1.1, and again to
+0.1.2, a later launch came up as 0.1.0, a version they said "doesn't have the
+quick auto updates". And they wanted a build from source to run beside the
+installed release without sharing anything with it. The full account is
+[plans/update-integrity.md](plans/update-integrity.md).
+
+**The revert is a second copy, almost certainly.** The version shown comes
+from the running bundle's own Info.plist, so no cache or preference could
+cause it, and clearing folders could not fix it. The investigation was three
+web-research tracks and two code and history audits, with an adversarial
+checker on every claim.
+
+- The updater only ever replaces the copy that is running. The Dock,
+  Spotlight and links open whichever copy LaunchServices picks.
+- The release download counters show that no copy ever fetched the `.sig` of
+  0.1.2 or 0.1.3. So the copy that keeps coming back has no updater, which
+  points at an old `make install` or local build. Before 2dcf6ee, every one
+  of those called itself 0.1.0.
+- The updater's habit of trashing the old bundle was a weaker suspect.
+  LaunchServices refuses to run anything from the Trash, and bookmarks
+  resolve by path first. It is fixed anyway.
+
+**What changed:**
+
+- **Builds from source are CCwiki Dev** (`CHANNEL`, default dev). That means
+  `com.axhoover.ccwiki.dev`, `build/CCwiki Dev.app`, data under `CCwiki-Dev`,
+  the `ccwiki-dev://` scheme, and no updater. Only `make package` and
+  `make dist` build the release. `verify-package` checks the packaged
+  identity, and CI checks both channels' stamping on every push.
+- **The updater** swaps in one step (`renamex_np(RENAME_SWAP)`) and deletes
+  the old bundle. It re-registers the new one with LaunchServices. It refuses
+  a release the Mac cannot run, and it refuses a copy it could not usefully
+  replace before downloading anything.
+- **A launch check** (`InstallationCheck`) asks LaunchServices for every copy
+  and offers one of three things: open a newer copy, put this copy in
+  Applications in place of an older one, or trash the others.
+- **Settings → About** shows the running copy's location. Each launch logs
+  its version, build and path.
+- What's New can no longer be rewound by an older copy.
+- Staged web copies are no longer deleted from under another running copy.
+
+**How it was built.** Identity, updater and launch check were three
+worktree tracks, each with a compile review and a behaviour review and then
+a fixer. The merged result had a further review across all three, from
+three angles, and 26 of its 28 findings were fixed. The other two were these
+docs. The track reviews caught a blocker: a first launch from Downloads,
+running under App Translocation, offered its own original to the Trash. The
+combined review caught that an update needing a newer macOS would have
+deleted the only copy that could start, and that Replace and Relaunch would
+have swapped out a copy that was still open. CI compiled the merged tracks
+on the first push (371 tests). The swiftui-pro, typography-designer and
+macos-design skills that CLAUDE.md asks for are not available in this
+session, so the alert copy and the About row follow the existing alerts
+and rows instead.
+
+**For the maintainer:**
+
+- §1 of the plan lists the commands that tell which copy was the "0.1.0".
+  Run them before deleting anything.
+- Then keep one copy, in /Applications. The first launch of 0.2.0 will offer
+  to deal with the others.
+- Still unproven on a real Mac: that the check never triggers the Downloads
+  privacy prompt, and that an open copy quits when asked.
+
 ## 2026-10-10 — The explorer, derived relations and link previews, built
 
 Built on `claude/relations-explorer` in three tracks, each in its own

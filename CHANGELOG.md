@@ -46,7 +46,27 @@ title and opening paragraph, math included; a link to a reduction shows the
 full statement with its class, model and sources. Turn it off in Settings →
 Reading.
 
-## 0.1.3 — unreleased
+**Updates no longer leave an old copy behind.** CCwiki now swaps the new
+version in, in one step where the disk allows, and deletes the old one
+instead of moving it to the Trash. It also tells macOS about the new
+version, so the Finder and Spotlight see it at once. It won't install a
+release your Mac can't run, and it says why before downloading anything
+when it can't replace itself, for example when it's running from the
+Trash or straight from the folder it was unzipped in.
+
+**CCwiki notices other copies of itself.** An old copy elsewhere on your
+Mac, in Downloads or left in Applications, can be what the Dock or
+Spotlight opens instead of the current one. CCwiki now looks at launch and
+says so. If a newer copy is on your Mac, it offers to open that one. If
+this copy isn't in Applications and an older one is, it offers to put this
+one there in its place. Other copies it offers to move to the Trash.
+Settings → About shows where the copy you're running lives.
+
+**For people who build CCwiki from source:** a build from source is now
+CCwiki Dev, with its own settings, wiki copy and search index. It runs
+beside the released app without touching it, and never updates itself.
+
+## 0.1.3 — 2026-10-10
 
 **Copy LaTeX the way the website lets you.** Hover any algorithm for Copy
 LaTeX (macros) and Copy LaTeX (no macros), as on cryptology.city. Select text
