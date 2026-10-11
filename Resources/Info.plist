@@ -6,14 +6,18 @@
 	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>CCwiki</string>
+	<!-- The identity is the build's channel, stamped by
+	     scripts/stamp-info-plist.sh: com.axhoover.ccwiki and CCwiki for a
+	     release, com.axhoover.ccwiki.dev and CCwiki Dev for a build from
+	     source, so the two never share defaults, data or links. -->
 	<key>CFBundleIdentifier</key>
-	<string>com.axhoover.ccwiki</string>
+	<string>__BUNDLE_ID__</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>CCwiki</string>
+	<string>__BUNDLE_NAME__</string>
 	<key>CFBundleDisplayName</key>
-	<string>CCwiki</string>
+	<string>__BUNDLE_NAME__</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -50,15 +54,16 @@
 		</dict>
 	</array>
 	<!-- ccwiki://wiki/page/Primitives%2Fprf.md opens that page from anywhere:
-	     a note, a mail, a link on the website. -->
+	     a note, a mail, a link on the website. A dev build answers to
+	     ccwiki-dev:// instead, so it never takes the release's links. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.axhoover.ccwiki.link</string>
+			<string>__URL_NAME__</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>ccwiki</string>
+				<string>__URL_SCHEME__</string>
 			</array>
 			<key>LSHandlerRank</key>
 			<string>Owner</string>

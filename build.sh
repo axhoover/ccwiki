@@ -8,15 +8,25 @@
 # the compile, this script does the bundling and signing. Xcode is only a
 # toolchain provider (swift / codesign).
 #
+# The bundle is always build/CCwiki.app; what it IS comes from CHANNEL. The
+# default, dev, is "CCwiki Dev": its own bundle id, data folders and URL
+# scheme, and no updater, so it runs beside an installed release without
+# touching it. Only `make package` and `make dist` build the release channel.
+# See scripts/stamp-info-plist.sh and plans/build-system.md.
+#
 # Environment:
+#   CHANNEL            dev (default) or release. Picks the bundle's identity.
 #   SIGN_IDENTITY      codesign identity. Defaults to ad-hoc ("-"), which is
 #                      all you need for `make run` on your own machine.
 #   PROVISION_PROFILE  optional .provisionprofile to embed (release/dist).
 #   VERSION            CFBundleShortVersionString to stamp (default 0.0.0).
+#                      The release channel takes X.Y.Z only; the dev channel
+#                      adds a -dev suffix when it has none.
 #
 set -euo pipefail
 
 CONFIG="${1:-debug}"
+CHANNEL="${CHANNEL:-dev}"
 APP_NAME="CCwiki"
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
@@ -26,8 +36,17 @@ VERSION="${VERSION:-0.0.0}"
 ENTITLEMENTS="$APP_NAME/$APP_NAME.entitlements"
 INFO_PLIST_SRC="Resources/Info.plist"
 
-# Build number: monotonic-ish from the date so re-signs differ. Falls back to 1.
-BUILD_NUMBER="$(date +%Y%m%d%H%M 2>/dev/null || echo 1)"
+# Build number: the build time in UTC, so local and CI builds compare and
+# re-signs differ. Falls back to 1.
+BUILD_NUMBER="$(date -u +%Y%m%d%H%M 2>/dev/null || echo 1)"
+
+# Stamp the Info.plist before compiling: a release-channel build with a
+# version that is not X.Y.Z fails here, not after a two-architecture compile.
+mkdir -p "$BUILD_DIR"
+STAMPED_PLIST="$BUILD_DIR/Info.plist.stamped"
+IDENTITY="$(./scripts/stamp-info-plist.sh \
+	"$CHANNEL" "$VERSION" "$BUILD_NUMBER" "$INFO_PLIST_SRC" "$STAMPED_PLIST")"
+echo "→ channel $IDENTITY"
 
 # A release is built for both architectures: a download has to run on an
 # Intel Mac and an Apple silicon one. One `swift build` per architecture and
@@ -73,10 +92,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$EXECUTABLE" "$APP/Contents/MacOS/$APP_NAME"
 
-# Info.plist — substitute version placeholders.
-sed -e "s/__SHORT_VERSION__/$VERSION/g" \
-    -e "s/__BUILD_VERSION__/$BUILD_NUMBER/g" \
-    "$INFO_PLIST_SRC" > "$APP/Contents/Info.plist"
+# Info.plist — stamped with the channel's identity and the version above.
+mv "$STAMPED_PLIST" "$APP/Contents/Info.plist"
 
 # PkgInfo — classic 8-byte file some macOS code paths still look for.
 printf 'APPL????' > "$APP/Contents/PkgInfo"
@@ -159,4 +176,4 @@ codesign --verify --verbose=1 "$APP"
 if [ "$CONFIG" = "release" ]; then
 	echo "  $(lipo -info "$APP/Contents/MacOS/$APP_NAME")"
 fi
-echo "✓ built $APP"
+echo "✓ built $APP ($CHANNEL channel)"

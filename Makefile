@@ -6,8 +6,15 @@
 #   make check     # compile + unit tests — the gate after every change
 #   make shots     # drive the app and capture screenshots (the visual gate)
 #   make test      # run the SwiftPM test suite
-#   make install   # copy to /Applications/ and register with LaunchServices
+#   make install   # copy to "/Applications/CCwiki Dev.app" and register it
 #   make help      # full target list
+#
+# Every build from source is "CCwiki Dev" (CHANNEL=dev, the default): bundle
+# id com.axhoover.ccwiki.dev, its own data folders and ccwiki-dev:// links,
+# and no updater. It runs beside an installed release and never touches it.
+# Only `make package` and `make dist` build CHANNEL=release, the real CCwiki;
+# `make install CHANNEL=release` installs one by hand. See
+# plans/build-system.md and plans/update-integrity.md §2.1.
 #
 # Build is driven by `swift build` + ./build.sh — NO Xcode IDE, NO
 # xcodebuild, NO XcodeGen. Xcode is only a toolchain provider (swift /
@@ -21,11 +28,27 @@
 CONFIG       := debug
 APP          := build/CCwiki.app
 LSREGISTER   := /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister
+PLISTBUDDY   := /usr/libexec/PlistBuddy
 MIN_MACOS    := 14
 MIN_SWIFT    := 6.0
 
 APP_NAME      := CCwiki
 ENTITLEMENTS  := CCwiki/CCwiki.entitlements
+
+# The build's identity: dev (CCwiki Dev) unless asked otherwise. The bundle id,
+# name, URL scheme and version suffix follow from it (scripts/stamp-info-plist.sh).
+CHANNEL       ?= dev
+ifneq ($(CHANNEL),release)
+ifneq ($(CHANNEL),dev)
+$(error CHANNEL must be release or dev, not '$(CHANNEL)')
+endif
+endif
+RELEASE_BUNDLE_ID := com.axhoover.ccwiki
+DEV_BUNDLE_ID     := com.axhoover.ccwiki.dev
+
+# Where `make install` puts this channel's build. The two names differ, so a
+# dev build can never overwrite the release. Quote it: the dev one has a space.
+INSTALL_APP   := /Applications/$(if $(filter release,$(CHANNEL)),$(APP_NAME),$(APP_NAME) Dev).app
 
 # ---------------------------------------------------------------------------
 # Release variables
@@ -85,7 +108,7 @@ NOTES_FILE       ?=
 all: build
 
 help:
-	@echo "Build:"
+	@echo "Build (CHANNEL=$(CHANNEL); dev is CCwiki Dev, release is CCwiki):"
 	@echo "  make / build      Build $(CONFIG) into ./$(APP)  (default)"
 	@echo "  check             Compile + unit tests — the gate after every change"
 	@echo "  build-only        Compile only, no tests"
@@ -98,10 +121,10 @@ help:
 	@echo "  clean             Remove ./build/ ./.build/ ./dist/"
 	@echo "  deps              Verify build prerequisites (auto-run before build)"
 	@echo ""
-	@echo "Local install:"
-	@echo "  install           Copy $(APP_NAME).app to /Applications/ and register it"
-	@echo "  uninstall         Remove /Applications/$(APP_NAME).app"
-	@echo "  register          Refresh LaunchServices for ./$(APP)"
+	@echo "Local install (CHANNEL=$(CHANNEL) installs as \"$(INSTALL_APP)\"):"
+	@echo "  install           Build, copy to \"$(INSTALL_APP)\" and register it"
+	@echo "  uninstall         Remove \"$(INSTALL_APP)\""
+	@echo "  register          Refresh LaunchServices for \"$(INSTALL_APP)\""
 	@echo ""
 	@echo "Release without a Developer ID (needs an exact 'vX.Y.Z' git tag):"
 	@echo "  release-keys      One-time: make the Ed25519 release key and embed its public half"
@@ -111,7 +134,7 @@ help:
 	@echo "Release with a Developer ID (also needs a signing identity):"
 	@echo "  notary-setup      One-time: store notary creds in keychain ($(NOTARY_PROFILE))"
 	@echo "  dist              Build → sign → notarize → staple → zip → checksum → Ed25519 sign"
-	@echo "  print-version     Print resolved release VERSION"
+	@echo "  print-version     Print the resolved VERSION and CHANNEL"
 	@echo ""
 	@echo "  help              Show this message"
 
@@ -159,10 +182,10 @@ $(APP_ICON): $(ICON_SCRIPT)
 icon: $(APP_ICON)
 
 build: deps $(APP_ICON)
-	SIGN_IDENTITY="$(DEV_IDENTITY)" PROVISION_PROFILE="$(PROVISION_PROFILE)" VERSION="$(VERSION)" ./build.sh $(CONFIG)
+	CHANNEL="$(CHANNEL)" SIGN_IDENTITY="$(DEV_IDENTITY)" PROVISION_PROFILE="$(PROVISION_PROFILE)" VERSION="$(VERSION)" ./build.sh $(CONFIG)
 
 release: deps $(APP_ICON)
-	SIGN_IDENTITY="$(DEV_IDENTITY)" PROVISION_PROFILE="$(PROVISION_PROFILE)" VERSION="$(VERSION)" ./build.sh release
+	CHANNEL="$(CHANNEL)" SIGN_IDENTITY="$(DEV_IDENTITY)" PROVISION_PROFILE="$(PROVISION_PROFILE)" VERSION="$(VERSION)" ./build.sh release
 
 # The gate to run after every change: compile, then run the unit tests. No
 # .app, no signing. `make shots` is the visual half of the gate — a passing
@@ -186,15 +209,28 @@ test: deps
 # The corpus suite additionally validates against a real clone: every wikilink
 # in ~300 pages, the whole frontmatter schema, and the live macro table. Skipped
 # by `make test` because it needs the clone to exist.
-# WIKI= points it at any clone of the wiki; CI uses a fresh one.
-WIKI ?= $(HOME)/Library/Application Support/CCwiki/repo
+# WIKI= points it at any clone of the wiki; CI uses a fresh one. The default is
+# the installed release's clone, which the tests only read; CCwiki Dev keeps its
+# own under "Application Support/CCwiki-Dev". A missing clone is an error: the
+# corpus suites skip themselves without one, so the run would pass untested.
+WIKI     ?= $(HOME)/Library/Application Support/CCwiki/repo
+DEV_WIKI := $(HOME)/Library/Application Support/CCwiki-Dev/repo
 
 test-corpus: deps
+	@if [ ! -d "$(WIKI)/content" ]; then \
+	  echo "✗ no wiki clone at $(WIKI)"; \
+	  echo "  Launch CCwiki once to download it, or test CCwiki Dev's:"; \
+	  echo "  make test-corpus WIKI=\"$(DEV_WIKI)\""; \
+	  exit 1; \
+	fi
 	CCWIKI_WIKI="$(WIKI)" swift test
 	@echo "✓ tests pass against the real corpus"
 
 print-version:
 	@echo "VERSION=$(VERSION)"
+	@echo "CHANNEL=$(CHANNEL)"
+	@echo "  builds:          $(if $(filter release,$(CHANNEL)),CCwiki $(VERSION) ($(RELEASE_BUNDLE_ID))$(if $(findstring -dev,$(VERSION)), — refused: a release needs X.Y.Z),CCwiki Dev $(if $(findstring -dev,$(VERSION)),$(VERSION),$(VERSION)-dev) ($(DEV_BUNDLE_ID)))"
+	@echo "  installs as:     $(INSTALL_APP)"
 	@echo "  git tag at HEAD: $(if $(GIT_TAG_VERSION),$(GIT_TAG_VERSION),(none))"
 	@echo "  latest tag:      $(if $(LAST_TAG_VERSION),$(LAST_TAG_VERSION),(none))"
 	@echo "  VERSION file:    $(if $(FILE_VERSION),$(FILE_VERSION),(missing))"
@@ -206,25 +242,31 @@ print-version:
 run: build
 	open "$(APP)"
 
+# A dev build installs as "CCwiki Dev.app" and a release-channel one as
+# "CCwiki.app": the target is named for the channel, so a dev build can never
+# overwrite the release.
 install: build
 	@if [ ! -d "$(APP)" ]; then echo "✗ $(APP) missing — build failed?"; exit 1; fi
-	rm -rf /Applications/$(APP_NAME).app
-	cp -R "$(APP)" /Applications/
-	@echo "✓ copied to /Applications/$(APP_NAME).app"
-	$(LSREGISTER) -f /Applications/$(APP_NAME).app
-	@echo "✓ registered /Applications/$(APP_NAME).app with LaunchServices"
+	rm -rf "$(INSTALL_APP)"
+	cp -R "$(APP)" "$(INSTALL_APP)"
+	@echo "✓ copied to $(INSTALL_APP)"
+	$(LSREGISTER) -f "$(INSTALL_APP)"
+	@echo "✓ registered $(INSTALL_APP) with LaunchServices"
 
 uninstall:
-	@if [ -d /Applications/$(APP_NAME).app ]; then \
-	  rm -rf /Applications/$(APP_NAME).app 2>/dev/null || sudo rm -rf /Applications/$(APP_NAME).app; \
-	  echo "✓ removed /Applications/$(APP_NAME).app"; \
+	@if [ -d "$(INSTALL_APP)" ]; then \
+	  rm -rf "$(INSTALL_APP)" 2>/dev/null || sudo rm -rf "$(INSTALL_APP)"; \
+	  echo "✓ removed $(INSTALL_APP)"; \
 	else \
-	  echo "  (no /Applications/$(APP_NAME).app to remove)"; \
+	  echo "  (no $(INSTALL_APP) to remove)"; \
 	fi
 
-register: build
-	$(LSREGISTER) -f "$(APP)"
-	@echo "✓ registered $(APP) with LaunchServices"
+register:
+	@if [ ! -d "$(INSTALL_APP)" ]; then \
+	  echo "✗ $(INSTALL_APP) is not installed — make install$(if $(filter release,$(CHANNEL)), CHANNEL=release,) first"; exit 1; \
+	fi
+	$(LSREGISTER) -f "$(INSTALL_APP)"
+	@echo "✓ registered $(INSTALL_APP) with LaunchServices"
 
 # ---------------------------------------------------------------------------
 # Clean
@@ -247,7 +289,7 @@ clean:
 # them: several have no file prerequisites of their own.
 dist: check-version clean
 	$(MAKE) release-notes
-	$(MAKE) release
+	$(MAKE) release CHANNEL=release
 	$(MAKE) sign
 	$(MAKE) zip-notary
 	$(MAKE) notarize
@@ -286,7 +328,7 @@ release-keys:
 
 package: check-version clean
 	$(MAKE) release-notes
-	$(MAKE) release
+	$(MAKE) release CHANNEL=release
 	$(MAKE) zip-package
 	$(MAKE) checksum
 	$(MAKE) sign-package
@@ -318,6 +360,8 @@ sign-package:
 	fi
 	swift scripts/release-sign.swift sign "$(RELEASE_ZIP)" "$(RELEASE_KEY_FILE)"
 
+# The packaged bundle is the release, not CCwiki Dev, and carries the tag's
+# version: read from the zip itself, which is what people download.
 verify-package:
 	@if [ -z "$(PUBLIC_KEY)" ]; then \
 	  echo "✗ $(RELEASE_KEY_SOURCE) has no public key; the app could not verify this package."; \
@@ -325,6 +369,19 @@ verify-package:
 	fi
 	swift scripts/release-sign.swift verify "$(RELEASE_ZIP)" "$(PUBLIC_KEY)"
 	codesign --verify --deep --strict --verbose=2 "$(APP)"
+	@plist="$$(mktemp "$${TMPDIR:-/tmp}/ccwiki-plist.XXXXXX")"; \
+	unzip -p "$(RELEASE_ZIP)" "$(APP_NAME).app/Contents/Info.plist" > "$$plist" || { \
+	  rm -f "$$plist"; echo "✗ $(RELEASE_ZIP) has no $(APP_NAME).app/Contents/Info.plist"; exit 1; }; \
+	id="$$($(PLISTBUDDY) -c 'Print :CFBundleIdentifier' "$$plist")"; \
+	version="$$($(PLISTBUDDY) -c 'Print :CFBundleShortVersionString' "$$plist")"; \
+	rm -f "$$plist"; \
+	if [ "$$id" != "$(RELEASE_BUNDLE_ID)" ]; then \
+	  echo "✗ the packaged bundle is $$id, not $(RELEASE_BUNDLE_ID): build it with CHANNEL=release."; exit 1; \
+	fi; \
+	if [ "$$version" != "$(VERSION)" ]; then \
+	  echo "✗ the packaged bundle says version $$version, not $(VERSION)."; exit 1; \
+	fi; \
+	echo "✓ packaged bundle is $$id $$version"
 
 check-version:
 	@if [ -z "$(VERSION)" ]; then \

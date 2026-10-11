@@ -72,6 +72,14 @@ make check                 # compile + unit tests
 make run                   # build the .app and launch it
 ```
 
+What you build is **CCwiki Dev**, not CCwiki: its own bundle id
+(`com.axhoover.ccwiki.dev`), its own settings and data folders, its own
+`ccwiki-dev://` links, and no updater. It runs beside an installed release
+without touching it, and its first launch downloads a copy of the wiki of its
+own. `make install` puts it at `/Applications/CCwiki Dev.app`, so it never
+replaces `/Applications/CCwiki.app`. Only `make package` and `make dist`
+build the release; see [plans/build-system.md](plans/build-system.md).
+
 `scripts/vendor-web.sh` downloads pinned, checksum-verified copies of
 markdown-it, KaTeX and the wiki's patched pseudocode.js into `Resources/web/`.
 The app never touches the network for rendering; this is the one step that does.
@@ -95,6 +103,8 @@ that off), and ⌘R does the same at any time.
 ~/Library/Caches/CCwiki/
 └── worktrees/     one git worktree per ingestion job
 ```
+
+CCwiki Dev keeps the same trees under `CCwiki-Dev` instead of `CCwiki`.
 
 Worktrees live under `Caches` on purpose: `Application Support` has a space in
 it, and a worktree is where `npm`, `npx` and the wiki's own node scripts run —
