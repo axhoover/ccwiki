@@ -50,12 +50,14 @@ and click **Open Anyway**. Once.
 
 Or, from Terminal, which skips that dialog because `curl` does not mark
 downloads for Gatekeeper. `ditto` merges into an app that is already
-there, so remove any older copy first:
+there, so any older copy is removed first, but only once the download has
+worked (`-f` makes `curl` fail on a missing file instead of saving the
+error page):
 
 ```sh
-curl -L -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip"
-rm -rf /Applications/CCwiki.app
-ditto -x -k /tmp/CCwiki.zip /Applications
+curl -fL -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip" \
+  && rm -rf /Applications/CCwiki.app \
+  && ditto -x -k /tmp/CCwiki.zip /Applications
 ```
 
 After that, CCwiki keeps itself current: once a day it checks for a newer

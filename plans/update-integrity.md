@@ -112,7 +112,7 @@ copy that was running. It now removes only copies untouched for a week.
 directory on the destination's volume (`.itemReplacementDirectory`). It
 then exchanges it with the installed bundle in one atomic step,
 `renamex_np(RENAME_SWAP)`. Where the volume cannot swap, it falls back to
-two renames with rollback. Then it:
+three renames through a temporary name, with rollback. Then it:
 
 - checks that the installed path now carries the new version, and swaps
   back if not;

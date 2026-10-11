@@ -4,10 +4,10 @@ import Testing
 @testable import CCwiki
 
 /// The parts of the installer that decide whether a download is ours and
-/// what it contains, and the swap that puts it in place, run against fake
-/// bundles in temporary directories. The download and unpack need a network
-/// and a real release, and are exercised by `make package` plus a real
-/// update.
+/// what it contains, whether this copy can be replaced, and the swap that
+/// puts it in place, run against fake bundles in temporary directories. The
+/// download and unpack need a network and a real release, and are exercised
+/// by `make package` plus a real update.
 struct UpdateInstallerTests {
 
     @Test("a signature made by the private key verifies, and nothing else does")
@@ -229,6 +229,58 @@ struct UpdateInstallerTests {
         #expect(afterSecond
             == ["CCwiki.app", "CCwiki.app.previous", "CCwiki.app.update", "Other.app.previous"])
         #expect(still.version == "0.2.0")
+    }
+
+    // MARK: Refusing a copy
+
+    @Test("a copy that cannot be replaced is refused before anything is downloaded")
+    func installRefusesBeforeDownloading() async throws {
+        let root = try makeRoot("refusals")
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Nothing can be fetched from `.invalid`, so a refusal that came only
+        // after the download would surface as `.download` instead.
+        let page = try #require(URL(string: "https://example.invalid/release"))
+        let release = ReleaseInfo(
+            version: "0.2.0", url: page,
+            archiveURL: URL(string: "https://example.invalid/CCwiki-0.2.0-macos.zip"),
+            signatureURL: URL(string: "https://example.invalid/CCwiki-0.2.0-macos.zip.sig"))
+        let key = Curve25519.Signing.PrivateKey().publicKey
+        func refusal(replacing current: URL) async -> UpdateInstaller.Failure? {
+            do {
+                _ = try await UpdateInstaller.install(
+                    release, replacing: current, expectedIdentifier: "com.axhoover.ccwiki",
+                    publicKey: key, report: { _ in })
+                return nil
+            } catch {
+                return error as? UpdateInstaller.Failure
+            }
+        }
+
+        // Moved to the Trash or deleted after launch: `Bundle.main.bundleURL`
+        // still names the place it started from, where nothing is now.
+        let gone = await refusal(replacing: root.appending(path: "CCwiki.app"))
+        #expect(gone == .moved)
+
+        // Something else under the same name: it must not be swapped out.
+        let other = root.appending(path: "Other/CCwiki.app")
+        try makeBundle(at: other, identifier: "com.example.other", version: "1.0")
+        let notOurs = await refusal(replacing: other)
+        #expect(notOurs == .moved)
+
+        let trashed = root.appending(path: ".Trash/CCwiki.app")
+        try makeBundle(at: trashed, version: "0.1.0")
+        let inTrash = await refusal(replacing: trashed)
+        #expect(inTrash == .inTrash)
+
+        let translocated = root.appending(path: "AppTranslocation/0A1B2C3D-4E5F/d/CCwiki.app")
+        try makeBundle(at: translocated, version: "0.1.0")
+        let behindTranslocation = await refusal(replacing: translocated)
+        #expect(behindTranslocation == .translocated)
+
+        let stillOther = try UpdateInstaller.inspect(bundle: other)
+        let stillTrashed = try UpdateInstaller.inspect(bundle: trashed)
+        #expect(stillOther.identifier == "com.example.other")
+        #expect(stillTrashed.version == "0.1.0")
     }
 
     // MARK: Where a copy is
