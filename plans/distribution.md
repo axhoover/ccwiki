@@ -112,9 +112,9 @@ Rules: silent when offline (the same posture as sync), a preference to turn
 it off, no download and no install. The unauthenticated GitHub API allows 60
 requests an hour per address, which a daily check does not approach. Zero
 dependencies, no signing keys, no feed to maintain: the GitHub release *is*
-the feed. Note the version is only real on tagged builds; `make install`
-stamps `0.0.0` (`build.sh:25`), which should be treated as "development, do
-not check".
+the feed. Builds from source are CCwiki Dev (`CHANNEL=dev`), with their own
+bundle id and no updater; only `make package`/`make dist` build the release
+(see [build-system.md](build-system.md), "Two channels").
 
 ### Tier 2: Homebrew does the updating
 
@@ -192,13 +192,33 @@ has to be installed by hand once, carrying a new public key.
 
 **What an installed app does.** Once a day it asks GitHub for the latest
 release. If there is a newer one with a signed zip attached, and "Install
-them automatically" is on (the default), it downloads the zip and its
-`.sig`, verifies the signature against the embedded key, unpacks with
-`ditto`, checks the bundle identifier, the version and the code signature,
-moves the running bundle aside, moves the new one in, and puts the old one
-in the Trash. It then says so in the status bar and waits: CCwiki > Relaunch
-to Update. It never relaunches on its own, never installs while a job is
-running, and never installs anything whose signature does not verify.
+them automatically" is on (the default), it first makes sure the running
+copy can be replaced. Before downloading anything, it refuses, with a
+message saying what to do, a copy running from the Trash or from App
+Translocation, one moved or deleted since it started, and one in a folder
+it cannot write to. Then it downloads the zip and its `.sig`, verifies the
+signature against the embedded key, unpacks with `ditto`, and checks the
+bundle identifier, the version, the code signature, and that this Mac meets
+the release's `LSMinimumSystemVersion`. It stages the new
+bundle in a temporary directory on the installed one's volume and
+exchanges the two in one atomic step (`renamex_np` with `RENAME_SWAP`;
+three renames with rollback on a volume that cannot swap). It checks that
+the installed path now reports the new version, swapping back if not,
+deletes the old bundle rather than putting it in the Trash, and
+re-registers the path with LaunchServices. It then says so in the status
+bar and waits: CCwiki > Relaunch to Update. It never relaunches on its
+own, never installs while a job is running, never installs anything whose
+signature does not verify, and never replaces a copy that is already as
+new as the release.
+
+The swap was rebuilt on 2026-10-11. Until then the updater moved the
+running bundle aside to `CCwiki.app.previous`, moved the new one in, and
+put the old one in the Trash. [update-integrity.md](update-integrity.md)
+§2.2 has the reasons. At launch, `UpdateInstaller.removeLegacyLeftovers`
+deletes any `.previous` or `.update` that procedure left beside the app.
+The new updater leaves a `.previous` only when a swap can be neither
+confirmed nor undone, so that the old bundle is not deleted with the
+temporary directory; the error names it.
 
 Gatekeeper assesses only files carrying the quarantine attribute, which
 browsers add to what they download. A zip the app fetches itself with
@@ -213,18 +233,29 @@ and Apple silicon alike. That is why `make install` works today. So:
    `curl` does not quarantine:
 
    ```sh
-   curl -L -o /tmp/CCwiki.zip https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-macos.zip
-   ditto -x -k /tmp/CCwiki.zip /Applications
+   curl -fL -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip" \
+     && rm -rf /Applications/CCwiki.app \
+     && ditto -x -k /tmp/CCwiki.zip /Applications
    ```
+
+   The `rm` matters: `ditto` merges into a folder that already exists, so
+   without it an older `CCwiki.app` keeps files the new one does not have.
+   The `&&` and `curl -f` matter as much. A mistyped version or an
+   unedited `<version>` gets a 404, which plain `curl` saves as the zip and
+   calls a success; run as separate lines, the old app would then be
+   deleted with nothing to replace it.
 
    Acceptable for an audience that lives in a terminal; not for a general
    one. That is the whole of what the membership buys.
 2. **Every later update is automatic and silent.** Tier 1's check finds the
    release; an installer step downloads the zip to a temporary directory,
-   verifies it, extracts it with `ditto -x -k`, swaps the bundle in place
-   (a running bundle can be moved; its mapped files stay valid), and
-   relaunches with `NSWorkspace.OpenConfiguration.createsNewApplicationInstance`
-   before terminating. No dialogs, because nothing is quarantined.
+   verifies it, extracts it with `ditto -x -k`, stages the bundle on the
+   installed app's volume, exchanges the two in one atomic rename and
+   deletes the old one (a running bundle can be swapped out; its mapped
+   files stay valid), and refreshes LaunchServices. When the user chooses
+   Relaunch to Update it relaunches with
+   `NSWorkspace.OpenConfiguration.createsNewApplicationInstance` before
+   terminating. No dialogs, because nothing is quarantined.
 
 **Verification, done properly and for free.** Sign each release zip with an
 Ed25519 key kept by the maintainer; embed the public key in the app; refuse
@@ -263,8 +294,8 @@ EdDSA idea, at the framework-embedding cost in tier 3.
 
 Then the honest options are: distribute only through Homebrew with
 instructions to run `xattr -dr com.apple.quarantine /Applications/CCwiki.app`
-(developers will, nobody else will), or distribute source and `make install`
-(the status quo). Neither is a download for a stranger. The membership is
+(developers will, nobody else will), or distribute source and
+`make install CHANNEL=release` at a tag (the status quo). Neither is a download for a stranger. The membership is
 the cheapest part of this whole plan.
 
 ## 6. Order

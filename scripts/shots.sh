@@ -2,7 +2,7 @@
 #
 # shots.sh — drive the built app through a plan of views and capture each one.
 #
-#   ./scripts/shots.sh <output-dir> "<plan>"
+#   ./scripts/shots.sh <output-dir> "<plan>" [<app>]
 #
 # The plan is a comma-separated list of steps understood by ScreenshotRunner:
 #
@@ -23,20 +23,28 @@
 # (System Settings → Privacy & Security → Screen & System Audio Recording).
 # Without it `screencapture` fails and the app's own fallback capture is used
 # instead, which renders everything except the blurred backdrops.
+#
+# The app defaults to "build/CCwiki Dev.app", what `make` builds (`make shots`
+# passes the bundle its CHANNEL built). CCwiki Dev reads its own wiki under
+# "Application Support/CCwiki-Dev", which its first launch downloads; a release
+# that is open meanwhile is left alone. Windows are found by the pid of the
+# process started here, never by name.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/build/shots}"
 PLAN="${2:-home}"
-APP="$ROOT/build/CCwiki.app"
+APP="${3:-$ROOT/build/CCwiki Dev.app}"
 
 [ -d "$APP" ] || { echo "✗ $APP not found — run make first" >&2; exit 1; }
+APP_LABEL="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$APP/Contents/Info.plist" 2>/dev/null \
+	|| echo CCwiki)"
 
 mkdir -p "$OUT"
 rm -f "$OUT"/.ready-* "$OUT"/.go-* "$OUT"/*.png
 
 STEPS=$(printf '%s' "$PLAN" | awk -F',' '{print NF}')
-echo "→ $STEPS step(s): $PLAN"
+echo "→ $APP_LABEL, $STEPS step(s): $PLAN"
 
 # Can this process capture the screen at all? Probe once, up front, so the
 # failure mode is one clear message rather than N blank PNGs.
@@ -65,7 +73,9 @@ if [ ! -x "$HELPER" ] || [ "$ROOT/scripts/window-id.swift" -nt "$HELPER" ]; then
 	swiftc -O -o "$HELPER" "$ROOT/scripts/window-id.swift"
 fi
 
-window_id() { "$HELPER" CCwiki 2>/dev/null || true; }
+# By pid: the release, "CCwiki", may be open beside this build, and a name
+# would find its window as readily as ours.
+window_id() { "$HELPER" "$APP_PID" 2>/dev/null || true; }
 
 if [ "$EXTERNAL" = "1" ]; then
 	i=1
@@ -90,7 +100,7 @@ if [ "$EXTERNAL" = "1" ]; then
 			screencapture -x -o -l "$WID" "$OUT/$NAME.png" 2>/dev/null \
 				|| echo "  ⚠️  capture failed for $NAME"
 		else
-			echo "  ⚠️  could not find the CCwiki window for $NAME"
+			echo "  ⚠️  could not find the $APP_LABEL window for $NAME"
 		fi
 		printf 'ok' > "$OUT/.go-$i"
 		rm -f "$OUT/.ready-$i"

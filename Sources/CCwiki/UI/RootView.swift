@@ -66,6 +66,11 @@ struct RootView: View {
             // Before the library: Welcome is readable while the wiki downloads.
             model.openLaunchDocumentIfNeeded()
             await model.loadLibrary()
+            // Which copy this is goes to the log on every launch; the other
+            // copies are looked for in a release, and not under the harness.
+            // Before the sync: a copy that hands over to another and quits
+            // must not leave a fetch running on the clone the two share.
+            await model.checkInstallation()
             // A launch fetch keeps the wiki current for someone who never
             // presses ⌘R. Not under the screenshot harness, whose captures
             // must not depend on the network.
@@ -79,7 +84,8 @@ struct RootView: View {
         }
         // Two kinds of URL reach the app from outside: a PDF handed to it by
         // Finder or the Dock (Info.plist declares the type), and a
-        // ccwiki:// link from anywhere (Info.plist declares the scheme).
+        // ccwiki:// link from anywhere (Info.plist declares the scheme;
+        // CCwiki Dev's is ccwiki-dev://, read here as ccwiki://).
         .onOpenURL { url in
             if url.isFileURL {
                 guard url.pathExtension.lowercased() == "pdf",
@@ -88,7 +94,8 @@ struct RootView: View {
                 model.pendingDroppedPDF = staged
                 model.ingestSheetPresented = true
                 openWindow(id: CCwikiApp.jobsWindowID)
-            } else if let destination = CCwikiURL.destination(of: url.absoluteString) {
+            } else if let destination = CCwikiURL.destination(
+                of: CCwikiURL.internalString(for: url)) {
                 model.navigate(to: destination)
             }
         }

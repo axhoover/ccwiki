@@ -6,6 +6,10 @@
 # "compiles and the unit tests pass", nothing more. See
 # plans/build-system.md, "CI gate".
 #
+# It also checks both build identities (plans/build-system.md, "Two
+# channels"): what the release channel stamps, without building it, and that
+# the app it does build is CCwiki Dev.
+#
 # Cost: this is a private repository, and a macOS runner minute counts ten
 # times against the account's free Actions quota. Every push gets the
 # compile-and-test half (~40 s); assembling and uploading the app is kept
@@ -37,6 +41,28 @@ jobs:
 
       - name: Vendored render pipeline is intact
         run: ./scripts/vendor-web.sh --check
+
+      # What `make package` will stamp, without building it: the release
+      # channel is com.axhoover.ccwiki with the version as given and the
+      # ccwiki:// scheme, and it refuses a version that is not X.Y.Z.
+      - name: Release channel identity
+        run: |
+          plist="$RUNNER_TEMP/release-Info.plist"
+          ./scripts/stamp-info-plist.sh release 1.2.3 202610111530 Resources/Info.plist "$plist"
+          plutil -lint "$plist"
+          read_key() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
+          fail() { echo "::error::$*"; exit 1; }
+          [ "$(read_key CFBundleIdentifier)" = com.axhoover.ccwiki ] || fail "release bundle id is $(read_key CFBundleIdentifier)"
+          [ "$(read_key CFBundleName)" = CCwiki ] || fail "release name is $(read_key CFBundleName)"
+          [ "$(read_key CFBundleShortVersionString)" = 1.2.3 ] || fail "release version is $(read_key CFBundleShortVersionString)"
+          [ "$(read_key CFBundleVersion)" = 202610111530 ] || fail "release build is $(read_key CFBundleVersion)"
+          [ "$(read_key CFBundleURLTypes:0:CFBundleURLSchemes:0)" = ccwiki ] || fail "release scheme is $(read_key CFBundleURLTypes:0:CFBundleURLSchemes:0)"
+          for version in 0.1.3-dev 0.0.0; do
+            if ./scripts/stamp-info-plist.sh release "$version" 1 Resources/Info.plist "$RUNNER_TEMP/refused.plist"; then
+              fail "the release channel stamped $version"
+            fi
+          done
+          echo "✓ release channel: com.axhoover.ccwiki 1.2.3, ccwiki://, refuses 0.1.3-dev and 0.0.0"
 
       - name: Cache SwiftPM build
         uses: actions/cache@v4
@@ -75,11 +101,31 @@ jobs:
         if: github.event_name != 'push' || github.ref == 'refs/heads/main'
         run: make release
 
+      # A build from source is CCwiki Dev, never something that could pass
+      # for the release: its own id, a -dev version, its own URL scheme.
+      - name: The build is CCwiki Dev
+        if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+        run: |
+          plist="build/CCwiki Dev.app/Contents/Info.plist"
+          read_key() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
+          fail() { echo "::error::$*"; exit 1; }
+          id="$(read_key CFBundleIdentifier)"
+          version="$(read_key CFBundleShortVersionString)"
+          scheme="$(read_key CFBundleURLTypes:0:CFBundleURLSchemes:0)"
+          [ "$id" = com.axhoover.ccwiki.dev ] || fail "the build's bundle id is $id"
+          [ "$(read_key CFBundleName)" = "CCwiki Dev" ] || fail "the build's name is $(read_key CFBundleName)"
+          case "$version" in *-dev*) ;; *) fail "the build's version $version has no -dev" ;; esac
+          [ "$scheme" = ccwiki-dev ] || fail "the build's URL scheme is $scheme"
+          echo "✓ $id $version, $scheme://"
+
+      # build.sh names a dev build "CCwiki Dev.app", and the zip keeps the
+      # name: one that unzipped as CCwiki.app could be dragged over the
+      # release in /Applications.
       - name: Package the app
         if: github.event_name != 'push' || github.ref == 'refs/heads/main'
         run: |
           mkdir -p dist
-          ditto -c -k --keepParent build/CCwiki.app dist/CCwiki-dev.zip
+          ditto -c -k --keepParent "build/CCwiki Dev.app" dist/CCwiki-dev.zip
           shasum -a 256 dist/CCwiki-dev.zip
 
       # One day: this is a build to try today, not to keep, and artifact

@@ -55,6 +55,24 @@ enum CCwikiURL {
         case shell
     }
 
+    /// A link from another app, in the reader's own `ccwiki://` terms.
+    ///
+    /// The reader serves its pages on `scheme` whatever the build, but
+    /// CCwiki Dev declares `ccwiki-dev://` to the system, so that it never
+    /// takes the release's links (see `BuildIdentity`). Its own links come in
+    /// under that scheme and are read as `ccwiki://`. Anything else is
+    /// returned as it is, for `destination(of:)` to accept or refuse.
+    static func internalString(
+        for url: URL, channel: BuildIdentity.Channel = BuildIdentity.current
+    ) -> String {
+        let string = url.absoluteString
+        let external = BuildIdentity.externalURLScheme(for: channel)
+        guard external != scheme, string.lowercased().hasPrefix(external + ":") else {
+            return string
+        }
+        return scheme + String(string.dropFirst(external.count))
+    }
+
     static func destination(of string: String) -> Destination? {
         guard let url = URL(string: string), url.scheme == scheme else { return nil }
 

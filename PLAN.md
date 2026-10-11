@@ -30,7 +30,11 @@ make help      # everything else
 
 First launch clones the wiki (~35 MB) into
 `~/Library/Application Support/CCwiki/repo` and builds the search index. After
-that, reading needs no network. Setup details are in [README.md](README.md).
+that, reading needs no network. A build from source is **CCwiki Dev**
+(`build/CCwiki Dev.app`, bundle id `com.axhoover.ccwiki.dev`), which keeps its
+own clone, index and settings under `CCwiki-Dev`, so it runs beside the
+installed release without touching it ([plans/build-system.md](plans/build-system.md)).
+Setup details are in [README.md](README.md).
 
 ## 3. The non-negotiables
 
@@ -137,6 +141,12 @@ redesign, not a refactor.
 - [plans/distribution.md](plans/distribution.md) — signing and notarization,
   a release workflow, and three tiers of update mechanism (an in-app check,
   a Homebrew cask, Sparkle) with what each costs in this codebase.
+- [plans/update-integrity.md](plans/update-integrity.md) — why CCwiki came
+  back as 0.1.0 after updates (a second copy with the same bundle id, most
+  likely), and the fix: the dev and release channels (`CHANNEL`, CCwiki Dev),
+  an updater that swaps in one step and deletes the old bundle, and a launch
+  check that finds other copies. §1 lists the commands that tell which copy
+  ran; §4 what is still unproven without a Mac.
 - [PROGRESS.md](PROGRESS.md) — running log, newest first.
 - [PROBLEMS.md](PROBLEMS.md) — things that bit us.
 - [SWIFTUI-RULES.md](SWIFTUI-RULES.md) — hard-won SwiftUI rules; the code here

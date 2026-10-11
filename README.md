@@ -49,18 +49,23 @@ open it, let macOS refuse, then go to System Settings → Privacy & Security
 and click **Open Anyway**. Once.
 
 Or, from Terminal, which skips that dialog because `curl` does not mark
-downloads for Gatekeeper:
+downloads for Gatekeeper. `ditto` merges into an app that is already
+there, so any older copy is removed first, but only once the download has
+worked (`-f` makes `curl` fail on a missing file instead of saving the
+error page):
 
 ```sh
-curl -L -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip"
-ditto -x -k /tmp/CCwiki.zip /Applications
+curl -fL -o /tmp/CCwiki.zip "https://github.com/axhoover/ccwiki/releases/latest/download/CCwiki-<version>-macos.zip" \
+  && rm -rf /Applications/CCwiki.app \
+  && ditto -x -k /tmp/CCwiki.zip /Applications
 ```
 
 After that, CCwiki keeps itself current: once a day it checks for a newer
 release, verifies its Ed25519 signature against a key built into the app,
-installs it in place, and asks before relaunching. Settings → About has the
-switches. See [plans/distribution.md](plans/distribution.md) for how that
-works without a Developer ID.
+swaps it in for the old copy in one step, deletes the old copy, and asks
+before relaunching. Settings → About has the switches. See
+[plans/distribution.md](plans/distribution.md) for how that works without a
+Developer ID.
 
 ## Building from source
 
@@ -71,6 +76,14 @@ git clone <this repo> ccwiki && cd ccwiki
 make check                 # compile + unit tests
 make run                   # build the .app and launch it
 ```
+
+What you build is **CCwiki Dev**, not CCwiki: its own bundle id
+(`com.axhoover.ccwiki.dev`), its own settings and data folders, its own
+`ccwiki-dev://` links, and no updater. It runs beside an installed release
+without touching it, and its first launch downloads a copy of the wiki of its
+own. `make install` puts it at `/Applications/CCwiki Dev.app`, so it never
+replaces `/Applications/CCwiki.app`. Only `make package` and `make dist`
+build the release; see [plans/build-system.md](plans/build-system.md).
 
 `scripts/vendor-web.sh` downloads pinned, checksum-verified copies of
 markdown-it, KaTeX and the wiki's patched pseudocode.js into `Resources/web/`.
@@ -95,6 +108,8 @@ that off), and ⌘R does the same at any time.
 ~/Library/Caches/CCwiki/
 └── worktrees/     one git worktree per ingestion job
 ```
+
+CCwiki Dev keeps the same trees under `CCwiki-Dev` instead of `CCwiki`.
 
 Worktrees live under `Caches` on purpose: `Application Support` has a space in
 it, and a worktree is where `npm`, `npx` and the wiki's own node scripts run —
