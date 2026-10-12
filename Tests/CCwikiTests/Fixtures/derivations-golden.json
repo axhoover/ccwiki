@@ -3,7 +3,7 @@
  "generator": "scripts/derivations_reference.py",
  "wikiCommit": "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157",
  "manifestSHA256": "b0c3fb657570d678d1d8bf69ca60d05ded9ade2b0bba05169d597767b4c0e3ee",
- "curationSHA256": "ef14fbdfcfe4707fd8a688a70af199b62eeaadd9008f17b728ac928f254fb0ca",
+ "curationSHA256": "f849e9fc217a72e9bfaa903a238e62ecc3d54a47fe70f479df9064fb5c1ac528",
  "counts": {
   "objects": 262,
   "reductions": 283,

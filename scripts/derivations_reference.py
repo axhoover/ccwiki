@@ -30,6 +30,17 @@ Python 3 standard library only. The inputs are the wiki's
     # the golden file the Swift corpus test asserts against
     derivations_reference.py RELATIONS_JSON --golden OUT.json --wiki-commit SHA
 
+    # is every quote the curation cites still on its page? (exit 1 if not)
+    derivations_reference.py RELATIONS_JSON --check-quotes WIKI_ROOT
+
+    # the curation review: each entry beside its quotes and its effect, against
+    # a clone at the golden file's commit (`make curation-review WIKI=…`)
+    derivations_reference.py RELATIONS_JSON --curation-report plans/curation-review.md
+        --wiki-root WIKI_ROOT --wiki-commit SHA
+
+    # the checks that need no manifest; `make check` runs them
+    derivations_reference.py --selftest-units
+
 Rule numbers (R1, R2, ...) refer to plans/derivations.md section 2.
 """
 
@@ -43,6 +54,8 @@ import os
 import re
 import sys
 import time
+import unicodedata
+import urllib.parse
 from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------------------
@@ -76,8 +89,9 @@ RELATIVIZING = "relativizing"
 #: "refuse" (the spec) or "caveat" (kept for comparison in --report).
 UNSTATED_AFTER_IDEALISED = "refuse"
 
-#: R13. What a step whose precondition is not established does: "refuse" (the
-#: spec) or "caveat" (kept for comparison in --report).
+#: R13: what a step whose precondition is not established does. "refuse" is
+#: decided (plans/derivations.md §0 item 4); "caveat" is kept for `--report`
+#: only.
 UNMET_PRECONDITION = "refuse"
 
 #: R2. Node types that never take part in a derivation.
@@ -107,8 +121,17 @@ CLASS_RANK = {"fully-black-box": 0, "relativizing": 1, "free": 2, "unstated": 3}
 STRENGTH_RANK = {"unconditional": 0, "conditional": 1}
 EFFECT_RANK = {"contradiction": 0, "complexity": 1}
 
-DEFAULT_CURATION = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "Resources", "derivation-curation.json"))
+REPOSITORY = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+DEFAULT_CURATION = os.path.join(REPOSITORY, "Resources", "derivation-curation.json")
+#: The golden file: the review document is generated against its manifest.
+GOLDEN_FIXTURE = os.path.join(REPOSITORY, "Tests", "CCwikiTests", "Fixtures", "derivations-golden.json")
+#: The quote-matching cases Python and Swift are both held to (§2.6 of
+#: plans/relations-followups.md).
+QUOTE_CASES = os.path.join(REPOSITORY, "Tests", "CCwikiTests", "Fixtures", "quote-cases.json")
+#: The wiki asks, as a document and in the wiki's review-inbox format.
+WIKI_ASKS = os.path.join(REPOSITORY, "plans", "wiki-asks.md")
+WIKI_ASKS_INBOX = os.path.join(REPOSITORY, "plans", "wiki-asks.inbox.json")
+WIKI_REPOSITORY = "https://github.com/axhoover/cryptology.city"
 
 FOOTER = (
     "CCwiki found no derivation from the reductions the wiki records. "
@@ -1280,6 +1303,192 @@ def statement_lint(dv: "Derivation", wiki_root: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Curation evidence (plans/relations-followups.md §2.2): each entry's
+# citations of the wiki, its id, and the one order entries are listed in
+# ---------------------------------------------------------------------------
+
+#: The curation's keys in §2.2's order. Entries are listed this way
+#: everywhere: the review document, the app (`DerivationCuration.entries`)
+#: and the asks.
+ENTRY_KEYS = ("refuted", "settings", "quarantine", "equivalences", "requires", "statementLint", "weakens")
+
+_HEADING_LINE = re.compile(r"(#{1,6}) (.*)")
+_FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})")
+_FENCE_CLOSE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*")
+_CLOSING_HASHES = re.compile(r"(?:^|[ \t])#+$")
+
+
+def _page_lines(text: str) -> list:
+    """The page's lines, CRLF and a lone CR read as LF, each in NFC. NFC
+    never composes across a line break, so a line at a time is the whole
+    text's NFC."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return [unicodedata.normalize("NFC", line) for line in text.split("\n")]
+
+
+def _headings(lines: list) -> list:
+    """(line index, level, text) of each ATX heading: `#` to `######` at the
+    start of a line, then a space. The text is trimmed of spaces and tabs and
+    of a closing run of `#`s. Lines in the frontmatter (a first line `---` up
+    to the next line `---`) and in fenced code blocks are not headings. A
+    fence opens on three or more backticks or tildes after at most three
+    spaces, and closes on a line holding only at least as many of its own
+    character, or at the end of the file."""
+    start = 0
+    if lines and lines[0].rstrip(" \t") == "---":
+        for i in range(1, len(lines)):
+            if lines[i].rstrip(" \t") == "---":
+                start = i + 1
+                break
+    out, fence = [], None
+    for i in range(start, len(lines)):
+        line = lines[i]
+        if fence is not None:
+            m = _FENCE_CLOSE.fullmatch(line)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+            continue
+        m = _FENCE_OPEN.match(line)
+        if m:
+            fence = m.group(1)
+            continue
+        m = _HEADING_LINE.fullmatch(line)
+        if m:
+            text = _CLOSING_HASHES.sub("", m.group(2).strip(" \t")).strip(" \t")
+            out.append((i, len(m.group(1)), text))
+    return out
+
+
+def _collapse(text: str, line_of=None):
+    """`text` with every run of space, tab and LF as one space. With
+    `line_of`, the line of each character of `text`, also the line each
+    character of the result came from (a run: where it starts)."""
+    out, lines, run = [], [], False
+    for i, ch in enumerate(text):
+        if ch in " \t\n":
+            if not run:
+                out.append(" ")
+                lines.append(line_of[i] if line_of else 0)
+            run = True
+        else:
+            out.append(ch)
+            lines.append(line_of[i] if line_of else 0)
+            run = False
+    return "".join(out), lines
+
+
+def locate_quote(text: str, quote: str, section) -> int | None:
+    """§2.2's matching rule. Swift's `CurationQuote.contains` follows it too,
+    and both are held to Tests/CCwikiTests/Fixtures/quote-cases.json.
+
+    Line breaks become LF and both texts NFC; every run of `[ \\t\\n]`
+    becomes one space in both; then `quote` must be a case-sensitive
+    substring of the section, compared code point by code point (never by
+    grapheme). The section is the body under the first heading (`_headings`)
+    whose text equals `section`, up to the next heading of the same or a
+    higher level; `section` None is the whole file, frontmatter included. A
+    quote that collapses to nothing or to one space is never found.
+
+    Returns the 1-based line where the first match starts, counting lines
+    after line breaks became LF (so a lone CR starts a line), or None."""
+    lines = _page_lines(text)
+    first, end = 0, len(lines)
+    if section is not None:
+        want = unicodedata.normalize("NFC", section)
+        heads = _headings(lines)
+        found = next((n for n, h in enumerate(heads) if h[2] == want), None)
+        if found is None:
+            return None
+        index, level, _ = heads[found]
+        first = index + 1
+        end = next((h[0] for h in heads[found + 1:] if h[1] <= level), len(lines))
+    line_of = []
+    for i in range(first, end):
+        line_of.extend([i] * (len(lines[i]) + 1))
+    haystack, line_at = _collapse("\n".join(lines[first:end]), line_of)
+    needle, _ = _collapse("\n".join(_page_lines(quote)))
+    if needle in ("", " "):
+        return None
+    at = haystack.find(needle)
+    return None if at < 0 else line_at[at] + 1
+
+
+def curation_entries(data: dict) -> list:
+    """Every entry of the curation file, in §2.2's order, as a dict: `id`
+    (computed, never stored, such as `requires:red-dlog-to-prg-bm84:dlog`),
+    `key` (the file's key it is under), `object` or `edge`, `reverse` and
+    `hypothesis` for a requirement, `raw` (the file's value), `prose` (its
+    evidence, reason or note) and `cites`.
+
+    `refuted`, `settings`, `requires` and `weakens` keep file order;
+    `quarantine`, `equivalences` and `statementLint` are sorted by edge id
+    with `sorted`, which is UTF-8 byte order, as `Derivation.precedes` is. A
+    key given twice keeps its first place and its last content, as a dict
+    does."""
+    entries, at = [], {}
+
+    def add(key, eid, raw, prose, **fields):
+        cites = list(raw.get("cites", [])) if isinstance(raw, dict) else []
+        entry = {"id": eid, "key": key, "raw": raw, "prose": prose, "cites": cites, **fields}
+        if eid in at:
+            entries[at[eid]] = entry
+        else:
+            at[eid] = len(entries)
+            entries.append(entry)
+
+    for e in data.get("refuted", []):
+        add("refuted", f"refuted:{e['object']}", e, e.get("evidence", ""), object=e["object"])
+    for e in data.get("settings", []):
+        add("settings", f"settings:{e['object']}", e, e.get("evidence", ""), object=e["object"])
+    for e in sorted(data.get("quarantine", []), key=lambda e: e["edge"]):
+        add("quarantine", f"quarantine:{e['edge']}", e, e.get("reason", ""), edge=e["edge"])
+    for edge, e in sorted(data.get("equivalences", {}).items()):
+        add("equivalences", f"equivalences:{edge}", e, e.get("note", ""), edge=edge)
+    for e in data.get("requires", []):
+        rev = e.get("direction", "forward") == "reverse"
+        add("requires", f"requires:{e['edge']}{'~reverse' if rev else ''}:{e['hypothesis']}", e,
+            e.get("evidence", ""), edge=e["edge"], reverse=rev, hypothesis=e["hypothesis"])
+    for edge, e in sorted(data.get("statementLint", {}).items()):
+        add("statementLint", f"statementLint:{edge}", e, e if isinstance(e, str) else e.get("note", ""),
+            edge=edge)
+    for e in data.get("weakens", []):
+        add("weakens", f"weakens:{e['edge']}", e, e.get("evidence", ""), edge=e["edge"])
+    return entries
+
+
+def without_entry(data: dict, entry: dict) -> dict:
+    """A copy of the curation file without one entry, every copy of its key
+    included."""
+    d = copy.deepcopy(data)
+    key = entry["key"]
+    if key in ("equivalences", "statementLint"):
+        d.get(key, {}).pop(entry["edge"], None)
+    else:
+        d[key] = [e for e in d.get(key, []) if curation_entries({key: [e]})[0]["id"] != entry["id"]]
+    return d
+
+
+def check_quotes(cur: Curation, wiki_root: str) -> list:
+    """Every citation of every entry, located: {"entry", "cite", "line"},
+    with `line` None when the quote is not on its page or the page cannot
+    be read."""
+    out, pages = [], {}
+    for entry in curation_entries(cur.data):
+        for c in entry["cites"]:
+            page = c["page"]
+            if page not in pages:
+                try:
+                    with open(os.path.join(wiki_root, page), encoding="utf-8", newline="") as f:
+                        pages[page] = f.read()
+                except (OSError, UnicodeDecodeError):
+                    pages[page] = None
+            text = pages[page]
+            line = None if text is None else locate_quote(text, c["quote"], c.get("section"))
+            out.append({"entry": entry["id"], "cite": c, "line": line})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Synthetic patches: the review's counterexamples, replayable by the Swift test
 # ---------------------------------------------------------------------------
 
@@ -1557,6 +1766,472 @@ def golden(dv: Derivation, wiki_commit: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# The curation review (plans/relations-followups.md §2.3): each entry beside
+# the wiki text it rests on and what it does to the answers
+# ---------------------------------------------------------------------------
+
+#: How many removed, added or changed pairs an entry's effect names.
+REPORT_LIST_CAP = 8
+
+_MD_ESCAPED = "|*_$`[]"
+
+
+def md_escape(text: str) -> str:
+    """The one escaper for generated Markdown outside fences: `\\` first,
+    then | * _ $ ` [ and ] each get a backslash. So a notion such as
+    "Z_p^*" or a title such as "$k$-Linear" renders as written."""
+    text = text.replace("\\", "\\\\")
+    for ch in _MD_ESCAPED:
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
+def md_code(text: str) -> str:
+    """A code span for an id or a path. Its content is never escaped, so it
+    must hold no backtick or pipe; anything else is escaped text instead."""
+    if "`" in text or "|" in text or "\n" in text:
+        return md_escape(text)
+    return f"`{text}`"
+
+
+def md_fence(text: str, info: str = "markdown") -> str:
+    """`text` verbatim in a fenced block one backtick longer than its
+    longest backtick run, and at least three, so the wiki's source (`$…$`,
+    `**`, `[[a|b]]`) is shown as written, not typeset."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    ticks = "`" * max(3, longest + 1)
+    return f"{ticks}{info}\n{text}\n{ticks}"
+
+
+def _content_path(page: str) -> str:
+    return page[len("content/"):] if page.startswith("content/") else page
+
+
+def _blob_url(page: str, commit: str, line) -> str:
+    url = f"{WIKI_REPOSITORY}/blob/{commit}/{urllib.parse.quote(page, safe='/')}"
+    return url + (f"#L{line}" if line else "")
+
+
+def _source_keys(source) -> list:
+    """The citation keys of a reduction's `source`: a wikilink's display
+    text, else its page name up to " - ", and "folklore" as is."""
+    keys = []
+    for s in source if isinstance(source, list) else [source]:
+        m = re.fullmatch(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]", s.strip())
+        if m:
+            keys.append((m.group(2) or m.group(1).split(" - ")[0]).strip())
+        else:
+            keys.append(s.strip())
+    return keys
+
+
+def _name(m: Manifest, oid: str) -> str:
+    """An object as the report names it: a page object by its first alias
+    or its title, a variant as "<host> § <variant title>"."""
+    o = m.objects.get(oid)
+    if o is None:
+        return oid
+    own = (o.get("aliases") or [o["title"]])[0]
+    if o["kind"] == "variant" and o.get("of") in m.objects:
+        return f"{_name(m, o['of'])} § {o['title']}"
+    return own
+
+
+def _step_name(m: Manifest, edge: str, reverse: bool = False) -> str:
+    """A reduction as the report names it: its title and its citation keys,
+    "DLOG ⇒ PRG (BM84)", with ", used right to left" for the reverse
+    direction of an equivalence."""
+    r = m.reductions.get(edge)
+    if r is None:
+        return edge
+    name = f"{r['title']} ({', '.join(_source_keys(r.get('source', [])))})"
+    return name + (", used right to left" if reverse else "")
+
+
+def _what_it_changes(m: Manifest, entry: dict) -> str:
+    """One sentence per kind, in the words of plans/derivations.md §7."""
+    raw, key = entry["raw"], entry["key"]
+    if key == "refuted":
+        return f"Answers from {_name(m, entry['object'])} are vacuous ({raw.get('source', '')})"
+    if key == "settings":
+        return f"{_name(m, entry['object'])} is listed apart as a setting, never as an assumption or a completion"
+    step = _step_name(m, entry["edge"])
+    if key == "quarantine":
+        return f"{step} is never used"
+    if key == "equivalences":
+        fwd, rev = raw.get("forward") == "record", raw.get("reverse") == "record"
+        if fwd and rev:
+            return f"Both directions of {step} take the record's class"
+        if fwd or rev:
+            kept = "left-to-right" if fwd else "right-to-left"
+            return f"Only the {kept} direction of {step} takes the record's class; the other is unstated"
+        return f"Neither direction of {step} takes the record's class"
+    if key == "requires":
+        step = _step_name(m, entry["edge"], entry["reverse"])
+        met = raw.get("metBy", [])
+        tail = f", given or from {', '.join(_step_name(m, e) for e in met)}" if met else ", which must be given"
+        return f"{step} fires only on {raw['notion']}{tail}"
+    if key == "statementLint":
+        return f"The Statement lint does not flag {step}"
+    accepted = raw.get("acceptedBy", [])
+    tail = (f"; only {', '.join(_step_name(m, e) for e in accepted)} may use it" if accepted
+            else "; no step may use it")
+    return f"{step} concludes {raw['notion']}{tail}"
+
+
+def _description(m: Manifest, entry: dict) -> str:
+    """The entry's first paragraph in the review: what it says, with the
+    step or object in bold."""
+    raw, key = entry["raw"], entry["key"]
+    if key == "refuted":
+        return (f"Answers from **{md_escape(_name(m, entry['object']))}** are vacuous. "
+                f"CCwiki's sentence: {md_escape(raw.get('text', ''))}")
+    if key == "settings":
+        return (f"**{md_escape(_name(m, entry['object']))}** is a setting, not an assumption: listed apart, and "
+                f"never a completion. CCwiki's sentence: {md_escape(raw.get('text', ''))}")
+    step = f"**{md_escape(_step_name(m, entry['edge']))}**"
+    if key == "quarantine":
+        return f"{step} is never used: its recorded hypotheses do not match its Statement."
+    if key == "equivalences":
+        cls = m.reductions.get(entry["edge"], {}).get("class", "?")
+
+        def said(direction):
+            return "takes the record's class" if raw.get(direction) == "record" else "is unstated"
+        return (f"{step}, recorded as {md_escape(cls)}: left to right {said('forward')}, right to left "
+                f"{said('reverse')}.")
+    if key == "requires":
+        step = f"**{md_escape(_step_name(m, entry['edge'], entry['reverse']))}**"
+        met = raw.get("metBy", [])
+        met_text = (", ".join(md_escape(_step_name(m, e)) for e in met) if met
+                    else "nothing; the notion must be given")
+        return (f"{step} needs *{md_escape(raw['notion'])}* of its hypothesis "
+                f"{md_escape(_name(m, entry['hypothesis']))}. Met by: {met_text}.")
+    if key == "statementLint":
+        return f"The Statement lint does not flag {step}."
+    accepted = raw.get("acceptedBy", [])
+    accepted_text = ", ".join(md_escape(_step_name(m, e)) for e in accepted) if accepted else "nothing"
+    return f"{step} concludes *{md_escape(raw['notion'])}*. Accepted by: {accepted_text}."
+
+
+def _single_pairs(dv: Derivation, starts: list, include_idealised: bool) -> dict:
+    """(start, target) -> (chain class, models, assumptions, weakened
+    notion) for every derived fact of every single-object closure, full or
+    weakened (a fact with both is read as its full one)."""
+    out = {}
+    for a in starts:
+        cl = dv.single(a, include_idealised)
+        for t in set(cl.facts) | set(cl.weak):
+            f = cl.get(t)
+            if f.step is None:
+                continue
+            out[(a, t)] = (f.chain, tuple(sorted(f.models)), tuple(sorted(q.notion for q in f.assumes)),
+                           f.weak.notion if f.weak else None)
+    return out
+
+
+def _backward_lists(dv: Derivation, pairs: dict) -> dict:
+    """R11's lists for every target, read off the single-object closures:
+    target -> (singles, settings, refuted), each a set of sources."""
+    m, out = dv.m, {}
+    for (a, t) in pairs:
+        if m.model_of_node(a):
+            continue
+        lists = out.setdefault(t, (set(), set(), set()))
+        lists[2 if a in dv.cur.refuted else 1 if a in dv.cur.settings else 0].add(a)
+    return out
+
+
+@dataclass
+class ReviewBaseline:
+    """What the full curation gives, computed once for every entry's effect."""
+    dv: Derivation
+    starts: list
+    pairs: dict  # include_idealised -> _single_pairs
+    backward: dict  # include_idealised -> _backward_lists
+    golden: dict  # golden query id -> golden_expect
+    wiki_root: str | None  # the clone, for the Statement lint
+    lint: list | None  # its hits with the full curation; None without a clone
+
+
+def review_baseline(dv: Derivation, wiki_root: str | None) -> ReviewBaseline:
+    starts = sorted(o for o in dv.m.objects if dv.m.type(o) not in EXCLUDED_TYPES)
+    pairs = {inc: _single_pairs(dv, starts, inc) for inc in (False, True)}
+    return ReviewBaseline(dv, starts, pairs, {inc: _backward_lists(dv, pairs[inc]) for inc in (False, True)},
+                          _golden_expectations(dv), wiki_root,
+                          statement_lint(dv, wiki_root) if wiki_root else None)
+
+
+def _golden_expectations(dv: Derivation) -> dict:
+    out = {}
+    for qid, start, target, inc, _stable in GOLDEN_QUERIES:
+        if target in dv.m.objects and all(s in dv.m.objects for s in start):
+            out[qid] = golden_expect(dv.query(start, target, inc))
+    return out
+
+
+def entry_effect(base: ReviewBaseline, entry: dict) -> dict:
+    """What one entry does: the engine rebuilt without it, compared with the
+    full curation (§2.3). Per model setting (False: default models, True:
+    idealised included): `removes` (pairs only the run without the entry
+    derives), `adds` (pairs only the full curation derives), `changed`
+    (pairs whose chain class, models, assumptions or weakened notion
+    differ, with what differs), `vacuous` (single-object answers whose
+    vacuity differs) and `backward` (targets whose R11 lists differ). Then
+    `golden` (golden query ids whose expectation differs) and `lint` (the
+    Statement lint's new hits, with a clone)."""
+    dv = base.dv
+    data = without_entry(dv.cur.data, entry)
+    alt = Derivation(dv.m, Curation(data), dv.policy, dv.pre_policy)
+    out = {"golden": [], "lint": [], "none": True}
+    for inc in (False, True):
+        full, other = base.pairs[inc], _single_pairs(alt, base.starts, inc)
+        removes = sorted(set(other) - set(full))
+        adds = sorted(set(full) - set(other))
+        changed = []
+        for p in sorted(set(full) & set(other)):
+            if full[p] != other[p]:
+                changed.append((p, _what_changed(full[p], other[p])))
+        vac_full = {p for p in full if p[0] in dv.cur.refuted}
+        vac_other = {p for p in other if p[0] in alt.cur.refuted}
+        back_other = _backward_lists(alt, other)
+        targets = set(base.backward[inc]) | set(back_other)
+        empty = (set(), set(), set())
+        backward = sorted(t for t in targets if base.backward[inc].get(t, empty) != back_other.get(t, empty))
+        out[inc] = {"removes": removes, "adds": adds, "changed": changed,
+                    "vacuous": sorted(vac_full ^ vac_other), "backward": backward}
+    alt_golden = _golden_expectations(alt)
+    out["golden"] = sorted(q for q in set(base.golden) | set(alt_golden) if base.golden.get(q) != alt_golden.get(q))
+    if base.lint is not None and entry["key"] == "statementLint":
+        known = {(h["edge"], tuple(h["unlisted"])) for h in base.lint}
+        out["lint"] = [h for h in statement_lint(alt, base.wiki_root)
+                       if (h["edge"], tuple(h["unlisted"])) not in known]
+    out["none"] = not (out["golden"] or out["lint"]
+                       or any(out[inc][k] for inc in (False, True) for k in ("removes", "adds", "changed",
+                                                                               "vacuous", "backward")))
+    return out
+
+
+def _what_changed(full: tuple, other: tuple) -> str:
+    """How a pair differs without the entry: its chain class, models,
+    assumptions or weakened notion."""
+    parts = []
+    if full[0] != other[0]:
+        parts.append(f"class {full[0]} → {other[0]}")
+    if full[1] != other[1]:
+        parts.append(f"models {', '.join(full[1]) or 'standard'} → {', '.join(other[1]) or 'standard'}")
+    if full[2] != other[2]:
+        a, b = set(full[2]), set(other[2])
+        parts.append("assumption dropped" if b < a else "assumption added" if a < b else "assumptions differ")
+    if full[3] != other[3]:
+        parts.append("no longer weakened" if other[3] is None else "weakened" if full[3] is None
+                     else "weakened differently")
+    return ", ".join(parts)
+
+
+def _plural(n: int, one: str, many: str | None = None) -> str:
+    return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def _listed(items: list) -> str:
+    """The first few of a list, joined; a longer list ends in an ellipsis."""
+    return ", ".join(items[:REPORT_LIST_CAP]) + (", …" if len(items) > REPORT_LIST_CAP else "")
+
+
+def _sentence(text: str) -> str:
+    """`text` with a full stop, unless it ends in an ellipsis."""
+    return text if text.endswith("…") else text + "."
+
+
+def _counts(e: dict) -> list:
+    parts = []
+    for key, word in (("removes", "removes"), ("adds", "adds"), ("changed", "changes")):
+        if e[key]:
+            parts.append(f"{word} {len(e[key])}")
+    if e["vacuous"]:
+        parts.append(f"{len(e['vacuous'])} vacuous")
+    if e["backward"]:
+        parts.append(f"backward lists {len(e['backward'])}")
+    return parts
+
+
+def _why_no_effect(dv: Derivation, entry: dict):
+    """Why an entry shows no effect, when the measure itself explains it, as
+    (short, long), or None: its object derives nothing alone, or its step has
+    several hypotheses, which no single start gives it together."""
+    if entry["key"] in ("refuted", "settings"):
+        derives = any(f.step is not None for inc in (False, True)
+                      for f in dv.single(entry["object"], inc).facts.values())
+        if derives:
+            return None
+        reason = f"nothing follows from {_name(dv.m, entry['object'])} alone"
+        return reason, reason
+    r = dv.m.reductions.get(entry.get("edge", ""))
+    if r is None or len(r["hypotheses"]) < 2:
+        return None
+    n = len(r["hypotheses"])
+    return (f"its step has {n} hypotheses, which no single start gives",
+            f"the step has {n} hypotheses, so the entry acts only in questions with several starts, which this "
+            "measure samples only through the golden queries")
+
+
+def _effect_cell(dv: Derivation, entry: dict, x: dict) -> str:
+    """The Summary's effect column: default models (or, failing those,
+    idealised ones), the golden queries and the Statement lint."""
+    if x["none"]:
+        why = _why_no_effect(dv, entry)
+        return md_escape("no effect" + (f": {why[0]}" if why else ""))
+    parts = []
+    default, idealised = _counts(x[False]), _counts(x[True])
+    if default:
+        parts.append(md_escape(", ".join(default)))
+    elif idealised:
+        parts.append(md_escape("with idealised models only: " + ", ".join(idealised)))
+    if x["golden"]:
+        parts.append("golden " + ", ".join(md_code(q) for q in x["golden"]))
+    if x["lint"]:
+        parts.append(md_escape(f"the Statement lint flags {_plural(len(x['lint']), 'edge')} without it"))
+    return "; ".join(parts)
+
+
+def _effect_paragraph(dv: Derivation, entry: dict, x: dict) -> str:
+    m = dv.m
+    if x["none"]:
+        why = _why_no_effect(dv, entry)
+        return ("**Effect.** None: without this entry no single-object answer, vacuous answer, backward list or "
+                "golden query changes." + (f" {md_escape(why[1][0].upper() + why[1][1:])}." if why else ""))
+    d, i = x[False], x[True]
+    out = []
+    if any(e[k] for e in (d, i) for k in ("removes", "adds", "changed")):
+        def more(e):
+            return (f"{len(e['removes'])} more" if e["removes"] else "no more") + (
+                f", {len(e['adds'])} fewer" if e["adds"] else "")
+        noun = "pair" if len(d["removes"]) + len(d["adds"]) == 1 else "pairs"
+        out.append(f"Without this entry the engine derives {more(d)} {noun} and changes {len(d['changed'])} "
+                   f"(default models), and {more(i)} and {len(i['changed'])} changed with idealised models.")
+
+    def pairs_sentence(label, key, describe):
+        e, where = (d, "") if d[key] else (i, ", with idealised models")
+        if not e[key]:
+            return
+        lead = (f"{label}{where} ({len(e[key])}), first {REPORT_LIST_CAP}: " if len(e[key]) > REPORT_LIST_CAP
+                else f"{label}{where}: ")
+        out.append(_sentence(lead + _listed([md_escape(describe(p)) for p in e[key]])))
+
+    pairs_sentence("Removed", "removes", lambda p: f"{_name(m, p[0])} ⇒* {_name(m, p[1])}")
+    pairs_sentence("Added", "adds", lambda p: f"{_name(m, p[0])} ⇒* {_name(m, p[1])}")
+    pairs_sentence("Changed", "changed", lambda c: f"{_name(m, c[0][0])} ⇒* {_name(m, c[0][1])} ({c[1]})")
+    if d["vacuous"] or i["vacuous"]:
+        out.append(f"Vacuous answers that change: {len(d['vacuous'])} (default models), {len(i['vacuous'])} with "
+                   "idealised models.")
+    if d["backward"] or i["backward"]:
+        targets = [md_escape(_name(m, t)) for t in (d["backward"] or i["backward"])]
+        out.append(_sentence(f"Backward lists that change: {len(d['backward'])} (default models), "
+                             f"{len(i['backward'])} with idealised models: {_listed(targets)}"))
+    if x["golden"]:
+        out.append("Golden queries that change: " + ", ".join(md_code(q) for q in x["golden"]) + ".")
+    for h in x["lint"]:
+        out.append(md_escape(f"Without it the Statement lint flags {_step_name(m, h['edge'])}: its Statement "
+                             f"names {', '.join(_name(m, o) for o in h['unlisted'])}, which its hypotheses "
+                             "do not list."))
+    return "**Effect.** " + " ".join(out)
+
+
+def _locations(found: list) -> list:
+    """Each citation of an entry with the line its quote starts on: the
+    Summary's "Wiki text" cell, one code span per distinct place."""
+    cells, seen, last = [], set(), None
+    for c, line in found:
+        path = _content_path(c["page"])
+        if line is None:
+            cells.append(f"{md_code(path)} not found")
+            last = None
+            continue
+        if (path, line) in seen:
+            continue
+        seen.add((path, line))
+        cells.append(md_code(f":{line}" if path == last else f"{path}:{line}"))
+        last = path
+    return cells
+
+
+def _citation_lines(c: dict, line, wiki_commit: str) -> list:
+    """One citation in the review: where it is, linked to the line at the
+    commit, then the quote in a fence."""
+    page, section = c["page"], c.get("section")
+    where = f"§ {md_escape(section)}" if section is not None else "anywhere on the page"
+    if line is None:
+        head = f"{md_code(page)}, {where}: **Not found on the page at {wiki_commit[:7]}**"
+    else:
+        head = f"[{md_code(f'{page}:{line}')}]({_blob_url(page, wiki_commit, line)}), {where}"
+    return [head, "", md_fence(c["quote"])]
+
+
+def curation_report(dv: Derivation, wiki_root: str, wiki_commit: str) -> str:
+    """plans/curation-review.md (relations-followups.md §2.3): every entry
+    beside the wiki text it rests on and what it does to the answers. Writes
+    only repository-relative paths and GitHub URLs, never `wiki_root`."""
+    m, cur = dv.m, dv.cur
+    entries = curation_entries(cur.data)
+    located = {}
+    for r in check_quotes(cur, wiki_root):
+        located.setdefault(r["entry"], []).append((r["cite"], r["line"]))
+    quotes = sum(len(v) for v in located.values())
+    missing = sum(1 for v in located.values() for _, line in v if line is None)
+    short = wiki_commit[:7]
+    counts = ", ".join(f"{sum(1 for e in entries if e['key'] == k)} {k}" for k in ENTRY_KEYS)
+
+    base = review_baseline(dv, wiki_root)
+    effects = {}
+    for e in entries:
+        effects[e["id"]] = entry_effect(base, e)
+        print(f"  {e['id']}", file=sys.stderr)
+
+    lines = [
+        f"<!-- curation-review: curation={cur.sha256} manifest={m.sha256} wiki={wiki_commit} "
+        f"entries={len(entries)} quotesMissing={missing} -->",
+        "# Curation review",
+        "",
+        "Generated by `scripts/derivations_reference.py --curation-report`; regenerate with",
+        "`make curation-review WIKI=…`. Spec: plans/relations-followups.md §2. Do not edit by hand.",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| Curation | `Resources/derivation-curation.json`, SHA-256 `{cur.sha256[:8]}…` |",
+        f"| Generated against | wiki `{short}`, relations.json `{m.sha256[:8]}…` (the golden file's) |",
+        f"| Entries | {len(entries)}: {counts} |",
+        f"| Quotes | {quotes - missing} of {quotes} found |",
+        "",
+        "Each entry is something `relations.json` does not record and CCwiki reads from the wiki's pages. "
+        "Read each one's claim beside the quotes it rests on. The quotes are the page source at the wiki "
+        "commit above, in fences, so math, emphasis and wikilinks show as written.",
+        "",
+        "**Effect** is measured by removing the one entry and rebuilding the engine: over every single-object "
+        f"closure ({len(base.starts)} starts), it *removes* the pairs only the run without it derives, *adds* "
+        "the pairs only the full curation derives, and *changes* the pairs whose chain class, models, "
+        "assumptions or weakened notion differ. Vacuous answers, the backward lists (R11) and the golden "
+        "queries are compared too. The Summary gives default models; each entry gives both settings.",
+        "",
+        "## Summary",
+        "",
+        "| # | Entry | What it changes | Wiki text | Effect (default) |",
+        "|---|---|---|---|---|",
+    ]
+    for n, e in enumerate(entries, 1):
+        lines.append(f"| {n} | {md_code(e['id'])} | {md_escape(_what_it_changes(m, e))} | "
+                     f"{', '.join(_locations(located.get(e['id'], [])))} | "
+                     f"{_effect_cell(dv, e, effects[e['id']])} |")
+    lines += ["", "## Entries"]
+    for n, e in enumerate(entries, 1):
+        lines += ["", f"### {n}. {md_code(e['id'])}", "", _description(m, e)]
+        for c, line in located.get(e["id"], []):
+            lines += [""] + _citation_lines(c, line, wiki_commit)
+        if e["prose"]:
+            lines += ["", f"CCwiki's note: {md_escape(e['prose'])}"]
+        lines += ["", _effect_paragraph(dv, e, effects[e["id"]])]
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Self-test: each review finding as an executable check
 # ---------------------------------------------------------------------------
 
@@ -1652,6 +2327,7 @@ def selftest(dv: Derivation) -> bool:
     check("invariants hold", all(v for k, v in inv.items() if not k.startswith("_")), inv["_detail"])
     sen = sentinels(dv)
     check("sentinels hold", all(v for k, v in sen.items() if not k.startswith("_")), sen["_detail"])
+    ok &= selftest_report(dv)
 
     print("synthetic patches")
     base = len(ad)
@@ -1679,6 +2355,178 @@ def selftest(dv: Derivation) -> bool:
     check("a stub barrier is not propagated",
           len(mad) < base and all(d["barrier"] != "bar-owp-to-ke-ir89" for d in a["derivedBarriers"]))
     return ok
+
+
+def _checker():
+    """A `check(name, cond, detail)` that prints as `selftest` does, and the
+    running result."""
+    state = {"ok": True}
+
+    def check(name, cond, detail=""):
+        state["ok"] &= bool(cond)
+        print(f"  {'PASS' if cond else 'FAIL'}  {name}" + (f"   ({detail})" if detail and not cond else ""))
+    return check, state
+
+
+def selftest_report(dv: Derivation) -> bool:
+    """The review document's measure on the reviewed commit (§2.6): BM84's
+    requirement removes 32 default pairs, and the ssddh and honest-majority
+    entries, which change no closure, still show an effect."""
+    check, state = _checker()
+    print("curation review")
+    base = review_baseline(dv, None)
+    entries = {e["id"]: e for e in curation_entries(dv.cur.data)}
+
+    def effect(eid):
+        return entry_effect(base, entries[eid]) if eid in entries else None
+
+    x = effect("requires:red-dlog-to-prg-bm84:dlog")
+    check("without BM84's requirement the engine derives 32 more default pairs",
+          x and len(x[False]["removes"]) == 32 and "ddh-prg" in x["golden"],
+          x and f"{len(x[False]['removes'])} more; golden {x['golden']}")
+    x = effect("refuted:ssddh")
+    check("refuted:ssddh has an effect: its answers stop being vacuous",
+          x and not x["none"] and x[False]["vacuous"] and x[False]["backward"] and "ssddh-ke" in x["golden"])
+    x = effect("settings:honest-majority-t-lt-n-over-2")
+    check("settings:honest-majority-t-lt-n-over-2 has an effect: MPC's backward list",
+          x and not x["none"] and x[False]["backward"] == ["mpc"], x and x[False]["backward"])
+    return state["ok"]
+
+
+#: The wiki's inbox kinds (`INBOX_KINDS` in its scripts/review/round.mjs).
+INBOX_KINDS = ("content-error", "verification-gap", "missing-edge", "node-granularity", "reference-page", "stub",
+               "schema-convention", "title-or-slug")
+#: The keys plans/relations-followups.md §4.1 lets an ask carry; the wiki's
+#: own check rejects a file with any key it does not know.
+INBOX_KEYS = {"id", "kind", "summary", "pages", "proposed_action", "rationale", "related", "needs_paper",
+              "confidence"}
+INBOX_REQUIRED = ("id", "kind", "summary", "pages", "proposed_action")
+_INBOX_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._-]*")
+#: Where an ask names the curation entries it retires: its `rationale`'s
+#: sentence "Retires CCwiki's curation entries `…`, `…`."
+_RETIRES = re.compile(r"Retires CCwiki's curation entr(?:y|ies) ((?:`[^`]+`(?:,? and |, )?)+)")
+
+
+def inbox_problems(inbox: dict, asks_markdown: str, entry_ids: set) -> list:
+    """Every problem with the asks' inbox file (§4.1): its shape, ids, kinds
+    and keys; a retired entry that is not in the curation; a `ccw:` id the
+    asks document does not name. The wiki's `round.mjs inbox` is the
+    authority; this catches what would make it reject the file."""
+    bad = []
+    if not isinstance(inbox, dict) or set(inbox) != {"source", "items"}:
+        return ['the file must be one object {"source", "items"}']
+    if not isinstance(inbox["source"], str) or not inbox["source"].strip():
+        bad.append("source must be a non-empty string")
+    if not isinstance(inbox["items"], list) or not inbox["items"]:
+        return bad + ["items must be a non-empty list"]
+    seen = set()
+    for n, it in enumerate(inbox["items"]):
+        label = it.get("id", f"items[{n}]") if isinstance(it, dict) else f"items[{n}]"
+        if not isinstance(it, dict):
+            bad.append(f"{label}: not an object")
+            continue
+        bad += [f"{label}: unknown key {k}" for k in sorted(set(it) - INBOX_KEYS)]
+        bad += [f"{label}: no {k}" for k in INBOX_REQUIRED if k not in it]
+        iid = it.get("id")
+        if not isinstance(iid, str) or not _INBOX_ID.fullmatch(iid):
+            bad.append(f"{label}: the id must be <prefix>:<name>")
+        elif re.match(r"r\d+:", iid):
+            bad.append(f"{label}: the prefix r<n>: is the wiki's audit findings'")
+        elif not iid.startswith("ccw:"):
+            bad.append(f"{label}: CCwiki's asks are ccw:")
+        if iid in seen:
+            bad.append(f"{label}: a second item with this id")
+        seen.add(iid)
+        if isinstance(iid, str) and iid.startswith("ccw:") and f"`{iid}`" not in asks_markdown:
+            bad.append(f"{label}: plans/wiki-asks.md does not name it")
+        if it.get("kind") not in INBOX_KINDS:
+            bad.append(f"{label}: kind {it.get('kind')!r} is not one of the wiki's")
+        for k in ("summary", "proposed_action", "rationale"):
+            if k in it and (not isinstance(it[k], str) or not it[k].strip()):
+                bad.append(f"{label}: {k} must be a non-empty string")
+        pages = it.get("pages")
+        if (not isinstance(pages, list) or not pages
+                or any(not isinstance(p, str) or not p or p.startswith("/") or ".." in p.split("/") for p in pages)):
+            bad.append(f"{label}: pages must be a non-empty list of repository-relative paths")
+        if "needs_paper" in it and not isinstance(it["needs_paper"], bool):
+            bad.append(f"{label}: needs_paper must be true or false")
+        if "confidence" in it and it["confidence"] not in ("high", "medium", "low"):
+            bad.append(f"{label}: confidence must be high, medium or low")
+        if "related" in it and (not isinstance(it["related"], list)
+                                or any(not isinstance(r, str) for r in it["related"])):
+            bad.append(f"{label}: related must be a list of ids")
+        for m in _RETIRES.finditer(it.get("rationale", "") if isinstance(it.get("rationale"), str) else ""):
+            for eid in re.findall(r"`([^`]+)`", m.group(1)):
+                if eid not in entry_ids:
+                    bad.append(f"{label}: retires {eid}, which is not a curation entry")
+    return bad
+
+
+def selftest_units() -> bool:
+    """The checks that need no manifest and no clone, run by `make check`:
+    the quote-matching cases Python and Swift share, the review document's
+    escaping and fences, the asks' inbox file, and the curation's citations
+    (plans/relations-followups.md §2.6, §4.1)."""
+    check, state = _checker()
+
+    print("quote matching (Tests/CCwikiTests/Fixtures/quote-cases.json)")
+    with open(QUOTE_CASES, encoding="utf-8") as f:
+        cases = json.load(f)["cases"]
+    check("the shared cases load", len(cases) >= 10, f"{len(cases)} cases")
+    for c in cases:
+        line = locate_quote(c["page"], c["quote"], c["section"])
+        ok = (line is not None) == c["found"] and ("line" not in c or line == c["line"])
+        check(c["name"], ok, f"line {line}; expected {'line ' + str(c.get('line')) if c['found'] else 'not found'}")
+
+    print("the review document")
+    quote = "If [[discrete-logarithm|DLOG]] is hard in $\\ZZ_p^*$, a **PRG** follows — [[a|b]]"
+    block = "\n".join(_citation_lines({"page": "content/Reductions/x y.md", "section": "Statement",
+                                       "quote": quote}, 23, "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157"))
+    check("a quote comes out inside a fence unchanged", f"\n```markdown\n{quote}\n```" in block, block)
+    check("its location links the line at the commit, the path percent-encoded",
+          "https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/"
+          "content/Reductions/x%20y.md#L23" in block, block)
+    fenced = md_fence("uses ``` and ```` inside")
+    check("a fence is one backtick longer than the quote's longest run",
+          fenced.startswith("`````markdown\n") and fenced.endswith("\n`````"), fenced)
+    check("generated text is escaped: \\ first, then | * _ $ ` [ ]",
+          md_escape("a|b*c_d$e`f[g]h\\i") == "a\\|b\\*c\\_d\\$e\\`f\\[g\\]h\\\\i", md_escape("a|b*c_d$e`f[g]h\\i"))
+    check("a cell with | and * is escaped", md_escape("Z_p^* | t < n/2") == "Z\\_p^\\* \\| t < n/2")
+    check("an id is a code span, unescaped", md_code("requires:red-a_b~reverse:x") == "`requires:red-a_b~reverse:x`")
+    missing = "\n".join(_citation_lines({"page": "content/a.md", "section": None, "quote": "gone"}, None, "ab81f02ff4"))
+    check("a missing quote says so", "**Not found on the page at ab81f02**" in missing, missing)
+
+    print("the curation's citations")
+    with open(DEFAULT_CURATION, encoding="utf-8") as f:
+        data = json.load(f)
+    entries = curation_entries(data)
+    ids = [e["id"] for e in entries]
+    check("42 entries, each id once", len(ids) == 42 and len(set(ids)) == len(ids), len(ids))
+    uncited = [e["id"] for e in entries if not e["cites"]]
+    check("every entry cites the wiki", not uncited, uncited)
+    bad = [(e["id"], c.get("page")) for e in entries for c in e["cites"]
+           if not (c.get("page", "").startswith("content/") and c["page"].endswith(".md"))
+           or "…" in c.get("quote", "") or not c.get("quote", "").strip()]
+    check("each citation is a content page and a contiguous quote", not bad, bad)
+    notions = [e["raw"].get("notionMarkdown") for e in entries if e["key"] in ("requires", "weakens")]
+    check("every requirement and weakening has a notionMarkdown", all(notions), notions.count(None))
+    check("no notionMarkdown has wikilinks, links or emphasis",
+          not [n for n in notions if n and any(k in n for k in ("[[", "](", "**"))])
+
+    print("the wiki asks (plans/wiki-asks.inbox.json)")
+    with open(WIKI_ASKS_INBOX, encoding="utf-8") as f:
+        inbox = json.load(f)
+    with open(WIKI_ASKS, encoding="utf-8") as f:
+        asks = f.read()
+    problems = inbox_problems(inbox, asks, set(ids))
+    check("the inbox file is valid, its retired entries exist and wiki-asks.md names each ask",
+          not problems, "; ".join(problems))
+    check("the checker refuses an unknown key, an r<n>: id and a retired entry that does not exist",
+          len(inbox_problems({"source": "s", "items": [
+              {"id": "r3:edge-1", "kind": "missing-edge", "summary": "s", "pages": ["content/a.md"],
+               "proposed_action": "a", "origin": "x",
+               "rationale": "Retires CCwiki's curation entries `requires:red-x:y`."}]}, "", set(ids))) == 3)
+    return state["ok"]
 
 
 # ---------------------------------------------------------------------------
@@ -1852,19 +2700,43 @@ def report(dv: Derivation):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("relations", help="path to .reductions/relations.json")
+    p.add_argument("relations", nargs="?",
+                   help="path to .reductions/relations.json; needed by all but --selftest-units and --check-quotes")
     p.add_argument("--curation", default=DEFAULT_CURATION, help="path to derivation-curation.json")
     p.add_argument("--query", action="append", default=[], help='"a, b => c"')
     p.add_argument("--all-models", action="store_true", help="include idealised and 'other' models (R4)")
     p.add_argument("--implied-by", action="append", default=[])
     p.add_argument("--report", action="store_true")
     p.add_argument("--selftest", action="store_true")
+    p.add_argument("--selftest-units", action="store_true",
+                   help="the checks that need no manifest: quote matching, the review's escaping, the asks")
     p.add_argument("--lint", metavar="WIKI_ROOT", help="Statement lint over the wiki clone's pages")
+    p.add_argument("--check-quotes", metavar="WIKI_ROOT", help="is every curation quote still on its page?")
+    p.add_argument("--curation-report", metavar="OUT", help="write the curation review (plans/curation-review.md)")
+    p.add_argument("--wiki-root", help="the clone --curation-report reads the quoted pages from")
     p.add_argument("--golden", help="write the golden JSON here")
-    p.add_argument("--wiki-commit", default="", help="the clone's HEAD, recorded in the golden file")
+    p.add_argument("--wiki-commit", default="", help="the clone's HEAD, recorded in the golden file and the review")
     p.add_argument("--policy", choices=["refuse", "caveat"], default=UNSTATED_AFTER_IDEALISED)
     p.add_argument("--precondition-policy", choices=["refuse", "caveat"], default=UNMET_PRECONDITION)
     a = p.parse_args(argv)
+
+    if a.selftest_units and not selftest_units():
+        sys.exit(1)
+    if a.check_quotes:
+        found = check_quotes(Curation.load(a.curation), a.check_quotes)
+        missing = [r for r in found if r["line"] is None]
+        for r in missing:
+            c = r["cite"]
+            where = f"§ {c['section']}" if c.get("section") is not None else "(anywhere)"
+            print(f"not found: {r['entry']}: {c['page']} {where}: {c['quote']}")
+        print(f"quotes: {len(found) - len(missing)} of {len(found)} found")
+        if missing:
+            sys.exit(1)
+    if a.relations is None:
+        if a.query or a.implied_by or a.report or a.selftest or a.lint or a.golden or a.curation_report \
+                or not (a.selftest_units or a.check_quotes):
+            p.error("RELATIONS_JSON is required")
+        return
 
     dv = Derivation(Manifest.load(a.relations), Curation.load(a.curation), a.policy, a.precondition_policy)
     for q in a.query:
@@ -1890,6 +2762,34 @@ def main(argv=None):
             json.dump(g, f, indent=1, sort_keys=False, ensure_ascii=False)
             f.write("\n")
         print(f"wrote {a.golden}: {len(g['queries'])} queries, {len(g['mutations'])} mutations", file=sys.stderr)
+    if a.curation_report:
+        write_curation_report(dv, a.curation_report, a.wiki_root, a.wiki_commit, p)
+
+
+def write_curation_report(dv: Derivation, out: str, wiki_root, wiki_commit: str, parser) -> None:
+    """--curation-report: refuses a manifest that is not the golden file's,
+    writes the review, and exits 1 when a quote is missing (the document is
+    written all the same, and says which)."""
+    if not wiki_root or not wiki_commit:
+        parser.error("--curation-report needs --wiki-root and --wiki-commit")
+    with open(GOLDEN_FIXTURE, encoding="utf-8") as f:
+        g = json.load(f)
+    if dv.m.sha256 != g["manifestSHA256"]:
+        sys.exit(f"✗ this relations.json is not the golden file's (SHA-256 {dv.m.sha256[:12]}…, the golden "
+                 f"file's {g['manifestSHA256'][:12]}…).\n"
+                 f"Use a separate clone at the golden file's commit: `git clone {WIKI_REPOSITORY} <dir> && "
+                 f"git -C <dir> checkout {g['wikiCommit']}`. Never check out a commit in CCwiki's own clone, "
+                 "which is pull-only.")
+    if wiki_commit != g["wikiCommit"]:
+        print(f"note: the clone is at {wiki_commit[:12]} and the golden file at {g['wikiCommit'][:12]}; their "
+              "manifests agree, so the review quotes the clone's pages.", file=sys.stderr)
+    text = curation_report(dv, wiki_root, wiki_commit)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(text)
+    header = re.search(r"entries=(\d+) quotesMissing=(\d+)", text)
+    print(f"wrote {out}: {header.group(1)} entries, {header.group(2)} quotes missing", file=sys.stderr)
+    if header.group(2) != "0":
+        sys.exit(1)
 
 
 if __name__ == "__main__":
