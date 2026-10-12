@@ -115,6 +115,9 @@ struct ExplorerResult: Sendable, Hashable {
         let models: [String]
         let footer: String
         let explainsRules: Bool
+        /// The Adjustments behind this proof, which replace the shortest
+        /// proof's: each proof has its own (relations-followups.md §2.5).
+        var adjustments: ExplorerSection? = nil
     }
 
     /// The verdict lines that say what the proof shown is: its model scope,
@@ -122,10 +125,15 @@ struct ExplorerResult: Sendable, Hashable {
     /// the stronger proof's own.
     static let proofLineIDs: Set<String> = ["scope", "provenance", "class"]
 
-    /// The sections, with the stronger proof swapped in when it is shown.
+    /// The sections, with the stronger proof swapped in when it is shown,
+    /// and its Adjustments, last, in place of the shortest proof's.
     func sections(showingStronger: Bool) -> [ExplorerSection] {
         guard showingStronger, let stronger else { return sections }
-        return sections.map { $0.id == stronger.proof.id ? stronger.proof : $0 }
+        var shown = sections
+            .filter { $0.id != Self.adjustmentsID }
+            .map { $0.id == stronger.proof.id ? stronger.proof : $0 }
+        if let adjustments = stronger.adjustments { shown.append(adjustments) }
+        return shown
     }
 
     /// The verdict's lines, likewise. The shortest proof's own lines come
@@ -275,6 +283,8 @@ struct ExplorerRow: Identifiable, Sendable, Hashable {
     enum Target: Sendable, Hashable {
         /// A reduction's or barrier's page, by content-relative path.
         case page(String)
+        /// A page at one of its headings: where a quoted passage is.
+        case section(path: String, anchor: String)
         /// An object: its page, or its host's page at its section.
         case object(String)
         /// "Shown above": the first occurrence, by row id.

@@ -673,6 +673,8 @@ struct RelationsExplorerView: View {
         switch target {
         case .page(let path):
             showInReader { model.openPage(path) }
+        case .section(let path, let anchor):
+            showInReader { model.openPage(path, anchor: anchor) }
         case .object(let id):
             showInReader { model.openRelationObject(id) }
         case .reveal(let id):

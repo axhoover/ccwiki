@@ -517,4 +517,384 @@ struct ExplorerResultTests {
         #expect(ancestors.first == "proof/0")
         #expect(ancestors.count == 4)
     }
+
+    // MARK: Refused, never caveated (relations-followups.md §1.2)
+
+    @Test("the rules and every help say an unmet precondition is refused, never caveated")
+    func refusalWording() {
+        #expect(DerivationWording.rules[5] == "A step whose Statement needs more of its hypothesis "
+            + "than the wiki's page defines is used only when that hypothesis is one you gave, and "
+            + "the derivation then says “assuming …”, or when the step that gives the hypothesis "
+            + "states the stronger notion. Otherwise CCwiki leaves the step out; it never uses it "
+            + "with a caveat.")
+        #expect(DerivationWording.refusedHelp == "Steps the wiki records on the way that CCwiki "
+            + "does not chain here, and why. A step that needs more of its hypothesis than the "
+            + "step before it states is left out, not used with a caveat.")
+        let leftOut = "A chain is left out when one of its steps needs more of a hypothesis than "
+            + "the step before it states; ask the Relations Explorer about the pair to see the step."
+        #expect(DerivationWording.impliesHelp == "What this implies through two or more recorded "
+            + "reductions chained together. Derived by CCwiki; the wiki does not state these "
+            + "chains. Standard, quantum and CRS models only; the Relations Explorer can include "
+            + "the others. Click a row for its proof. " + leftOut)
+        #expect(DerivationWording.impliedByHelp == "Objects that each imply this through two or "
+            + "more recorded reductions chained together, derived by CCwiki from what the wiki "
+            + "records, which is not everything known. Combinations of several objects are in the "
+            + "Relations Explorer. " + leftOut)
+    }
+
+    @Test("the wording file says caveat only where it says CCwiki never uses one")
+    func caveatOnlyWhereRefused() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appending(path: "Sources/CCwiki/Wiki/DerivationWording.swift"),
+            encoding: .utf8)
+        let caveat = try NSRegularExpression(pattern: #"\bcaveat\b"#, options: .caseInsensitive)
+        func count(_ text: String) -> Int {
+            caveat.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+        }
+        #expect(count(DerivationWording.rules[5]) == 1)
+        #expect(count(DerivationWording.refusedHelp) == 1)
+        #expect(count(source) == 2)
+    }
+
+    @Test("no answer says a precondition is not established: it refuses instead")
+    func noUnestablishedCaveat() throws {
+        let plain = try ExplorerFixture.derivation()
+        let plainQueries = [
+            ExplorerQuery(from: ["owf", "kem"], to: "pke"), ExplorerQuery(from: ["owf"], to: "pke"),
+            ExplorerQuery(from: ["rom"], to: "ot", includesIdealisedModels: true),
+            ExplorerQuery(from: ["owf"]), ExplorerQuery(to: "pke"),
+        ]
+        var results = plainQueries.map { Self.compute($0, over: plain) }
+        let curated = try AdjustmentsFixture.derivation()
+        results += Self.adjustmentQueries.map { Self.compute($0, over: curated) }
+        results += [ExplorerQuery(from: ["cdh"]), ExplorerQuery(to: "prg")].map {
+            Self.compute($0, over: curated)
+        }
+        for result in results {
+            var shown = Self.texts(result)
+            if let footer = result.footer { shown.append(footer) }
+            for text in shown {
+                #expect(!text.lowercased().contains("not established"), "\(text)")
+            }
+        }
+    }
+
+    // MARK: Adjustments (relations-followups.md §2.5)
+
+    /// Questions over `AdjustmentsFixture` that touch every kind of entry.
+    private static let adjustmentQueries = [
+        ExplorerQuery(from: ["ddh"], to: "prg"), ExplorerQuery(from: ["ddh"], to: "mpc"),
+        ExplorerQuery(from: ["cpir"], to: "mpc"), ExplorerQuery(from: ["ot"], to: "mpc"),
+        ExplorerQuery(from: ["prp"], to: "prf"), ExplorerQuery(from: ["prp"], to: "invertible-prfs"),
+        ExplorerQuery(from: ["isis"], to: "crhf"), ExplorerQuery(from: ["fake"], to: "pke"),
+        ExplorerQuery(from: ["hm"], to: "mpc"),
+        ExplorerQuery(from: ["fake", "isis", "cpir", "prp"], to: "z"),
+        ExplorerQuery(from: ["fake"], to: "mpc"), ExplorerQuery(from: ["cdh"], to: "prg"),
+        ExplorerQuery(from: ["bdh"], to: "hve"), ExplorerQuery(from: ["prp"], to: "ske"),
+        ExplorerQuery(from: ["fake", "bdh"], to: "hve"),
+    ]
+
+    private static func adjusted(_ query: ExplorerQuery) throws -> ExplorerResult {
+        compute(query, over: try AdjustmentsFixture.derivation())
+    }
+
+    private static func adjustments(_ result: ExplorerResult,
+                                    showingStronger: Bool = false) -> ExplorerSection? {
+        result.sections(showingStronger: showingStronger).first { $0.id == "adjustments" }
+    }
+
+    @Test("a derivable answer ends with its Adjustments: the step, then the wiki's text for it")
+    func adjustmentsOfADerivation() throws {
+        let result = try Self.adjusted(ExplorerQuery(from: ["ddh"], to: "prg"))
+        let ids = result.sections.map { $0.id }
+        #expect(ids == ["proof", "adjustments"])
+        let section = try #require(result.sections.last)
+        #expect(section.title == "Adjustments")
+        #expect(section.help == DerivationWording.adjustmentsHelp)
+
+        let row = try #require(section.rows.first)
+        #expect(section.rows.count == 1)
+        #expect(row.id == "adjustments/requires:red-dlog-to-prg-bm84:dlog")
+        #expect(row.title == "Not used here: Discrete logarithm ⇒ Pseudorandom generator (BM84) "
+            + "needs DLOG hard in Z_p^* (p prime, g a generator), and the Discrete logarithm here "
+            + "comes from Computational Diffie-Hellman ⇒ Discrete logarithm (folklore).")
+        let note = "“If DLOG is hard in ℤ_p^* (p prime, g a generator)” — BM84: DLOG ⇒ PRG § Statement"
+        #expect(row.notes == [note])
+        let statement = ExplorerRow.Target.section(path: "Reductions/red-dlog-to-prg-bm84.md",
+                                                   anchor: "statement")
+        let links = [ExplorerRow.Link(id: row.id + "/cite-0", title: "BM84: DLOG ⇒ PRG",
+                                      target: statement)]
+        #expect(row.links == links)
+        #expect(row.primary == statement)
+        #expect(row.page == ExplorerRow.PageLink(kind: "Reduction", title: "BM84: DLOG ⇒ PRG",
+                                                 path: "Reductions/red-dlog-to-prg-bm84.md"))
+        #expect(row.statement == row.title + "\n" + note)
+        #expect(row.help == "CCwiki applies this because relations.json does not record it. "
+            + "The quoted text is the wiki's own.")
+        #expect(row.wraps)
+    }
+
+    @Test("a precondition DMO00 establishes for Kil88 is said once, with a link to each page quoted")
+    func establishedAdjustment() throws {
+        let result = try Self.adjusted(ExplorerQuery(from: ["cpir"], to: "mpc"))
+        let row = try #require(Self.adjustments(result)?.rows.first)
+        #expect(row.title == "Oblivious transfer ⇒ Secure multi-party computation (Kil88, GMW87) "
+            + "needs OT secure against malicious parties (it instantiates Kil88's ideal OT). "
+            + "Private Information Retrieval ⇒ Oblivious transfer (DMO00) establishes it.")
+        let notes: [String] = [
+            "“every two-party functionality can be computed with unconditional security against "
+                + "malicious parties” — Kil88, GMW87: OT ⇒ MPC § Statement",
+            "“The definitions above are semi-honest” — Oblivious transfer § Malicious Security",
+            "“Non-trivial single-server PIR is therefore complete for secure two-party and "
+                + "multi-party computation” — DMO00: cPIR ⇒ OT § Statement",
+        ]
+        #expect(row.notes == notes)
+        let titles = row.links.map { $0.title }
+        #expect(titles == ["Kil88, GMW87: OT ⇒ MPC", "Oblivious transfer", "DMO00: cPIR ⇒ OT"])
+        let targets = row.links.map { $0.target }
+        let sections: [ExplorerRow.Target] = [
+            .section(path: "Reductions/red-ot-to-mpc-kil88.md", anchor: "statement"),
+            .section(path: "Primitives/ot.md", anchor: "malicious-security"),
+            .section(path: "Reductions/red-cpir-to-ot-dmo00.md", anchor: "statement"),
+        ]
+        #expect(targets == sections)
+    }
+
+    @Test("what the proof row or the verdict already says gets no sentence of its own")
+    func adjustmentTitlesSayEachThingOnce() throws {
+        let assumed = try Self.adjusted(ExplorerQuery(from: ["ot"], to: "mpc"))
+        let assumedTitle = Self.adjustments(assumed)?.rows.first?.title
+        #expect(assumedTitle == "Oblivious transfer ⇒ Secure multi-party computation (Kil88, GMW87)")
+
+        let accepted = try Self.adjusted(ExplorerQuery(from: ["prp"], to: "prf"))
+        let acceptedTitle = Self.adjustments(accepted)?.rows.first?.title
+        #expect(acceptedTitle == "Pseudorandom function § Invertible PRFs ⇒ Pseudorandom function "
+            + "(folklore) accepts what Pseudorandom permutation ⇒ Pseudorandom function § "
+            + "Invertible PRFs (folklore) gives: an invertible PRF for the forward-oracle game "
+            + "only, over a super-polynomial domain.")
+
+        let keptApart = try Self.adjusted(ExplorerQuery(from: ["prp"], to: "invertible-prfs"))
+        let keptApartTitle = Self.adjustments(keptApart)?.rows.first?.title
+        #expect(keptApartTitle == "Pseudorandom permutation ⇒ Pseudorandom function § Invertible "
+            + "PRFs (folklore)")
+
+        let unstated = try Self.adjusted(ExplorerQuery(from: ["isis"], to: "crhf"))
+        let unstatedTitle = Self.adjustments(unstated)?.rows.first?.title
+        #expect(unstatedTitle == "Shortest Integer Solution § ISIS (Inhomogeneous SIS) ⇒ Shortest "
+            + "Integer Solution (folklore) is used with its class unstated: the record's class "
+            + "holds for the other direction only.")
+
+        let setting = try Self.adjusted(ExplorerQuery(from: ["hm"], to: "mpc"))
+        let settingTitle = Self.adjustments(setting)?.rows.first?.title
+        #expect(settingTitle == "Honest majority")
+    }
+
+    @Test("no derivation ends with what its starts are; its refusals carry their own quotes")
+    func adjustmentsOfNoDerivation() throws {
+        let vacuous = try Self.adjusted(ExplorerQuery(from: ["fake"], to: "mpc"))
+        let ids = vacuous.sections.map { $0.id }
+        #expect(ids == ["adjustments"])
+        let row = try #require(vacuous.sections.last?.rows.first)
+        #expect(row.id == "adjustments/refuted:fake")
+        #expect(row.title == "Fake assumption")
+        #expect(row.notes == ["“broken by XY99” — Fake assumption"])
+        let links = [ExplorerRow.Link(id: row.id + "/cite-0", title: "Fake assumption",
+                                      target: .page("Assumptions/fake.md"))]
+        #expect(row.links == links)
+        #expect(row.page == ExplorerRow.PageLink(kind: "Page", title: "Fake assumption",
+                                                 path: "Assumptions/fake.md"))
+
+        // A refusal says why on its own row, so it adds nothing at the end.
+        let refused = try Self.adjusted(ExplorerQuery(from: ["cdh"], to: "prg"))
+        let refusedIDs = refused.sections.map { $0.id }
+        #expect(refusedIDs == ["refused"])
+    }
+
+    @Test("a refused step carries its entry's quotes, and its link opens the quoted section")
+    func refusedRowEvidence() throws {
+        let result = try Self.adjusted(ExplorerQuery(from: ["cdh"], to: "prg"))
+        let row = try #require(result.sections.first { $0.id == "refused" }?.rows.first)
+        #expect(row.title == "Not derived: Discrete logarithm ⇒ Pseudorandom generator (BM84) "
+            + "needs DLOG hard in Z_p^* (p prime, g a generator); the Discrete logarithm here "
+            + "comes from Computational Diffie-Hellman ⇒ Discrete logarithm (folklore), whose "
+            + "Statement the wiki does not record as establishing that.")
+        let note = "“If DLOG is hard in ℤ_p^* (p prime, g a generator)” — BM84: DLOG ⇒ PRG § Statement"
+        #expect(row.notes == [note])
+        // The step's own link, now at the quote rather than the top of the page.
+        let links = [ExplorerRow.Link(
+            id: "refused/0/step", title: "BM84: DLOG ⇒ PRG",
+            target: .section(path: "Reductions/red-dlog-to-prg-bm84.md", anchor: "statement"))]
+        #expect(row.links == links)
+        #expect(row.help?.contains("Discrete logarithm ⇒ Pseudorandom generator") == true)
+
+        // A weakened input names the producer's entry, on the producer's page.
+        let weak = try Self.adjusted(ExplorerQuery(from: ["prp"], to: "ske"))
+        let weakRow = try #require(weak.sections.first { $0.id == "refused" }?.rows.first)
+        let weakNote = "“is an invertible PRF for the traditional (forward-oracle) game” — "
+            + "folklore: PRP ⇒ iPRF § Statement"
+        #expect(weakRow.notes == [weakNote])
+        let weakTitles = weakRow.links.map { $0.title }
+        #expect(weakTitles == ["folklore: iPRF ⇒ SKE", "folklore: PRP ⇒ iPRF"])
+        let weakTargets = weakRow.links.map { $0.target }
+        let expectedTargets: [ExplorerRow.Target] = [
+            .page("Reductions/red-invertible-prfs-to-ske.md"),
+            .section(path: "Reductions/red-prp-to-invertible-prf.md", anchor: "statement"),
+        ]
+        #expect(weakTargets == expectedTargets)
+    }
+
+    @Test("a quarantined reduction recorded on the pair carries the wiki's text, as its refusal does")
+    func quarantineEvidence() throws {
+        let result = try Self.adjusted(ExplorerQuery(from: ["bdh"], to: "hve"))
+        let ids = result.sections.map { $0.id }
+        #expect(ids == ["onPair", "refused"])
+        let quote = "“in composite-order bilinear groups” — BW07: BDH ⇒ HVE § Statement"
+        let statement = ExplorerRow.Target.section(path: "Reductions/red-bdh-to-hve-bw07.md",
+                                                   anchor: "statement")
+
+        let onPair = try #require(result.sections.first?.rows.first)
+        #expect(onPair.notes == ["Its Statement is in composite-order groups.", quote])
+        let onPairTargets = onPair.links.map { $0.target }
+        #expect(onPairTargets == [statement])
+
+        let refused = try #require(result.sections.last?.rows.first)
+        #expect(refused.notes == [quote])
+        let refusedTargets = refused.links.map { $0.target }
+        #expect(refusedTargets == [statement])
+    }
+
+    @Test("Show It swaps the Adjustments with the proof, and removes or adds the section")
+    func adjustmentsFollowTheProofShown() throws {
+        let both = Self.compute(ExplorerQuery(from: ["a"], to: "t"),
+                                over: try AdjustmentsFixture.strongerDerivation())
+        let shortest = try #require(both.sections.last)
+        #expect(shortest.id == "adjustments")
+        let shortestRows = shortest.rows.map { $0.id }
+        #expect(shortestRows == ["adjustments/equivalences:red-t-eq-a"])
+        #expect(shortest.rows.first?.title == "Alpha ⇒ Tau (TA05) is used with its class "
+            + "unstated: the record's class holds for the other direction only.")
+        let swapped = both.sections(showingStronger: true)
+        let swappedIDs = swapped.map { $0.id }
+        #expect(swappedIDs == ["proof", "adjustments"])
+        let strongerRows = swapped.last?.rows.map { $0.id }
+        #expect(strongerRows == ["stronger-adjustments/requires:red-y-to-t:y"])
+        #expect(swapped.last?.rows.first?.title == "Upsilon ⇒ Tau (YT07) needs y in full. Alpha ⇒ "
+            + "Upsilon (AY06) establishes it.")
+
+        // Only the shortest proof touches an entry: Show It removes the section.
+        let removes = Self.compute(ExplorerQuery(from: ["a"], to: "t"),
+                                   over: try AdjustmentsFixture.strongerDerivation(requirement: false))
+        let removesIDs = removes.sections.map { $0.id }
+        let removesShown = removes.sections(showingStronger: true).map { $0.id }
+        #expect(removesIDs == ["proof", "adjustments"])
+        #expect(removesShown == ["proof"])
+
+        // Only the stronger one does: Show It adds it.
+        let adds = Self.compute(ExplorerQuery(from: ["a"], to: "t"),
+                                over: try AdjustmentsFixture.strongerDerivation(equivalence: false))
+        let addsIDs = adds.sections.map { $0.id }
+        let addsShown = adds.sections(showingStronger: true).map { $0.id }
+        #expect(addsIDs == ["proof"])
+        #expect(addsShown == ["proof", "adjustments"])
+    }
+
+    @Test("a quote no longer on its page is said so, and the row no longer vouches for it")
+    func unverifiedQuote() throws {
+        var derivation = try AdjustmentsFixture.derivation()
+        derivation.unverifiedCitations = [AdjustmentsFixture.otMalicious]
+        let result = Self.compute(ExplorerQuery(from: ["cpir"], to: "mpc"), over: derivation)
+        let row = try #require(Self.adjustments(result)?.rows.first)
+        #expect(row.notes.count == 3)
+        #expect(row.notes.first?.hasPrefix("“every two-party functionality") == true)
+        #expect(row.notes.dropFirst().first == "No longer on Oblivious transfer as quoted; CCwiki "
+            + "still applies this as reviewed at wiki ab81f02.")
+        #expect(row.help == "CCwiki applies this because relations.json does not record it.")
+        // The page is still linked: the reader can see what it says now.
+        #expect(row.links.count == 3)
+    }
+
+    @Test("entries on one step that quote one sentence show it once, and their rows differ")
+    func sharedQuotes() throws {
+        let derivation = try AdjustmentsFixture.conjunctionDerivation()
+        let page = "JL21: Xi + Psi ⇒ Chi"
+        let hardness = "“Assume sub-exponential hardness of the following:” — \(page) § Statement"
+        let xi = "“Xi with secret dimension k” — \(page) § Statement"
+        let psi = "“Psi over a prime field” — \(page) § Statement"
+        let both = "“requires sub-exponential hardness of both hypotheses” — \(page)"
+
+        // Refused for both hypotheses: one row, each quote on it once.
+        let refused = Self.compute(ExplorerQuery(from: ["a", "b"], to: "chi"), over: derivation)
+        let row = try #require(refused.sections.first { $0.id == "refused" }?.rows.first)
+        #expect(row.notes == [hardness, xi, both, psi])
+        let targets = row.links.map { $0.target }
+        let statement = ExplorerRow.Target.section(path: "Reductions/red-xi-and-psi-to-chi.md",
+                                                   anchor: "statement")
+        #expect(targets == [statement])
+
+        // Assumed of both givens: an item each, which the hypothesis names.
+        let assumed = Self.compute(ExplorerQuery(from: ["xi", "psi"], to: "chi"), over: derivation)
+        let rows = try #require(Self.adjustments(assumed)).rows
+        let titles = rows.map { $0.title }
+        #expect(titles == ["Xi ∧ Psi ⇒ Chi (JL21) · Xi", "Xi ∧ Psi ⇒ Chi (JL21) · Psi"])
+        let notes = rows.map { $0.notes }
+        #expect(notes == [[hardness, xi, both], [hardness, psi, both]])
+
+        // Two quotes gone from one page: the page is named once.
+        var drifted = derivation
+        drifted.unverifiedCitations = [AdjustmentsFixture.hardnessStatement,
+                                       AdjustmentsFixture.xiStatement]
+        let gone = Self.compute(ExplorerQuery(from: ["xi", "psi"], to: "chi"), over: drifted)
+        let goneRows = try #require(Self.adjustments(gone)).rows
+        let missing = "No longer on \(page) as quoted; CCwiki still applies this as reviewed at "
+            + "wiki ab81f02."
+        let goneNotes = goneRows.map { $0.notes }
+        #expect(goneNotes == [[missing, both], [missing, psi, both]])
+    }
+
+    @Test("no adjustment repeats a refused row or a verdict line")
+    func adjustmentsSayEachThingOnce() throws {
+        let derivation = try AdjustmentsFixture.derivation()
+        for query in Self.adjustmentQueries {
+            let result = Self.compute(query, over: derivation)
+            var said = Set((result.verdict?.lines ?? []).map { $0.text })
+            for section in result.sections where section.id == "refused" {
+                said.formUnion(section.rows.map { $0.title })
+            }
+            for row in Self.adjustments(result)?.rows ?? [] {
+                #expect(!said.contains(row.title), "\(query): \(row.title)")
+            }
+        }
+    }
+
+    @Test("CCwiki's words for an adjustment never call the wiki wrong, nor use the word correction")
+    func adjustmentWording() throws {
+        let banned = try NSRegularExpression(
+            pattern: #"\b(caveat|error|errors|fix|fixes|fixed|correction|corrections)\b"#,
+            options: .caseInsensitive)
+        var templates = [
+            DerivationWording.adjustmentHelp(quotesFound: false),
+            DerivationWording.unverifiedQuote(pageTitle: "Oblivious transfer",
+                                              commit: AdjustmentsFixture.reviewedCommit),
+        ]
+        let derivation = try AdjustmentsFixture.derivation()
+        for query in Self.adjustmentQueries {
+            let result = Self.compute(query, over: derivation)
+            for section in [Self.adjustments(result), Self.adjustments(result, showingStronger: true)] {
+                guard let section else { continue }
+                templates += [section.title, section.help].compactMap { $0 }
+                // The titles and help are CCwiki's; the notes are the wiki's.
+                for row in section.rows {
+                    templates.append(row.title)
+                    templates += [row.help].compactMap { $0 }
+                }
+            }
+        }
+        #expect(templates.count > 20)
+        for text in templates {
+            let range = NSRange(text.startIndex..., in: text)
+            #expect(banned.firstMatch(in: text, range: range) == nil, "\(text)")
+        }
+    }
 }

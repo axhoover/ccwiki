@@ -188,6 +188,24 @@ extension ExplorerResult {
             result.sections += sections
         }
 
+        // Last: what CCwiki applies that the record does not, for each proof
+        // that can be shown. One closure, the answer's own, tells a step
+        // refused on the way from one the proof does without.
+        let closure = writer.derivation.closure(from: Set(start), options: query.options)
+        let shortest = CurationTrace.derived(
+            answer.proof, other: answer.stronger?.proof, closure: closure, start: start,
+            derivation: writer.derivation)
+        if let section = adjustmentsSection(shortest, idPrefix: adjustmentsID, writer: writer) {
+            result.sections.append(section)
+        }
+        if let stronger = answer.stronger {
+            let trace = CurationTrace.derived(
+                stronger.proof, other: answer.proof, closure: closure, start: start,
+                derivation: writer.derivation)
+            result.stronger?.adjustments = adjustmentsSection(
+                trace, idPrefix: "stronger-" + adjustmentsID, writer: writer)
+        }
+
         result.footer = recorded ? DerivationWording.recordedFooter : DerivationWording.derivedFooter
         result.explainsRules = !recorded
         result.announcement = recorded
@@ -419,8 +437,7 @@ extension ExplorerResult {
             // hypothesis holds in.
             let closure = writer.derivation.closure(from: Set(start), options: .all)
             result.sections.append(ExplorerSection(
-                id: "refused", title: "Refused steps",
-                help: "Steps the wiki records on the way, which CCwiki does not chain here, and why.",
+                id: "refused", title: "Refused steps", help: DerivationWording.refusedHelp,
                 rows: answer.refused.enumerated().map { index, refused in
                     writer.refusalRow(refused, closure: closure, id: "refused/\(index)")
                 }))
@@ -437,6 +454,13 @@ extension ExplorerResult {
         }
 
         if let section = completionsSection(answer, query: query, writer: writer) {
+            result.sections.append(section)
+        }
+
+        // Last: what CCwiki applies to the starts. A refusal carries its
+        // quotes on its own row above.
+        let trace = CurationTrace.starts(start, derivation: writer.derivation)
+        if let section = adjustmentsSection(trace, idPrefix: adjustmentsID, writer: writer) {
             result.sections.append(section)
         }
 
@@ -584,6 +608,13 @@ extension ExplorerResult {
                               accessibilityLabel: "\(title), \(status)")
         row.detail = (keys.isEmpty ? "" : keys.joined(separator: ", ") + " · ") + status
         if let detail = entry.detail { row.notes = [detail] }
+        if entry.status == .excluded(.quarantined) {
+            // The wiki's own text for the quarantine, as on its refused row.
+            let evidence = writer.curationEvidence(.quarantine(relationID: entry.relationID),
+                                                   rowID: row.id)
+            row.notes += evidence.notes
+            row.links = evidence.links
+        }
         row.isStub = relation?.status == .stub
         if let relation {
             row.primary = .page(relation.path)
