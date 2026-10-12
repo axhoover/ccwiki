@@ -45,6 +45,9 @@ struct CCwikiApp: App {
         // Never for a ccwiki:// link or a PDF from Finder: those belong to a
         // reader, and an empty paper window is no answer to either.
         .handlesExternalEvents(matching: [])
+        // Nor from File ▸ New: the group's own New Paper Window item would
+        // open a window with no paper. Only Show Paper opens one.
+        .commandsRemoved()
 
         // Jobs get their own window rather than a fourth pane: the thing you
         // actually want is to watch a job run while reading the page it is

@@ -619,11 +619,17 @@ final class AppModel {
         // other, and the page on screen waits for both.
         async let searched = syncSearchIndex(with: update.library)
 
+        // Git answers for a clone and the marker for a snapshot. When neither
+        // can (a clone whose git has gone, or content with no marker), the
+        // commit and dates already shown stay, as they always have.
+        let store = paths.wikiStore
         let facts = await LibraryRefresh.revisionFacts(
-            store: paths.wikiStore, git: git, paths: paths, after: outcome)
-        modifiedDates = facts.modifiedDates
-        headRevision = facts.head
-        headDate = facts.date
+            store: store, git: git, paths: paths, after: outcome)
+        if (git != nil && store == .git) || store == .snapshot {
+            modifiedDates = facts.modifiedDates
+            headRevision = facts.head
+            headDate = facts.date
+        }
         let revisionAfter = await LibraryRefresh.currentRevision(
             store: paths.wikiStore, git: git, clone: cloneRoot)
         loadedRevision = revisionBefore == revisionAfter ? revisionAfter : nil

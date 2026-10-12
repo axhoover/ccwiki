@@ -13,8 +13,9 @@
 #   search:<query>            the ⇧⌘F full-text sheet, pre-filled
 #   outline | backlinks       flip the inspector
 #   light | dark              switch NSAppearance
-#   paper:<content-relative>  a reference page's paper window, from the
-#                             fixture PDFs in $CCWIKI_PAPER_FIXTURES
+#   paper:<content-relative>  a reference page's paper window (Track C, C6;
+#                             until then the step changes nothing and
+#                             captures the reader)
 #
 # The app pauses at each step and writes `.ready-N`; this script captures the
 # window with `screencapture -l` and answers with `.go-N`. That handshake is
@@ -33,9 +34,9 @@
 # process started here, never by name.
 #
 # The app starts with -ApplePersistenceIgnoreState YES, so windows macOS saved
-# from your own use of it never come back into a capture. Papers come from
-# Tests/CCwikiTests/Fixtures/papers unless CCWIKI_PAPER_FIXTURES says
-# otherwise; under the harness the app never fetches one.
+# from your own use of it never come back into a capture. CCWIKI_PAPER_FIXTURES
+# defaults to Tests/CCwikiTests/Fixtures/papers, which Track C adds; under the
+# harness the app will never fetch a paper.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

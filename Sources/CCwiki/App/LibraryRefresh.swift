@@ -67,7 +67,7 @@ enum LibraryRefresh {
 
     /// The commit, its date and the pages' dates. From git for a clone, from
     /// the marker for a snapshot, which has no history to date files by;
-    /// nothing at all without either.
+    /// nothing at all without either, and then `AppModel` keeps what it has.
     static func revisionFacts(
         store: AppPaths.WikiStore, git: GitService?, paths: AppPaths,
         after outcome: GitService.SyncOutcome?
