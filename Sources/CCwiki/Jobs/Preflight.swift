@@ -34,6 +34,10 @@ struct PreflightFinding: Identifiable, Sendable {
 /// launch sheet *and* pasted into the prompt.
 enum Preflight {
 
+    /// `repository` is where the pull request would go
+    /// (`PublishTarget.repository`). The agent no longer pushes, but CCwiki
+    /// does once the change is approved, and a credential needed at the end
+    /// is checked at the beginning (plans/corrections.md §5.3).
     static func run(
         submission: IngestSubmission,
         index: WikiIndex?,
@@ -41,7 +45,8 @@ enum Preflight {
         tools: ToolLocator,
         isGitHubAuthenticated: Bool,
         canPush: Bool = true,
-        hasPushRights: Bool? = nil
+        hasPushRights: Bool? = nil,
+        repository: String = AppPaths.repositorySlug
     ) -> [PreflightFinding] {
         var findings: [PreflightFinding] = []
 
@@ -54,8 +59,8 @@ enum Preflight {
                     + "Install it, or set its path in Settings."))
         }
 
-        // 2. GitHub auth. `gh pr create` failing at the very end of a long job
-        //    is a miserable way to find this out.
+        // 2. GitHub auth. The pull request opens only after review, and
+        //    finding then that it cannot is a miserable way to learn this.
         if tools.path(for: .gh) != nil, !isGitHubAuthenticated {
             findings.append(PreflightFinding(
                 level: .blocking,
@@ -81,9 +86,10 @@ enum Preflight {
         if hasPushRights == false {
             findings.append(PreflightFinding(
                 level: .blocking,
-                title: "The signed-in account cannot push to \(AppPaths.repositorySlug)",
-                detail: "The job pushes a branch to the wiki itself, so a fork is not enough. "
-                    + "Ask for write access, or sign in to gh as an account that has it."))
+                title: "The signed-in account cannot push to \(repository)",
+                detail: "Opening the pull request pushes a branch to the wiki itself, so a "
+                    + "fork is not enough. Ask for write access, or sign in to gh as an "
+                    + "account that has it."))
         }
 
         // 4. The submodules the wiki's lint reads.
@@ -184,19 +190,10 @@ enum GitHubAuth {
         guard let gh = tools.path(for: .gh) else { return false }
         let environment = tools.childEnvironment()
 
-        let answer: Bool? = await withTaskGroup(of: Bool?.self) { group in
-            group.addTask {
-                await Subprocess.run(
-                    executable: gh, arguments: ["auth", "status"], environment: environment
-                ).succeeded
-            }
-            group.addTask {
-                try? await Task.sleep(for: deadline)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+        let answer: Bool? = await Subprocess.withDeadline(deadline) {
+            await Subprocess.run(
+                executable: gh, arguments: ["auth", "status"], environment: environment
+            ).succeeded
         }
 
         // A timeout is not an answer, so it is not cached either.
@@ -207,14 +204,18 @@ enum GitHubAuth {
     }
 
     /// Whether the signed-in account may push to `repository`, asked of
-    /// GitHub itself. `nil` when it could not be asked — no `gh`, no network.
+    /// GitHub itself. `nil` when it could not be asked — no `gh`, no network,
+    /// or no answer before the deadline.
     static func canPush(tools: ToolLocator, repository: String) async -> Bool? {
         guard let gh = tools.path(for: .gh) else { return nil }
-        let result = await Subprocess.run(
-            executable: gh,
-            arguments: ["api", "repos/\(repository)", "--jq", ".permissions.push"],
-            environment: tools.childEnvironment())
-        guard result.succeeded else { return nil }
+        let environment = tools.childEnvironment()
+        let result = await Subprocess.withDeadline(deadline) {
+            await Subprocess.run(
+                executable: gh,
+                arguments: ["api", "repos/\(repository)", "--jq", ".permissions.push"],
+                environment: environment)
+        }
+        guard let result, result.succeeded else { return nil }
         return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
     }
 
@@ -228,11 +229,57 @@ enum GitHubAuth {
 
 extension GitHubAuth {
     /// `gh auth status`: nil on a timeout, unlike `isAuthenticated`'s false,
-    /// so an unreachable GitHub reads as offline, not as signed out.
+    /// so an unreachable GitHub reads as offline, not as signed out
+    /// (plans/corrections.md §7.1). Nil, too, without `gh`: it could not be
+    /// asked, and `GitHubAccess.classify` says gh is missing.
     ///
-    /// Phase 0: always nil. Track B asks gh (plans/corrections.md §11.3).
+    /// Not cached, so signing in mid-session is seen at the next ask; a
+    /// definite answer refreshes `isAuthenticated`'s cache.
+    ///
+    /// `gh auth status` reports a timeout as one, but a connection that
+    /// fails at once (no network, DNS) as an invalid token. So when it fails
+    /// in words that are not a network's, one cheap API call that needs both
+    /// the network and a valid token decides between the two.
     static func signedIn(tools: ToolLocator) async -> Bool? {
-        nil
+        guard let gh = tools.path(for: .gh) else { return nil }
+        let environment = tools.childEnvironment()
+
+        func ask(_ arguments: [String]) async -> Subprocess.Result? {
+            await Subprocess.withDeadline(deadline) {
+                await Subprocess.run(executable: gh, arguments: arguments, environment: environment)
+            }
+        }
+
+        guard let status = await ask(["auth", "status", "--hostname", "github.com"]) else {
+            return nil
+        }
+        var answer: Bool?
+        if status.succeeded {
+            answer = true
+        } else if !isNetworkFailure(status.stdout + "\n" + status.stderr),
+                  let probe = await ask([
+                      "api", "--hostname", "github.com", "rate_limit", "--jq", ".rate.limit",
+                  ]) {
+            if probe.succeeded {
+                answer = true
+            } else if !isNetworkFailure(probe.stdout + "\n" + probe.stderr) {
+                answer = false
+            }
+        }
+
+        if let answer {
+            lock.withLock { cached = answer }
+        }
+        return answer
+    }
+
+    /// `gh`'s words, and git's, for "GitHub could not be reached".
+    static func isNetworkFailure(_ output: String) -> Bool {
+        if GitService.isNetworkFailure(output) { return true }
+        let lowered = output.lowercased()
+        return ["error connecting to", "timeout", "timed out", "no such host", "dial tcp",
+                "tls handshake", "i/o timeout", "proxyconnect",
+        ].contains { lowered.contains($0) }
     }
 }
 

@@ -273,3 +273,145 @@ enum Subprocess {
             stderr: err.joined(separator: "\n"))
     }
 }
+
+// MARK: - Bytes
+
+extension Subprocess {
+
+    /// Run to completion with stdout as bytes, untouched by `LineSplitter`.
+    ///
+    /// For `git show`, `-z` and `--binary` output (plans/corrections.md
+    /// §6.1). `run` splits on `\r` as well as `\n`, decodes lossily and drops
+    /// the final newline, so a file read through it gains a spurious
+    /// end-of-file hunk and a patch read through it no longer applies.
+    /// stderr is decoded, for messages. Cancelling the calling task stops
+    /// the child, as it does for `lines`.
+    static func runData(
+        executable: String,
+        arguments: [String],
+        currentDirectory: URL? = nil,
+        environment: [String: String]
+    ) async -> (status: Int32, stdout: Data, stderr: String) {
+        var out = Data()
+        var err = Data()
+        var status: Int32 = -1
+        for await chunk in chunks(
+            executable: executable, arguments: arguments,
+            currentDirectory: currentDirectory, environment: environment
+        ) {
+            switch chunk {
+            case .output(.stdout, let data): out.append(data)
+            case .output(.stderr, let data): err.append(data)
+            case .exit(let code): status = code
+            }
+        }
+        return (status, out,
+                String(decoding: err, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// `work`'s answer, or nil once `deadline` has passed. The work is then
+    /// cancelled, which stops any child it started: for `gh` and `git
+    /// ls-remote`, which a captive portal can hold open indefinitely.
+    static func withDeadline<T: Sendable>(
+        _ deadline: Duration, _ work: @escaping @Sendable () async -> T
+    ) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await work() }
+            group.addTask {
+                try? await Task.sleep(for: deadline)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// A piece of a child's output, as it arrived, or its exit status.
+    private enum Chunk: Sendable {
+        case output(OutputStream, Data)
+        case exit(Int32)
+    }
+
+    /// `lines`, without the splitting: the same launch, the same
+    /// cancellation, the same bookkeeping for `terminateAll`, and the bytes
+    /// exactly as the child wrote them.
+    private static func chunks(
+        executable: String,
+        arguments: [String],
+        currentDirectory: URL?,
+        environment: [String: String]
+    ) -> AsyncStream<Chunk> {
+        AsyncStream(bufferingPolicy: .unbounded) { continuation in
+            guard FileManager.default.isExecutableFile(atPath: executable) else {
+                continuation.yield(.output(.stderr, Data("not executable: \(executable)".utf8)))
+                continuation.yield(.exit(127))
+                continuation.finish()
+                return
+            }
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.currentDirectoryURL = currentDirectory
+            process.environment = environment
+            process.standardInput = FileHandle.nullDevice
+
+            let outPipe = Pipe()
+            let errPipe = Pipe()
+            process.standardOutput = outPipe
+            process.standardError = errPipe
+
+            // Both pipes must reach EOF before the exit status is reported, or
+            // the tail of the output is lost.
+            let drained = DispatchGroup()
+            drained.enter()
+            drained.enter()
+
+            func drain(_ pipe: Pipe, _ which: OutputStream) {
+                pipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    if data.isEmpty {
+                        handle.readabilityHandler = nil  // must clear or the queue spins
+                        drained.leave()
+                        return
+                    }
+                    continuation.yield(.output(which, data))
+                }
+            }
+            drain(outPipe, .stdout)
+            drain(errPipe, .stderr)
+
+            process.terminationHandler = { finished in
+                running.remove(finished.processIdentifier)
+                drained.notify(queue: .global()) {
+                    continuation.yield(.exit(finished.terminationStatus))
+                    continuation.finish()
+                }
+            }
+
+            continuation.onTermination = { reason in
+                guard case .cancelled = reason, process.isRunning else { return }
+                deliver(SIGTERM, to: process.processIdentifier)
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    if process.isRunning { deliver(SIGKILL, to: process.processIdentifier) }
+                }
+            }
+
+            do {
+                try process.run()
+                running.insert(process.processIdentifier)
+                if !process.isRunning { running.remove(process.processIdentifier) }
+            } catch {
+                outPipe.fileHandleForReading.readabilityHandler = nil
+                errPipe.fileHandleForReading.readabilityHandler = nil
+                process.terminationHandler = nil
+                continuation.yield(.output(
+                    .stderr, Data("launch failed: \(error.localizedDescription)".utf8)))
+                continuation.yield(.exit(127))
+                continuation.finish()
+            }
+        }
+    }
+}
