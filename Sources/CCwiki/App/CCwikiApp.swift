@@ -225,7 +225,7 @@ struct CCwikiCommands: Commands {
                 let window = ReaderWindow()
                 if let model, let request = ReaderWindowRequest(
                     opening: window, as: .newTab(inBackground: false),
-                    beside: session?.windowNumber) {
+                    beside: session?.hostWindowNumber) {
                     model.expectReaderWindow(request)
                 }
                 openWindow(id: CCwikiApp.mainWindowID, value: window)

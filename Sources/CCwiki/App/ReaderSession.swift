@@ -102,6 +102,20 @@ final class ReaderSession: Identifiable {
     /// Its `NSWindow`'s number, for bringing it forward from elsewhere and
     /// for joining a new tab to it. Set by its view, which knows the window.
     @ObservationIgnored var windowNumber: Int?
+    /// Its `NSWindow` itself, from the moment its view claims it. A window
+    /// has a number only once it has been shown, and the session hears it
+    /// for certain only when the window is first key, so a tab restored
+    /// behind another has a window but may have no number yet. Weak: the
+    /// window holds the view that holds the session.
+    @ObservationIgnored weak var hostWindow: NSWindow?
+
+    /// Its window's number as of now, for a new tab to join: the window's
+    /// own once it has one, else the last one its view saw.
+    var hostWindowNumber: Int? {
+        guard let number = hostWindow?.windowNumber, number > 0 else { return windowNumber }
+        return number
+    }
+
     /// Opens a page in a new tab or window: `openWindow` is an environment
     /// action, so the window's view builds this from its own and sets it
     /// when it claims the session (§1.4).

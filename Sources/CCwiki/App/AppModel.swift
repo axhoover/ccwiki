@@ -226,20 +226,27 @@ final class AppModel {
     @ObservationIgnored private var windowRequests = ReaderWindowRequests()
 
     /// The session for the reader window `id`, created the first time the
-    /// window asks (§1.3). `windowNumber` is its `NSWindow`'s.
+    /// window asks (§1.3). `windowNumber` is its `NSWindow`'s, 0 or less
+    /// until the window is first shown; `window` is the window itself,
+    /// which the session keeps whether it has a number yet or not.
     ///
     /// Nil when `id` is live in another window, which a restoration can
     /// produce, or closed earlier in this process: one web view is never in
     /// two windows, and a closed window never comes back. The caller then
     /// takes a fresh id.
-    func claimSession(for id: UUID, windowNumber: Int) -> ReaderSession? {
+    func claimSession(
+        for id: UUID, windowNumber: Int, window: NSWindow? = nil
+    ) -> ReaderSession? {
         guard !closedSessionIDs.contains(id) else { return nil }
         if let existing = sessions[id] {
             // The same window asking again keeps its session.
-            return windowNumber > 0 && existing.windowNumber == windowNumber ? existing : nil
+            let isSameWindow = (window != nil && existing.hostWindow === window)
+                || (windowNumber > 0 && existing.windowNumber == windowNumber)
+            return isSameWindow ? existing : nil
         }
         let session = ReaderSession(id: id, model: self)
         session.windowNumber = windowNumber > 0 ? windowNumber : nil
+        session.hostWindow = window
         sessions[id] = session
         sessionOrder.opened(id)
         mainWindowCount = sessions.count
@@ -283,10 +290,16 @@ final class AppModel {
         windowRequests.takeTabbing(for: windowID)
     }
 
+    /// The window `session` is in: the window itself, which its view hands
+    /// over when it claims the session, else the one its number names. A
+    /// tab that has never been key may have no number yet.
+    private func hostWindow(of session: ReaderSession) -> NSWindow? {
+        session.hostWindow ?? session.windowNumber.flatMap { NSApp.window(withWindowNumber: $0) }
+    }
+
     /// Brings the reader window `session` forward, selecting its tab.
     private func bringForward(_ session: ReaderSession) {
-        guard let number = session.windowNumber else { return }
-        NSApp.window(withWindowNumber: number)?.makeKeyAndOrderFront(nil)
+        hostWindow(of: session)?.makeKeyAndOrderFront(nil)
     }
 
     // MARK: For windows that are not readers
@@ -344,15 +357,17 @@ final class AppModel {
     /// Opens `location` in a reader and brings that window forward: for an
     /// explicit Show, such as a paper window's Show Reference Page, which
     /// must be seen. A reader tab already showing the page is preferred,
-    /// else the active reader. False with no reader open, and the caller
-    /// opens one.
+    /// else the active reader. False with no reader open, or none whose
+    /// window can be brought forward, and the caller opens one.
     func revealInReader(_ location: Location) -> Bool {
         let showing = location.path.flatMap { path in
-            sessions.values.first { $0.location.path == path }
+            sessions.values.first { $0.location.path == path && hostWindow(of: $0) != nil }
         }
-        guard let session = showing ?? activeSession else { return false }
+        guard let session = showing ?? activeSession, let window = hostWindow(of: session) else {
+            return false
+        }
         session.open(location)
-        bringForward(session)
+        window.makeKeyAndOrderFront(nil)
         return true
     }
 
@@ -454,9 +469,14 @@ final class AppModel {
     /// reader. With no reader open it waits for the next one. While it is
     /// up, another request only brings its window forward, as one from
     /// outside a reader (the Jobs window) always does.
+    ///
+    /// A window that closed after it asked, as one a PDF was dropped on can
+    /// while the drop loads, is no window to pin to: the sheet goes to the
+    /// active reader instead, so it never waits on a window that is gone.
     func requestIngestSheet(in session: UUID?) {
-        ingestTarget.request(in: session, active: activeSession?.id)
-        if let target = ingestTarget.window, target != session, let shown = sessions[target] {
+        let live = session.flatMap { sessions[$0]?.id }
+        ingestTarget.request(in: live, active: activeSession?.id)
+        if let target = ingestTarget.window, target != live, let shown = sessions[target] {
             bringForward(shown)
         }
     }

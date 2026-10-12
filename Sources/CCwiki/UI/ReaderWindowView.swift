@@ -110,7 +110,8 @@ struct ReaderWindowView: View {
         guard session == nil else { return }
         let number = nsWindow.windowNumber
         let claimed: ReaderSession
-        if let forThisID = model.claimSession(for: window.id, windowNumber: number) {
+        if let forThisID = model.claimSession(
+            for: window.id, windowNumber: number, window: nsWindow) {
             claimed = forThisID
         } else {
             // Claimed by the local, not read back through the scene's
@@ -118,7 +119,8 @@ struct ReaderWindowView: View {
             // neither live nor closed, so this claim cannot fail.
             let fresh = UUID()
             window.id = fresh
-            guard let forFreshID = model.claimSession(for: fresh, windowNumber: number)
+            guard let forFreshID = model.claimSession(
+                for: fresh, windowNumber: number, window: nsWindow)
             else { return }
             claimed = forFreshID
         }
@@ -141,8 +143,7 @@ struct ReaderWindowView: View {
     /// of this group, opened with this view's `openWindow`, which joins
     /// `session`'s window as a tab when it first sees its `NSWindow`
     /// (`found(_:)`). The window number is read when a page is opened, not
-    /// now: the session learns it for certain only once its window has
-    /// been key.
+    /// now: a window has one only once it has been shown.
     ///
     /// The session is held weakly: it holds this action, and a closed
     /// window's session must go with its web view.
@@ -152,7 +153,7 @@ struct ReaderWindowView: View {
         OpenInReaderAction { [weak session] location, disposition, find in
             let window = ReaderWindow(opening: location, find: find)
             guard let request = ReaderWindowRequest(
-                opening: window, as: disposition, beside: session?.windowNumber)
+                opening: window, as: disposition, beside: session?.hostWindowNumber)
             else { return }
             model.expectReaderWindow(request)
             openWindow(id: CCwikiApp.mainWindowID, value: window)
