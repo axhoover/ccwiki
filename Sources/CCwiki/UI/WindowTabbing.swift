@@ -7,14 +7,46 @@ import SwiftUI
 enum WindowTabbing {
 
     /// False until the maintainer has checked background tabs on a Mac (§1.4).
+    /// Until then every new tab opens in front, whatever the caller asks.
     static let joinsInBackground: Bool = false
 
     /// Makes `window` a tab of `source`'s group, directly after `source`. In
     /// the background, `source` stays the selected tab and the key window.
     ///
-    /// Does nothing until Track B fills it (B3): a new tab opens as a window
-    /// of its own meanwhile.
-    static func join(_ window: NSWindow, to source: NSWindow, inBackground: Bool) {}
+    /// Called when the new window's `WindowReader` first reports it. The
+    /// window is hidden at once, so it never shows as a window of its own,
+    /// and joins the group on the next turn of the main actor, after the
+    /// view update that reported it. Moving a window into a tab group
+    /// changes its frame, which inside that update is the constraint crash
+    /// of `SWIFTUI-RULES` §1.1; and SwiftUI, which orders the new window in
+    /// itself, should have done so by then, so it does not select the tab
+    /// again after a background join (an unproven timing, §6). If `source`
+    /// has closed in the meantime, `window` stays a window of its own.
+    static func join(_ window: NSWindow, to source: NSWindow, inBackground: Bool) {
+        guard window !== source else { return }
+        let background = inBackground && Self.joinsInBackground
+        window.alphaValue = 0
+        Task { @MainActor [weak window, weak source] in
+            guard let window else { return }
+            defer { window.alphaValue = 1 }
+            guard let source, Self.isOpen(source) else { return }
+            // A tab shares its group's identifier, so Merge All Windows and
+            // Move Tab to New Window treat it as one of the group.
+            window.tabbingIdentifier = source.tabbingIdentifier
+            source.addTabbedWindow(window, ordered: .above)
+            if background {
+                source.makeKeyAndOrderFront(nil)
+            } else {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
+    /// On screen, or a tab of a group that is: a tab that is not selected is
+    /// ordered out but still open. A closed window is neither.
+    private static func isOpen(_ window: NSWindow) -> Bool {
+        window.isVisible || (window.tabbedWindows ?? []).contains { $0.isVisible }
+    }
 }
 
 /// Hands the view's `NSWindow` to `onWindow` once the view is in one.
