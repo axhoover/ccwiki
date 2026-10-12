@@ -124,11 +124,13 @@ final class PaperLibrary {
         }
     }
 
+    /// Each report replaces the last: every request the fetcher makes starts
+    /// again from zero, and one fetch's reports reach the main actor in the
+    /// order they were made.
     private func progressed(_ path: String, token: UUID, received: Int64, expected: Int64?) {
-        guard fetches[path] == token,
-              case .downloading(let host, let before, _) = transient[path],
-              received > before
-        else { return }
+        guard fetches[path] == token, case .downloading(let host, _, _) = transient[path] else {
+            return
+        }
         transient[path] = .downloading(host: host, received: received, expected: expected)
     }
 
@@ -153,11 +155,13 @@ final class PaperLibrary {
                 transient[path] = nil
                 lastFailures[path] = nil
             } catch {
+                // The site did its part; the failure is CCwiki's, and says so.
                 try? FileManager.default.removeItem(at: paper.file)
                 let host = paper.from.host() ?? paper.from.absoluteString
                 fail(path, .unexpected(
                     host: host,
-                    detail: "sent a PDF CCwiki could not keep: \(error.localizedDescription)",
+                    detail: "sent the paper, but CCwiki couldn't save it: "
+                        + PaperFetcher.clause(error),
                     url: paper.from))
             }
         case .failure(let failure):

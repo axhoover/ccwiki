@@ -15,9 +15,10 @@ import UniformTypeIdentifiers
 /// wiki to load, and a window whose reference has gone (and whose PDF was
 /// never kept) closes itself (SWIFTUI-RULES §6.5).
 ///
-/// A paper window restored on its own loads the wiki through
-/// `model.launchIfNeeded()`, which Track A adds (§1.7, §2.6); until then
-/// it waits for a reader window's launch.
+/// Track A seam (§1.7, §2.6): a paper window restored on its own must load
+/// the wiki itself. On rebasing onto Track A, `body` gains
+/// `.task { await model.launchIfNeeded() }`; until then it waits for a
+/// reader window's launch, and shows Loading the Wiki if none comes.
 struct PaperWindowView: View {
     let referencePath: String?
 
@@ -211,10 +212,11 @@ struct PaperWindowView: View {
     private func unavailableView(_ page: WikiPage, _ state: PaperLibrary.State) -> some View {
         switch state {
         case .notDownloaded:
-            if let first = PaperSource(page: page).candidates.first {
-                notDownloadedView(page, host: first.url.host() ?? first.url.absoluteString)
+            let source = PaperSource(page: page)
+            if let first = source.candidates.first {
+                notDownloadedView(page, from: first)
             } else {
-                failureView(.noLink(source: PaperSource(page: page).sourceURL), page: page)
+                failureView(.noLink(source: source.sourceURL), page: page)
             }
         case .downloading(let host, let received, let expected):
             downloadingView(page, host: host, received: received, expected: expected)
@@ -225,11 +227,20 @@ struct PaperWindowView: View {
         }
     }
 
-    private func notDownloadedView(_ page: WikiPage, host: String) -> some View {
-        ContentUnavailableView {
+    private func notDownloadedView(
+        _ page: WikiPage, from candidate: PaperSource.Candidate
+    ) -> some View {
+        let host = candidate.url.host() ?? candidate.url.absoluteString
+        // A landing page may name its PDF, often one behind a subscription:
+        // CCwiki can promise to look for it, not to download it. The Show
+        // Paper button's tooltip makes the same distinction.
+        let promise = candidate.kind == .landingPage
+            ? "CCwiki looks for the PDF at \(host) and keeps it in its library."
+            : "CCwiki downloads it from \(host) once and keeps it in its library."
+        return ContentUnavailableView {
             Label("Paper Not Downloaded", systemImage: "doc.richtext")
         } description: {
-            Text("CCwiki downloads it from \(host) once and keeps it in its library.")
+            Text(promise)
         } actions: {
             Button("Download") { model.papers.show(page) }
                 .keyboardShortcut(.defaultAction)
@@ -350,10 +361,13 @@ struct PaperWindowView: View {
     /// An explicit Show, so the page must be seen: in the reader, opening
     /// one if none is on screen.
     ///
-    /// Track A replaces this with `model.revealInReader(_:)`, which brings
-    /// the reader showing the page forward, and with
-    /// `openWindow(id:value: ReaderWindow(opening:))` when no reader is open
-    /// (§1.8).
+    /// Track A seam (§1.8): on rebasing onto Track A, the body becomes
+    /// `model.revealInReader(.page(path: reference.path, anchor: nil))`,
+    /// which brings the reader showing the page forward, and, when that
+    /// returns false, `openWindow(id: CCwikiApp.mainWindowID,
+    /// value: ReaderWindow(opening: location))`. Until then an open reader
+    /// changes page without coming forward, and `model.openPage` here fails
+    /// A3's grep gate.
     private func showReferencePage() {
         guard let reference else { return }
         if model.mainWindowCount == 0 {
@@ -429,8 +443,17 @@ struct PaperWindowView: View {
 
     private func acceptDrop(_ providers: [NSItemProvider]) -> Bool {
         guard let reference, let provider = providers.first else { return false }
+        // The title bar's proxy icon is this paper's own file. Dragged over
+        // the window and let go there, it is a drag given up, not a PDF to
+        // keep in place of itself as one you added.
+        let current = readyFile?.resolvingSymlinksInPath()
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            guard let url, url.pathExtension.lowercased() == "pdf" else { return }
+            guard let url else { return }
+            guard url.pathExtension.lowercased() == "pdf" else {
+                Task { @MainActor in problem = "“\(url.lastPathComponent)” is not a PDF." }
+                return
+            }
+            guard url.resolvingSymlinksInPath() != current else { return }
             Task { @MainActor in adopt(url, for: reference) }
         }
         return true

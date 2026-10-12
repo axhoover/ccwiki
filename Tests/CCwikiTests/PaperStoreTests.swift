@@ -93,7 +93,7 @@ struct PaperStoreTests {
         #expect(scratch.store.records()[record.referencePath] == record, "the record itself stays")
     }
 
-    @Test("a PDF you add is copied, and replaces the reference's own file")
+    @Test("a PDF you add is copied, and replaces the reference's own file, which goes to the Trash")
     func adoptReplaces() throws {
         let scratch = try Scratch()
         defer { scratch.remove() }
@@ -109,6 +109,10 @@ struct PaperStoreTests {
         #expect(FileManager.default.fileExists(atPath: yours.path(percentEncoded: false)),
                 "your own copy stays where it was")
         #expect(scratch.store.records().count == 1)
+
+        // The paper replaced can be put back, like one removed.
+        let replaced = scratch.trash.appending(path: downloaded.fileName)
+        #expect(try String(contentsOf: replaced, encoding: .utf8) == "%PDF downloaded")
     }
 
     @Test("remove moves the file to the Trash and drops the record")
@@ -150,6 +154,32 @@ struct PaperStoreTests {
         #expect(again.fileName == "sw25-2.pdf")
         #expect(try scratch.contents(of: added) == "%PDF yours")
         #expect(try scratch.contents(of: again) == "%PDF again")
+    }
+
+    @Test("an index this version cannot read is set aside, never written over")
+    func unreadableIndex() throws {
+        // Damaged or edited by hand, and written by a newer CCwiki.
+        for contents in ["not an index", #"{"version": 2, "papers": []}"#] {
+            let scratch = try Scratch()
+            defer { scratch.remove() }
+            let directory = scratch.store.directory
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data(contents.utf8).write(to: scratch.store.indexURL)
+            #expect(scratch.store.records().isEmpty, "read as empty")
+
+            let record = try scratch.store.keep(
+                try scratch.file("%PDF"), for: source("AABN02"), origin: .addedByYou)
+            #expect(scratch.store.records() == [record.referencePath: record])
+
+            let files = try FileManager.default.contentsOfDirectory(
+                atPath: directory.path(percentEncoded: false))
+            let setAside = files.filter { $0.hasPrefix("papers-unreadable-") && $0.hasSuffix(".json") }
+            #expect(setAside.count == 1, "\(contents)")
+            if let name = setAside.first {
+                #expect(try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                    == contents, "kept as it was")
+            }
+        }
     }
 
     @Test("a file already in the folder that no record holds is never overwritten")

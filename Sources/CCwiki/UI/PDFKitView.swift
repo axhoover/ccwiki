@@ -8,7 +8,8 @@ import SwiftUI
 /// chrome. The view takes the keyboard when its window appears, so Space
 /// and Page Down scroll at once. It hands its zoom actions and its page
 /// changes up to the window, which shows the page and gives the View menu's
-/// Zoom In, Zoom Out and Actual Size something to act on.
+/// Zoom In, Zoom Out and Actual Size something to act on. It never takes a
+/// dropped file: the window does, and keeps it (§2.6).
 ///
 /// Replacing the paper at the same path is a new view: the window keys this
 /// one by the record, not the URL.
@@ -22,12 +23,14 @@ struct PDFKitView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> PDFView {
-        let view = FocusingPDFView(frame: .zero)
+        let view = PaperPDFView(frame: .zero)
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
         view.displaysPageBreaks = true
+        view.acceptsDraggedFiles = false
         view.document = PDFDocument(url: url)
+        context.coordinator.loadedURL = url
         context.coordinator.attach(view)
         return view
     }
@@ -35,10 +38,14 @@ struct PDFKitView: NSViewRepresentable {
     func updateNSView(_ view: PDFView, context: Context) {
         context.coordinator.onPageChange = onPageChange
         context.coordinator.onZoom = onZoom
-        if view.document?.documentURL != url {
-            view.document = PDFDocument(url: url)
-            context.coordinator.reportSoon()
-        }
+        // Against the URL last loaded, not the document's own: a file that
+        // no longer opens leaves no document, and PDFKit may spell the URL
+        // another way. Either would reload on every update, and each reload
+        // reports new zoom actions, which update the view again.
+        guard context.coordinator.loadedURL != url else { return }
+        context.coordinator.loadedURL = url
+        view.document = PDFDocument(url: url)
+        context.coordinator.reportSoon()
     }
 
     /// Reports the page and the zoom actions to the window's state. Never
@@ -47,6 +54,8 @@ struct PDFKitView: NSViewRepresentable {
     final class Coordinator: NSObject {
         var onPageChange: @MainActor (Int, Int) -> Void
         var onZoom: @MainActor (PaperZoomAction) -> Void
+        /// The file the view was last given.
+        var loadedURL: URL?
         private weak var view: PDFView?
 
         init(
@@ -87,10 +96,18 @@ struct PDFKitView: NSViewRepresentable {
         }
     }
 
-    /// Takes the keyboard once it is in a window, so the paper scrolls with
-    /// Space, Page Down and the arrows without a click first.
-    final class FocusingPDFView: PDFView {
+    /// The pages. They take the keyboard once they are in a window, so the
+    /// paper scrolls with Space, Page Down and the arrows without a click
+    /// first, and they are never a drop target of their own.
+    final class PaperPDFView: PDFView {
         private var hasTakenFocus = false
+
+        /// A PDF dropped on the pages is the window's to keep (Keep This PDF,
+        /// Replace the PDF). AppKit gives a drop to the deepest view
+        /// registered for it, and a view that refuses one does not pass it
+        /// up, so with `acceptsDraggedFiles` off the pages could still stand
+        /// between the drop and the window. They never register at all.
+        override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {}
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()

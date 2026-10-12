@@ -24,7 +24,7 @@ enum PaperFailure: Error, Equatable, Sendable {
     case unreachable(host: String, url: URL)
     /// Over the download cap. A PDF you add can be any size.
     case tooLarge(bytes: Int64, host: String, url: URL)
-    /// It said it was a PDF, and CoreGraphics found no pages in it.
+    /// It was sent as a PDF, and CoreGraphics found no pages in it.
     case unreadable(host: String)
     /// Anything else, with what the host did: "answered 500".
     case unexpected(host: String, detail: String, url: URL)
@@ -237,6 +237,9 @@ struct PaperFetcher: Sendable {
     private func attempt(
         _ url: URL, progress: @escaping @Sendable (Int64, Int64?) -> Void
     ) async -> Attempt {
+        // Every request counts from nothing: a landing page's bytes and size
+        // are not its PDF's.
+        progress(0, nil)
         let download: PaperDownload
         do {
             download = try await transport.download(
@@ -285,6 +288,11 @@ struct PaperFetcher: Sendable {
             return .failed(page)
         case .other(let contentType):
             try? FileManager.default.removeItem(at: file)
+            // Labelled a PDF and not one (an error or a bot check sent under
+            // the PDF's label): a file that does not open as a PDF.
+            if contentType == "application/pdf" || contentType == "application/x-pdf" {
+                return .failed(.unreadable(host: host))
+            }
             return .failed(.unexpected(
                 host: host, detail: "sent \(Self.describe(contentType)), not a PDF", url: finalURL))
         }
@@ -340,13 +348,13 @@ struct PaperFetcher: Sendable {
         case "application/gzip", "application/x-gzip", "application/x-tar": return "a compressed file"
         case "text/plain": return "plain text"
         case "application/octet-stream": return "a file"
-        default: return type.hasPrefix("image/") ? "an image" : "a \(type) file"
+        default: return type.hasPrefix("image/") ? "an image" : "a file of type \(type)"
         }
     }
 
-    /// An error's description as the end of "<host> did not send the
-    /// paper: …", without its own full stop.
-    private static func clause(_ error: any Error) -> String {
+    /// An error's description as the end of a sentence of ours ("<host> did
+    /// not send the paper: …"), without its own full stop.
+    static func clause(_ error: any Error) -> String {
         var text = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         while text.hasSuffix(".") { text.removeLast() }
         return text

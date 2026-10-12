@@ -52,6 +52,28 @@ struct ScriptedTransport: PaperTransport {
     }
 }
 
+/// Every progress report, in order, whichever thread made it.
+///
+/// `@unchecked Sendable` with a lock: the fetcher reports from wherever its
+/// transport runs.
+final class ProgressLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    /// "received/expected", "?" for a size not known.
+    func record(_ received: Int64, _ expected: Int64?) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.append("\(received)/\(expected.map { String($0) } ?? "?")")
+    }
+
+    var reports: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+}
+
 extension Result where Failure == PaperFailure {
     /// The failure, for comparing: a `FetchedPaper` is not `Equatable`.
     var failureValue: PaperFailure? {
@@ -124,6 +146,27 @@ struct PaperFetcherTests {
         #expect(requests.map { $0.host() } == ["doi.org", "link.springer.com"])
     }
 
+    @Test("each request reports its progress from zero, not from the last request's total")
+    func progressPerRequest() async throws {
+        let page = PaperFixtures.reference("BGI15", source: "https://doi.org/10.1007/abc")
+        let landing = #"<meta name="citation_pdf_url" content="/content/pdf/10.1007/abc.pdf">"#
+        let transport = ScriptedTransport(replies: [
+            "https://doi.org/10.1007/abc": Self.html(
+                landing, from: URL(string: "https://link.springer.com/chapter/10.1007/abc")!),
+            "https://link.springer.com/content/pdf/10.1007/abc.pdf": Self.pdfReply(),
+        ])
+        let log = ProgressLog()
+        let result = await PaperFetcher(transport: transport).fetch(PaperSource(page: page)) {
+            log.record($0, $1)
+        }
+        let paper = try result.get()
+        defer { try? FileManager.default.removeItem(at: paper.file) }
+
+        let html = landing.utf8.count
+        let pdf = Self.pdf.count
+        #expect(log.reports == ["0/?", "\(html)/\(html)", "0/?", "\(pdf)/\(pdf)"])
+    }
+
     @Test("a landing page without a PDF link is a web page, naming both hosts")
     func landingPageWithoutPDF() async {
         let page = PaperFixtures.reference("BGI15", source: "https://doi.org/10.1007/abc")
@@ -175,6 +218,15 @@ struct PaperFetcherTests {
         #expect(await failure(.body(status: 200, type: "application/postscript",
                                     data: Data("%!PS-Adobe-3.0".utf8)))
             == .unexpected(host: "dl.acm.org", detail: "sent a PostScript file, not a PDF", url: link))
+        #expect(await failure(.body(status: 200, type: "application/x-dvi",
+                                    data: Data("\u{F7}\u{2}".utf8)))
+            == .unexpected(host: "dl.acm.org",
+                           detail: "sent a file of type application/x-dvi, not a PDF", url: link))
+        // Labelled a PDF and not one, as an error page or a bot check can
+        // be: a file that does not open as a PDF, not "a PDF, not a PDF".
+        #expect(await failure(.body(status: 200, type: "application/pdf",
+                                    data: Data("<html><body>Just a moment…</body></html>".utf8)))
+            == .unreadable(host: "dl.acm.org"))
     }
 
     @Test("offline stops at once; an unreachable host moves on to the next link")

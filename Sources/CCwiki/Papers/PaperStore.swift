@@ -31,9 +31,10 @@ struct PaperStore: Sendable {
 
     /// `AppPaths.papers`, or a temporary directory for the shots.
     let directory: URL
-    /// What Remove From Library does with a file: the Trash, so a paper that
-    /// will not download again, or the only copy of one you added, can be
-    /// put back. Tests pass their own, and leave the real Trash alone.
+    /// What Remove From Library, and a paper replaced by another, do with a
+    /// file: the Trash, so a paper that will not download again, or the only
+    /// copy of one you added, can be put back. Tests pass their own, and
+    /// leave the real Trash alone.
     private let discard: @Sendable (URL) throws -> Void
 
     init(directory: URL, discard: (@Sendable (URL) throws -> Void)? = nil) {
@@ -48,13 +49,12 @@ struct PaperStore: Sendable {
     // MARK: Reading
 
     /// Every record in `papers.json`, by reference path, whether or not its
-    /// file is still there. A missing or unreadable index is an empty one.
+    /// file is still there. No index is an empty one, and so, for reading,
+    /// is one this version cannot read; `keep` sets that one aside rather
+    /// than write over it.
     func records() -> [String: PaperRecord] {
-        guard let data = try? Data(contentsOf: indexURL),
-              let index = try? Self.decoder.decode(Index.self, from: data)
-        else { return [:] }
-        return Dictionary(
-            index.papers.map { ($0.referencePath, $0) }, uniquingKeysWith: { first, _ in first })
+        if case .records(let records) = readIndex() { return records }
+        return [:]
     }
 
     /// The paper kept for a reference; nil when there is none, or its file
@@ -83,14 +83,15 @@ struct PaperStore: Sendable {
     /// notices a clash, so it takes the first of `SW25.pdf`, `SW25-2.pdf`, …
     /// that no other reference's record holds and no other file has,
     /// compared case-insensitively. A reference that already has a paper
-    /// keeps its file name, and only that file is replaced.
+    /// keeps its file name, and only that file is replaced: the old one goes
+    /// to the Trash, as Remove From Library's does.
     func keep(
         _ file: URL, for source: PaperSource, origin: PaperRecord.Origin
     ) throws -> PaperRecord {
         let manager = FileManager.default
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        var records = self.records()
+        var records = try recordsForWriting()
         let name = records[source.referencePath]?.fileName
             ?? uniqueFileName(for: source, among: records)
         let destination = directory.appending(component: name)
@@ -102,8 +103,12 @@ struct PaperStore: Sendable {
         case .addedByYou: try manager.copyItem(at: file, to: staged)
         }
         do {
+            // The paper replaced may be the only copy of a PDF you added, or a
+            // download that will not come again. Should the move then fail,
+            // it is in the Trash, not gone, and the record counts as not
+            // downloaded.
             if manager.fileExists(atPath: destination.path(percentEncoded: false)) {
-                try manager.removeItem(at: destination)
+                try discard(destination)
             }
             try manager.moveItem(at: staged, to: destination)
         } catch {
@@ -139,8 +144,49 @@ struct PaperStore: Sendable {
     /// What `papers.json` holds: the records sorted by path, so the file
     /// reads well and diffs well.
     private struct Index: Codable {
-        var version = 1
+        /// The version this CCwiki writes, and the newest it reads.
+        static let currentVersion = 1
+
+        var version = Index.currentVersion
         var papers: [PaperRecord]
+    }
+
+    private enum IndexContents {
+        case missing
+        /// There, and not an index this version can read: damaged, edited
+        /// by hand, or written by a newer CCwiki.
+        case unreadable
+        case records([String: PaperRecord])
+    }
+
+    private func readIndex() -> IndexContents {
+        guard FileManager.default.fileExists(atPath: indexURL.path(percentEncoded: false)) else {
+            return .missing
+        }
+        guard let data = try? Data(contentsOf: indexURL),
+              let index = try? Self.decoder.decode(Index.self, from: data),
+              index.version <= Index.currentVersion
+        else { return .unreadable }
+        return .records(Dictionary(
+            index.papers.map { ($0.referencePath, $0) }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    /// The records a write starts from. An index this version cannot read
+    /// is set aside first, never written over: a new index holding only the
+    /// paper being kept would lose every other paper's record and where it
+    /// came from. If it cannot be set aside, nothing is written.
+    private func recordsForWriting() throws -> [String: PaperRecord] {
+        switch readIndex() {
+        case .missing:
+            return [:]
+        case .records(let records):
+            return records
+        case .unreadable:
+            let stamp = Int(Date().timeIntervalSince1970)
+            try FileManager.default.moveItem(
+                at: indexURL, to: directory.appending(component: "papers-unreadable-\(stamp).json"))
+            return [:]
+        }
     }
 
     private func save(_ records: [String: PaperRecord]) throws {

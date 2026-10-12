@@ -17,6 +17,37 @@ struct PaperLibraryTests {
         }
     }
 
+    /// A landing page, longer than the PDF has yet arrived of, that names
+    /// its PDF; then the PDF, which reports part of itself and stalls until
+    /// its fetch is cancelled.
+    private struct LandingThenStall: PaperTransport {
+        static let landing = "https://doi.org/10.1007/abc"
+        static let pdf = "https://link.springer.com/content/pdf/10.1007/abc.pdf"
+
+        func download(
+            _ url: URL, maximumBytes: Int64,
+            progress: @escaping @Sendable (Int64, Int64?) -> Void
+        ) async throws -> PaperDownload {
+            guard url.absoluteString == Self.landing else {
+                progress(100, 250)
+                try await Task.sleep(for: .seconds(60))
+                throw URLError(.timedOut)
+            }
+            let page = String(repeating: " ", count: 300)
+                + #"<meta name="citation_pdf_url" content="\#(Self.pdf)">"#
+            let file = FileManager.default.temporaryDirectory
+                .appending(path: "ccwiki-landing-\(UUID().uuidString)")
+            try Data(page.utf8).write(to: file)
+            guard let response = HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/html"])
+            else { throw URLError(.badServerResponse) }
+            let size = Int64(page.utf8.count)
+            progress(size, size)
+            return PaperDownload(response: response, file: file, bytes: size)
+        }
+    }
+
     private let aabn = PaperFixtures.reference("AABN02", source: "https://eprint.iacr.org/2002/022")
     private let eprintPDF = "https://eprint.iacr.org/2002/022.pdf"
 
@@ -75,6 +106,55 @@ struct PaperLibraryTests {
         #expect(await transport.log.requests.count == 1)
         let (reopened, _) = library(transport, in: root)
         #expect(reopened.state(for: aabn.path) == .ready(record, file: file))
+    }
+
+    @Test("the PDF's progress shows after a larger landing page's, not once it passes it")
+    func progressPerRequest() async throws {
+        let root = try PaperFixtures.temporaryDirectory("library")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (papers, _) = library(LandingThenStall(), in: root)
+        let page = PaperFixtures.reference("BGI15", source: LandingThenStall.landing)
+
+        papers.show(page)
+        var state = papers.state(for: page.path)
+        for _ in 0..<200 {
+            if case .downloading(_, let received, let expected) = state,
+               received == 100, expected == 250 {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+            state = papers.state(for: page.path)
+        }
+        guard case .downloading(_, let received, let expected) = state else {
+            Issue.record("expected a download, got \(state)")
+            return
+        }
+        #expect(received == 100)
+        #expect(expected == 250)
+        papers.cancel(page.path)
+    }
+
+    @Test("a paper CCwiki cannot save is CCwiki's failure, in one sentence")
+    func keepFails() async throws {
+        let root = try PaperFixtures.temporaryDirectory("library")
+        defer { try? FileManager.default.removeItem(at: root) }
+        // A file where the papers folder goes: nothing can be kept there.
+        try Data().write(to: root.appending(path: "papers"))
+        let (papers, _) = library(
+            ScriptedTransport(replies: [
+                eprintPDF: .body(status: 200, type: "application/pdf", data: Self.pdf),
+            ]),
+            in: root)
+
+        papers.show(aabn)
+        guard case .failed(let failure) = await settled(papers, aabn.path) else {
+            Issue.record("expected a failure, got \(papers.state(for: aabn.path))")
+            return
+        }
+        #expect(failure.message.hasPrefix(
+            "eprint.iacr.org sent the paper, but CCwiki couldn't save it: "), "\(failure.message)")
+        #expect(failure.message.hasSuffix(".") && !failure.message.hasSuffix(".."),
+                "\(failure.message)")
     }
 
     @Test("a failure is kept until Try Again, which fetches afresh")
