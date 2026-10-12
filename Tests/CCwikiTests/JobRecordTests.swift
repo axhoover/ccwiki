@@ -246,6 +246,134 @@ struct JobRecordTests {
         #expect(try String(contentsOf: file, encoding: .utf8) == "{\"type\":\"system\"}\nRestored.\n")
     }
 
+    // MARK: The transcript, replayed
+
+    @Test("CCwiki's own lines keep their role, their time and their line breaks")
+    func transcriptLines() throws {
+        let at = Date(timeIntervalSince1970: 1_760_263_200.5)
+        let entries = [
+            JobLogEntry(.system, "git worktree add x -b fix/page abc", at: at),
+            JobLogEntry(.error, "Permission denied — Bash: git push", at: at),
+            JobLogEntry(.assistant, "READY FOR REVIEW\n\nTwo lines, and a \"quote\".", at: at),
+            JobLogEntry(.tool(name: "Edit"), "content/page.md", at: at),
+            JobLogEntry(.toolResult(isError: true), "No such file", at: at),
+            JobLogEntry(.stderr, "warning", at: at),
+        ]
+        for entry in entries {
+            let line = try #require(TranscriptLine.encode(entry))
+            #expect(!line.contains("\n"), "one entry is one line")
+            let decoded = try #require(TranscriptLine.decode(Substring(line)))
+            #expect(decoded.text == entry.text)
+            #expect(decoded.timestamp == at)
+            #expect(String(describing: decoded.role) == String(describing: entry.role))
+        }
+        #expect(TranscriptLine.decode(#"{"type":"assistant","message":{}}"#) == nil)
+        #expect(TranscriptLine.decode("plain stderr") == nil)
+    }
+
+    @Test("a transcript file comes back as the agent's events, its stderr and CCwiki's lines, in order")
+    func transcriptFile() throws {
+        let own = try #require(TranscriptLine.encode(JobLogEntry(.system, "Creating worktree…")))
+        let text = [
+            own,
+            #"{"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet","cwd":"/w/job"}"#,
+            #"{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the page."},{"type":"tool_use","name":"Read","input":{"file_path":"content/page.md"}}]}}"#,
+            "npm warn deprecated",
+            #"{"type":"result","subtype":"success","is_error":false,"result":"READY FOR REVIEW","num_turns":4,"total_cost_usd":0.03}"#,
+        ].joined(separator: "\n") + "\n"
+        let replayed = Job.transcript(from: text)
+        #expect(replayed.entries.map(\.text) == [
+            "Creating worktree…", "Session started · claude-sonnet · job", "Reading the page.",
+            "content/page.md", "npm warn deprecated",
+        ])
+        #expect(replayed.outcome?.turns == 4)
+        #expect(replayed.outcome?.result == "READY FOR REVIEW")
+    }
+
+    @Test("a restored job replays what earlier launches wrote, once, before what it logs now")
+    func replay() async throws {
+        let paths = try Self.temporaryPaths()
+        try Self.write(Self.record("review", kind: .edit(Self.target), state: .awaitingReview),
+                       in: paths)
+        try FileManager.default.createDirectory(
+            at: paths.worktree(forJob: "review"), withIntermediateDirectories: true)
+        let earlier = try #require(TranscriptLine.encode(JobLogEntry(.system, "Edited by hand.")))
+        let result = #"{"type":"result","subtype":"success","is_error":false,"result":"Done.","num_turns":2}"#
+        try Data((earlier + "\n" + result + "\n").utf8).write(to: paths.log(forJob: "review"))
+
+        let center = JobCenter(paths: paths) { Self.environment() }
+        let job = try #require(center.job(id: "review"))
+        #expect(job.log.count == 1 && job.outcome == nil)
+        // Written by this launch, after the restore: already in `log`, never replayed.
+        let handle = try FileHandle(forWritingTo: paths.log(forJob: "review"))
+        _ = try handle.seekToEnd()
+        try handle.write(contentsOf: Data("this launch\n".utf8))
+        try handle.close()
+
+        await job.replayTranscript()
+        #expect(job.log.map(\.text).first == "Edited by hand.")
+        #expect(job.log.last?.text.hasPrefix("Restored from an earlier launch.") == true)
+        #expect(!job.log.contains { $0.text == "this launch" })
+        #expect(job.outcome?.turns == 2)
+
+        await job.replayTranscript()
+        #expect(job.log.count == 2, "a second replay changes nothing")
+    }
+
+    @Test("a job from this launch has nothing to replay")
+    func noReplay() async throws {
+        let paths = try Self.temporaryPaths()
+        let job = Job(kind: .edit(Self.target), paths: paths)
+        job.append(JobLogEntry(.system, "Live."))
+        await job.replayTranscript()
+        #expect(job.log.map(\.text) == ["Live."])
+    }
+
+    // MARK: The pull request, as edited
+
+    @Test("an edited pull request is written within a second, and at once when the app stops")
+    func pullRequestPersists() async throws {
+        let paths = try Self.temporaryPaths()
+        try Self.write(Self.record("review", kind: .edit(Self.target), state: .awaitingReview),
+                       in: paths)
+        try FileManager.default.createDirectory(
+            at: paths.worktree(forJob: "review"), withIntermediateDirectories: true)
+        let center = JobCenter(paths: paths) { Self.environment() }
+        let job = try #require(center.job(id: "review"))
+        func onDisk() throws -> PullRequestDraft? {
+            try JSONDecoder().decode(JobRecord.self, from: Data(contentsOf: job.recordFile)).pullRequest
+        }
+
+        job.pullRequest.title = "[fix] Pseudorandom function: Security"
+        #expect(try onDisk() == nil, "not at every keystroke")
+        try await Task.sleep(for: .milliseconds(2_000))
+        #expect(try onDisk()?.title == "[fix] Pseudorandom function: Security")
+
+        job.pullRequest.body = "Why."
+        center.stopJobs()
+        #expect(try onDisk()?.body == "Why.")
+    }
+
+    @Test("a restored edit with a saved, non-empty patch counts as awaiting review")
+    func restoredEditWithChanges() throws {
+        let paths = try Self.temporaryPaths()
+        for id in ["changed", "unchanged"] {
+            try Self.write(Self.record(id, kind: .edit(Self.target), state: .awaitingReview),
+                           in: paths)
+            try FileManager.default.createDirectory(
+                at: paths.worktree(forJob: id), withIntermediateDirectories: true)
+        }
+        try Data("diff --git a/x b/x\n".utf8).write(to: paths.patch(forJob: "changed"))
+        try Data().write(to: paths.patch(forJob: "unchanged"))
+
+        let center = JobCenter(paths: paths) { Self.environment() }
+        let changed = try #require(center.job(id: "changed"))
+        let unchanged = try #require(center.job(id: "unchanged"))
+        #expect(changed.statusLabel == "Awaiting review")
+        #expect(unchanged.statusLabel == "Editing")
+        #expect(center.reviewCount == 1)
+    }
+
     @Test("an edit with no changes yet is Editing, and is not counted as awaiting review")
     func untouchedEdit() throws {
         let paths = try Self.temporaryPaths()

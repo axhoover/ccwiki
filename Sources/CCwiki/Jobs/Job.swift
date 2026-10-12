@@ -263,15 +263,31 @@ final class Job: Identifiable {
     /// Restored without its worktree: Restore applies `patchFile`.
     private(set) var needsRestore = false
     /// Edited in the review. Persisted at most once a second, and before
-    /// Approve.
-    var pullRequest: PullRequestDraft
+    /// Approve (which persists the record as it starts publishing).
+    var pullRequest: PullRequestDraft {
+        didSet {
+            if pullRequest != oldValue { schedulePersist() }
+        }
+    }
 
-    /// Set by the runner so the panel's Cancel button has something to cancel.
+    /// Set by the runner so the panel's Cancel button has something to cancel,
+    /// and by Approve so a quit can interrupt the publish.
     @ObservationIgnored var task: Task<Void, Never>?
 
     /// The raw stream, appended to as it arrives. Kept even after the worktree
     /// is pruned — a transcript you cannot re-read is not a transcript.
     @ObservationIgnored private var logWriter: LogWriter?
+    /// A job from an earlier launch, whose transcript is on disk and not yet
+    /// in `log`. Cleared by the first `replayTranscript()`.
+    @ObservationIgnored private var needsReplay = false
+    /// How much of `logFile` earlier launches wrote: what a replay reads.
+    /// Anything after it was written by this launch, and is in `log`.
+    @ObservationIgnored private var replayLength = 0
+    /// Restored with a saved patch that is not empty: the last launch's
+    /// snapshot had changes (`isUntouchedEdit`).
+    @ObservationIgnored private var restoredWithChanges = false
+    /// The pending write of an edited pull request, at most one a second.
+    @ObservationIgnored private var persistTask: Task<Void, Never>?
 
     init(kind: JobKind, paths: AppPaths, createdAt: Date = Date()) {
         // A timestamp prefix keeps the jobs directory sorted and readable, and
@@ -326,6 +342,16 @@ final class Job: Identifiable {
             at: at)]
         if let note = restored.note { entries.append(JobLogEntry(.system, note, at: at)) }
         self.log = entries
+        self.needsReplay = true
+        self.replayLength = Self.fileSize(logFile)
+        if patchExists { self.restoredWithChanges = Self.fileSize(patchFile) > 0 }
+    }
+
+    /// Bytes, or 0 for a file that is not there.
+    nonisolated private static func fileSize(_ file: URL) -> Int {
+        let attributes = try? FileManager.default.attributesOfItem(
+            atPath: file.path(percentEncoded: false))
+        return (attributes?[.size] as? NSNumber)?.intValue ?? 0
     }
 
     /// §4.3, row by row: what a recorded state comes back as.
@@ -363,10 +389,31 @@ final class Job: Identifiable {
     }
 
     private func persist() {
+        persistTask?.cancel()
+        persistTask = nil
         guard let data = try? JSONEncoder().encode(record) else { return }
         try? FileManager.default.createDirectory(
             at: recordFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: recordFile, options: .atomic)
+    }
+
+    /// The record again in a second, for the pull request's title and body,
+    /// which change at every keystroke. Any other persist meanwhile writes
+    /// them too, and cancels this one.
+    private func schedulePersist() {
+        guard persistTask == nil else { return }
+        persistTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled else { return }
+            self.persistTask = nil
+            self.persist()
+        }
+    }
+
+    /// Writes the record now, with the pull request as edited: before
+    /// Approve, and when the app quits.
+    func saveRecord() {
+        persist()
     }
 
     private static let stampFormatter: DateFormatter = {
@@ -407,8 +454,13 @@ final class Job: Identifiable {
 
     /// An edit whose worktree holds no change yet: "Editing", not counted
     /// as awaiting review, and discarded when its last editor closes.
+    /// Judged by the last snapshot; before the first one, an edit restored
+    /// from an earlier launch is judged by the patch that launch saved, so
+    /// the Dock badge counts it before its review is shown.
     var isUntouchedEdit: Bool {
-        kind.tag == .edit && (review?.isEmpty ?? true)
+        guard kind.tag == .edit else { return false }
+        if let review { return review.isEmpty }
+        return !restoredWithChanges
     }
 
     /// The state's label, as the kind adjusts it (§4.1).
@@ -489,14 +541,20 @@ final class Job: Identifiable {
         needsRestore = flag
     }
 
+    /// One of CCwiki's own lines: shown, and written to the transcript file
+    /// beside the agent's stream, so a replay after a relaunch has it too
+    /// (`TranscriptLine`).
     func append(_ entry: JobLogEntry) {
         log.append(entry)
         // The transcript in memory is bounded; the file on disk is not.
         if log.count > 4_000 { log.removeFirst(1_000) }
+        if let line = TranscriptLine.encode(entry) { appendRaw(line) }
     }
 
     /// Many entries as one change to `log`, so the transcript view updates
-    /// once for the batch rather than once per line.
+    /// once for the batch rather than once per line. The agent's, parsed
+    /// from lines `appendRaw` has already written, so nothing is written
+    /// again.
     func append(_ entries: [JobLogEntry]) {
         guard !entries.isEmpty else { return }
         log.append(contentsOf: entries)
@@ -518,8 +576,45 @@ final class Job: Identifiable {
 
     /// A restored job: `logFile` through `ClaudeStreamParser`, off the main
     /// actor, to rebuild `log` and `outcome`. Once, when the job is first
-    /// shown. (Phase 0: not yet; corrections §11.3.)
-    func replayTranscript() async {}
+    /// shown; a job from this launch has its transcript already, and a
+    /// second call does nothing.
+    ///
+    /// The replayed lines go before whatever the job has logged since the
+    /// relaunch, which starts with the line that says it was restored. Only
+    /// what earlier launches wrote is read: the rest is in `log` already.
+    func replayTranscript() async {
+        guard needsReplay else { return }
+        needsReplay = false
+        let file = logFile
+        let length = replayLength
+        let replayed = await Task.detached(priority: .utility) {
+            Job.transcript(at: file, length: length)
+        }.value
+        log = replayed.entries + log
+        if outcome == nil, let previous = replayed.outcome { outcome = previous }
+    }
+
+    /// The entries and the outcome in the first `length` bytes of a
+    /// transcript file: the agent's stream-json, its stderr, and CCwiki's
+    /// own lines. At most the last 3,000 entries, as the live transcript
+    /// keeps.
+    nonisolated static func transcript(at file: URL, length: Int) -> (entries: [JobLogEntry], outcome: ClaudeOutcome?) {
+        guard length > 0, let data = try? Data(contentsOf: file) else { return ([], nil) }
+        return transcript(from: String(decoding: data.prefix(length), as: UTF8.self))
+    }
+
+    nonisolated static func transcript(from text: String) -> (entries: [JobLogEntry], outcome: ClaudeOutcome?) {
+        var parser = ClaudeStreamParser()
+        var entries: [JobLogEntry] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            if let own = TranscriptLine.decode(line) {
+                entries.append(own)
+            } else {
+                entries.append(contentsOf: parser.consume(String(line)))
+            }
+        }
+        return (Array(entries.suffix(3_000)), parser.outcome)
+    }
 
     /// Stops work that has not reached review. Anything else is left as it
     /// is: a review is discarded, never cancelled, and a publish is
@@ -607,6 +702,65 @@ extension JobRecord {
 }
 
 // MARK: - Transcript file
+
+/// One of CCwiki's own lines in a job's transcript file, which otherwise
+/// holds the agent's stream-json and its stderr, line by line.
+///
+/// JSON, as the agent's lines are, with a type of its own: `{"type":
+/// "ccwiki", "role": "error", "text": "…", "at": 1760263200.5}`.
+/// `ClaudeStreamParser` passes over a type it does not know, and a replay
+/// gives each line back its role and its time, and a text of several lines
+/// back as one entry.
+enum TranscriptLine {
+
+    static let typeName = "ccwiki"
+
+    static func encode(_ entry: JobLogEntry) -> String? {
+        var object: [String: Any] = [
+            "type": typeName,
+            "role": role(entry.role),
+            "text": entry.text,
+            "at": entry.timestamp.timeIntervalSince1970,
+        ]
+        if case .tool(let name) = entry.role { object["tool"] = name }
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
+        else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The entry `line` holds, or nil for any line that is not CCwiki's.
+    static func decode(_ line: Substring) -> JobLogEntry? {
+        // Cheap test first: most lines are the agent's.
+        guard line.hasPrefix("{"), line.contains("\"type\":\"\(typeName)\""),
+              let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              object["type"] as? String == typeName,
+              let text = object["text"] as? String
+        else { return nil }
+        let at = (object["at"] as? Double).map(Date.init(timeIntervalSince1970:)) ?? Date()
+        let role: JobLogEntry.Role = switch object["role"] as? String ?? "system" {
+        case "assistant": .assistant
+        case "tool": .tool(name: object["tool"] as? String ?? "tool")
+        case "toolResult": .toolResult(isError: false)
+        case "toolError": .toolResult(isError: true)
+        case "stderr": .stderr
+        case "error": .error
+        default: .system
+        }
+        return JobLogEntry(role, text, at: at)
+    }
+
+    private static func role(_ role: JobLogEntry.Role) -> String {
+        switch role {
+        case .system: "system"
+        case .assistant: "assistant"
+        case .tool: "tool"
+        case .toolResult(let isError): isError ? "toolError" : "toolResult"
+        case .stderr: "stderr"
+        case .error: "error"
+        }
+    }
+}
 
 /// Appends lines to a file on a private serial queue, in order.
 ///
