@@ -232,7 +232,7 @@ enum ProofLaTeX {
             lines.append("\(name) is known to be false\(cited), so this implication is vacuous.")
         }
         lines.append(#"\begin{enumerate}"#)
-        for step in proof.steps { lines.append("  " + item(step, context: context)) }
+        for step in proof.steps { lines.append("  " + #"\item "# + item(step, context: context)) }
         lines.append(#"\end{enumerate}"#)
         return lines.joined(separator: "\n")
     }
