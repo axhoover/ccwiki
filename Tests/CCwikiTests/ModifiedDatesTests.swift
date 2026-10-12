@@ -155,6 +155,22 @@ struct ModifiedDatesTests {
             git: git, clone: paths.clone, head: second, pulledFrom: nil, cache: cache)
         #expect(source == .cache)
 
+        // The pull again, from a cache at its base: only the commits it
+        // brought are read, whether the outcome names the base or git is
+        // asked whether HEAD has the cached commit in its history.
+        ModifiedDatesCache(revision: first, dates: launch.modifiedDates).write(to: cache)
+        let (viaBase, baseSource) = await LibraryRefresh.modifiedDates(
+            git: git, clone: paths.clone, head: second, pulledFrom: first, cache: cache)
+        #expect(baseSource == .range)
+        #expect(viaBase == history)
+        #expect(ModifiedDatesCache.read(from: cache)?.revision == second)
+
+        ModifiedDatesCache(revision: first, dates: launch.modifiedDates).write(to: cache)
+        let (viaAncestry, ancestrySource) = await LibraryRefresh.modifiedDates(
+            git: git, clone: paths.clone, head: second, pulledFrom: nil, cache: cache)
+        #expect(ancestrySource == .range)
+        #expect(viaAncestry == history)
+
         // A cache from a commit this clone never had: the whole history.
         ModifiedDatesCache(revision: "not-a-commit", dates: ["a.md": Self.date(1)]).write(to: cache)
         let (dates, fallback) = await LibraryRefresh.modifiedDates(

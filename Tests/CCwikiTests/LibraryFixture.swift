@@ -70,25 +70,40 @@ struct FixtureClone {
     }
 
     /// The manifest: three objects, the first titled `prfTitle`; OWF's page
-    /// off the listings when `unlistingOWF`.
-    static func manifest(prfTitle: String = "Pseudorandom function", unlistingOWF: Bool = false)
-        -> String {
-        """
-        {"version": 1, "classes": {}, "classSentinels": [], "propositions": {},
-         "objects": [
-          {"id": "prf", "kind": "object", "type": "primitive",
-           "page": "content/Primitives/pseudorandom-function.md",
-           "slug": "pseudorandom-function", "title": "\(prfTitle)", "aliases": ["PRF"]},
-          {"id": "owf", "kind": "object", "type": "primitive",
-           "page": "content/Primitives/one-way-function.md",
-           "slug": "one-way-function", "title": "One-way function", "aliases": ["OWF"],
-           "unlisted": \(unlistingOWF)},
-          {"id": "lwe", "kind": "object", "type": "assumption",
-           "page": "content/Assumptions/learning-with-errors.md",
-           "slug": "learning-with-errors", "title": "Learning with errors", "aliases": ["LWE"]}
-         ],
-         "reductions": [], "barriers": []}
-        """
+    /// off the listings when `unlistingOWF`. With `withVariant`, a fourth: a
+    /// variant for PRF's Syntax section, written the way manifests from
+    /// before the final form write one, its title only its id, so its label
+    /// is read from the heading on PRF's page.
+    static func manifest(
+        prfTitle: String = "Pseudorandom function", unlistingOWF: Bool = false,
+        withVariant: Bool = false
+    ) -> String {
+        var variant = ""
+        if withVariant {
+            variant = """
+                ,
+                  {"id": "prf-syntax", "kind": "variant", "of": "prf", "title": "prf-syntax",
+                   "anchor": "syntax", "type": "primitive",
+                   "page": "content/Primitives/pseudorandom-function.md",
+                   "slug": "pseudorandom-function"}
+                """
+        }
+        return """
+            {"version": 1, "classes": {}, "classSentinels": [], "propositions": {},
+             "objects": [
+              {"id": "prf", "kind": "object", "type": "primitive",
+               "page": "content/Primitives/pseudorandom-function.md",
+               "slug": "pseudorandom-function", "title": "\(prfTitle)", "aliases": ["PRF"]},
+              {"id": "owf", "kind": "object", "type": "primitive",
+               "page": "content/Primitives/one-way-function.md",
+               "slug": "one-way-function", "title": "One-way function", "aliases": ["OWF"],
+               "unlisted": \(unlistingOWF)},
+              {"id": "lwe", "kind": "object", "type": "assumption",
+               "page": "content/Assumptions/learning-with-errors.md",
+               "slug": "learning-with-errors", "title": "Learning with errors", "aliases": ["LWE"]}\(variant)
+             ],
+             "reductions": [], "barriers": []}
+            """
     }
 
     static let macros = """

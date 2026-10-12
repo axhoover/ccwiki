@@ -157,9 +157,13 @@ struct LibraryUpdate: Sendable {
             return !library.linkedPaths(from: page).isDisjoint(with: changed)
         case .folder(let slug):
             guard let changes, !isFullBuild else { return true }
-            // The listing leaves out the manifest's unlisted pages, and shows
-            // each page's title and status.
-            if resolutionChanged || changes.manifestChanged { return true }
+            // The listing leaves out the manifest's unlisted pages, shows
+            // each page's title and status, and carries the notice that the
+            // macros could not be loaded, which a change to `macros.ts` can
+            // raise or clear.
+            if resolutionChanged || changes.manifestChanged || changes.macrosChanged {
+                return true
+            }
             return changes.changedPages.contains {
                 QuartzSlug.slugifyFilePath($0).hasPrefix(slug + "/")
             }

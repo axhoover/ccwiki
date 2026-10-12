@@ -244,7 +244,7 @@ struct IncrementalLibraryTests {
         }
     }
 
-    @Test("links resolving anew, new labels and new macros render every page again")
+    @Test("links resolving anew, a new manifest and new macros render every page and listing again")
     func rerenderEveryPage() throws {
         let edits: [(String, (FixtureClone) throws -> Void)] = [
             ("an alias", { clone in
@@ -252,9 +252,11 @@ struct IncrementalLibraryTests {
                     type: "primitive", title: "One-way function", aliases: ["OWF", "OWFs"],
                     body: "# One-way function\n\nEasy to compute and hard to invert.\n"))
             }),
-            ("a label", { clone in
+            ("the manifest", { clone in
                 try clone.write(FixtureClone.manifestPath, FixtureClone.manifest(prfTitle: "PRFs"))
             }),
+            // A listing carries the notice that the macros could not be
+            // loaded, which a change to them can raise or clear.
             ("the macros", { clone in
                 try clone.write("macros.ts", FixtureClone.macros + "\n")
             }),
@@ -263,8 +265,35 @@ struct IncrementalLibraryTests {
             let (_, update) = try Self.update(edit)
             #expect(update.requiresRerender(of: Self.ggm), "after a change to \(name)")
             #expect(update.requiresRerender(of: Self.home), "after a change to \(name)")
+            #expect(update.requiresRerender(of: Self.assumptions), "after a change to \(name)")
         }
-        let (_, macros) = try Self.update { try $0.write("macros.ts", FixtureClone.macros + "\n") }
-        #expect(!macros.requiresRerender(of: Self.primitives), "a listing has no math")
+    }
+
+    /// On a manifest from before the final form, a variant's title is its id
+    /// and its label is the heading on its host page, so a page edit can
+    /// rename it with `relations.json` untouched.
+    @Test("new labels alone render every page again, and no listing that does not show the page")
+    func rerenderEveryPageOnLabelsAlone() throws {
+        let clone = try FixtureClone()
+        defer { clone.delete() }
+        try clone.write(FixtureClone.manifestPath, FixtureClone.manifest(withVariant: true))
+        let previous = LoadedLibrary.build(cloneRoot: clone.root)
+        // The anchor stays `syntax`; only the heading's text, and so the
+        // label, changes.
+        try clone.write(FixtureClone.prf, try clone.read(FixtureClone.prf)
+            .replacingOccurrences(of: "## Syntax", with: "## SYNTAX"))
+        let update = LoadedLibrary.update(previous, cloneRoot: clone.root)
+
+        #expect(previous.labels.label("prf-syntax") == "Pseudorandom function § Syntax")
+        #expect(update.library.labels.label("prf-syntax") == "Pseudorandom function § SYNTAX")
+        #expect(update.labelsChanged)
+        #expect(update.changes?.changedFiles == ["Primitives/pseudorandom-function.md"])
+        #expect(update.changes?.manifestChanged == false)
+        #expect(update.changes?.macrosChanged == false)
+        #expect(!update.resolutionChanged)
+        #expect(!update.isFullBuild)
+        #expect(update.requiresRerender(of: Self.ggm), "though it links to nothing that changed")
+        #expect(update.requiresRerender(of: Self.primitives), "lists the changed page")
+        #expect(!update.requiresRerender(of: Self.assumptions), "a listing shows no labels")
     }
 }
