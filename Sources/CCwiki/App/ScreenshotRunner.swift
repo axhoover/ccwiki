@@ -122,9 +122,10 @@ enum ScreenshotRunner {
         }
     }
 
-    /// `openWindow` is the reader's, for the steps that open a window of
-    /// their own.
-    static func run(model: AppModel, openWindow: OpenWindowAction) {
+    /// `session` is the reader window that started the plan, which its page
+    /// steps drive; `openWindow` is that window's, for the steps that open a
+    /// window of their own.
+    static func run(model: AppModel, session: ReaderSession, openWindow: OpenWindowAction) {
         guard let directory else { return }
         let plan = (ProcessInfo.processInfo.environment["CCWIKI_SHOT_PLAN"] ?? "home")
             .components(separatedBy: ",")
@@ -142,7 +143,7 @@ enum ScreenshotRunner {
             try? await Task.sleep(for: .milliseconds(900))
 
             for (offset, step) in plan.enumerated() {
-                await apply(step, model: model, openWindow: openWindow)
+                await apply(step, model: model, session: session, openWindow: openWindow)
                 try? await Task.sleep(for: .milliseconds(step.settleMilliseconds))
 
                 let name = String(format: "%02d-%@", offset + 1, step.slug)
@@ -151,7 +152,7 @@ enum ScreenshotRunner {
                 } else {
                     await capture(to: directory.appending(path: name + ".png"))
                 }
-                await teardown(step, model: model)
+                await teardown(step, model: model, session: session)
                 try? await Task.sleep(for: .milliseconds(250))
             }
 
@@ -177,30 +178,32 @@ enum ScreenshotRunner {
         }
     }
 
-    private static func apply(_ step: Step, model: AppModel, openWindow: OpenWindowAction) async {
+    private static func apply(
+        _ step: Step, model: AppModel, session: ReaderSession, openWindow: OpenWindowAction
+    ) async {
         switch step {
         case .home:
-            model.openHome()
+            session.openHome()
         case .welcome:
-            model.showWelcome()
+            session.showWelcome()
         case .whatsNew:
-            model.showWhatsNew()
+            session.showWhatsNew()
         case .page(let path):
-            model.openPage(path)
+            session.openPage(path)
         case .folder(let slug):
-            model.open(.folder(slug: slug))
+            session.open(.folder(slug: slug))
         case .switcher(let query):
-            model.presentQuickSwitcher()
+            session.presentQuickSwitcher()
             try? await Task.sleep(for: .milliseconds(250))
             model.quickSwitcherQuery = query
             model.refreshQuickSwitcher()
         case .search(let query):
-            model.searchPresented = true
+            session.searchPresented = true
             try? await Task.sleep(for: .milliseconds(250))
             model.searchQuery = query
         case .inspector(let tab):
-            model.inspectorTab = tab
-            model.showInspector = true
+            session.inspectorTab = tab
+            session.showInspector = true
         case .appearance(let name, _):
             // The web view follows `NSAppearance`, so this exercises the
             // reader's dark palette as well as the chrome's.
@@ -256,12 +259,12 @@ enum ScreenshotRunner {
         }
     }
 
-    private static func teardown(_ step: Step, model: AppModel) async {
+    private static func teardown(_ step: Step, model: AppModel, session: ReaderSession) async {
         switch step {
         case .switcher:
-            model.quickSwitcherPresented = false
+            session.quickSwitcherPresented = false
         case .search:
-            model.searchPresented = false
+            session.searchPresented = false
             model.searchQuery = ""
         case .settings:
             NSApp.windows.first { $0.title == "Settings" || $0.title == "Preferences" }?.close()

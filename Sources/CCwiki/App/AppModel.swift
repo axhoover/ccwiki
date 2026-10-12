@@ -202,109 +202,42 @@ final class AppModel {
     /// The reader window's session: its page, history, web view, sidebar,
     /// inspector and sheets (plans/reader-comforts.md §1.2). Made last in
     /// `init`, since it reads the model whole. One until there is a session
-    /// per window (A4b).
+    /// per window (A4b). A view in the reader window reads it from the
+    /// environment, never through the model; the model's own code calls it by
+    /// name, so that what A4b fans out to every session is easy to find.
     @ObservationIgnored private(set) lazy var primarySession: ReaderSession =
         ReaderSession(id: UUID(), model: self)
 
-    // Each member that moved into the session, forwarded under its old name
-    // so that no view changed with the move (A2). A3 gives every reader view
-    // its own window's session and deletes these, all but the API for
-    // windows that are not readers (§1.8): `open`, `openPage`,
-    // `openRelationObject`, `navigate(to:)`, `currentPageExplorerQuery` and
-    // `canExploreCurrentPage`. The model's own code calls `primarySession`
-    // by name, so that what A4b fans out to every session is easy to find.
+    // MARK: For windows that are not readers
 
-    var webController: WebController { primarySession.webController }
-    var location: Location { primarySession.location }
-    var canGoBack: Bool { primarySession.canGoBack }
-    var canGoForward: Bool { primarySession.canGoForward }
+    // The explorer, Jobs and a paper window have no session, so they open
+    // pages through these, in the active reader: the reader window used
+    // last, which is the one session until each window has its own (§1.8).
+    // A view inside a reader window never calls them; it opens pages in its
+    // own window's session.
 
-    var sidebarSelection: String? {
-        get { primarySession.sidebarSelection }
-        set { primarySession.sidebarSelection = newValue }
-    }
-    var expandedFolders: Set<String> {
-        get { primarySession.expandedFolders }
-        set { primarySession.expandedFolders = newValue }
-    }
-    var inspectorTab: InspectorTab {
-        get { primarySession.inspectorTab }
-        set { primarySession.inspectorTab = newValue }
-    }
-    var showInspector: Bool {
-        get { primarySession.showInspector }
-        set { primarySession.showInspector = newValue }
-    }
-
-    var quickSwitcherPresented: Bool {
-        get { primarySession.quickSwitcherPresented }
-        set { primarySession.quickSwitcherPresented = newValue }
-    }
-    var searchPresented: Bool {
-        get { primarySession.searchPresented }
-        set { primarySession.searchPresented = newValue }
-    }
-    var referenceSearchPresented: Bool {
-        get { primarySession.referenceSearchPresented }
-        set { primarySession.referenceSearchPresented = newValue }
-    }
-    var grepPresented: Bool {
-        get { primarySession.grepPresented }
-        set { primarySession.grepPresented = newValue }
-    }
-    var syncLogPresented: Bool {
-        get { primarySession.syncLogPresented }
-        set { primarySession.syncLogPresented = newValue }
-    }
-
-    var currentPage: WikiPage? { primarySession.currentPage }
-    var currentBacklinks: [WikiIndex.Backlink] { primarySession.currentBacklinks }
-    var currentRelations: PageRelations { primarySession.currentRelations }
-    var currentDerivations: PageDerivations { primarySession.currentDerivations }
-    var citingPages: [WikiIndex.Backlink] { primarySession.citingPages }
-    var currentSiteURL: URL? { primarySession.currentSiteURL }
-    var currentTitle: String { primarySession.currentTitle }
-    var currentPageExplorerQuery: ExplorerQuery? { primarySession.currentPageExplorerQuery }
-    var canExploreCurrentPage: Bool { primarySession.canExploreCurrentPage }
-
-    func open(_ newLocation: Location, recordHistory: Bool = true) {
-        primarySession.open(newLocation, recordHistory: recordHistory)
+    /// Shows `location` in the active reader without bringing it forward, so
+    /// the explorer stays key while a proof's pages open beside it.
+    func open(_ location: Location) {
+        primarySession.open(location)
     }
 
     func openPage(_ path: String, anchor: String? = nil) {
         primarySession.openPage(path, anchor: anchor)
     }
 
-    func navigate(to destination: CCwikiURL.Destination) {
-        primarySession.navigate(to: destination)
-    }
-
-    func goBack() { primarySession.goBack() }
-    func goForward() { primarySession.goForward() }
-    func openHome() { primarySession.openHome() }
-    func openRandomPage() { primarySession.openRandomPage() }
-
-    func openSearchResult(_ hit: SearchHit, query: String) {
-        primarySession.openSearchResult(hit, query: query)
-    }
-
-    func openGrepResult(_ hit: TextGrep.Hit, query: String) {
-        primarySession.openGrepResult(hit, query: query)
-    }
-
-    func openReferenceResult(_ hit: ReferenceHit, query: String) {
-        primarySession.openReferenceResult(hit, query: query)
-    }
-
     func openRelationObject(_ objectID: String) {
         primarySession.openRelationObject(objectID)
     }
 
-    func showWelcome() { primarySession.showWelcome() }
-    func showWhatsNew() { primarySession.showWhatsNew() }
-    func showInspectorTab(_ tab: InspectorTab) { primarySession.showInspectorTab(tab) }
-    func presentQuickSwitcher() { primarySession.presentQuickSwitcher() }
-    func printCurrentPage() { primarySession.printCurrentPage() }
+    func navigate(to destination: CCwikiURL.Destination) {
+        primarySession.navigate(to: destination)
+    }
+
+    /// The explorer's own Explore From This Page, about the active reader's
+    /// page.
+    var currentPageExplorerQuery: ExplorerQuery? { primarySession.currentPageExplorerQuery }
+    var canExploreCurrentPage: Bool { primarySession.canExploreCurrentPage }
 
     // MARK: Sync
 

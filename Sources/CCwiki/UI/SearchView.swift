@@ -9,6 +9,7 @@ import SwiftUI
 /// matched a heading names it and opens there.
 struct SearchView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
 
     var body: some View {
         @Bindable var model = model
@@ -26,7 +27,9 @@ struct SearchView: View {
             emptyDescription: "Names and aliases first, then headings, then text. "
                 + "Primitives and assumptions lead. Papers have their own search, ⇧⌘R.",
             countLabel: { "\($0) page\($0 == 1 ? "" : "s")" },
-            open: { model.openSearchResult($0, query: model.searchCorrection ?? model.searchQuery) }
+            open: { hit in
+                session.openSearchResult(hit, query: model.searchCorrection ?? model.searchQuery)
+            }
         ) { hit in
             resultRow(hit)
         }

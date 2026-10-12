@@ -13,6 +13,12 @@ struct CCwikiApp: App {
         WindowGroup(id: CCwikiApp.mainWindowID) {
             RootView()
                 .modifier(ReaderWindowHooks())
+                // What the window shows is its session's, and every view in
+                // it reads the session from here, never through the model
+                // (plans/reader-comforts.md §1.2). The one session for now;
+                // each window claims its own once the scene is
+                // `WindowGroup(for: ReaderWindow.self)`.
+                .environment(model.primarySession)
                 .environment(model)
                 .frame(
                     minWidth: Theme.windowMinWidth,
@@ -147,8 +153,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// Every primary action gets a shortcut and every shortcut appears in a menu,
 /// so it is discoverable rather than folklore. The actions reach the focused
 /// scene through `@FocusedValue` rather than through a shared singleton.
+///
+/// Two values, both published by the key reader window: its session, for
+/// everything about the page it shows, and the model, for what is app-wide
+/// (sync, updates, text size, ingestion). Neither is published by Jobs, the
+/// explorer, a paper or Settings, so the reader's commands are disabled there
+/// (plans/reader-comforts.md §1.5).
 struct CCwikiCommands: Commands {
     @FocusedValue(\.appModel) private var model
+    @FocusedValue(\.readerSession) private var session
     @FocusedValue(\.findAction) private var findAction
     @FocusedValue(\.searchAction) private var searchAction
     /// Set while a paper window is key: the text-size items zoom the PDF.
@@ -189,35 +202,35 @@ struct CCwikiCommands: Commands {
 
             Divider()
 
-            Button("Toggle Inspector") { model?.showInspector.toggle() }
+            Button("Toggle Inspector") { session?.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.option, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
-            Button("Show Outline") { model?.showInspectorTab(.outline) }
+            Button("Show Outline") { session?.showInspectorTab(.outline) }
                 .keyboardShortcut("1", modifiers: [.option, .command])
-                .disabled(model == nil)
-            Button("Show Backlinks") { model?.showInspectorTab(.backlinks) }
+                .disabled(session == nil)
+            Button("Show Backlinks") { session?.showInspectorTab(.backlinks) }
                 .keyboardShortcut("2", modifiers: [.option, .command])
-                .disabled(model == nil)
-            Button("Show Relations") { model?.showInspectorTab(.relations) }
+                .disabled(session == nil)
+            Button("Show Relations") { session?.showInspectorTab(.relations) }
                 .keyboardShortcut("3", modifiers: [.option, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
             Divider()
 
-            Button("Back") { model?.goBack() }
+            Button("Back") { session?.goBack() }
                 .keyboardShortcut("[", modifiers: .command)
-                .disabled(model?.canGoBack != true)
+                .disabled(session?.canGoBack != true)
 
-            Button("Forward") { model?.goForward() }
+            Button("Forward") { session?.goForward() }
                 .keyboardShortcut("]", modifiers: .command)
-                .disabled(model?.canGoForward != true)
+                .disabled(session?.canGoForward != true)
         }
 
         CommandGroup(replacing: .newItem) {
-            Button("Quick Switcher…") { model?.presentQuickSwitcher() }
+            Button("Quick Switcher…") { session?.presentQuickSwitcher() }
                 .keyboardShortcut("o", modifiers: .command)
-                .disabled(model == nil)
+                .disabled(session == nil)
 
             Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
@@ -238,9 +251,9 @@ struct CCwikiCommands: Commands {
                 .disabled(findAction?.previous == nil)
 
             // ⇧⌘F, as Find in Project is in Xcode: the literal text, everywhere.
-            Button("Find in All Pages…") { model?.grepPresented = true }
+            Button("Find in All Pages…") { session?.grepPresented = true }
                 .keyboardShortcut("f", modifiers: [.shift, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
             // ⌘S, because searching is the thing a reader does most and ⌘S is
             // the easiest chord to reach. It is Save by convention, but CCwiki
@@ -251,9 +264,9 @@ struct CCwikiCommands: Commands {
                 .disabled(searchAction == nil)
 
             // ⇧⌘R, because ⌘R is Sync: reload, as in nearly every Mac app.
-            Button("Search References…") { model?.referenceSearchPresented = true }
+            Button("Search References…") { session?.referenceSearchPresented = true }
                 .keyboardShortcut("r", modifiers: [.shift, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
         }
 
         // A reader has no documents: no Save, Save As, Revert or Duplicate.
@@ -261,18 +274,18 @@ struct CCwikiCommands: Commands {
 
         // The page you are reading. The print panel's PDF menu is Save as PDF.
         CommandGroup(replacing: .printItem) {
-            Button("Print…") { model?.printCurrentPage() }
+            Button("Print…") { session?.printCurrentPage() }
                 .keyboardShortcut("p", modifiers: .command)
-                .disabled(model == nil || model?.location == .empty)
+                .disabled(session == nil || session?.location == .empty)
         }
 
         // The default "CCwiki Help" item opens a help book that does not
         // exist. These are what help there is.
         CommandGroup(replacing: .help) {
-            Button("Welcome to CCwiki") { model?.showWelcome() }
-                .disabled(model == nil)
-            Button("What's New in CCwiki") { model?.showWhatsNew() }
-                .disabled(model == nil)
+            Button("Welcome to CCwiki") { session?.showWelcome() }
+                .disabled(session == nil)
+            Button("What's New in CCwiki") { session?.showWhatsNew() }
+                .disabled(session == nil)
             Divider()
             Button("Report an Issue…") {
                 if let url = URL(string: "https://github.com/axhoover/ccwiki/issues/new") {
@@ -292,15 +305,15 @@ struct CCwikiCommands: Commands {
                 .disabled(model?.syncState.isRunning ?? true)
 
             // ⇧⌘H, as in Safari. ⌘0 is "Actual Size" everywhere else on the Mac.
-            Button("Go Home") { model?.openHome() }
+            Button("Go Home") { session?.openHome() }
                 .keyboardShortcut("h", modifiers: [.shift, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
-            Button("Show Sync Log…") { model?.syncLogPresented = true }
-                .disabled(model == nil)
+            Button("Show Sync Log…") { session?.syncLogPresented = true }
+                .disabled(session == nil)
 
-            Button("Random Page") { model?.openRandomPage() }
-                .disabled(model?.index == nil)
+            Button("Random Page") { session?.openRandomPage() }
+                .disabled(session == nil || model?.index == nil)
 
             Divider()
 
@@ -314,52 +327,52 @@ struct CCwikiCommands: Commands {
             // reader's page, so it is disabled unless a reader window is key
             // and its page has something to explore.
             Button("Explore From This Page") {
-                guard let model, let query = model.currentPageExplorerQuery else { return }
+                guard let model, let query = session?.currentPageExplorerQuery else { return }
                 model.explore(query)
                 openWindow(id: CCwikiApp.explorerWindowID)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift, .option])
-            .disabled(model?.canExploreCurrentPage != true)
+            .disabled(session?.canExploreCurrentPage != true)
 
             Divider()
 
             Button("Open on cryptology.city") {
-                guard let url = model?.currentSiteURL else { return }
+                guard let url = session?.currentSiteURL else { return }
                 NSWorkspace.shared.open(url)
             }
-            .disabled(model?.currentSiteURL == nil)
+            .disabled(session?.currentSiteURL == nil)
 
             Button("Copy Link") {
-                guard let model, let url = model.currentSiteURL else { return }
+                guard let model, let url = session?.currentSiteURL else { return }
                 model.copyToPasteboard(url.absoluteString)
             }
-            .disabled(model?.currentSiteURL == nil)
+            .disabled(session?.currentSiteURL == nil)
 
             Button("Copy Wikilink") {
-                guard let model, let page = model.currentPage else { return }
+                guard let model, let page = session?.currentPage else { return }
                 model.copyToPasteboard(page.wikilink)
             }
-            .disabled(model?.currentPage == nil)
+            .disabled(session?.currentPage == nil)
 
             // ⌥⌘P: ⌘P is Print, and ⇧⌘P is Page Setup by convention. Out of
             // the menu until papers can be fetched.
             if ShowPaperCommand.isAvailable {
                 Button("Show Paper") {
-                    guard let model, let page = model.currentPage else { return }
+                    guard let model, let page = session?.currentPage else { return }
                     ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
                 }
                 .keyboardShortcut("p", modifiers: [.command, .option])
-                .disabled(!ShowPaperCommand.isEnabled(for: model?.currentPage))
+                .disabled(!ShowPaperCommand.isEnabled(for: session?.currentPage))
             }
 
             Divider()
 
             Button("Reveal Page in Finder") {
-                guard let model, let page = model.currentPage else { return }
+                guard let model, let page = session?.currentPage else { return }
                 NSWorkspace.shared.activateFileViewerSelecting(
                     [model.paths.content.appending(path: page.path)])
             }
-            .disabled(model?.currentPage == nil)
+            .disabled(session?.currentPage == nil)
 
             Button("Reveal Clone in Finder") {
                 guard let model else { return }

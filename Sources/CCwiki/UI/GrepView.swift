@@ -7,6 +7,7 @@ import SwiftUI
 /// markdown as written, so they are set in the monospaced face.
 struct GrepView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
 
     var body: some View {
         @Bindable var model = model
@@ -21,7 +22,7 @@ struct GrepView: View {
             emptyDescription: "The exact text, on every page, references included. "
                 + "Case matters only if you type a capital.",
             countLabel: { _ in model.grepSummary },
-            open: { model.openGrepResult($0, query: model.grepQuery) }
+            open: { session.openGrepResult($0, query: model.grepQuery) }
         ) { hit in
             resultRow(hit)
         }

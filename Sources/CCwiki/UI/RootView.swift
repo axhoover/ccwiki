@@ -6,42 +6,48 @@ import UniformTypeIdentifiers
 /// A three-column `NavigationSplitView` is the macOS document-browser idiom
 /// (Mail, Notes, Xcode), and it gets the sidebar's vibrancy, the toolbar's
 /// unified title bar, and column resizing without any of it being hand-built.
+///
+/// What the window shows — its page, history, sidebar, inspector and sheets —
+/// is its `ReaderSession`'s; what every window shares is the model's
+/// (plans/reader-comforts.md §1.2).
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @State private var isDropTargeted = false
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var session = session
 
         NavigationSplitView {
             SidebarView()
         } detail: {
             ReaderView()
-                .inspector(isPresented: $model.showInspector) {
+                .inspector(isPresented: $session.showInspector) {
                     InspectorView()
                 }
         }
         .toolbar { toolbar }
         .navigationTitle("CCwiki")
         .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
-        .sheet(isPresented: $model.quickSwitcherPresented) {
+        .sheet(isPresented: $session.quickSwitcherPresented) {
             QuickSwitcherView()
         }
-        .sheet(isPresented: $model.searchPresented) {
+        .sheet(isPresented: $session.searchPresented) {
             SearchView()
         }
-        .sheet(isPresented: $model.referenceSearchPresented) {
+        .sheet(isPresented: $session.referenceSearchPresented) {
             ReferenceSearchView()
         }
-        .sheet(isPresented: $model.grepPresented) {
+        .sheet(isPresented: $session.grepPresented) {
             GrepView()
         }
         .sheet(isPresented: $model.ingestSheetPresented) {
             IngestSheet()
         }
-        .sheet(isPresented: $model.syncLogPresented) {
+        .sheet(isPresented: $session.syncLogPresented) {
             SyncLogView()
         }
         // The whole reader is a drop target: when you have the paper open, the
@@ -76,7 +82,7 @@ struct RootView: View {
             // must not depend on the network.
             let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
             if model.index == nil || launchFetch { model.sync() }
-            ScreenshotRunner.run(model: model, openWindow: openWindow)
+            ScreenshotRunner.run(model: model, session: session, openWindow: openWindow)
             if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in
@@ -96,14 +102,15 @@ struct RootView: View {
                 openWindow(id: CCwikiApp.jobsWindowID)
             } else if let destination = CCwikiURL.destination(
                 of: CCwikiURL.internalString(for: url)) {
-                model.navigate(to: destination)
+                session.navigate(to: destination)
             }
         }
         .onChange(of: model.settingsRequests) { _, _ in
             openSettings()
         }
         .focusedSceneValue(\.appModel, model)
-        .focusedSceneValue(\.searchAction, FindAction { model.searchPresented = true })
+        .focusedSceneValue(\.readerSession, session)
+        .focusedSceneValue(\.searchAction, FindAction { session.searchPresented = true })
     }
 
     // MARK: Toolbar
@@ -111,35 +118,35 @@ struct RootView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            Button { model.goBack() } label: {
+            Button { session.goBack() } label: {
                 Image(systemName: "chevron.left")
             }
-            .disabled(!model.canGoBack)
+            .disabled(!session.canGoBack)
             .help("Back (⌘[)")
             .accessibilityLabel("Back")
 
-            Button { model.goForward() } label: {
+            Button { session.goForward() } label: {
                 Image(systemName: "chevron.right")
             }
-            .disabled(!model.canGoForward)
+            .disabled(!session.canGoForward)
             .help("Forward (⌘])")
             .accessibilityLabel("Forward")
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
-            Button { model.presentQuickSwitcher() } label: {
+            Button { session.presentQuickSwitcher() } label: {
                 Image(systemName: "magnifyingglass")
             }
             .help("Quick switcher (⌘O)")
             .accessibilityLabel("Quick Switcher")
 
-            Button { model.searchPresented = true } label: {
+            Button { session.searchPresented = true } label: {
                 Image(systemName: "text.magnifyingglass")
             }
             .help("Search the wiki (⌘S)")
             .accessibilityLabel("Search the Wiki")
 
-            Button { model.referenceSearchPresented = true } label: {
+            Button { session.referenceSearchPresented = true } label: {
                 Image(systemName: "books.vertical")
             }
             .help("Search references (⇧⌘R)")
@@ -156,7 +163,7 @@ struct RootView: View {
             .help("Sync with GitHub (⌘R)")
             .accessibilityLabel("Sync with GitHub")
 
-            Button { model.showInspector.toggle() } label: {
+            Button { session.showInspector.toggle() } label: {
                 Image(systemName: "sidebar.right")
             }
             .help("Toggle inspector (⌥⌘I)")
@@ -225,7 +232,7 @@ struct RootView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if !model.syncLog.isEmpty {
-                        Button("Details…") { model.syncLogPresented = true }
+                        Button("Details…") { session.syncLogPresented = true }
                             .buttonStyle(.link)
                             .font(Theme.Fonts.meta)
                             .fixedSize()
@@ -260,7 +267,7 @@ struct RootView: View {
 
                 Spacer(minLength: Theme.small)
 
-                if let error = model.webController.lastRenderError {
+                if let error = session.webController.lastRenderError {
                     Label(error, systemImage: "exclamationmark.bubble")
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.orange)

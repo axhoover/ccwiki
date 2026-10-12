@@ -12,9 +12,10 @@ import Observation
 /// window's session, never "the active one": two windows side by side show
 /// different pages, and each inspector follows its own.
 ///
-/// Moved out of `AppModel` as it was, one member at a time. Until there is
-/// more than one window, the model holds the one session and forwards each
-/// member under its old name (A2), so no view had to change with it.
+/// Moved out of `AppModel` as it was, one member at a time. The views of a
+/// reader window find it in the environment, `@Environment(ReaderSession.self)`,
+/// and the menu bar as `FocusedValues.readerSession`. Until there is a session
+/// per window, the model holds the one there is.
 @MainActor
 @Observable
 final class ReaderSession: Identifiable {

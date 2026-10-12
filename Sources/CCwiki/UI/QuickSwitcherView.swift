@@ -10,6 +10,8 @@ import SwiftUI
 /// reach for the mouse in is slower than the sidebar it replaces.
 struct QuickSwitcherView: View {
     @Environment(AppModel.self) private var model
+    /// The window it was opened over, which is where its page opens.
+    @Environment(ReaderSession.self) private var session
     @Environment(\.dismiss) private var dismiss
 
     /// Selection is held by *id*, not by index.
@@ -211,7 +213,7 @@ struct QuickSwitcherView: View {
     private func openHighlighted() {
         guard let id = currentHighlight, let item = results.first(where: { $0.id == id })
         else { return }
-        model.openPage(item.path)
+        session.openPage(item.path)
         dismiss()
     }
 }
