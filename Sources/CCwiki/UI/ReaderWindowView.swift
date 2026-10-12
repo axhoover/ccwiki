@@ -17,6 +17,7 @@ struct ReaderWindowView: View {
     @Binding var window: ReaderWindow
 
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     @State private var session: ReaderSession?
     @State private var host = HostWindow()
     /// URLs from outside that came before the window had its session.
@@ -112,8 +113,12 @@ struct ReaderWindowView: View {
         if let forThisID = model.claimSession(for: window.id, windowNumber: number) {
             claimed = forThisID
         } else {
-            window.id = UUID()
-            guard let forFreshID = model.claimSession(for: window.id, windowNumber: number)
+            // Claimed by the local, not read back through the scene's
+            // binding, which need not show the write yet. A fresh id is
+            // neither live nor closed, so this claim cannot fail.
+            let fresh = UUID()
+            window.id = fresh
+            guard let forFreshID = model.claimSession(for: fresh, windowNumber: number)
             else { return }
             claimed = forFreshID
         }
@@ -121,8 +126,13 @@ struct ReaderWindowView: View {
         // Already key by now, most likely, and its notification gone by
         // with no session to tell.
         if nsWindow.isKeyWindow { model.sessionBecameKey(claimed.id) }
+        // RootView opens the Jobs window when the model asks, but it is not
+        // there yet: it would mount with the count these URLs leave and wait
+        // for the next. So a PDF that launched the app asks here.
+        let jobsRequests = model.jobsWindowRequests
         for url in pendingURLs { claimed.handleOpenURL(url) }
         pendingURLs = []
+        if model.jobsWindowRequests != jobsRequests { openWindow(id: CCwikiApp.jobsWindowID) }
     }
 
     /// The window a notification is about, when it is this view's.
