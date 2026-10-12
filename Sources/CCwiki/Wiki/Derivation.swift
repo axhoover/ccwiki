@@ -396,6 +396,19 @@ struct Derivation: Sendable {
     private(set) var derivedBarriers: [DerivedBarrier] = []
     private var linkTables: [Options: LinkTable] = [:]
 
+    /// The curation's citations whose quote is no longer on its page in this
+    /// clone (relations-followups.md §2.5). The bundled curation stays as
+    /// reviewed while the wiki syncs daily, so the explorer says so beside
+    /// the quote instead of showing it as the page's text.
+    ///
+    /// Set on every library load from `missingQuotes(pageText:)`: by
+    /// `AppModel.loadLibrary` today, and by `LoadedLibrary.build` and
+    /// `.update` after reader-comforts, also when `update` reuses the
+    /// derivation. It depends on page text, not on the manifest, so nothing
+    /// in `init` can know it; empty means every quote was found, or the
+    /// check has not run.
+    var unverifiedCitations: Set<DerivationCuration.Citation> = []
+
     private struct LinkTable: Sendable {
         var implications: [String: [Link]] = [:]
         var sources: [String: [Link]] = [:]

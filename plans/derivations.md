@@ -1012,10 +1012,10 @@ completions and total, question-becomes, refused steps with reason kinds,
 hints and the toggle hint.
 
 **A mutation record** is one of the review's counterexamples as a patch: it
-adds objects, reductions and barriers, or sets fields and appends
-consequences on existing barriers. The Swift test applies the patch to the
-decoded manifest and asserts the query, the derived-barrier count and the
-invariants. The seven: a stronger chain behind an unstated shortcut
+adds objects, reductions and barriers, sets fields on existing barriers and
+reductions, or appends consequences to barriers. The Swift test applies the
+patch to the decoded manifest and asserts the query, the derived-barrier
+count, the invariants and the entries `curationSuperseded` lists. The seven: a stronger chain behind an unstated shortcut
 conflicts; a chain contradicting a derived barrier fails its invariant; a
 quantum and a ROM chain beside a barrier are context, not conflicts; a
 believed-true consequence is not propagated; an unstated chain conflicts

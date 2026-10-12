@@ -1,5 +1,5 @@
 {
- "about": "Expected answers of CCwiki's derivation engine on one wiki manifest and one curation. Written by scripts/derivations_reference.py; spec in plans/derivations.md. Exact when manifestSHA256 matches the clone's .reductions/relations.json and curationSHA256 matches Resources/derivation-curation.json; otherwise only each record's `stable` fields, `invariants`, `sentinels` and `mutations` are asserted, and only while every count is within `tolerance` of `counts`.",
+ "about": "Expected answers of CCwiki's derivation engine on one wiki manifest and one curation. Written by scripts/derivations_reference.py; spec in plans/derivations.md. Exact when manifestSHA256 matches the clone's .reductions/relations.json and curationSHA256 matches Resources/derivation-curation.json; otherwise only each record's `stable` fields, `invariants`, `sentinels` and `mutations` are asserted, and only while every count is within `tolerance` of `counts`. `curatedEdges` is every reduction the curation names, as recorded here: a later manifest that changes one under its id fails the corpus test.",
  "generator": "scripts/derivations_reference.py",
  "wikiCommit": "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157",
  "manifestSHA256": "b0c3fb657570d678d1d8bf69ca60d05ded9ade2b0bba05169d597767b4c0e3ee",
@@ -211,7 +211,332 @@
  "sentinels": {
   "curationResolves": true,
   "regimeLossCurated": true,
-  "equivalencesReviewed": true
+  "equivalencesReviewed": true,
+  "curationSuperseded": true
+ },
+ "curatedEdges": {
+  "red-abe-to-be": {
+   "kind": "implication",
+   "hypotheses": [
+    "abe"
+   ],
+   "conclusion": "be",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-bdh-to-abe-gpsw06": {
+   "kind": "implication",
+   "hypotheses": [
+    "bdh"
+   ],
+   "conclusion": "abe",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-bdh-to-hibe-wat09": {
+   "kind": "implication",
+   "hypotheses": [
+    "bdh",
+    "decisional-linear"
+   ],
+   "conclusion": "hibe",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-bdh-to-hve-bw07": {
+   "kind": "implication",
+   "hypotheses": [
+    "bdh"
+   ],
+   "conclusion": "hve",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-bdh-to-ibe-wat09": {
+   "kind": "implication",
+   "hypotheses": [
+    "bdh",
+    "decisional-linear"
+   ],
+   "conclusion": "ibe",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-cpa-security-to-cpa-security": {
+   "kind": "equivalence",
+   "hypotheses": [
+    "pke-cpa-security"
+   ],
+   "conclusion": "semantic-security",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-cpir-to-ot-dmo00": {
+   "kind": "implication",
+   "hypotheses": [
+    "cpir"
+   ],
+   "conclusion": "ot",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21": {
+   "kind": "implication",
+   "hypotheses": [
+    "sxdh",
+    "lwe",
+    "lpn",
+    "prg-in-nc0"
+   ],
+   "conclusion": "io",
+   "class": "free",
+   "model": "standard"
+  },
+  "red-dlog-to-prg-bm84": {
+   "kind": "implication",
+   "hypotheses": [
+    "dlog"
+   ],
+   "conclusion": "prg",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-evasive-lwe-to-abe": {
+   "kind": "implication",
+   "hypotheses": [
+    "circular-evasive-lwe"
+   ],
+   "conclusion": "abe",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-evasive-lwe-to-abe-wee22": {
+   "kind": "implication",
+   "hypotheses": [
+    "evasive-lwe",
+    "tensor-lwe"
+   ],
+   "conclusion": "abe",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-evasive-lwe-to-be-wee22": {
+   "kind": "implication",
+   "hypotheses": [
+    "evasive-lwe"
+   ],
+   "conclusion": "be",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-fe-to-io": {
+   "kind": "implication",
+   "hypotheses": [
+    "functional-encryption"
+   ],
+   "conclusion": "io",
+   "class": "free",
+   "model": "standard"
+  },
+  "red-invertible-prfs-to-prf": {
+   "kind": "implication",
+   "hypotheses": [
+    "invertible-prf"
+   ],
+   "conclusion": "prf",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-isis-inhomogeneous-sis-to-sis": {
+   "kind": "equivalence",
+   "hypotheses": [
+    "inhomogeneous-sis"
+   ],
+   "conclusion": "sis",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-k-linear-assumption-to-abe-rw13": {
+   "kind": "implication",
+   "hypotheses": [
+    "k-linear-assumption"
+   ],
+   "conclusion": "abe",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-linear-secret-sharing-schemes-lsss-to-msp": {
+   "kind": "equivalence",
+   "hypotheses": [
+    "linear-secret-sharing-scheme"
+   ],
+   "conclusion": "monotone-span-program",
+   "class": "free",
+   "model": "standard"
+  },
+  "red-lwe-to-leveled-fully-homomorphic-encryption-bgv12": {
+   "kind": "implication",
+   "hypotheses": [
+    "lwe"
+   ],
+   "conclusion": "leveled-fully-homomorphic-encryption",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-lwe-to-zero-bit-prc-cg24": {
+   "kind": "implication",
+   "hypotheses": [
+    "subexponential-lpn"
+   ],
+   "conclusion": "zero-bit-prc",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-module-lwe-to-lwe-ls15": {
+   "kind": "equivalence",
+   "hypotheses": [
+    "module-lwe-rank-n"
+   ],
+   "conclusion": "lwe",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-module-lwe-to-ring-lwe-ls15": {
+   "kind": "equivalence",
+   "hypotheses": [
+    "module-lwe-rank-1"
+   ],
+   "conclusion": "ring-lwe",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-noise-level-to-tdh-amr25": {
+   "kind": "implication",
+   "hypotheses": [
+    "lpn-low-noise"
+   ],
+   "conclusion": "tdh",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-ot-to-com": {
+   "kind": "implication",
+   "hypotheses": [
+    "ot"
+   ],
+   "conclusion": "com",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-ot-to-mpc-kil88": {
+   "kind": "implication",
+   "hypotheses": [
+    "ot"
+   ],
+   "conclusion": "mpc",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-partially-homomorphic-encryption-phe-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25": {
+   "kind": "implication",
+   "hypotheses": [
+    "additively-homomorphic-encryption",
+    "sparse-lpn"
+   ],
+   "conclusion": "somewhat-homomorphic-encryption",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-pke-to-com": {
+   "kind": "implication",
+   "hypotheses": [
+    "pke"
+   ],
+   "conclusion": "com",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-prp-to-invertible-prf": {
+   "kind": "implication",
+   "hypotheses": [
+    "prp"
+   ],
+   "conclusion": "invertible-prf",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-rabin-ot-to-ot": {
+   "kind": "equivalence",
+   "hypotheses": [
+    "rabin-ot"
+   ],
+   "conclusion": "ot",
+   "class": "fully-black-box",
+   "model": "standard"
+  },
+  "red-rsa-to-fac-dlo24": {
+   "kind": "equivalence",
+   "hypotheses": [
+    "rsa"
+   ],
+   "conclusion": "fac",
+   "class": "free",
+   "model": "other"
+  },
+  "red-subexponential-lpn-to-crhf-yzw-19": {
+   "kind": "implication",
+   "hypotheses": [
+    "subexponential-lpn"
+   ],
+   "conclusion": "crhf",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-subexponential-lpn-to-ot-yz16": {
+   "kind": "implication",
+   "hypotheses": [
+    "subexponential-lpn"
+   ],
+   "conclusion": "ot",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-subexponential-lpn-to-pke-yz16": {
+   "kind": "implication",
+   "hypotheses": [
+    "subexponential-lpn"
+   ],
+   "conclusion": "pke-cca2-security",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-subexponential-lpn-to-prc-cg24": {
+   "kind": "implication",
+   "hypotheses": [
+    "subexponential-lpn"
+   ],
+   "conclusion": "prc",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-succinct-lwe-to-abe-wee25": {
+   "kind": "implication",
+   "hypotheses": [
+    "succinct-lwe"
+   ],
+   "conclusion": "abe",
+   "class": "unstated",
+   "model": "standard"
+  },
+  "red-tdp-to-nizk-bfm88": {
+   "kind": "implication",
+   "hypotheses": [
+    "tdp"
+   ],
+   "conclusion": "nizk",
+   "class": "fully-black-box",
+   "model": "crs"
+  }
  },
  "queries": [
   {
@@ -3335,7 +3660,8 @@
     "noDerivedBarrierContradictsRecordedReduction": true,
     "romDoesNotReachOT": true,
     "romDoesNotReachKE": true
-   }
+   },
+   "superseded": []
   },
   {
    "id": "derived-barrier-conflict",
@@ -3466,7 +3792,8 @@
     "noDerivedBarrierContradictsRecordedReduction": false,
     "romDoesNotReachOT": true,
     "romDoesNotReachKE": true
-   }
+   },
+   "superseded": []
   },
   {
    "id": "quantum-chain-is-context",
@@ -3574,7 +3901,8 @@
     "noDerivedBarrierContradictsRecordedReduction": true,
     "romDoesNotReachOT": true,
     "romDoesNotReachKE": true
-   }
+   },
+   "superseded": []
   },
   {
    "id": "rom-chain-is-context",
@@ -3682,7 +4010,8 @@
     "noDerivedBarrierContradictsRecordedReduction": true,
     "romDoesNotReachOT": true,
     "romDoesNotReachKE": true
-   }
+   },
+   "superseded": []
   },
   {
    "id": "believed-true-consequence-not-propagated",
@@ -3758,7 +4087,8 @@
     "noDerivedBarrierContradictsRecordedReduction": true,
     "romDoesNotReachOT": true,
     "romDoesNotReachKE": true
-   }
+   },
+   "superseded": []
   },
   {
    "id": "free-barrier-meets-unstated-chain",
@@ -3895,7 +4225,8 @@
     "noDerivedBarrierContradictsRecordedReduction": true,
     "romDoesNotReachOT": true,
     "romDoesNotReachKE": true
-   }
+   },
+   "superseded": []
   },
   {
    "id": "stub-barrier-not-propagated",
@@ -3945,7 +4276,211 @@
     "noDerivedBarrierContradictsRecordedReduction": true,
     "romDoesNotReachOT": true,
     "romDoesNotReachKE": true
-   }
+   },
+   "superseded": []
+  },
+  {
+   "id": "barrier-model-not-propagated",
+   "patch": {
+    "barrierPatches": [
+     {
+      "id": "bar-owp-to-crhf-sim98",
+      "set": {
+       "model": "rom"
+      }
+     }
+    ]
+   },
+   "start": [
+    "owf"
+   ],
+   "target": "crhf",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [],
+     "startHostsDerive": []
+    }
+   },
+   "derivedBarrierCount": 393,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
+  },
+  {
+   "id": "reverse-class-field",
+   "patch": {
+    "reductionPatches": [
+     {
+      "id": "red-rabin-ot-to-ot",
+      "set": {
+       "reverseClass": "unstated"
+      }
+     }
+    ]
+   },
+   "start": [
+    "ot"
+   ],
+   "target": "rabin-ot",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-rabin-ot-to-ot",
+      "reverse": true,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-rabin-ot-to-ot"
+    ],
+    "reverseSteps": [
+     "red-rabin-ot-to-ot"
+    ],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   },
+   "derivedBarrierCount": 397,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": [
+    "equivalences:red-rabin-ot-to-ot"
+   ]
+  },
+  {
+   "id": "refuted-by-field",
+   "patch": {
+    "objects": [
+     {
+      "id": "syn-r",
+      "kind": "object",
+      "type": "assumption",
+      "page": "",
+      "slug": "syn-r",
+      "graphSlug": "",
+      "title": "syn-r",
+      "aliases": [],
+      "unlisted": false,
+      "refutedBy": [
+       "[[X - Y|X]]"
+      ]
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-r-to-pke",
+      "kind": "implication",
+      "hypotheses": [
+       "syn-r"
+      ],
+      "conclusion": "pke",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-r-to-pke",
+      "graphSlug": "",
+      "title": "red-syn-r-to-pke"
+     }
+    ]
+   },
+   "start": [
+    "syn-r"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "vacuous": [
+     "syn-r"
+    ],
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-syn-r-to-pke",
+      "reverse": false,
+      "status": "used"
+     }
+    ],
+    "depth": 1,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-syn-r-to-pke"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   },
+   "derivedBarrierCount": 406,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
   }
  ]
 }

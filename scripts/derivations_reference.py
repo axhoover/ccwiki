@@ -1333,19 +1333,64 @@ def invariants(dv: Derivation, all_derived: list) -> dict:
 
 def sentinels(dv: Derivation) -> dict:
     """Drift checks on the curation (section 2a). The corpus test fails on
-    the first two and prints the third."""
+    the first two and prints the last two."""
     m = dv.m
     curated = {e for (e, _rev) in dv.cur.requires}
     regime = sorted(s.edge for s in dv.steps
                     if any(w in m.reductions[s.edge].get("securityLoss", "").lower() for w in REGIME_WORDS)
                     and s.edge not in curated)
+    gone = superseded(dv)
     return {
         "curationResolves": not dv.cur.unresolved(m),
         "regimeLossCurated": not regime,
         "equivalencesReviewed": not dv.unreviewed,
+        "curationSuperseded": not gone,
         "_detail": {"unresolved": dv.cur.unresolved(m), "uncuratedRegime": sorted(set(regime)),
-                    "unreviewedEquivalences": dv.unreviewed},
+                    "unreviewedEquivalences": dv.unreviewed, "superseded": gone},
     }
+
+
+def superseded(dv: Derivation) -> list:
+    """Curation entries the manifest now records itself (plans/relations-
+    followups.md §4.4), by entry id in the curation's order: an equivalence
+    whose record states `reverseClass`, a refuted object whose record carries
+    `refutedBy`, and a setting that is no longer the sole hypothesis of any
+    eligible step. The engine already prefers the record for the first two;
+    each is an entry to retire."""
+    m = dv.m
+    sole = {s.hyps[0] for s in dv.steps if len(s.hyps) == 1}
+    out = []
+    for e in curation_entries(dv.cur.data):
+        if e["key"] == "equivalences":
+            r = m.reductions.get(e["edge"])
+            if r is not None and r["kind"] == "equivalence" and m.reverse_class(e["edge"]) is not None:
+                out.append(e["id"])
+        elif e["key"] == "refuted" and m.refuted_by(e["object"]):
+            out.append(e["id"])
+        elif e["key"] == "settings" and e["object"] not in sole:
+            out.append(e["id"])
+    return out
+
+
+def curated_edges(dv: Derivation) -> dict:
+    """The golden file's `curatedEdges`: every reduction the curation names
+    (each entry's edge, every `metBy` and `acceptedBy` id), as the manifest
+    records it, by id. The corpus test's `curationEdgesUnchanged` compares
+    the wiki's head against it (§2.4)."""
+    ids = set()
+    for e in curation_entries(dv.cur.data):
+        if "edge" in e:
+            ids.add(e["edge"])
+        if isinstance(e["raw"], dict):
+            ids.update(e["raw"].get("metBy", []))
+            ids.update(e["raw"].get("acceptedBy", []))
+    out = {}
+    for rid in sorted(ids):
+        r = dv.m.reductions.get(rid)
+        if r is not None:
+            out[rid] = {"kind": r["kind"], "hypotheses": list(r["hypotheses"]), "conclusion": r["conclusion"],
+                        "class": r.get("class", ""), "model": r.get("model", "")}
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1605,7 +1650,9 @@ def _bar(bid, hyps, concl, cls):
 
 
 #: (id, patch, query start, target, toggle). A patch adds records, then sets
-#: fields on existing barriers and appends consequences to them.
+#: fields on existing barriers and reductions and appends consequences to
+#: barriers. The last three try the upstream fields of
+#: plans/relations-followups.md §4.4 before the wiki ships them.
 MUTATIONS = [
     ("strongest-chain-conflict",
      {"objects": [_obj("syn-x", "assumption")],
@@ -1636,6 +1683,21 @@ MUTATIONS = [
     ("stub-barrier-not-propagated",
      {"barrierPatches": [{"id": "bar-owp-to-ke-ir89", "set": {"status": "stub"}}]},
      ["owf"], "ke", False),
+    # Ask 3: Sim98 proved in the random oracle model no longer composes with
+    # standard-model side reductions.
+    ("barrier-model-not-propagated",
+     {"barrierPatches": [{"id": "bar-owp-to-crhf-sim98", "set": {"model": "rom"}}]},
+     ["owf"], "crhf", False),
+    # Ask 1: the record's own reverse class wins over the curation's table,
+    # which says the reverse direction of Cre87 takes the record's class.
+    ("reverse-class-field",
+     {"reductionPatches": [{"id": "red-rabin-ot-to-ot", "set": {"reverseClass": "unstated"}}]},
+     ["ot"], "rabin-ot", False),
+    # Ask 2: an object the record marks refuted is vacuous, with no entry.
+    ("refuted-by-field",
+     {"objects": [dict(_obj("syn-r", "assumption"), refutedBy=["[[X - Y|X]]"])],
+      "reductions": [_red("red-syn-r-to-pke", ["syn-r"], "pke", "fully-black-box")]},
+     ["syn-r"], "pke", False),
 ]
 
 
@@ -1648,6 +1710,8 @@ def apply_patch(data: dict, patch: dict) -> dict:
         b = next(b for b in d["barriers"] if b["id"] == bp["id"])
         b.update(bp.get("set", {}))
         b["consequences"] = b["consequences"] + bp.get("appendConsequences", [])
+    for rp in patch.get("reductionPatches", []):
+        next(r for r in d["reductions"] if r["id"] == rp["id"]).update(rp.get("set", {}))
     return d
 
 
@@ -1804,7 +1868,8 @@ def golden(dv: Derivation, wiki_commit: str) -> dict:
         mid, patch, start, target, inc = mut
         mutations.append({"id": mid, "patch": patch, "start": start, "target": target, "includeIdealised": inc,
                           "expect": golden_expect(a), "derivedBarrierCount": len(mad),
-                          "invariants": {k: v for k, v in inv.items() if not k.startswith("_")}})
+                          "invariants": {k: v for k, v in inv.items() if not k.startswith("_")},
+                          "superseded": superseded(mdv)})
     closures = {}
     for o in ["owf", "ddh", "lwe", "dcr", "fac", "rsa", "gapsvp", "dlog", "rom", "ggm", "pke", "ot",
               "lpn-low-noise", "bdh", "circular-evasive-lwe"]:
@@ -1828,7 +1893,9 @@ def golden(dv: Derivation, wiki_commit: str) -> dict:
                   "Exact when manifestSHA256 matches the clone's .reductions/relations.json and "
                   "curationSHA256 matches Resources/derivation-curation.json; otherwise only each "
                   "record's `stable` fields, `invariants`, `sentinels` and `mutations` are asserted, "
-                  "and only while every count is within `tolerance` of `counts`."),
+                  "and only while every count is within `tolerance` of `counts`. `curatedEdges` is "
+                  "every reduction the curation names, as recorded here: a later manifest that "
+                  "changes one under its id fails the corpus test."),
         "generator": "scripts/derivations_reference.py",
         "wikiCommit": wiki_commit,
         "manifestSHA256": dv.m.sha256,
@@ -1853,6 +1920,7 @@ def golden(dv: Derivation, wiki_commit: str) -> dict:
         "derivedBarrierPairs": len({(d["hypotheses"][0], d["conclusion"]) for d in all_derived}),
         "invariants": {k: v for k, v in inv.items() if not k.startswith("_")},
         "sentinels": {k: v for k, v in sen.items() if not k.startswith("_")},
+        "curatedEdges": curated_edges(dv),
         "queries": records,
         "mutations": mutations,
     }
@@ -2449,6 +2517,7 @@ def selftest(dv: Derivation) -> bool:
     mdv, mad, a, inv = res["stub-barrier-not-propagated"]
     check("a stub barrier is not propagated",
           len(mad) < base and all(d["barrier"] != "bar-owp-to-ke-ir89" for d in a["derivedBarriers"]))
+    ok &= selftest_upstream(dv, ad, res)
     return ok
 
 
@@ -2461,6 +2530,47 @@ def _checker():
         state["ok"] &= bool(cond)
         print(f"  {'PASS' if cond else 'FAIL'}  {name}" + (f"   ({detail})" if detail and not cond else ""))
     return check, state
+
+
+def selftest_upstream(dv: Derivation, all_derived: list, res: dict) -> bool:
+    """The upstream fields of plans/relations-followups.md §4.4, through their
+    three mutations (`res`, by id, from `run_mutation`): a barrier `model`
+    stops R12, a `reverseClass` overrides the curation, and a `refutedBy`
+    makes an answer vacuous. None is on the reviewed commit, so the real
+    manifest supersedes nothing."""
+    check, state = _checker()
+    print("upstream fields (plans/relations-followups.md §4.4)")
+    check("the reviewed manifest supersedes no curation entry", not superseded(dv), superseded(dv))
+
+    sim98 = sum(1 for d in all_derived if d["barrier"] == "bar-owp-to-crhf-sim98")
+    mdv, mad, a, inv = res["barrier-model-not-propagated"]
+    check("a barrier proved in the ROM is not propagated, and costs exactly its own derived barriers",
+          sim98 > 0 and len(mad) == len(all_derived) - sim98
+          and all(d["barrier"] != "bar-owp-to-crhf-sim98" for d in a["derivedBarriers"]),
+          f"{len(mad)} vs {len(all_derived)} - {sim98}")
+    check("R8 still checks a barrier proved in the ROM", all(v for k, v in inv.items() if not k.startswith("_")),
+          inv["_detail"])
+
+    base = dv.query(["ot"], "rabin-ot")
+    mdv, mad, a, inv = res["reverse-class-field"]
+    check("the record's reverseClass wins over the curation's table",
+          base["derivable"] and base["chainClass"] == "fully-black-box"
+          and a["derivable"] and a["chainClass"] == "unstated", (base.get("chainClass"), a.get("chainClass")))
+    check("an equivalence whose record states reverseClass supersedes its entry",
+          superseded(mdv) == ["equivalences:red-rabin-ot-to-ot"]
+          and not sentinels(mdv)["curationSuperseded"], superseded(mdv))
+
+    mdv, mad, a, inv = res["refuted-by-field"]
+    vac = a.get("vacuous", [])
+    check("an object the record marks refuted is vacuous, by the record's key and sentence",
+          [v["object"] for v in vac] == ["syn-r"] and vac[0]["source"] == "X"
+          and vac[0]["text"] == RECORDED_REFUTATION_TEXT, vac)
+    r = mdv.implied_by("pke")
+    check("an object the record marks refuted is never a source",
+          "syn-r" in r["refutedExcluded"] and "syn-r" not in {s["from"] for s in r["singles"]})
+    check("a manifest refutation is not a curation entry", "refuted:syn-r" not in
+          {e["id"] for e in curation_entries(mdv.cur.data)} and mdv.cur.sha256 == dv.cur.sha256)
+    return state["ok"]
 
 
 def selftest_report(dv: Derivation) -> bool:
