@@ -5,6 +5,38 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-12 — Reader comforts, built
+
+Built on `claude/reader-comforts`, from [reader-comforts.md](plans/reader-comforts.md).
+
+- **Phase 0** laid the seams and passed CI on its own.
+- **Track A** split `AppModel` into one app-wide library and one
+  `ReaderSession` per window or tab. It was built in four reviewed steps,
+  with a review of the whole track at the end.
+- **Track B** added the link targets: ⌘-click, middle-click, ⌥⌘-click, and
+  the link menu.
+- **Track C** added a reference's paper in a window of its own.
+- **Track D** made the library load incremental.
+
+The merged branch compiled and passed its 530 tests on the first CI run.
+
+A review across the four tracks found the paper window behind the rest.
+Track C wrote it before Track A existed. Restored on its own, it never
+loaded the wiki, and Show Reference Page did not bring the reader forward.
+It could also resize its window while SwiftUI was still drawing it. All
+three are fixed, along with the docs.
+
+**D6 is not built.** D6 would reuse the in-memory indexes between loads. CI
+measured a full in-memory rebuild of the 877 pages at about 2.6 s, the
+largest parts being previews (1.0 s), backlinks (0.7 s) and the derivation
+(0.5 s). That was a debug build beside the other suites, so it says nothing
+about §3.2's 300 ms threshold. The release-build command in §3.8 settles it
+on a Mac.
+
+**Background tabs wait for a Mac.** `WindowTabbing.joinsInBackground` stays
+false, so a "background" tab opens in front until §5's tab checks pass by
+eye.
+
 ## 2026-10-11 — Why CCwiki came back as 0.1.0, and CCwiki Dev
 
 The maintainer reported two things. After updating to 0.1.1, and again to

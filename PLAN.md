@@ -147,8 +147,8 @@ redesign, not a refactor.
   the wiki's text beside each adjustment in the explorer, Copy Proof As LaTeX,
   wiki Markdown and BibTeX, and the asks for the wiki as a ready-to-apply
   document.
-- [plans/reader-comforts.md](plans/reader-comforts.md) — **specified
-  2026-10-12, second**: native tabs and windows, each with its own
+- [plans/reader-comforts.md](plans/reader-comforts.md) — **built on
+  `claude/reader-comforts` (all but D6), second of the batch**: native tabs and windows, each with its own
   `ReaderSession`; a reference's paper on request, in a window of its own; and
   a library load that rebuilds only what changed.
 - [plans/corrections.md](plans/corrections.md) — **specified 2026-10-12,

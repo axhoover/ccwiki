@@ -12,6 +12,26 @@
   code. Commit messages are for the code.
 -->
 
+## 0.3.0 — unreleased
+
+**Tabs and windows.** File → New Tab (⌘T) and New Window (⌘N). Each tab
+keeps its own page and its own Back and Forward. ⌘-click a link, or click it
+with the middle button, to open it in a new tab; ⌥⌘-click opens it in a new
+window. A link's right-click menu has Open in New Tab, Open in New Window and
+Open Link on cryptology.city, which is what ⌘-click used to do. When you
+reopen CCwiki, your windows and tabs come back as macOS's "Close windows when
+quitting" setting says.
+
+**A reference's paper, beside it.** On a reference page, Show Paper (⌥⌘P)
+downloads the paper's PDF from the reference's own ePrint, arXiv or PDF link,
+keeps it in CCwiki's library, and opens it in a window of its own. Where
+there is nothing to download, such as a DOI alone, Choose PDF… takes a copy
+you already have.
+
+**Quicker syncs.** After a sync, the search index updates only the pages that
+changed, and an open tab renders again only if its page did. A sync that
+changes nothing reloads nothing.
+
 ## 0.2.0 — unreleased
 
 **Ask whether one thing implies another.** Wiki → Relations Explorer (⇧⌘E)
