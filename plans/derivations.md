@@ -122,11 +122,15 @@ case in the default filter: its own Statement says SIS ⇒ ISIS is immediate
 and ISIS ⇒ SIS "holds only under conditions on the column count and norm
 bound". So a direction takes the record's class only where the curation's
 `equivalences` table (§2a) says `record`. A direction marked `unstated`, and
-both directions of an equivalence the table does not list, are `unstated`.
-The record's `model` applies to both directions. That can only under-claim:
-DLO24's trivial RSA ⇒ FAC carries `other` and is off by default. Today all 7
-eligible equivalences are reviewed, and one direction is scoped: ISIS ⇒ SIS,
-which is also given an R13 precondition.
+both directions of an equivalence the table does not list, are `unstated`. A
+record that states `reverseClass`
+([relations-followups.md](relations-followups.md) §4.4) takes `class`
+forward and `reverseClass` backward, and the table is not read for it; R3
+still makes a stub unstated both ways. The record's `model` applies to both
+directions. That can only under-claim: DLO24's trivial RSA ⇒ FAC carries
+`other` and is off by default. Today all 7 eligible equivalences are
+reviewed, and one direction is scoped: ISIS ⇒ SIS, which is also given an
+R13 precondition.
 
 Of the 8 equivalences, 7 are eligible; R2 removes `qip ⇔ pspace`. After
 R1–R3 and R13's quarantine there are **236 directed steps** (7 reverse), and
@@ -361,9 +365,12 @@ step, assumes a precondition, or concludes a weakened notion is never a
 conflict: a barrier is a statement about standard-model reductions from the
 node as the wiki defines it. When such a chain stands beside a barrier, the
 answer carries a scope note ("This barrier concerns standard-model
-reductions; this derivation uses the quantum setting."). OIHF ⇒ OT is
-derived (`free`, BH26) beside `bar-oihf-to-ot-bh26` (`fully-black-box`),
-which the barrier itself lists as circumvented.
+reductions; this derivation uses the quantum setting."). A barrier proved in
+another model does not call for the note, since it is not about
+standard-model reductions and its own row names its model; a stub's model is
+not evidence, so a stub still does. OIHF ⇒ OT is derived (`free`, BH26)
+beside `bar-oihf-to-ot-bh26` (`fully-black-box`), which the barrier itself
+lists as circumvented.
 
 ### R9. Hosts and variants
 
@@ -466,12 +473,14 @@ compose into a class-C reduction `X ⇒ Y`, so `Q` follows:
 This is sound only when every condition below holds, and CCwiki emits a
 derived barrier only then:
 
-- **The barrier** has one hypothesis, both endpoints are primitives, and it
-  is not a stub. Each **consequence that rules out** (R8: a contradiction, or
-  a complexity proposition with `believed: false`) is propagated at its own
-  class C ∈ {fully-black-box, relativizing, free}. A consequence that would
-  only be a major result, or of kind `object` or `reduction`, is never
-  propagated, and nor is any class outside the three.
+- **The barrier** has one hypothesis, both endpoints are primitives, it is
+  not a stub, and its `model` is `standard` (a barrier proved in another
+  model is shown as recorded, checked by R8, and never composed). Each
+  **consequence that rules out** (R8: a contradiction, or a complexity
+  proposition with `believed: false`) is propagated at its own class C ∈
+  {fully-black-box, relativizing, free}. A consequence that would only be a
+  major result, or of kind `object` or `reduction`, is never propagated, and
+  nor is any class outside the three.
 - **Side edges** are single-hypothesis, non-heuristic, not stubs, not
   quarantined, **standard-model only**, have **no R13 precondition and no
   weakened conclusion**, and have a class that implies\* C. For C = `free`,
@@ -508,6 +517,9 @@ The manifest has **no `model` field on barriers**. R12 relies on today's
 only model-scoped barrier, `bar-rom-to-ke-hmo-19`, having a model-node
 hypothesis, which the primitive rule excludes. A primitive-to-primitive
 barrier proved only in an idealised model would be propagated wrongly (§10).
+CCwiki reads a barrier `model` when the manifest records one
+([wiki-asks.md](wiki-asks.md) ask 3), and R12 then composes only
+standard-model barriers.
 
 On this manifest: **406 derived records, 272 primitive pairs, 270 of them not
 recorded, from 9 barriers**: IR89 153, GKM+00 OWF ⇏ PKE 103, GKM+00 PKE ⇏
@@ -557,13 +569,14 @@ Z_p^\*, and the record has no DLOG ⇒ OWF). Everything lost is listed by
 
 ### R14. Refuted assumptions and settings
 
-- **Refuted** objects (curation): circular evasive LWE (AMYY25), SIDH and
-  SSDDH (CD22). A query from one is still answered, since the implication
-  holds, but marked **vacuous**: "The hypothesis is known to be false
-  (AMYY25), so this implication is vacuous." A refuted object is never an R11
-  source and never a completion. Nothing derives one today; if something
-  did, the derivation would be shown as usual, and it would mean the start is
-  false too.
+- **Refuted** objects (curation, or the object's own `refutedBy` in the
+  manifest, which wins and whose sentence is "Its page records the
+  attack."): circular evasive LWE (AMYY25), SIDH and SSDDH (CD22). A query
+  from one is still answered, since the implication holds, but marked
+  **vacuous**: "The hypothesis is known to be false (AMYY25), so this
+  implication is vacuous." A refuted object is never an R11 source and never
+  a completion. Nothing derives one today; if something did, the derivation
+  would be shown as usual, and it would mean the start is false too.
 - **Settings** (curation): the honest-majority variants of MPC, t < n/2 and
   t < n/3. They are corruption settings in which MPC exists unconditionally,
   not assumptions. Queries from them work; R11 lists them apart; they are
@@ -947,8 +960,8 @@ anywhere else a derived claim appears.
 - **Barrier titles are the wiki's and must be qualified.** Print R8's
   qualifier beside an unclassified, fixed-construction or stub barrier's
   title, every time the title appears, previews included. A `believed: true`
-  consequence reads "would imply P ≠ NP", never "rules out". A barrier beside
-  a non-standard chain carries R8's scope note.
+  consequence reads "would imply P ≠ NP", never "rules out". A standard-model
+  barrier beside a non-standard chain carries R8's scope note.
 - **Derived barriers show their argument and their consequence.** For
   example: "A relativizing reduction from OWF to CRHF would compose with OWP ⇒
   OWF (fully black-box) into one from OWP to CRHF, which Sim98 rules out.
@@ -1014,15 +1027,17 @@ hints and the toggle hint.
 **A mutation record** is one of the review's counterexamples as a patch: it
 adds objects, reductions and barriers, sets fields on existing barriers and
 reductions, or appends consequences to barriers. The Swift test applies the
-patch to the decoded manifest and asserts the query, the derived-barrier
-count, the invariants and the entries `curationSuperseded` lists. The seven: a stronger chain behind an unstated shortcut
-conflicts; a chain contradicting a derived barrier fails its invariant; a
-quantum and a ROM chain beside a barrier are context, not conflicts; a
-believed-true consequence is not propagated; an unstated chain conflicts
-with a `free` barrier; a stub barrier is not propagated. Three more test the
-upstream fields of [relations-followups.md](relations-followups.md) §4.4: a
-barrier `model` that stops R12, a `reverseClass` that overrides the
-curation, and a `refutedBy` that makes an answer vacuous.
+patch to the decoded manifest and asserts the invariants and, when both
+hashes match, the query, the derived-barrier count and the entries
+`curationSuperseded` lists. The seven: a stronger chain behind an unstated
+shortcut conflicts; a chain contradicting a derived barrier fails its
+invariant; a quantum and a ROM chain beside a barrier are context, not
+conflicts; a believed-true consequence is not propagated; an unstated chain
+conflicts with a `free` barrier; a stub barrier is not propagated. Three
+more test the upstream fields of
+[relations-followups.md](relations-followups.md) §4.4: a barrier `model`
+that stops R12, a `reverseClass` that overrides the curation, and a
+`refutedBy` that makes an answer vacuous.
 
 **The corpus test** (`DerivationTests`, gated on `CCWIKI_WIKI` like
 `RelationsTests`) reads the golden file and the curation through

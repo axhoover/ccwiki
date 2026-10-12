@@ -668,7 +668,7 @@ struct DerivationTests {
         #expect(sentinels.curationResolves)
     }
 
-    @Test("a barrier proved outside the standard model is never propagated, and still checked for conflicts")
+    @Test("a barrier proved outside the standard model is not propagated, still checked, and takes no scope note")
     func barrierModel() throws {
         let objects = ["x", "a", "y", "u", "t"].map { Fx.object($0) }
         let reductions = [Fx.reduction("red-x-to-a", ["x"], "a"), Fx.reduction("red-u-to-t", ["u"], "t")]
@@ -697,6 +697,20 @@ struct DerivationTests {
         #expect(conflicting.conflicts == [Derivation.BarrierConflict(
             barrierID: "bar-u-to-t", isDerived: false, consequenceIndex: 0, chainClass: .fullyBlackBox)])
         #expect(!rom.invariants().noChainContradictsRecordedBarrier)
+
+        // R8's scope note says the barriers concern standard-model
+        // reductions: a ROM chain gets it beside a standard-model barrier,
+        // not beside a ROM barrier, whose row names its model.
+        func scopeNote(besideBarrierIn model: String?) throws -> Derivation.ScopeNote? {
+            let manifest = try Fx.manifest(
+                objects: [Fx.object("v"), Fx.object("w")],
+                reductions: [Fx.reduction("red-v-to-w-rom", ["v"], "w", model: "rom")],
+                barriers: [Fx.barrier("bar-v-to-w", ["v"], "w", model: model)])
+            let derivation = Derivation(manifest: manifest, curation: .empty)
+            return try #require(derivation.answer(from: ["v"], to: "w", options: .all).derived).scopeNote
+        }
+        #expect(try scopeNote(besideBarrierIn: nil)?.reasons == ["rom"])
+        #expect(try scopeNote(besideBarrierIn: "rom") == nil)
     }
 
     @Test("curationSuperseded lists a setting no eligible step takes alone")
@@ -763,6 +777,29 @@ struct DerivationTests {
         let gone = try #require(changed.first { $0.relationID == "red-p-to-w" })
         #expect(gone.now == nil)
         #expect(gone.entryIDs == ["weakens:red-p-to-w"])
+    }
+
+    @Test("a curated conjunction whose page reorders its hypotheses is the same theorem")
+    func curatedConjunctionReordered() throws {
+        let curation = DerivationCuration(quarantine: ["red-a-and-b-to-c": "The Statement needs one group."])
+        let objects = ["a", "b", "c", "d"].map { Fx.object($0) }
+        func world(_ hypotheses: [String], reductionClass: String = "fully-black-box") throws -> Derivation {
+            let manifest = try Fx.manifest(objects: objects, reductions: [
+                Fx.reduction("red-a-and-b-to-c", hypotheses, "c", reductionClass: reductionClass),
+            ])
+            return Derivation(manifest: manifest, curation: curation)
+        }
+        // Reviewed out of sorted order, as JLS21's conjunction is recorded.
+        let reviewed = try #require(try world(["b", "a"]).curatedEdge("red-a-and-b-to-c"))
+        let snapshot = ["red-a-and-b-to-c": reviewed]
+
+        #expect(try world(["a", "b"]).changedCuratedEdges(since: snapshot).isEmpty)
+        // Reordered and retyped off an equivalence: the retyping alone warns.
+        let retyped = try world(["a", "b"], reductionClass: "unstated").changedCuratedEdges(since: snapshot)
+        #expect(retyped.map(\.fails) == [false])
+        // A different conjunct is a different theorem.
+        let other = try world(["d", "b"]).changedCuratedEdges(since: snapshot)
+        #expect(other.map(\.fails) == [true])
     }
 
     // MARK: The Statement lint (§2a)

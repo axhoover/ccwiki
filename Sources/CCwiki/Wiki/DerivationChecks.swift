@@ -264,6 +264,15 @@ extension Derivation {
         let conclusion: String
         let reductionClass: String
         let model: String
+
+        /// The same edge with its hypotheses sorted. A conjunction is a set,
+        /// but the manifest keeps each in its page's order, so a page that
+        /// reorders its `hypotheses` states the same theorem.
+        var normalised: CuratedEdge {
+            CuratedEdge(
+                kind: kind, hypotheses: hypotheses.sorted(by: Derivation.precedes),
+                conclusion: conclusion, reductionClass: reductionClass, model: model)
+        }
     }
 
     /// A curated edge the manifest records differently from the snapshot.
@@ -329,6 +338,7 @@ extension Derivation {
     /// different theorem, and so does a class or model change on an edge
     /// whose directions the curation types; those fail. A class or model
     /// change elsewhere touches no notion requirement, so it is a warning.
+    /// Hypotheses compare as a set: reordering them changes nothing.
     func changedCuratedEdges(since snapshot: [String: CuratedEdge]) -> [ChangedEdge] {
         let naming = curatedRelations()
         var equivalenceEdges: Set<String> = []
@@ -339,10 +349,11 @@ extension Derivation {
         for relationID in snapshot.keys.sorted(by: Self.precedes) {
             guard let was = snapshot[relationID] else { continue }
             let now = curatedEdge(relationID)
-            guard now != was else { continue }
+            guard now?.normalised != was.normalised else { continue }
             var fails = true
             if let now {
-                let sameTheorem = now.kind == was.kind && now.hypotheses == was.hypotheses
+                let sameTheorem = now.kind == was.kind
+                    && now.normalised.hypotheses == was.normalised.hypotheses
                     && now.conclusion == was.conclusion
                 let sameTyping = now.reductionClass == was.reductionClass && now.model == was.model
                 fails = !sameTheorem || (equivalenceEdges.contains(relationID) && !sameTyping)

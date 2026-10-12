@@ -1019,7 +1019,13 @@ class Derivation:
                 ans["conflictingBarriers"] = conflicts
                 ans["majorResultBarriers"] = majors
                 outside = sorted(f.models) + (["assumption"] if f.assumes else []) + (["weakened"] if f.weak else [])
-                if outside and (ans["recordedBarriers"] or any(not d["redundantWith"] for d in derived)):
+                # The note says the barriers concern standard-model reductions,
+                # so a barrier proved in another model (ask 3), whose own row
+                # names its model, does not call for it. A stub's model is not
+                # evidence, and every derived barrier is standard-model.
+                beside = any(bv["qualifier"] == "stub"
+                             or self.m.barrier_model(bv["id"]) == "standard" for bv in ans["recordedBarriers"])
+                if outside and (beside or any(not d["redundantWith"] for d in derived)):
                     ans["barrierScopeNote"] = outside
             return ans
         ans["derivable"] = False
@@ -2536,8 +2542,10 @@ def selftest_upstream(dv: Derivation, all_derived: list, res: dict) -> bool:
     """The upstream fields of plans/relations-followups.md §4.4, through their
     three mutations (`res`, by id, from `run_mutation`): a barrier `model`
     stops R12, a `reverseClass` overrides the curation, and a `refutedBy`
-    makes an answer vacuous. None is on the reviewed commit, so the real
-    manifest supersedes nothing."""
+    makes an answer vacuous. Two patches of its own show that R8 still
+    checks a ROM barrier and that its scope note does not claim one is
+    standard-model. None is on the reviewed commit, so the real manifest
+    supersedes nothing."""
     check, state = _checker()
     print("upstream fields (plans/relations-followups.md §4.4)")
     check("the reviewed manifest supersedes no curation entry", not superseded(dv), superseded(dv))
@@ -2548,8 +2556,25 @@ def selftest_upstream(dv: Derivation, all_derived: list, res: dict) -> bool:
           sim98 > 0 and len(mad) == len(all_derived) - sim98
           and all(d["barrier"] != "bar-owp-to-crhf-sim98" for d in a["derivedBarriers"]),
           f"{len(mad)} vs {len(all_derived)} - {sim98}")
-    check("R8 still checks a barrier proved in the ROM", all(v for k, v in inv.items() if not k.startswith("_")),
+    check("invariants hold with a barrier proved in the ROM", all(v for k, v in inv.items() if not k.startswith("_")),
           inv["_detail"])
+    # They would hold just as well if R8 skipped the barrier: a standard-model
+    # chain on Sim98's own pair must still conflict with it.
+    rom_sim98 = {"barrierPatches": [{"id": "bar-owp-to-crhf-sim98", "set": {"model": "rom"}}]}
+    cdv = Derivation(Manifest(apply_patch(dv.m.data, dict(rom_sim98, reductions=[
+        _red("red-syn-owp-to-crhf", ["owp"], "crhf", "fully-black-box")])), ""), dv.cur)
+    conflicts = invariants(cdv, cdv.derived_barriers())["_detail"]["conflicts"]
+    check("R8 still checks a barrier proved in the ROM",
+          ("bar-owp-to-crhf-sim98", 0, "fully-black-box") in conflicts, conflicts)
+    # R8's scope note says the barriers concern standard-model reductions, so
+    # a ROM chain beside the ROM barrier alone does not get it.
+    rom_chain = {"reductions": [_red("red-syn-owp-to-crhf-rom", ["owp"], "crhf", "fully-black-box", "rom")]}
+    notes = []
+    for patch in (rom_chain, dict(rom_chain, **rom_sim98)):
+        pdv = Derivation(Manifest(apply_patch(dv.m.data, patch), ""), dv.cur)
+        notes.append(pdv.query(["owp"], "crhf", True).get("barrierScopeNote"))
+    check("a ROM chain gets the scope note beside a standard-model barrier, not beside a ROM one",
+          notes == [["rom"], None], notes)
 
     base = dv.query(["ot"], "rabin-ot")
     mdv, mad, a, inv = res["reverse-class-field"]
