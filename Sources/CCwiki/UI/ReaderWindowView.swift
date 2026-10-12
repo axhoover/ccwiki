@@ -123,6 +123,8 @@ struct ReaderWindowView: View {
             claimed = forFreshID
         }
         session = claimed
+        claimed.openInReader = Self.openInReader(
+            beside: claimed, model: model, openWindow: openWindow)
         // Already key by now, most likely, and its notification gone by
         // with no session to tell.
         if nsWindow.isKeyWindow { model.sessionBecameKey(claimed.id) }
@@ -133,6 +135,28 @@ struct ReaderWindowView: View {
         for url in pendingURLs { claimed.handleOpenURL(url) }
         pendingURLs = []
         if model.jobsWindowRequests != jobsRequests { openWindow(id: CCwikiApp.jobsWindowID) }
+    }
+
+    /// Where `session`'s Open in New Tab and New Window go (§1.4): a window
+    /// of this group, opened with this view's `openWindow`, which joins
+    /// `session`'s window as a tab when it first sees its `NSWindow`
+    /// (`found(_:)`). The window number is read when a page is opened, not
+    /// now: the session learns it for certain only once its window has
+    /// been key.
+    ///
+    /// The session is held weakly: it holds this action, and a closed
+    /// window's session must go with its web view.
+    private static func openInReader(
+        beside session: ReaderSession, model: AppModel, openWindow: OpenWindowAction
+    ) -> OpenInReaderAction {
+        OpenInReaderAction { [weak session] location, disposition, find in
+            let window = ReaderWindow(opening: location, find: find)
+            guard let request = ReaderWindowRequest(
+                opening: window, as: disposition, beside: session?.windowNumber)
+            else { return }
+            model.expectReaderWindow(request)
+            openWindow(id: CCwikiApp.mainWindowID, value: window)
+        }
     }
 
     /// The window a notification is about, when it is this view's.

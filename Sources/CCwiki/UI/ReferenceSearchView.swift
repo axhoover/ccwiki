@@ -23,7 +23,10 @@ struct ReferenceSearchView: View {
             emptyDescription: "A citation key such as GGM86, an author, words of a title, "
                 + "or a topic. Add a year to narrow it: regev 2005.",
             countLabel: { "\($0) paper\($0 == 1 ? "" : "s")" },
-            open: { session.openReferenceResult($0, query: model.referenceQuery) }
+            open: { hit, disposition in
+                session.openReferenceResult(
+                    hit, query: model.referenceQuery, disposition: disposition)
+            }
         ) { hit in
             resultRow(hit)
         }

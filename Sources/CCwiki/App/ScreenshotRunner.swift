@@ -62,6 +62,10 @@ enum ScreenshotRunner {
         case paper(String)
         /// A second reader window, opened on this page.
         case window(String)
+        /// A new tab of the key reader window on this page: `tab:` in
+        /// front, `bgtab:` behind, once background tabs are on
+        /// (`WindowTabbing.joinsInBackground`); in front until then.
+        case tab(String, inBackground: Bool)
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -83,6 +87,8 @@ enum ScreenshotRunner {
             case "jobs": return .jobs
             case "paper": return parts.count > 1 ? .paper(parts[1]) : nil
             case "window": return parts.count > 1 ? .window(parts[1]) : nil
+            case "tab": return parts.count > 1 ? .tab(parts[1], inBackground: false) : nil
+            case "bgtab": return parts.count > 1 ? .tab(parts[1], inBackground: true) : nil
             default: return nil
             }
         }
@@ -90,10 +96,7 @@ enum ScreenshotRunner {
         var slug: String {
             switch self {
             case .home: "home"
-            case .page(let path):
-                (path as NSString).lastPathComponent
-                    .replacingOccurrences(of: ".md", with: "")
-                    .replacingOccurrences(of: " ", with: "-")
+            case .page(let path): Self.slug(ofPage: path)
             case .folder(let slug): "folder-\(slug)"
             case .switcher(let query): "switcher-\(query.isEmpty ? "empty" : query)"
             case .search(let query): "search-\(query.replacingOccurrences(of: " ", with: "-"))"
@@ -104,23 +107,27 @@ enum ScreenshotRunner {
             case .jobs: "jobs"
             case .welcome: "welcome"
             case .whatsNew: "whats-new"
-            case .paper(let path):
-                "paper-" + (path as NSString).lastPathComponent
-                    .replacingOccurrences(of: ".md", with: "")
-                    .replacingOccurrences(of: " ", with: "-")
-            case .window(let path):
-                "window-" + (path as NSString).lastPathComponent
-                    .replacingOccurrences(of: ".md", with: "")
-                    .replacingOccurrences(of: " ", with: "-")
+            case .paper(let path): "paper-" + Self.slug(ofPage: path)
+            case .window(let path): "window-" + Self.slug(ofPage: path)
+            case .tab(let path, let inBackground):
+                (inBackground ? "bgtab-" : "tab-") + Self.slug(ofPage: path)
             }
+        }
+
+        /// A page's file name, as a capture's file name can carry it.
+        private static func slug(ofPage path: String) -> String {
+            (path as NSString).lastPathComponent
+                .replacingOccurrences(of: ".md", with: "")
+                .replacingOccurrences(of: " ", with: "-")
         }
 
         /// Rendering a page needs longer to settle than flipping a picker.
         var settleMilliseconds: Int {
             switch self {
             case .page, .folder, .home, .welcome, .whatsNew, .paper: 1500
-            // A new window loads its web view's shell before it can render.
-            case .window: 2500
+            // A new window or tab loads its web view's shell before it can
+            // render.
+            case .window, .tab: 2500
             case .search: 900
             // An ingestion job is minutes, not milliseconds; `apply` waits for
             // a terminal state rather than guessing a duration.
@@ -138,7 +145,9 @@ enum ScreenshotRunner {
     /// `session` is the reader window that started the plan; `openWindow` is
     /// that window's, for the steps that open a window of their own. Each
     /// step drives the reader window that is key when it runs, which is
-    /// `session` until a `window:` step opens another.
+    /// `session` until a `window:` or `tab:` step opens another. A `bgtab:`
+    /// tab is behind, so the steps after it drive the tab it joined, once
+    /// background tabs are on.
     static func run(model: AppModel, session: ReaderSession, openWindow: OpenWindowAction) {
         guard let directory, !hasStarted else { return }
         hasStarted = true
@@ -260,6 +269,11 @@ enum ScreenshotRunner {
             openWindow(
                 id: CCwikiApp.mainWindowID,
                 value: ReaderWindow(opening: .page(path: path, anchor: nil)))
+
+        case .tab(let path, let inBackground):
+            // As a ⌘-click or ⇧⌘-click would: through the session, which
+            // asks its window's view to open the tab.
+            session.open(.page(path: path, anchor: nil), .newTab(inBackground: inBackground))
         }
     }
 

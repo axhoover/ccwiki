@@ -218,6 +218,20 @@ struct CCwikiCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: .command)
 
+            // At Home too, as a tab of the key reader window, in front, as
+            // in Safari. While the explorer, Jobs or a paper is key there is
+            // no reader to join, and it is a window of its own (§1.8).
+            Button("New Tab") {
+                let window = ReaderWindow()
+                if let model, let request = ReaderWindowRequest(
+                    opening: window, as: .newTab(inBackground: false),
+                    beside: session?.windowNumber) {
+                    model.expectReaderWindow(request)
+                }
+                openWindow(id: CCwikiApp.mainWindowID, value: window)
+            }
+            .keyboardShortcut("t", modifiers: .command)
+
             Divider()
 
             Button("Quick Switcher…") { session?.presentQuickSwitcher() }

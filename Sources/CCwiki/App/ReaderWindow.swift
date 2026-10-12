@@ -24,6 +24,26 @@ struct ReaderWindowRequest: Equatable, Sendable {
     var inBackground: Bool
 }
 
+extension ReaderWindowRequest {
+    /// How `window` joins the others when it opens as `disposition` says,
+    /// from the reader window numbered `source`: as a tab of that window,
+    /// behind it or in front, or as a window of its own (§1.4).
+    ///
+    /// Nil for a disposition that opens no window: where you are, or the
+    /// site. A tab with no window to join is a window of its own, as ⌘T is
+    /// while the explorer or Jobs is key.
+    init?(opening window: ReaderWindow, as disposition: LinkDisposition, beside source: Int?) {
+        switch disposition {
+        case .newTab(let inBackground):
+            self.init(window: window, tabbingInto: source, inBackground: inBackground)
+        case .newWindow:
+            self.init(window: window, tabbingInto: nil, inBackground: false)
+        case .here, .onSite:
+            return nil
+        }
+    }
+}
+
 /// The tabbing of windows the caller is opening itself. Pure.
 ///
 /// `openWindow` cannot say where a window goes, so the request waits here

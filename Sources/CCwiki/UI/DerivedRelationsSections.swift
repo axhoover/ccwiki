@@ -166,6 +166,11 @@ struct DerivedRelationsSections: View {
                 Button("Explore From Here…") { model.explore(query) }
             }
             Button("Open “\(row.label)”") { session.openRelationObject(row.link.objectID) }
+            // After the row's Open, not first: its click shows a proof, not
+            // a page, so ⌘-click keeps that meaning (reader-comforts §1.1).
+            OpenElsewhereItems {
+                session.openRelationObject(row.link.objectID, disposition: $0)
+            }
             Divider()
             Button("Copy Statement") { model.copyToPasteboard(row.statement) }
         }

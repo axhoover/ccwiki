@@ -85,10 +85,12 @@ struct SidebarView: View {
 
     /// A page that cites the reference being read. Not part of the selection
     /// binding — the tree owns selection, and these rows are a way back rather
-    /// than a place in the hierarchy.
+    /// than a place in the hierarchy. A button, so ⌘-click is a link's: a
+    /// tab behind this one (reader-comforts §1.1).
     private func citingRow(_ backlink: WikiIndex.Backlink) -> some View {
-        Button {
-            session.openPage(backlink.sourcePath)
+        let location = AppModel.Location.page(path: backlink.sourcePath, anchor: nil)
+        return Button {
+            session.open(location, LinkDisposition.current)
         } label: {
             HStack(spacing: Theme.small) {
                 Image(systemName: "arrow.turn.up.left")
@@ -106,6 +108,9 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .help(backlink.context)
         .selectionDisabled()
+        .contextMenu {
+            OpenElsewhereItems { session.open(location, $0) }
+        }
     }
 
     /// A folder that is too big to be a branch of the tree, as one row.
@@ -123,8 +128,9 @@ struct SidebarView: View {
     private func collapsedFolderRow(
         _ name: String, systemImage: String, count: Int, help: String
     ) -> some View {
-        Button {
-            session.open(.folder(slug: name))
+        let location = AppModel.Location.folder(slug: name)
+        return Button {
+            session.open(location, LinkDisposition.current)
         } label: {
             HStack(spacing: Theme.small) {
                 Image(systemName: systemImage)
@@ -149,6 +155,9 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .selectionDisabled()
         .help(help)
+        .contextMenu {
+            OpenElsewhereItems { session.open(location, $0) }
+        }
     }
 
     @ViewBuilder
@@ -177,6 +186,9 @@ struct SidebarView: View {
                 .onTapGesture(count: 2) { session.open(.folder(slug: node.id)) }
                 .contextMenu {
                     Button("Open Folder Page") { session.open(.folder(slug: node.id)) }
+                    OpenElsewhereItems(title: "Open Folder Page") {
+                        session.open(.folder(slug: node.id), $0)
+                    }
                 }
                 // Double-click and the context menu are both invisible to
                 // VoiceOver; a named action is not.
@@ -222,8 +234,13 @@ struct SidebarView: View {
             Spacer(minLength: 0)
         }
         .tag(node.id)
+        // Selection, not a button, so ⌘-click keeps `List`'s own meaning, as
+        // in Finder's and Mail's sidebars; a new tab is in the menu
+        // (reader-comforts §1.1).
         .contextMenu {
             if let page = node.page {
+                OpenElsewhereItems { session.open(.page(path: page.path, anchor: nil), $0) }
+                Divider()
                 if let url = AppModel.siteURL(slug: page.slug) {
                     Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
                     Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }

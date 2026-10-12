@@ -48,6 +48,41 @@ struct ReaderWindowRequestsTests {
         #expect(step3 == behind)
     }
 
+    @Test("a new tab joins the window it was asked from, behind it or in front")
+    func tabsJoinTheirSource() {
+        let window = ReaderWindow(opening: .page(path: "A.md", anchor: nil), find: ["prf"])
+
+        let behind = ReaderWindowRequest(
+            opening: window, as: .newTab(inBackground: true), beside: 42)
+        #expect(behind == ReaderWindowRequest(window: window, tabbingInto: 42, inBackground: true))
+
+        let inFront = ReaderWindowRequest(
+            opening: window, as: .newTab(inBackground: false), beside: 42)
+        #expect(inFront == ReaderWindowRequest(
+            window: window, tabbingInto: 42, inBackground: false))
+    }
+
+    @Test("a new window, or a tab with no window to join, is a window of its own")
+    func windowsJoinNothing() {
+        let window = ReaderWindow()
+
+        let newWindow = ReaderWindowRequest(opening: window, as: .newWindow, beside: 42)
+        #expect(newWindow == ReaderWindowRequest(
+            window: window, tabbingInto: nil, inBackground: false))
+
+        let orphanTab = ReaderWindowRequest(
+            opening: window, as: .newTab(inBackground: false), beside: nil)
+        #expect(orphanTab?.tabbingInto == nil)
+        #expect(orphanTab?.window == window)
+    }
+
+    @Test("opening here or on the site opens no window")
+    func noWindowForHereOrSite() {
+        let window = ReaderWindow()
+        #expect(ReaderWindowRequest(opening: window, as: .here, beside: 42) == nil)
+        #expect(ReaderWindowRequest(opening: window, as: .onSite, beside: 42) == nil)
+    }
+
     @Test("every window value is new, so opening one never brings another forward")
     func windowValuesAreUnique() {
         let opening = AppModel.Location.page(path: "A.md", anchor: nil)

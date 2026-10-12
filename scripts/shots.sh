@@ -18,6 +18,11 @@
 #                             captures the reader)
 #   window:<content-relative> a second reader window on that page; the
 #                             steps after it drive the new window
+#   tab:<content-relative>    a new tab of the key reader window on that
+#                             page, in front; the steps after it drive it
+#   bgtab:<content-relative>  the same tab behind the one being read, once
+#                             WindowTabbing.joinsInBackground is on (in
+#                             front until then)
 #
 # The app pauses at each step and writes `.ready-N`; this script captures the
 # window with `screencapture -l` and answers with `.go-N`. That handshake is

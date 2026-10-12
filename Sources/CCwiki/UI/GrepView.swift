@@ -22,7 +22,9 @@ struct GrepView: View {
             emptyDescription: "The exact text, on every page, references included. "
                 + "Case matters only if you type a capital.",
             countLabel: { _ in model.grepSummary },
-            open: { session.openGrepResult($0, query: model.grepQuery) }
+            open: { hit, disposition in
+                session.openGrepResult(hit, query: model.grepQuery, disposition: disposition)
+            }
         ) { hit in
             resultRow(hit)
         }

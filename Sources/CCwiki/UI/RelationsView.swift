@@ -277,7 +277,7 @@ struct RelationsView: View {
 
     private func relationRow(_ relation: Relation, edge: Edge, exploring: ExplorerQuery?) -> some View {
         Button {
-            session.openPage(relation.path)
+            session.open(.page(path: relation.path, anchor: nil), LinkDisposition.current)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: Theme.small) {
                 StatusBadge(status: relation.status, compact: true)
@@ -312,7 +312,7 @@ struct RelationsView: View {
         exploring: ExplorerQuery?
     ) -> some View {
         Button {
-            session.openPage(barrier.path)
+            session.open(.page(path: barrier.path, anchor: nil), LinkDisposition.current)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: Theme.small) {
                 Image(systemName: "nosign")
@@ -363,7 +363,7 @@ struct RelationsView: View {
         let object = model.relations.object(id)
         let label = model.relationLabels.label(id)
         return Button {
-            session.openRelationObject(id)
+            session.openRelationObject(id, disposition: LinkDisposition.current)
         } label: {
             HStack(spacing: Theme.small) {
                 Text(label)
@@ -511,22 +511,28 @@ struct RelationsView: View {
         return .page(path: path, anchor: anchor)
     }
 
+    /// A value is a link, so ⌘-click opens it in a tab behind this one, as
+    /// a link in the page does (reader-comforts §1.4).
     private func follow(_ target: FactTarget) {
+        let disposition = LinkDisposition.current
         switch target {
-        case .object(let id): session.openRelationObject(id)
-        case .page(let path, let anchor): session.openPage(path, anchor: anchor)
+        case .object(let id): session.openRelationObject(id, disposition: disposition)
+        case .page(let path, let anchor): session.open(.page(path: path, anchor: anchor), disposition)
         }
     }
 
     // MARK: Context menus
 
     /// The actions the sidebar and Backlinks offer for a page, plus the row's
-    /// own text, which is what you want when quoting a result.
+    /// own text, which is what you want when quoting a result. A new tab or
+    /// window follows Open, which is the row's own click (reader-comforts
+    /// §1.1).
     @ViewBuilder
     private func pageMenu(
         _ path: String, anchor: String? = nil, copyTitle: String, copyText: String
     ) -> some View {
         Button("Open") { session.openPage(path, anchor: anchor) }
+        OpenElsewhereItems { session.open(.page(path: path, anchor: anchor), $0) }
         if let page = model.index?.pages[path] {
             if let url = AppModel.siteURL(slug: page.slug, anchor: anchor) {
                 Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }

@@ -27,8 +27,10 @@ struct SearchView: View {
             emptyDescription: "Names and aliases first, then headings, then text. "
                 + "Primitives and assumptions lead. Papers have their own search, ⇧⌘R.",
             countLabel: { "\($0) page\($0 == 1 ? "" : "s")" },
-            open: { hit in
-                session.openSearchResult(hit, query: model.searchCorrection ?? model.searchQuery)
+            open: { hit, disposition in
+                session.openSearchResult(
+                    hit, query: model.searchCorrection ?? model.searchQuery,
+                    disposition: disposition)
             }
         ) { hit in
             resultRow(hit)

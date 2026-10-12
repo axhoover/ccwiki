@@ -102,6 +102,10 @@ final class ReaderSession: Identifiable {
     /// Its `NSWindow`'s number, for bringing it forward from elsewhere and
     /// for joining a new tab to it. Set by its view, which knows the window.
     @ObservationIgnored var windowNumber: Int?
+    /// Opens a page in a new tab or window: `openWindow` is an environment
+    /// action, so the window's view builds this from its own and sets it
+    /// when it claims the session (§1.4).
+    @ObservationIgnored var openInReader: OpenInReaderAction = .none
 
     // MARK: Starting
 
@@ -130,18 +134,12 @@ final class ReaderSession: Identifiable {
         // Each closure reads the model through `self`, never the `model`
         // parameter: the web view keeps its closures, and the model keeps
         // the session, so capturing the parameter would make a cycle.
+        //
+        // A link in the page opens where its click says: here, in a new tab
+        // or window, or on cryptology.city, for Open Link on cryptology.city
+        // (§1.4). A modified click no longer means the site by itself.
         webController.onNavigate = { [weak self] destination, disposition in
-            guard let self else { return }
-            // ⌘-click: the same page on cryptology.city, in the browser. The
-            // app has one reader window, so anywhere but here means the site,
-            // until tabs give the other dispositions somewhere to go.
-            if disposition != .here, case .page(let path, let anchor) = destination,
-               let page = self.model.index?.pages[path],
-               let url = AppModel.siteURL(slug: page.slug, anchor: anchor) {
-                NSWorkspace.shared.open(url)
-                return
-            }
-            navigate(to: destination)
+            self?.navigate(to: destination, disposition: disposition)
         }
         webController.onReady = { [weak self] in
             self?.renderCurrent()
@@ -338,7 +336,8 @@ final class ReaderSession: Identifiable {
         guard isStarted, model.index != nil || newLocation.isDocument else {
             if !isShowing(newLocation) {
                 pendingLocation = newLocation
-                pendingLocationFind = nil
+                // A search hit that waits still lands on its match.
+                pendingLocationFind = pendingFind
             }
             return
         }
@@ -398,14 +397,41 @@ final class ReaderSession: Identifiable {
         }
     }
 
+    /// Open `location` where `disposition` says (§1.4): here, on
+    /// cryptology.city, or in a new tab or window of its own, which the
+    /// window's view opens (`openInReader`). `find` is found on the page once
+    /// it renders, so a search hit lands on its match wherever it opens.
+    ///
+    /// What a SwiftUI row calls with `LinkDisposition.current`, and what a
+    /// link in the page comes to through `navigate(to:disposition:)`.
+    func open(_ location: Location, _ disposition: LinkDisposition, find: [String]? = nil) {
+        switch disposition {
+        case .here:
+            pendingFind = find
+            open(location)
+            // Consumed by the render `open` did, or kept with a location
+            // that waits for the wiki. If neither (a page the wiki lacks),
+            // it must not linger for the next render.
+            pendingFind = nil
+        case .onSite:
+            if let url = siteURL(for: location) { NSWorkspace.shared.open(url) }
+        case .newTab, .newWindow:
+            openInReader(location, disposition, find: find)
+        }
+    }
+
     func openPage(_ path: String, anchor: String? = nil) {
         open(.page(path: path, anchor: anchor))
     }
 
-    func navigate(to destination: CCwikiURL.Destination) {
+    /// Follow a link: one in the page, whose click or context menu said
+    /// where (`WebController.onNavigate`), or a ccwiki:// link from outside,
+    /// which opens here. An asset opens in its own app wherever it was asked
+    /// for.
+    func navigate(to destination: CCwikiURL.Destination, disposition: LinkDisposition = .here) {
         switch destination {
-        case .page(let path, let anchor): open(.page(path: path, anchor: anchor))
-        case .folder(let slug): open(.folder(slug: slug))
+        case .page(let path, let anchor): open(.page(path: path, anchor: anchor), disposition)
+        case .folder(let slug): open(.folder(slug: slug), disposition)
         case .asset(let path):
             NSWorkspace.shared.open(model.paths.content.appending(path: path))
         case .shell:
@@ -427,40 +453,41 @@ final class ReaderSession: Identifiable {
 
     /// Open a search hit where it matched: at the heading when a section was
     /// the match, otherwise finding the query on the page, so the reader
-    /// lands on the match rather than the top of a long page.
-    func openSearchResult(_ hit: SearchHit, query: String) {
+    /// lands on the match rather than the top of a long page. In a new tab
+    /// too: the tab finds it once its page renders.
+    func openSearchResult(
+        _ hit: SearchHit, query: String, disposition: LinkDisposition = .here
+    ) {
         // A find would scroll away from the heading the hit is about.
-        pendingFind = hit.anchor == nil ? AppModel.findCandidates(for: query) : nil
-        openPage(hit.path, anchor: hit.anchor)
-        // Consumed by the render `openPage` just did; if it did not render
-        // (a page the index lacks), it must not linger for the next one.
-        pendingFind = nil
+        let find = hit.anchor == nil ? AppModel.findCandidates(for: query) : nil
+        open(.page(path: hit.path, anchor: hit.anchor), disposition, find: find)
     }
 
     /// Open a ⇧⌘F hit and find the text on it.
-    func openGrepResult(_ hit: TextGrep.Hit, query: String) {
-        pendingFind = [query]
-        openPage(hit.path)
-        pendingFind = nil
+    func openGrepResult(
+        _ hit: TextGrep.Hit, query: String, disposition: LinkDisposition = .here
+    ) {
+        open(.page(path: hit.path, anchor: nil), disposition, find: [query])
     }
 
     /// Open a reference hit. A paper found by its text is opened with the
     /// query found on it, as ⌘S does; one found by its key, authors, title
     /// or a citing page is opened at the top, where those are.
-    func openReferenceResult(_ hit: ReferenceHit, query: String) {
-        pendingFind = hit.field == .text
+    func openReferenceResult(
+        _ hit: ReferenceHit, query: String, disposition: LinkDisposition = .here
+    ) {
+        let find = hit.field == .text
             ? AppModel.findCandidates(for: ReferenceRanker.parse(query).text) : nil
-        openPage(hit.path)
-        pendingFind = nil
+        open(.page(path: hit.path, anchor: nil), disposition, find: find)
     }
 
     /// Navigate to a manifest node. A variant is a *section*, so this resolves
     /// to its host page plus an anchor rather than to a page of its own.
-    func openRelationObject(_ objectID: String) {
+    func openRelationObject(_ objectID: String, disposition: LinkDisposition = .here) {
         guard let destination = model.relationLabels.destination(objectID),
               model.index?.pages[destination.path] != nil
         else { return }
-        openPage(destination.path, anchor: destination.anchor)
+        open(.page(path: destination.path, anchor: destination.anchor), disposition)
     }
 
     /// A concept page picked at random: not a stub, not a reference or a
@@ -584,7 +611,11 @@ final class ReaderSession: Identifiable {
 
     /// The same page on cryptology.city, for "Open on the website" and
     /// "Copy Link".
-    var currentSiteURL: URL? {
+    var currentSiteURL: URL? { siteURL(for: location) }
+
+    /// Where `location` is on cryptology.city. The app's own pages are not
+    /// there.
+    private func siteURL(for location: Location) -> URL? {
         switch location {
         case .page(let path, let anchor):
             guard let page = model.index?.pages[path] else { return nil }

@@ -98,8 +98,11 @@ struct InspectorView: View {
             } else {
                 List {
                     ForEach(links) { link in
+                        // A button, so ⌘-click is a link's: a tab behind
+                        // this one (reader-comforts §1.1).
+                        let location = AppModel.Location.page(path: link.sourcePath, anchor: nil)
                         Button {
-                            session.openPage(link.sourcePath)
+                            session.open(location, LinkDisposition.current)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(model.title(forPath: link.sourcePath))
@@ -119,8 +122,10 @@ struct InspectorView: View {
                         .buttonStyle(.plain)
                         .listRowSeparator(.hidden)
                         .contextMenu {
+                            OpenElsewhereItems { session.open(location, $0) }
                             if let page = model.index?.pages[link.sourcePath],
                                let url = AppModel.siteURL(slug: page.slug) {
+                                Divider()
                                 Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
                                 Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
                             }
