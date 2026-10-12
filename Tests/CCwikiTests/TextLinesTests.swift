@@ -68,6 +68,31 @@ struct TextLinesTests {
         #expect(TextLines.utf16Range(of: Self.lines(1, 1), in: "") == NSRange(location: 0, length: 0))
     }
 
+    @Test("the status line's column counts characters, so an emoji or an accent is one")
+    func columns() {
+        // "e" + U+0301 is one character in two units; 👍 is two units.
+        let text = "e\u{301}👍x\nab"
+        func position(_ offset: Int) -> [Int] {
+            let found = TextLines.position(atUTF16Offset: offset, in: text)
+            return [found.line, found.column]
+        }
+        #expect(position(0) == [1, 1])
+        #expect(position(2) == [1, 2])
+        #expect(position(4) == [1, 3])
+        #expect(position(5) == [1, 4])
+        // Past the line break: the start of the next line.
+        #expect(position(6) == [2, 1])
+        #expect(position(8) == [2, 3])
+        // Out of range: the start, or the end.
+        #expect(position(-3) == [1, 1])
+        #expect(position(99) == [2, 3])
+        // The line agrees with `line(atUTF16Offset:in:)` everywhere.
+        for offset in 0...(text as NSString).length {
+            #expect(TextLines.position(atUTF16Offset: offset, in: text).line
+                == TextLines.line(atUTF16Offset: offset, in: text))
+        }
+    }
+
     @Test("a carriage return belongs to the line break, not the line")
     func crlf() {
         let text = "a\r\nb\r\n"

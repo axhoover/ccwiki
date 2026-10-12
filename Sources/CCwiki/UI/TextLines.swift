@@ -47,6 +47,28 @@ enum TextLines {
         return line
     }
 
+    /// Where UTF-16 `offset` is, as the editor's status line says it: the
+    /// 1-based line, as `line(atUTF16Offset:in:)`, and the 1-based column,
+    /// counted in characters as a reader sees them, so an emoji or an
+    /// accented letter is one column. An offset past the end is at the end.
+    static func position(atUTF16Offset offset: Int, in text: String) -> (line: Int, column: Int) {
+        let utf16 = text.utf16
+        let end = min(max(offset, 0), utf16.count)
+        var line = 1
+        var lineStart = 0
+        var index = 0
+        for unit in utf16.prefix(end) {
+            index += 1
+            if unit == newline {
+                line += 1
+                lineStart = index
+            }
+        }
+        let start = String.Index(utf16Offset: lineStart, in: text)
+        let caret = String.Index(utf16Offset: end, in: text)
+        return (line, text[start..<caret].count + 1)
+    }
+
     /// `"\n"` and `"\r"` as UTF-16 code units.
     private static let newline: UInt16 = 0x0A
     private static let carriageReturn: UInt16 = 0x0D
