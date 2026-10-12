@@ -90,7 +90,7 @@ redesign, not a refactor.
 │   │                        and correction runners, the review snapshot, DiffGuard,
 │   │                        Publisher, Tripwire
 │   └── UI/                  the SwiftUI views
-└── Tests/CCwikiTests/     101 tests; see §6
+└── Tests/CCwikiTests/     about 870 tests (2026-10-12); see §6
 ```
 
 ## 5. Documentation index

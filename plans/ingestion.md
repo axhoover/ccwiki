@@ -253,6 +253,7 @@ Sources/CCwiki/App/
 ```
 claude -p "<prompt>"
   --output-format stream-json --verbose
+  --strict-mcp-config --setting-sources project
   --permission-mode acceptEdits
   --allowedTools Read,Write,Edit,Glob,Grep,TodoWrite,Bash(git status:*),Bash(git diff:*),
                  Bash(git log:*),…,Bash(git submodule update:*),Bash(npm:*),Bash(npx:*),Bash(node:*),…
@@ -274,6 +275,15 @@ The allow-list mirrors the one the wiki's own GitHub workflow grants, plus the
 `npm`/`npx`/`node` the *local* lint needs. A job that wanders outside it fails
 visibly, with the denied call named in the transcript, which is much better than
 one that quietly did something nobody asked for.
+
+`--strict-mcp-config`, with no `--mcp-config`, loads no MCP server, and
+`--setting-sources project` loads only the worktree's own project settings.
+Without them, the agent would inherit the maintainer's own Claude setup: a
+GitHub MCP server whose tools are pre-approved could open a pull request
+with no approval, and user allow rules would widen the allow-list. They
+also leave out any `env` or `apiKeyHelper` in `~/.claude/settings.json`, so
+a `claude` signed in that way fails its first job (corrections.md §5.1,
+§13).
 
 ### Outcomes
 

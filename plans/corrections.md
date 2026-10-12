@@ -572,10 +572,10 @@ and the integrator deletes it there (§17).
 | Two corrections of one page | Edit Page… on a page whose `edit` job can still be edited opens that job's editor, at the new lines, with no alert. Any other job on the page asks first (§7.1). DiffGuard's `changedUpstream` catches the rest at Approve |
 | The agent pushing or opening a PR itself | The seal makes it unlikely, not impossible (§5.1). The tripwire looks afterwards (§5.5) |
 | An issue sent twice | Open Issue is disabled while `gh` runs. A retry first searches for the sheet's hidden marker (§8.2) |
-| Text lost when an editor or the app closes | Autosave, 0.5 s after typing stops and on close. `approve`, `revert`, `refreshReview` and `restoreWorktree` first await `JobCenter.flushEdits`, which saves every open editor of the job. A quit with unsaved text returns `.terminateLater` until `flushAllEditors()` finishes. An editor writes only while its job is `awaitingReview` |
+| Text lost when an editor or the app closes | Autosave, 0.5 s after typing stops and on close. `approve`, `revert`, `refreshReview` and `restoreWorktree` first await `JobCenter.flushEdits`, which saves every open editor of the job. A quit with unsaved text returns `.terminateLater` until `flushAllEditors()` finishes. An editor writes only while its job is `awaitingReview`. An editor whose text did not reach the disk (a conflict nobody settled, or a failed write) disables Open Draft PR, and `approve` asks `unsettledEdits` again after its own flush and refuses: publishing would send the file without that text and close the editor |
 | Two git commands in one worktree at once | One serial queue per job (§6.1). Two `git add -A` runs would collide on `index.lock` |
 | CCwiki changing a file under an open editor (Revert File, Restore) | `JobCenter.onFilesChanged` reloads the editor: silently if nothing is unsaved, otherwise with the choice "CCwiki reverted this file in Jobs." Use Reverted File, or Keep My Version |
-| The worktree deleted (Caches cleared by hand; the maintainer has done this before, update-integrity.md) | Every snapshot also writes `git diff --cached --binary <base>`, byte for byte, to `logs/<id>.patch` in Application Support. Restore runs `git worktree prune`, `git worktree add -B <branch> <path> <base>`, then `git apply --index` |
+| The worktree deleted (Caches cleared by hand; the maintainer has done this before, update-integrity.md) | Every snapshot also writes `git diff --cached --binary <base>`, byte for byte, to `logs/<id>.patch` in Application Support. Restore runs `git worktree prune`, `git worktree add -B <branch> <path> <base>`, then `git apply --index`. An empty patch applies as nothing; a missing one is said to be missing, and git is not asked |
 | Approving a diff that changed after it was shown | The snapshot carries a SHA-256 of the staged patch. Approve snapshots again and compares the two. If they differ, it shows the new diff and sends nothing |
 | The file edited outside CCwiki while the editor is open | Before each save, the editor compares the file on disk with what it last wrote. If they differ, it asks: Keep My Version, or Use the File on Disk |
 | Discard by mistake | A confirmation dialog. The patch file stays in `logs/` until Clear Finished, and the transcript stays as it does today |
@@ -717,9 +717,11 @@ claude -p "<prompts/correct.md, composed>"
   `content/`. Path-scoped rules (`Edit(./content/<path>)`) would enforce it
   up front; §13 says when.
 - **Never on a generated passage.** Route b is refused for a target whose
-  region is `generated` or `frontmatter` (§8.1). Fixing either means changing
-  a reduction page's frontmatter and regenerating, and this agent cannot run
-  the generator.
+  region is `generated` or `frontmatter` (§8.1), each with its own text. A
+  "Participates in" section is rebuilt from the reduction pages; the
+  relation line under a reduction or barrier page's title is drawn from that
+  page's own frontmatter. Fixing either means changing frontmatter and
+  regenerating `relations.json`, and this agent cannot run the generator.
 
 `prompts/correct.md` follows `ingest.md`'s rule: **house style is not
 compiled in.** It points the agent at the worktree's own `CLAUDE.md`
@@ -1506,6 +1508,12 @@ page (§7.1).
   bodies itself: GitHub's search lags a new issue and may not read inside
   the HTML comment that holds the marker. If the issue exists, gh's reply was lost; the sheet shows it
   instead of opening another. If gh cannot answer, nothing is sent.
+- **Deadlines.** `gh issue create` and the retry's `gh issue list` each get
+  `Publisher.ghDeadline` (90 s), and `githubLogin` gets
+  `GitHubAuth.deadline`, so a stalled network cannot hold the sheet, whose
+  Cancel is disabled while gh runs. A create that does not answer in time
+  fails with "gh did not answer in time. The issue may have been opened;
+  Open Issue checks GitHub for it before sending again."
 - **On failure** the sheet stays open, with the text and gh's error.
 - **`CCWIKI_PUBLISH_DRY_RUN=1`** stops before `gh issue create` and shows the
   command it would have run.
@@ -1912,6 +1920,10 @@ final class JobCenter {
     @ObservationIgnored var environment: @MainActor () -> Environment
     /// Saves every open editor of the job. Set by AppModel.init.
     @ObservationIgnored var flushEdits: (@MainActor (Job) async -> Void)?
+    /// Why an editor of the job holds text the disk does not (a conflict,
+    /// or a failed write); nil when none does. Approve asks it after
+    /// flushEdits (§4.4). Set by AppModel.init.
+    @ObservationIgnored var unsettledEdits: (@MainActor (Job) -> String?)?
     /// CCwiki changed these repository-relative paths in the job's worktree.
     @ObservationIgnored var onFilesChanged: (@MainActor (Job, [String]) -> Void)?
     /// Loads the job history synchronously.
@@ -1926,6 +1938,14 @@ final class JobCenter {
     /// changes it (content-relative), newest first.
     func jobs(touching pagePath: String) -> [Job]
     func refreshGitHubAccess() async
+    /// Once git is found: a snapshot for every review that has none.
+    func refreshMissingReviews() async
+    /// Once every tool is found: refreshMissingReviews, then GitHub asked
+    /// again if an answer was kept from before gh was found (§4.3, §7.1).
+    func toolsDidChange() async
+    /// A transcript line from outside the runners, which alone change a
+    /// job (§4.2): an editor saying where its unsaved text went.
+    func log(_ entry: JobLogEntry, in job: Job)
 
     @discardableResult func submitIngestion(source: IngestSubmission.Source?, pdf: URL?, notes: String) -> Job
     @discardableResult func startCorrection(_ request: CorrectionRequest) -> Job
@@ -1946,7 +1966,10 @@ final class JobCenter {
     func clearFinishedJobs()
     func cancelActiveJobs()
     func refreshOrphanedWorktrees() async
+    /// Never the worktree of a job that owns it.
     func pruneOrphan(_ path: String)
+    /// Not finished, or Review Anyway may still take it to review (§4.3).
+    nonisolated static func ownsWorktree(_ state: JobState) -> Bool
 }
 struct JobError: Error, Sendable, Equatable { let message: String; init(_ message: String) }
 

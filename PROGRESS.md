@@ -5,6 +5,84 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-12 — Page corrections and the review step, built
+
+Built on `claude/page-corrections`, from [corrections.md](plans/corrections.md).
+The branch starts from `claude/reader-comforts` and merges after it (§11.7).
+
+- **Phase 0** laid the seams: `IngestJob` became `Job`, with a `JobKind` and
+  the new states; the job section moved out of `AppModel` into `JobCenter`;
+  every new type, view and menu item was declared with a stub body; and the
+  `make shots` steps were added.
+- **Track A** built the review model, all pure: `ReviewSnapshot`, `LineDiff`,
+  `DiffGuard`'s nineteen rules, and `PullRequestDraft`.
+- **Track B** built the pipeline: `JobCenter` and `Job`, the sealed
+  `AgentInvocation`, the correction runner, `Publisher` (approve, the push
+  lease and its recovery, `gh pr create --draft`), `Tripwire`, Restore and
+  Review Anyway.
+- **Track C** built the reader side: source-line stamps on every rendered
+  block, `SourceLineMap`, `CorrectionTarget`, the Describe and Issue sheets,
+  `IssueComposer`, and `ccwiki-markdown.js`, the reader's Markdown pipeline
+  without the DOM, shared with the review.
+- **Track D** built the review in the Jobs window and the editor window.
+
+Each track was built and reviewed in its own worktree. A container restart
+killed the first build workflow halfway; the built branches survived on
+disk, and a resume workflow reviewed and finished them. Merged here, the four
+tracks compiled and passed 868 tests on the first CI run.
+
+A review across the tracks found no compile problems, and two that matter:
+
+- **Restored windows asked too early.** A Jobs or editor window restored at
+  launch asked for a snapshot and for GitHub access before CCwiki had found
+  git and gh. It cached "gh is not installed" and never loaded the review.
+  JobCenter now asks again once the tools are found.
+- **The seal leaked.** `claude -p` still loaded the user's own MCP servers,
+  allow rules and hooks. A pre-approved GitHub MCP tool would have let an
+  agent open a pull request with no approval. Agents now run with
+  `--strict-mcp-config` and `--setting-sources project`.
+
+The other fixes from that review:
+
+- A failed, aborted or cancelled agent job keeps its worktree off Left
+  Behind while Review Anyway can still take it to review. Prune refuses
+  such a worktree.
+- Approve refuses while an editor holds text it could not save: a conflict,
+  or a failed write. The job center asks again after its own save, so the
+  alert's button cannot get around it.
+- `gh issue create`, the retry's lookup and the login lookup each have a
+  deadline, so a stalled network cannot hold the issue sheet open for good.
+- Open an Issue is offered only when the account cannot push, not when gh
+  is missing, since an issue needs gh too.
+- The relation line under a reduction page's title has its own text. The
+  generated-region text sent the reader to the wrong page.
+- The review banner says "CCwiki has pushed nothing", because the
+  tripwire's notice beneath it may say the agent pushed.
+- A library load sets the pages and their commit in one step. A correction
+  started during a sync could otherwise read the wrong lines.
+- A restored editor redraws its preview when the library loads.
+- Restore says when the saved patch is missing.
+
+The docs caught up too: the README, the welcome page, the PLAN tree, the
+roadmap, design-system §5, ingestion.md, and corrections.md §4.3, §4.4,
+§5.1, §5.4, §6.2, §8 and §15 now describe what was built.
+
+CLAUDE.md asks for the swiftui-pro, typography-designer and macos-design
+skills. None is installed in this session, so the tracks followed
+SWIFTUI-RULES.md and the surrounding code instead.
+
+**Waits for a Mac:**
+
+- §12.3's check-by-hand list: the Page and Passage menus, restored editor
+  windows, ⌘↩ in sheets, and the review at the window's minimum size.
+- §13's CLI flags (`--disallowedTools` with its `Bash(git push:*)` rule,
+  `--model sonnet`, `--strict-mcp-config`, `--setting-sources project`),
+  watched on the first live job. `--setting-sources project` also drops any
+  `env` or `apiKeyHelper` in `~/.claude/settings.json`; a `claude` signed in
+  that way fails its first job.
+- One real correction through Open Draft PR, against a fork with
+  `CCWIKI_TARGET_REPO`, before one against the wiki.
+
 ## 2026-10-12 — Reader comforts, built
 
 Built on `claude/reader-comforts`, from [reader-comforts.md](plans/reader-comforts.md).
