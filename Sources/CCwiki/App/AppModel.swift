@@ -697,13 +697,6 @@ final class AppModel {
             await git.repairWorktrees(clone: paths.clone, worktreeRoot: paths.worktrees)
         }
         await refreshOrphanedWorktrees()
-        warnings.removeAll { $0.hasPrefix(Self.orphansWarningPrefix) }
-        if !orphanedWorktrees.isEmpty {
-            let count = orphanedWorktrees.count
-            warn(Self.orphansWarningPrefix
-                + "\(count) left over from an interrupted job. "
-                + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
-        }
     }
 
     /// What a load means for the reader: re-render what is on screen, since
@@ -2261,11 +2254,22 @@ final class AppModel {
         Subprocess.terminateAll()
     }
 
+    /// Look for strays, and say so. The warning is rebuilt with the list
+    /// wherever that is refreshed (at launch, after a clone or a reset, after
+    /// a job and after a prune), so it never names worktrees already pruned
+    /// (SWIFTUI-RULES §3.1).
     func refreshOrphanedWorktrees() async {
         guard let git = gitService else { return }
         let runner = IngestJobRunner(paths: paths, tools: tools, git: git, index: index)
         let known = Set(jobs.filter { !$0.state.isTerminal }.map(\.id))
         orphanedWorktrees = await runner.orphanedWorktrees(knownJobIDs: known).map(\.path)
+        warnings.removeAll { $0.hasPrefix(Self.orphansWarningPrefix) }
+        if !orphanedWorktrees.isEmpty {
+            let count = orphanedWorktrees.count
+            warn(Self.orphansWarningPrefix
+                + "\(count) left over from an interrupted job. "
+                + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
+        }
     }
 
     func pruneOrphan(_ path: String) {
