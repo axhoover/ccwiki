@@ -882,8 +882,9 @@
 
   // Before WebKit builds the context menu, tell Swift what is under the
   // pointer: a formula's LaTeX, and an algorithm's, as written and with the
-  // macros written out. The message is sent on the same connection as, and
-  // ahead of, the menu request, so it arrives first.
+  // macros written out; and the link, for the menu's Open Link in New Tab,
+  // in New Window and on cryptology.city. The message is sent on the same
+  // connection as, and ahead of, the menu request, so it arrives first.
   document.addEventListener("contextmenu", function (event) {
     var target = event.target;
     var host = mathHost(target);
@@ -894,13 +895,54 @@
       tex: host ? texOf(host) : null,
       algorithm: source,
       algorithmExpanded: source === null ? null : expandMacros(source, currentMacros || {}),
+      link: appLink(linkAt(target)),
     });
   }, true);
 
+  /** The link `node` is in, if any. */
+  function linkAt(node) {
+    return node && node.closest ? node.closest("a") : null;
+  }
+
+  /** The href of a link the app follows itself, to a page, a folder or a
+   *  file of the wiki. Null for no link, a dead one, one to the web, or a
+   *  place on this page. Swift decides which of these a tab can show. */
+  function appLink(anchor) {
+    if (!anchor || anchor.classList.contains("broken")) return null;
+    var href = anchor.getAttribute("href") || "";
+    if (!href || href.charAt(0) === "#" || /^https?:|^mailto:/.test(href)) return null;
+    return href;
+  }
+
+  /** Follows a link off the page: the web in the browser, anything else in
+   *  the app, with the keys held and whether it was the middle button.
+   *  Where it opens is Swift's call (LinkDisposition.forClick), made as
+   *  Safari makes it. */
+  function follow(href, event, middleButton) {
+    if (/^https?:|^mailto:/.test(href)) {
+      post({ type: "openExternal", url: href });
+      return;
+    }
+    post({
+      type: "navigate",
+      href: href,
+      command: event.metaKey,
+      shift: event.shiftKey,
+      option: event.altKey,
+      middleButton: middleButton,
+    });
+  }
+
   // Internal links are navigations for the *app*, not the web view: the Swift
-  // side owns history, the sidebar selection and the inspector.
-  document.addEventListener("click", function (event) {
-    var anchor = event.target.closest ? event.target.closest("a") : null;
+  // side owns history, the sidebar selection, the inspector, and the tab or
+  // window a link opens in.
+  //
+  // Only the primary button follows a link here. WebKit may also give a
+  // middle click a `click`, or an `auxclick`, so both are listened for and
+  // only stopped: the middle button is the `mouseup` listener's, below, and
+  // a link opens once, never in the web view itself.
+  function onLinkClick(event) {
+    var anchor = linkAt(event.target);
     if (!anchor) return;
 
     if (anchor.classList.contains("broken")) { event.preventDefault(); return; }
@@ -908,18 +950,40 @@
     var href = anchor.getAttribute("href") || "";
     if (!href) return;
 
-    if (/^https?:|^mailto:/.test(href)) {
-      event.preventDefault();
-      post({ type: "openExternal", url: href });
-      return;
-    }
+    event.preventDefault();
+    if (event.button !== 0) return;
     if (href.charAt(0) === "#") {
-      event.preventDefault();
       scrollToAnchor(href.slice(1));
       return;
     }
-    event.preventDefault();
-    post({ type: "navigate", href: href, modified: event.metaKey || event.shiftKey });
+    follow(href, event, false);
+  }
+  document.addEventListener("click", onLinkClick, true);
+  document.addEventListener("auxclick", onLinkClick, true);
+
+  // The middle button opens a link in a tab behind this one, as in Safari.
+  // WebKit may not dispatch `auxclick`, so the press and the release are read
+  // instead: a release on the link that was pressed is a middle click. These
+  // two listeners are their own, apart from every other `mousedown` (the
+  // preview card's, or one for the right button): they return at once for
+  // any other button and never call preventDefault. A place on this page is
+  // a scroll, not a page to open, so a middle click leaves it alone.
+  var middlePressedLink = null;
+
+  document.addEventListener("mousedown", function (event) {
+    if (event.button !== 1) return;
+    middlePressedLink = linkAt(event.target);
+  }, true);
+
+  document.addEventListener("mouseup", function (event) {
+    if (event.button !== 1) return;
+    var pressed = middlePressedLink;
+    middlePressedLink = null;
+    if (!pressed || linkAt(event.target) !== pressed) return;
+    if (pressed.classList.contains("broken")) return;
+    var href = pressed.getAttribute("href") || "";
+    if (!href || href.charAt(0) === "#") return;
+    follow(href, event, true);
   }, true);
 
   // One report per frame, and only when the answer changed: a scroll event

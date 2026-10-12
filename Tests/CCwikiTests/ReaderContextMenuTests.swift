@@ -70,4 +70,104 @@ struct ReaderContextMenuTests {
         #expect(target == ReaderContextTarget())
         #expect(target.copyItems.isEmpty)
     }
+
+    // MARK: Links (reader-comforts §1.1, B2)
+
+    private static let pagePath = "Primitives/pseudorandom-function.md"
+    private static let pageLink = CCwikiURL.page(path: pagePath, anchor: "syntax")
+    private static let linkTitles = [
+        "Open Link in New Tab",
+        "Open Link in New Window",
+        "Open Link on cryptology.city",
+    ]
+
+    @Test("a link to a page offers a new tab, a new window and the site, in that order")
+    func pageLinkItems() {
+        let target = ReaderContextTarget(link: Self.pageLink)
+        #expect(target.linkItems.map(\.title) == Self.linkTitles)
+        #expect(target.linkItems.map(\.disposition) == [
+            .newTab(inBackground: true), .newWindow, .onSite,
+        ])
+        let destination = CCwikiURL.Destination.page(path: Self.pagePath, anchor: "syntax")
+        #expect(target.linkItems.map(\.destination) == Array(repeating: destination, count: 3))
+        #expect(target.copyItems.isEmpty)
+    }
+
+    @Test("a link to a folder offers the same three")
+    func folderLinkItems() {
+        let target = ReaderContextTarget(link: CCwikiURL.folder(slug: "Primitives"))
+        #expect(target.linkItems.map(\.title) == Self.linkTitles)
+        #expect(target.linkItems.first?.destination == .folder(slug: "Primitives"))
+    }
+
+    @Test("a file of the wiki, the web, a place on the page or the shell offers no link items")
+    func noLinkItems() {
+        let links = [
+            CCwikiURL.asset(path: "Files/Minicrypt.png"),
+            "https://eprint.iacr.org/2015/022",
+            "mailto:someone@example.com",
+            "#syntax",
+            "Primitives/pseudorandom-function",
+            CCwikiURL.shell.absoluteString,
+        ]
+        for link in links {
+            let target = ReaderContextTarget(link: link)
+            #expect(target.linkItems.isEmpty, "\(link) is not a page to open elsewhere")
+        }
+        #expect(ReaderContextTarget().linkItems.isEmpty)
+    }
+
+    @Test("a formula offers no link items; a formula inside a link offers both kinds")
+    func formulaAndLink() {
+        #expect(ReaderContextTarget(tex: "\\secpar").linkItems.isEmpty)
+
+        let both = ReaderContextTarget(tex: "\\mathsf{PRF}", link: Self.pageLink)
+        #expect(both.copyItems.map(\.title) == ["Copy LaTeX"])
+        #expect(both.linkItems.map(\.title) == Self.linkTitles)
+    }
+
+    @Test("the bridge message carries the link after the algorithm")
+    func readsLink() {
+        let message: [String: Any] = [
+            "type": "contextTarget",
+            "tex": NSNull(),
+            "algorithm": NSNull(),
+            "algorithmExpanded": NSNull(),
+            "link": Self.pageLink,
+        ]
+        let target = ReaderContextTarget(message: message)
+        #expect(target == ReaderContextTarget(link: Self.pageLink))
+        #expect(target.linkItems.count == 3)
+    }
+
+    @Test("a null, empty or missing link is absent")
+    func absentLink() {
+        let null: [String: Any] = ["type": "contextTarget", "link": NSNull()]
+        let empty: [String: Any] = ["type": "contextTarget", "link": ""]
+        let missing: [String: Any] = ["type": "contextTarget", "tex": "\\secpar"]
+        #expect(ReaderContextTarget(message: null).link == nil)
+        #expect(ReaderContextTarget(message: empty).link == nil)
+        #expect(ReaderContextTarget(message: missing).link == nil)
+        #expect(ReaderContextTarget(message: missing).linkItems.isEmpty)
+    }
+
+    @Test("the link items go directly after WebKit's Open Link")
+    func afterOpenLink() {
+        let webKitMenu: [String?] = [
+            "WKMenuItemIdentifierOpenLink",
+            "WKMenuItemIdentifierCopyLink",
+            "WKMenuItemIdentifierShareMenu",
+        ]
+        #expect(ReaderContextTarget.indexAfterOpenLink(in: webKitMenu) == 1)
+
+        // Below the copy items and their separator, which have no identifier.
+        #expect(ReaderContextTarget.indexAfterOpenLink(in: [nil, nil] + webKitMenu) == 3)
+    }
+
+    @Test("without WebKit's Open Link there is no place after it")
+    func withoutOpenLink() {
+        let menu: [String?] = [nil, nil, "WKMenuItemIdentifierCopy", "WKMenuItemIdentifierLookUp"]
+        #expect(ReaderContextTarget.indexAfterOpenLink(in: menu) == nil)
+        #expect(ReaderContextTarget.indexAfterOpenLink(in: []) == nil)
+    }
 }
