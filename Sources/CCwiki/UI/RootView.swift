@@ -9,7 +9,8 @@ import UniformTypeIdentifiers
 ///
 /// What the window shows — its page, history, sidebar, inspector and sheets —
 /// is its `ReaderSession`'s; what every window shares is the model's
-/// (plans/reader-comforts.md §1.2).
+/// (plans/reader-comforts.md §1.2). The window itself, which gives this view
+/// its session and starts it, is `ReaderWindowView`'s.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(ReaderSession.self) private var session
@@ -63,28 +64,6 @@ struct RootView: View {
                 .opacity(isDropTargeted ? 1 : 0)
                 .animation(.easeOut(duration: 0.15), value: isDropTargeted)
         }
-        .task {
-            // Find git (one stat), read what is already on disk, and only then
-            // touch the network — so the app is usable instantly and offline.
-            // The ingestion tools are looked for in the background.
-            await model.discoverTools()
-            model.loadJobHistory()
-            // Before the library: Welcome is readable while the wiki downloads.
-            model.openLaunchDocumentIfNeeded()
-            await model.loadLibrary(reason: .launch)
-            // Which copy this is goes to the log on every launch; the other
-            // copies are looked for in a release, and not under the harness.
-            // Before the sync: a copy that hands over to another and quits
-            // must not leave a fetch running on the clone the two share.
-            await model.checkInstallation()
-            // A launch fetch keeps the wiki current for someone who never
-            // presses ⌘R. Not under the screenshot harness, whose captures
-            // must not depend on the network.
-            let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
-            if model.index == nil || launchFetch { model.sync() }
-            ScreenshotRunner.run(model: model, session: session, openWindow: openWindow)
-            if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
-        }
         .onChange(of: model.jobsWindowRequests) { _, _ in
             openWindow(id: CCwikiApp.jobsWindowID)
         }
@@ -108,8 +87,6 @@ struct RootView: View {
         .onChange(of: model.settingsRequests) { _, _ in
             openSettings()
         }
-        .focusedSceneValue(\.appModel, model)
-        .focusedSceneValue(\.readerSession, session)
         .focusedSceneValue(\.searchAction, FindAction { session.searchPresented = true })
     }
 

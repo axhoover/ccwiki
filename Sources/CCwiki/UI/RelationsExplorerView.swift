@@ -686,7 +686,7 @@ struct RelationsExplorerView: View {
     /// With no reader on screen, one is opened first.
     private func showInReader(_ open: () -> Void) {
         if model.mainWindowCount == 0 {
-            openWindow(id: CCwikiApp.mainWindowID)
+            openWindow(id: CCwikiApp.mainWindowID, value: ReaderWindow())
         }
         open()
     }
@@ -899,7 +899,7 @@ struct RelationsExplorerView: View {
         guard !Task.isCancelled, model.libraryGeneration == 0, model.mainWindowCount == 0 else {
             return
         }
-        openWindow(id: CCwikiApp.mainWindowID)
+        openWindow(id: CCwikiApp.mainWindowID, value: ReaderWindow())
     }
 
     private func rebuildMatcher() {

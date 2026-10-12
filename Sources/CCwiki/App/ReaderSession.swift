@@ -12,10 +12,11 @@ import Observation
 /// window's session, never "the active one": two windows side by side show
 /// different pages, and each inspector follows its own.
 ///
-/// Moved out of `AppModel` as it was, one member at a time. The views of a
-/// reader window find it in the environment, `@Environment(ReaderSession.self)`,
-/// and the menu bar as `FocusedValues.readerSession`. Until there is a session
-/// per window, the model holds the one there is.
+/// One per reader window or tab. The model keeps them by window, and the
+/// window's `ReaderWindowView` claims its own, installs it and starts it
+/// (§1.3). The views of a reader window find it in the environment,
+/// `@Environment(ReaderSession.self)`, and the menu bar as
+/// `FocusedValues.readerSession`.
 @MainActor
 @Observable
 final class ReaderSession: Identifiable {
@@ -79,6 +80,32 @@ final class ReaderSession: Identifiable {
 
     /// Set by `openSearchResult` for the render it triggers, then cleared.
     @ObservationIgnored private var pendingFind: [String]?
+    /// Set for the render that shows a restored page where it was being
+    /// read, then cleared: the heading it scrolls to in place of the
+    /// location's own anchor.
+    @ObservationIgnored private var renderAnchor: String?
+
+    // MARK: Window
+
+    /// Its `NSWindow`'s number, for bringing it forward from elsewhere and
+    /// for joining a new tab to it. Set by its view, which knows the window.
+    @ObservationIgnored var windowNumber: Int?
+
+    // MARK: Starting
+
+    /// Whether `start` has run. A window's view may run its task again, when
+    /// a tab is shown again, and must not start the session twice.
+    @ObservationIgnored private(set) var isStarted = false
+    /// From `start` until the wiki is first there for this session: what the
+    /// plan left for the wiki is still to do.
+    @ObservationIgnored private var awaitsLibrary = false
+    /// Opened once the wiki is there: the plan's choice, or what was asked
+    /// for before the session could open it, the latest winning.
+    @ObservationIgnored private var pendingLocation: Location?
+    /// Found on `pendingLocation` when it opens: the window's `find`.
+    @ObservationIgnored private var pendingLocationFind: [String]?
+    /// The heading a restored page was being read at, for its first render.
+    @ObservationIgnored private var readingPosition: (location: Location, heading: String)?
 
     // MARK: Init
 
@@ -120,15 +147,86 @@ final class ReaderSession: Identifiable {
         }
     }
 
+    // MARK: Starting
+
+    /// Begin as `plan` says (§1.7). Idempotent: a second call does nothing.
+    ///
+    /// A restored history is put back at once, and the launch document is
+    /// shown over it, since neither needs the wiki. The rest waits for the
+    /// wiki to load (`libraryDidLoad`), or happens now if it already has.
+    /// `readingAnchor` is the heading the restored page was being read at.
+    func start(_ plan: SessionStartPlan, readingAnchor: String?) {
+        guard !isStarted else { return }
+        isStarted = true
+        history = plan.history
+        if let path = location.path { sidebarSelection = path }
+        if let readingAnchor, plan.showsAtOnce == nil, location != .empty {
+            readingPosition = (location: location, heading: readingAnchor)
+        }
+        // Asked for before the session started, so after everything the
+        // plan knows of: it wins.
+        if pendingLocation == nil, let opening = plan.opensOnLoad {
+            pendingLocation = opening
+            pendingLocationFind = plan.find
+        }
+        awaitsLibrary = true
+        if let document = plan.showsAtOnce { open(document) }
+        if model.index != nil { openWhatWaited() }
+    }
+
+    /// What the plan left for the wiki, done the first time it is there. A
+    /// restored history forgets the pages the wiki no longer has and shows
+    /// its page where it was being read. A location asked for meanwhile then
+    /// opens, and with nothing on screen, Home.
+    private func openWhatWaited() {
+        guard awaitsLibrary, let index = model.index else { return }
+        awaitsLibrary = false
+        history = history.pruned { location in
+            location.path.map { index.pages[$0] != nil } ?? true
+        }
+        if let path = location.path { sidebarSelection = path }
+
+        let shown = location
+        if let pending = pendingLocation {
+            pendingLocation = nil
+            pendingFind = pendingLocationFind
+            pendingLocationFind = nil
+            open(pending)
+            // Consumed by the render `open` did; if it did not render (a
+            // page the wiki no longer has), it must not linger.
+            pendingFind = nil
+        }
+        if location == .empty {
+            // What the plan asks for when it has nothing else
+            // (`opensHomeOnLoad`), and where an opening or a last page the
+            // wiki no longer has falls back to.
+            openHome()
+        } else if location == shown {
+            // Nothing new opened: render what was restored, or shown before
+            // the wiki was there, now that its links resolve.
+            webController.invalidate()
+            if let position = readingPosition, position.location == location {
+                renderAnchor = position.heading
+            }
+            renderCurrent(preservingScroll: location.isDocument)
+            renderAnchor = nil
+        }
+        readingPosition = nil
+    }
+
     // MARK: What the model tells it
 
     /// What a load means for the reader: re-render what is on screen, since
     /// the file may have changed, keeping the reader's place, since it
-    /// usually has not. With nothing on screen yet, open the first page.
+    /// usually has not. The first load also does what the session's start
+    /// left for the wiki. A session that has not started waits for its
+    /// start, which does the same.
     func libraryDidLoad(_ update: LibraryUpdate) {
-        if case .empty = location {
-            webController.invalidate()
-            openInitialPage()
+        guard isStarted else { return }
+        if awaitsLibrary {
+            openWhatWaited()
+        } else if case .empty = location {
+            openHome()
         } else if update.requiresRerender(of: location) {
             webController.invalidate()
             renderCurrent(preservingScroll: true)
@@ -157,17 +255,6 @@ final class ReaderSession: Identifiable {
 
     // MARK: Opening pages
 
-    /// Cold start: the page from last time, if it still exists, else home.
-    /// Not under the screenshot harness, whose plan starts where it says.
-    private func openInitialPage() {
-        if ScreenshotRunner.directory == nil,
-           let last = CCwikiSettings.lastPage, model.index?.pages[last] != nil {
-            open(.page(path: last, anchor: nil))
-        } else {
-            openHome()
-        }
-    }
-
     func openHome() {
         guard let index = model.index else { return }
         if index.pages["index.md"] != nil {
@@ -178,6 +265,13 @@ final class ReaderSession: Identifiable {
     }
 
     func open(_ newLocation: Location, recordHistory: Bool = true) {
+        // Before the session starts, what it is asked to open waits, and
+        // opens over the plan's own choice (§1.7).
+        guard isStarted else {
+            pendingLocation = newLocation
+            pendingLocationFind = nil
+            return
+        }
         // A page the clone does not have is not somewhere the reader can be.
         // Without this the chrome moved — title, selection, history — while
         // the web view kept the previous page.
@@ -334,7 +428,8 @@ final class ReaderSession: Identifiable {
         switch location {
         case .page(let path, let anchor):
             guard let page = index.pages[path] else { return }
-            request = renderer.request(for: page, anchor: anchor, notices: notices)
+            request = renderer.request(
+                for: page, anchor: renderAnchor ?? anchor, notices: notices)
         case .folder(let slug):
             request = renderer.folderRequest(
                 slug: slug, hidingStubs: model.hidesStubs, notices: notices)

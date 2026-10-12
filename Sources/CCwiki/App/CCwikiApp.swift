@@ -8,17 +8,15 @@ struct CCwikiApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
-        // An id, so the explorer can open a reader when none is on screen to
-        // show the page it was asked to open.
-        WindowGroup(id: CCwikiApp.mainWindowID) {
-            RootView()
-                .modifier(ReaderWindowHooks())
-                // What the window shows is its session's, and every view in
-                // it reads the session from here, never through the model
-                // (plans/reader-comforts.md §1.2). The one session for now;
-                // each window claims its own once the scene is
-                // `WindowGroup(for: ReaderWindow.self)`.
-                .environment(model.primarySession)
+        // A reader window or tab, each with a session of its own
+        // (plans/reader-comforts.md §1.3). The value is the window's identity
+        // and where it opens. Every value is new, so opening one always
+        // opens a window; the default is new too, and opens Home, for a
+        // window SwiftUI opens by itself. The id lets the explorer open a
+        // reader when none is on screen to show the page it was asked to
+        // open.
+        WindowGroup(id: CCwikiApp.mainWindowID, for: ReaderWindow.self) { $window in
+            ReaderWindowView(window: $window)
                 .environment(model)
                 .frame(
                     minWidth: Theme.windowMinWidth,
@@ -26,6 +24,8 @@ struct CCwikiApp: App {
                 // The delegate is made before the model's view exists; this is
                 // the first moment both are in hand.
                 .onAppear { appDelegate.model = model }
+        } defaultValue: {
+            ReaderWindow()
         }
         .defaultSize(
             width: Theme.windowDefaultWidth,
@@ -88,26 +88,6 @@ struct CCwikiApp: App {
     static let explorerWindowID = "ccwiki.relations-explorer"
     static let mainWindowID = "ccwiki.main"
     static let paperWindowID = "ccwiki.paper"
-}
-
-/// What a reader window does for the others: it counts itself, so the
-/// explorer knows whether a page it opens will be seen, and it answers the
-/// model's requests to open the explorer. `openWindow` is an environment
-/// action, so a view has to make the call; the requests come from AppKit's
-/// menus and from `AppModel.explore(_:)`. The Jobs window's requests are
-/// answered the same way, in `RootView`.
-private struct ReaderWindowHooks: ViewModifier {
-    @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
-
-    func body(content: Content) -> some View {
-        content
-            .onAppear { model.mainWindowCount += 1 }
-            .onDisappear { model.mainWindowCount -= 1 }
-            .onChange(of: model.explorerWindowRequests) { _, _ in
-                openWindow(id: CCwikiApp.explorerWindowID)
-            }
-    }
 }
 
 /// The one AppKit hook SwiftUI does not offer: a say in whether the app quits.

@@ -41,7 +41,7 @@ final class AppModel {
         didSet {
             guard showsMaintenanceNotices != oldValue else { return }
             CCwikiSettings.showsMaintenanceNotices = showsMaintenanceNotices
-            primarySession.preferencesDidChange()
+            preferencesDidChange()
         }
     }
 
@@ -51,7 +51,7 @@ final class AppModel {
         didSet {
             guard showsLinkPreviews != oldValue else { return }
             CCwikiSettings.showsLinkPreviews = showsLinkPreviews
-            primarySession.preferencesDidChange()
+            preferencesDidChange()
         }
     }
 
@@ -62,8 +62,15 @@ final class AppModel {
             CCwikiSettings.hidesStubs = hidesStubs
             rebuildBrowseState()
             // The rendered folder page does not follow the preference by itself.
-            primarySession.preferencesDidChange()
+            preferencesDidChange()
         }
+    }
+
+    /// A preference that changes what a page renders to changed: every
+    /// reader window renders its own page again (§1.2: the model never
+    /// renders; each session decides).
+    private func preferencesDidChange() {
+        for session in sessions.values { session.preferencesDidChange() }
     }
 
     // MARK: Library
@@ -122,9 +129,10 @@ final class AppModel {
     /// environment action, so only a view can call it, and the reader's
     /// context menu is AppKit. The same pattern as `jobsWindowRequests`.
     private(set) var explorerWindowRequests = 0
-    /// Reader windows on screen. At 0 a page the explorer opens would be
-    /// shown nowhere, so it opens a reader window first.
-    var mainWindowCount = 0
+    /// Reader windows on screen, one per tab: the live sessions. At 0 a page
+    /// the explorer opens would be shown nowhere, so it opens a reader
+    /// window first.
+    private(set) var mainWindowCount = 0
     /// The inspector's derived sections left open, by role.
     private(set) var derivedSectionsExpanded: Set<String> =
         Set(CCwikiSettings.derivedSectionsExpanded) {
@@ -197,47 +205,116 @@ final class AppModel {
         }
     }
 
-    // MARK: The reader's session
+    // MARK: Reader windows
 
-    /// The reader window's session: its page, history, web view, sidebar,
-    /// inspector and sheets (plans/reader-comforts.md §1.2). Made last in
-    /// `init`, since it reads the model whole. One until there is a session
-    /// per window (A4b). A view in the reader window reads it from the
-    /// environment, never through the model; the model's own code calls it by
-    /// name, so that what A4b fans out to every session is easy to find.
-    @ObservationIgnored private(set) lazy var primarySession: ReaderSession =
-        ReaderSession(id: UUID(), model: self)
+    /// Every reader window's session, by its window's id: its page, history,
+    /// web view, sidebar, inspector and sheets (plans/reader-comforts.md
+    /// §1.2). Not observed: a view in a reader window reads its own session
+    /// from the environment, never this, and a window that is not a reader
+    /// goes through `activeSession`.
+    @ObservationIgnored private var sessions: [UUID: ReaderSession] = [:]
+    /// The windows of this process that have closed. A closed id never comes
+    /// back: a window that turns up with one is given a new id.
+    @ObservationIgnored private var closedSessionIDs: Set<UUID> = []
+    /// The reader windows, the active one first: for now the one opened
+    /// first. Observed, unlike the registry, so what follows the active
+    /// reader updates with it.
+    private var sessionOrder = SessionOrder<UUID>()
+
+    /// The session for the reader window `id`, created the first time the
+    /// window asks (§1.3). `windowNumber` is its `NSWindow`'s.
+    ///
+    /// Nil when `id` is live in another window, which a restoration can
+    /// produce, or closed earlier in this process: one web view is never in
+    /// two windows, and a closed window never comes back. The caller then
+    /// takes a fresh id.
+    func claimSession(for id: UUID, windowNumber: Int) -> ReaderSession? {
+        guard !closedSessionIDs.contains(id) else { return nil }
+        if let existing = sessions[id] {
+            // The same window asking again keeps its session.
+            return windowNumber > 0 && existing.windowNumber == windowNumber ? existing : nil
+        }
+        let session = ReaderSession(id: id, model: self)
+        session.windowNumber = windowNumber > 0 ? windowNumber : nil
+        sessions[id] = session
+        sessionOrder.opened(id)
+        mainWindowCount = sessions.count
+        return session
+    }
+
+    /// The reader window `id` is closing: its session and web view go, and
+    /// the id is not handed out again. From the window's
+    /// `willCloseNotification`, never `onDisappear`, which SwiftUI may send
+    /// for a tab that is only deselected (§1.3).
+    func sessionDidClose(_ id: UUID) {
+        guard sessions.removeValue(forKey: id) != nil else { return }
+        closedSessionIDs.insert(id)
+        sessionOrder.closed(id)
+        mainWindowCount = sessions.count
+    }
+
+    /// The reader that windows which are not readers act on (§1.8). Nil
+    /// with no reader open.
+    var activeSession: ReaderSession? {
+        sessionOrder.mostRecent.flatMap { sessions[$0] }
+    }
 
     // MARK: For windows that are not readers
 
     // The explorer, Jobs and a paper window have no session, so they open
-    // pages through these, in the active reader: the reader window used
-    // last, which is the one session until each window has its own (§1.8).
-    // A view inside a reader window never calls them; it opens pages in its
-    // own window's session.
+    // pages through these, in the active reader (§1.8). With no reader open,
+    // the location waits for the next one to start. A view inside a reader
+    // window never calls them; it opens pages in its own window's session.
+
+    /// A location asked for while no reader was open, taken by the next
+    /// session to start.
+    @ObservationIgnored private var pendingReaderLocation: Location?
+
+    /// Taken once: the next session to start opens it (§1.7).
+    func takePendingReaderLocation() -> Location? {
+        defer { pendingReaderLocation = nil }
+        return pendingReaderLocation
+    }
 
     /// Shows `location` in the active reader without bringing it forward, so
     /// the explorer stays key while a proof's pages open beside it.
     func open(_ location: Location) {
-        primarySession.open(location)
+        guard let session = activeSession else {
+            pendingReaderLocation = location
+            return
+        }
+        session.open(location)
     }
 
     func openPage(_ path: String, anchor: String? = nil) {
-        primarySession.openPage(path, anchor: anchor)
+        open(.page(path: path, anchor: anchor))
     }
 
     func openRelationObject(_ objectID: String) {
-        primarySession.openRelationObject(objectID)
+        if let session = activeSession {
+            session.openRelationObject(objectID)
+        } else if let destination = relationLabels.destination(objectID) {
+            open(.page(path: destination.path, anchor: destination.anchor))
+        }
     }
 
     func navigate(to destination: CCwikiURL.Destination) {
-        primarySession.navigate(to: destination)
+        if let session = activeSession {
+            session.navigate(to: destination)
+            return
+        }
+        switch destination {
+        case .page(let path, let anchor): open(.page(path: path, anchor: anchor))
+        case .folder(let slug): open(.folder(slug: slug))
+        case .asset(let path): NSWorkspace.shared.open(paths.content.appending(path: path))
+        case .shell: break
+        }
     }
 
     /// The explorer's own Explore From This Page, about the active reader's
     /// page.
-    var currentPageExplorerQuery: ExplorerQuery? { primarySession.currentPageExplorerQuery }
-    var canExploreCurrentPage: Bool { primarySession.canExploreCurrentPage }
+    var currentPageExplorerQuery: ExplorerQuery? { activeSession?.currentPageExplorerQuery }
+    var canExploreCurrentPage: Bool { activeSession?.canExploreCurrentPage ?? false }
 
     // MARK: Sync
 
@@ -424,10 +501,56 @@ final class AppModel {
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
         refreshMacrosWarning()
+    }
 
-        // Last: the session reads the model whole, for its web view's root
-        // and text size and for everything it renders.
-        _ = primarySession
+    // MARK: Launch
+
+    /// The launch, which runs once per process however many windows ask.
+    @ObservationIgnored private var launchTask: Task<Void, Never>?
+
+    /// Find git (one stat), read what is already on disk, and only then
+    /// touch the network, so the app is usable at once and offline. The
+    /// ingestion tools are looked for in the background.
+    ///
+    /// Every reader window calls it when it starts, and so does a paper
+    /// window, so a window macOS restores alone still loads the wiki. The
+    /// first caller runs the launch; later callers wait for the same run
+    /// (plans/reader-comforts.md §1.7).
+    func launchIfNeeded() async {
+        if let launchTask {
+            await launchTask.value
+            return
+        }
+        let task = Task { await launch() }
+        launchTask = task
+        await task.value
+    }
+
+    private func launch() async {
+        await discoverTools()
+        loadJobHistory()
+        await loadLibrary(reason: .launch)
+        // Which copy this is goes to the log on every launch; the other
+        // copies are looked for in a release, and not under the harness.
+        // Before the sync: a copy that hands over to another and quits must
+        // not leave a fetch running on the clone the two share
+        // (update-integrity §2.3).
+        await checkInstallation()
+        // A launch fetch keeps the wiki current for someone who never
+        // presses ⌘R. Not under the screenshot harness, whose captures must
+        // not depend on the network.
+        let launchFetch = syncsAtLaunch && ScreenshotRunner.directory == nil
+        if index == nil || launchFetch { sync() }
+        if ScreenshotRunner.directory == nil { await checkForUpdatesIfDue() }
+    }
+
+    /// True for the first session of the process only, which opens the page
+    /// read last; every later window opens Home (§1.7).
+    @ObservationIgnored private var hasColdStarted = false
+
+    func takeColdStart() -> Bool {
+        defer { hasColdStarted = true }
+        return !hasColdStarted
     }
 
     // MARK: Tools
@@ -681,11 +804,11 @@ final class AppModel {
         }
     }
 
-    /// What a load means for the reader: its session decides what to render
-    /// again (`ReaderSession.libraryDidLoad`), and the quick switcher's list
-    /// follows the new wiki.
+    /// What a load means for the readers: each window's session decides
+    /// what to render again (`ReaderSession.libraryDidLoad`), and the quick
+    /// switcher's list follows the new wiki.
     private func libraryDidLoad(_ update: LibraryUpdate) {
-        primarySession.libraryDidLoad(update)
+        for session in sessions.values { session.libraryDidLoad(update) }
         refreshQuickSwitcher()
     }
 
@@ -846,11 +969,17 @@ final class AppModel {
         return (.whatsNew, lastSeen)
     }
 
-    /// Called once at launch, before the library loads, so Welcome can be
-    /// read while the wiki downloads. Records this version as seen, unless a
-    /// newer one already was.
-    func openLaunchDocumentIfNeeded() {
-        guard ScreenshotRunner.directory == nil else { return }
+    @ObservationIgnored private var hasTakenLaunchDocument = false
+
+    /// Welcome or What's New, once per process: the first reader window to
+    /// start shows it at once, before the library loads, so Welcome can be
+    /// read while the wiki downloads (§1.7). Records this version as seen,
+    /// unless a newer one already was. Nil for every later window, and under
+    /// the screenshot harness.
+    func takeLaunchDocument() -> Document? {
+        guard !hasTakenLaunchDocument else { return nil }
+        hasTakenLaunchDocument = true
+        guard ScreenshotRunner.directory == nil else { return nil }
         let current = appVersion
         // Two records, because a copy from before this check still writes
         // its own version to `lastSeenVersion` when it runs, however old.
@@ -863,9 +992,9 @@ final class AppModel {
         let seen = InstallationCheck.nextSeenVersion(lastSeen: lastSeen, current: current)
         CCwikiSettings.lastSeenVersion = seen
         if !UpdateChecker.isDevelopmentVersion(seen) { CCwikiSettings.highestSeenVersion = seen }
-        guard let decision else { return }
+        guard let decision else { return nil }
         if decision.document == .whatsNew { whatsNewSince = decision.since }
-        primarySession.open(.document(decision.document))
+        return decision.document
     }
 
     /// One of the app's own pages, ready to render in any reader.
@@ -932,7 +1061,7 @@ final class AppModel {
             guard zoom != storedPageZoom else { return }
             storedPageZoom = zoom
             CCwikiSettings.pageZoom = zoom
-            primarySession.webController.setPageZoom(zoom)
+            for session in sessions.values { session.webController.setPageZoom(zoom) }
         }
     }
 
@@ -1133,7 +1262,7 @@ final class AppModel {
             return
         }
         let recent = recentPages.filter {
-            $0 != primarySession.location.path && index.pages[$0] != nil
+            $0 != activeSession?.location.path && index.pages[$0] != nil
         }
         quickSwitcherResults = index.quickSwitch(
             quickSwitcherQuery, excluding: unlistedPaths, recent: recent)
@@ -1362,12 +1491,12 @@ final class AppModel {
 
     // MARK: Other copies
 
-    /// Every reader window runs the launch task; the check belongs to the
-    /// launch, so it runs for the first one only.
+    /// The check belongs to the launch, which runs once; this keeps it to
+    /// once if anything else ever asks.
     @ObservationIgnored private var hasCheckedInstallation = false
 
-    /// The launch check of `plans/update-integrity.md` §2.3, from the launch
-    /// task, before the launch sync and the update check: logs which copy
+    /// The launch check of `plans/update-integrity.md` §2.3, from
+    /// `launchIfNeeded`, before the launch sync and the update check: logs which copy
     /// this is, then, in a release, looks for the other copies LaunchServices
     /// could start instead of this one and says at most one thing about them.
     /// The updater can only ever replace this copy; a stale one elsewhere is

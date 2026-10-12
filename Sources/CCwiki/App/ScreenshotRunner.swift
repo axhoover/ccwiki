@@ -122,11 +122,16 @@ enum ScreenshotRunner {
         }
     }
 
+    /// Whether a reader window has started the plan. Every reader window
+    /// asks once its session has started; the plan runs once per process.
+    private static var hasStarted = false
+
     /// `session` is the reader window that started the plan, which its page
     /// steps drive; `openWindow` is that window's, for the steps that open a
     /// window of their own.
     static func run(model: AppModel, session: ReaderSession, openWindow: OpenWindowAction) {
-        guard let directory else { return }
+        guard let directory, !hasStarted else { return }
+        hasStarted = true
         let plan = (ProcessInfo.processInfo.environment["CCWIKI_SHOT_PLAN"] ?? "home")
             .components(separatedBy: ",")
             .compactMap { Step.parse($0.trimmingCharacters(in: .whitespaces)) }
