@@ -382,6 +382,117 @@ struct GitReviewIntegrationTests {
 
 }
 
+/// The snapshot a review is built on, taken through the job center against
+/// real git (plans/corrections.md §6.1, §12.2, steps 1–6). Upstream moves
+/// on after the job starts; the agent's or the editor's scratch in
+/// `.ccwiki/` is never part of it.
+@MainActor
+struct ReviewSnapshotIntegrationTests {
+
+    static let newPage = "content/References/A - B & é [draft].md"
+
+    /// An edit job; then `origin/main` advances, the page is edited, a page
+    /// is added, and the hand-over and a lint log are written.
+    static func editedScene() async throws -> (JobScene, Job)? {
+        guard let scene = try await JobScene.make() else { return nil }
+        let job = try await scene.beginEdit()
+
+        try scene.clone.write("content/other.md", "upstream\n")
+        try #require(await scene.clone.commit("upstream", date: 1_780_000_100) != nil)
+        try #require(await scene.clone.run(["push", "-q", "origin", "main"]).succeeded)
+        try #require(await scene.clone.run(["fetch", "-q", "origin"]).succeeded)
+
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        try scene.write(newPage, "new\n", in: job)
+        try scene.write(".ccwiki/pull-request.md", "# [fix] Page: B\n\nWhy.\n", in: job)
+        try scene.write(".ccwiki/lint.log", "ok\n", in: job)
+        return (scene, job)
+    }
+
+    @Test("the saved patch holds the two changes, not .ccwiki/ and not upstream's")
+    func patch() async throws {
+        guard let (scene, job) = try await Self.editedScene() else { return }
+        defer { scene.delete() }
+
+        await scene.center.refreshReview(job)
+        let patch = scene.patch(of: job)
+        #expect(patch.contains("diff --git a/content/page.md b/content/page.md"))
+        // git quotes the new page's name, for its é, so its content is looked for.
+        #expect(patch.contains("new file mode") && patch.contains("+new"))
+        #expect(!patch.contains(".ccwiki"))
+        #expect(!patch.contains("content/other.md"), "upstream's commit is not the job's")
+        #expect(!patch.contains("content/region.md"))
+
+        // Nothing changed, nothing new: the same bytes again.
+        let first = try Data(contentsOf: job.patchFile)
+        await scene.center.refreshReview(job)
+        #expect(try Data(contentsOf: job.patchFile) == first)
+    }
+
+    @Test("reverting both files leaves nothing to review")
+    func revertBoth() async throws {
+        guard let (scene, job) = try await Self.editedScene() else { return }
+        defer { scene.delete() }
+
+        await scene.center.refreshReview(job)
+        await scene.center.revert("content/page.md", in: job)
+        await scene.center.revert(Self.newPage, in: job)
+        #expect(try Data(contentsOf: job.patchFile).isEmpty)
+        #expect(try scene.read("content/page.md", in: job) == JobScene.page)
+        #expect(!FileManager.default.fileExists(
+            atPath: job.worktree.appending(path: Self.newPage).path(percentEncoded: false)))
+        #expect(job.review?.isEmpty == true)
+        #expect(FileManager.default.fileExists(
+            atPath: job.worktree.appending(path: ".ccwiki/lint.log").path(percentEncoded: false)),
+            "the scratch stays on disk")
+    }
+
+    @Test("the snapshot reports exactly the two files, with a stable digest",
+          .disabled("needs Track A: ReviewSnapshot.assemble and GitNameStatus"))
+    func snapshot() async throws {
+        guard let (scene, job) = try await Self.editedScene() else { return }
+        defer { scene.delete() }
+
+        await scene.center.refreshReview(job)
+        let review = try #require(job.review)
+        #expect(review.baseCommit == scene.base)
+        #expect(review.files.map(\.path) == [Self.newPage, "content/page.md"])
+        let page = try #require(review.files.first { $0.path == "content/page.md" })
+        #expect(page.status == .modified)
+        #expect(page.oldText == JobScene.page && page.newText == "a\nB\nc")
+        #expect(page.hunks == [LineHunk(old: 1..<2, new: 1..<2)],
+                "no end-of-file hunk for a file without a final newline")
+        let added = try #require(review.files.first { $0.path == Self.newPage })
+        #expect(added.status == .added && added.oldText == nil && added.newText == "new\n")
+        #expect(review.digest.count == 64)
+
+        await scene.center.refreshReview(job)
+        #expect(job.review?.digest == review.digest)
+    }
+
+    @Test("an agent's commit shows in the review, collapsed onto the base",
+          .disabled("needs Track A: ReviewSnapshot.assemble and GitNameStatus"))
+    func agentCommit() async throws {
+        guard let (scene, job) = try await Self.editedScene() else { return }
+        defer { scene.delete() }
+        let agent = await Subprocess.run(
+            executable: scene.clone.git,
+            arguments: ["-C", job.worktree.path(percentEncoded: false), "add", "-A", "--",
+                        "content"],
+            environment: FixtureRepository.environment())
+        try #require(agent.succeeded)
+        let commit = await Subprocess.run(
+            executable: scene.clone.git,
+            arguments: ["-C", job.worktree.path(percentEncoded: false), "commit", "-q",
+                        "--no-verify", "-m", "agent"],
+            environment: FixtureRepository.environment(date: 1_780_000_200))
+        try #require(commit.succeeded)
+
+        await scene.center.refreshReview(job)
+        #expect(job.review?.files.map(\.path) == [Self.newPage, "content/page.md"])
+    }
+}
+
 /// `Subprocess.runData`: stdout exactly as the child wrote it (§6.1).
 struct SubprocessDataTests {
 

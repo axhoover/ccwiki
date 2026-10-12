@@ -205,3 +205,272 @@ enum Handover {
         try? String(contentsOf: worktree.appending(path: pullRequestPath), encoding: .utf8)
     }
 }
+
+// MARK: - Running an agent job
+
+/// What an ingestion and a correction do alike, once each has resolved its
+/// base: the worktree, then, after the runner has composed its prompt, the
+/// agent itself and what comes after it (plans/corrections.md §5.3–§5.5).
+///
+/// ```
+/// git worktree add <worktrees>/<id> -b <branch> <base>
+/// git ls-remote <target> 'refs/heads/*'     the tripwire's "before"
+/// claude -p "<prompt>" …                    sealed; streamed into the transcript
+/// the tripwire                              a push or a PR CCwiki did not make
+/// the outcome                               aborted, failed, or
+/// the hand-over                             .ccwiki/pull-request.md, the change → awaiting review
+/// ```
+///
+/// The worktree is **kept** whenever there is something in it to look at —
+/// a review, a failure, an abort — because a job you cannot inspect is a job
+/// you cannot debug. Only an agent that changed nothing has its worktree,
+/// scratch and local branch removed. Nothing on GitHub is touched: the
+/// agent cannot push, and CCwiki pushes only at Approve.
+@MainActor
+struct AgentRun {
+
+    let paths: AppPaths
+    let tools: ToolLocator
+    let git: GitService
+    /// Where the pull request would go: the tripwire watches it.
+    let target: PublishTarget
+    let job: Job
+
+    // MARK: The worktree
+
+    /// The job's branch, at the first name no local or remote branch claims,
+    /// and its worktree on `base`. `ref` names what `base` was resolved
+    /// from, for the transcript. False when the job has ended: failed, or
+    /// cancelled meanwhile.
+    func addWorktree(base: String, describing ref: String?) async -> Bool {
+        // Running a job again after a failure is the common case, and the
+        // branch from the failed attempt is still there. Take the next free
+        // name rather than making the user learn `git branch -D`.
+        let branch = await git.availableBranchName(clone: paths.clone, preferred: job.branch)
+        job.setBranch(branch)
+        job.append(JobLogEntry(.system,
+            "git worktree add \(job.worktree.lastPathComponent) -b \(branch) \(base.prefix(12))"
+            + (ref.map { " (\($0))" } ?? "")))
+
+        let transcript = job
+        let created = await git.addWorktree(
+            clone: paths.clone, at: job.worktree, branch: branch, baseRef: base
+        ) { line in
+            Task { @MainActor in transcript.append(JobLogEntry(.system, line.text)) }
+        }
+        // Cancelled during `worktree add`: `job.cancel()` has set the state,
+        // and a failed add is not a failure to report over it.
+        if Task.isCancelled {
+            if created { await cleanUpDespiteCancellation(keep: false) }
+            return false
+        }
+        guard created else {
+            job.setState(.failed(
+                "Could not create the worktree at \(job.worktree.lastPathComponent). "
+                + "Check the transcript for git's reason."))
+            return false
+        }
+        return true
+    }
+
+    // MARK: The agent
+
+    /// Runs `claude` with `invocation` in the job's worktree, and settles
+    /// the job: `awaitingReview` when the agent changed something and did
+    /// not abort, `opened` when the tripwire found a pull request it opened
+    /// itself, and otherwise aborted, failed or cancelled. `base` is the
+    /// commit the worktree started from; `siteURL` is the page on the
+    /// site, for the pull request CCwiki proposes.
+    func run(_ invocation: AgentInvocation, claude: String, base: String, siteURL: URL?) async {
+        // What GitHub looked like before, so the tripwire can tell
+        // afterwards what moved while the agent ran (§5.5).
+        let tripwire = Tripwire(git: git, tools: tools, target: target)
+        let headsBefore = await tripwire.headsBefore()
+        if Task.isCancelled { await cleanUpDespiteCancellation(keep: true); return }
+        if headsBefore == nil {
+            job.append(JobLogEntry(.system,
+                "Could not list the branches on GitHub, so the tripwire will not be able to "
+                + "check for a push."))
+        }
+
+        // The agent's own, empty gh configuration: the seal (§5.1).
+        try? FileManager.default.createDirectory(
+            at: AgentInvocation.ghConfigDirectory(scratch: job.scratch),
+            withIntermediateDirectories: true)
+
+        job.setState(.running)
+        var parser = ClaudeStreamParser()
+        var exitStatus: Int32 = -1
+        let transcript = TranscriptBuffer(job: job)
+        for await line in Subprocess.lines(
+            executable: claude,
+            arguments: invocation.arguments,
+            currentDirectory: job.worktree,
+            environment: invocation.environment
+        ) {
+            if let status = line.exitStatus { exitStatus = status; continue }
+            job.appendRaw(line.text)
+
+            switch line.stream {
+            case .stdout:
+                transcript.append(parser.consume(line.text))
+            case .stderr:
+                // The CLI logs progress to stderr; only surface the substantive
+                // lines, or the transcript fills with noise.
+                let text = line.text.trimmingCharacters(in: .whitespaces)
+                if !text.isEmpty, !line.isProgress {
+                    transcript.append([JobLogEntry(.stderr, text)])
+                }
+            }
+        }
+        // Everything buffered lands before the outcome is written beneath it.
+        transcript.flush()
+
+        if Task.isCancelled {
+            await cleanUp(keep: true)
+            job.setState(.cancelled)
+            return
+        }
+
+        // What the agent says is prose; what GitHub says is fact. Asked
+        // after every exit but a cancel, whatever the agent reports.
+        let caught = await tripwire.check(
+            job, headsBefore: headsBefore,
+            otherBranches: Tripwire.otherJobBranches(logs: paths.logs, excluding: job.id))
+        if Task.isCancelled {
+            await cleanUpDespiteCancellation(keep: true)
+            return
+        }
+        if let notice = caught.notice { job.setNotice(notice) }
+        if let outcome = parser.outcome { job.setOutcome(outcome) }
+        if let url = caught.pullRequest {
+            // Not CCwiki's pull request, and nothing to review: the change
+            // is already on GitHub. The worktree stays, for inspection.
+            await cleanUp(keep: true)
+            job.setState(.opened(url: url))
+            return
+        }
+
+        guard let outcome = parser.outcome else {
+            job.append(JobLogEntry(.error, "claude exited \(exitStatus) with no result event."))
+            await cleanUp(keep: true)
+            job.setState(.failed(
+                exitStatus == 0
+                    ? "The agent produced no result. The transcript is in the log file."
+                    : "claude exited \(exitStatus)."))
+            return
+        }
+
+        for denial in outcome.permissionDenials {
+            job.append(JobLogEntry(.error, "Permission denied — \(denial)"))
+        }
+        if !outcome.result.isEmpty {
+            job.append(JobLogEntry(.assistant, outcome.result))
+        }
+        if let claimed = outcome.pullRequestURL {
+            job.append(JobLogEntry(.system,
+                "The agent's last message names \(claimed.absoluteString). CCwiki takes a "
+                + "pull request from GitHub, never from the agent's words."))
+        }
+
+        if let reason = outcome.abortReason {
+            // Aborting is a good outcome, and the prompts say so: a wrong
+            // page in the wiki costs a maintainer more than a change that did
+            // not land. Keep the worktree so the reasoning can be checked.
+            await cleanUp(keep: true)
+            job.setState(.aborted(reason: reason))
+            return
+        }
+
+        if outcome.isError {
+            await cleanUp(keep: true)
+            job.setState(.failed("The agent reported an error (\(outcome.subtype))."))
+            return
+        }
+
+        await handOver(base: base, siteURL: siteURL)
+    }
+
+    // MARK: The hand-over
+
+    /// The agent finished. Read the pull request text it left, and either
+    /// wait for a person or, when it changed nothing, say so and prune.
+    /// The full snapshot, with DiffGuard's findings, is the job center's,
+    /// taken as the job enters review (§6.1); this asks git only whether
+    /// there is anything to review.
+    private func handOver(base: String, siteURL: URL?) async {
+        let handover = Handover.pullRequestText(in: job.worktree)
+        if handover == nil {
+            job.append(JobLogEntry(.system,
+                "The agent left no \(Handover.pullRequestPath); CCwiki proposes a title "
+                + "and body of its own."))
+        }
+        job.pullRequest = PullRequestDraft.make(
+            for: job.kind,
+            handover: handover.flatMap { PullRequestDraft.parse(handover: $0) },
+            siteURL: siteURL)
+
+        var diff: (nameStatus: Data, numstat: Data, patch: Data)?
+        if await git.stageAll(in: job.worktree) {
+            diff = await git.stagedDiff(in: job.worktree, base: base)
+        }
+        if Task.isCancelled {
+            await cleanUpDespiteCancellation(keep: true)
+            return
+        }
+        guard let diff else {
+            job.append(JobLogEntry(.error,
+                "git could not stage or compare the worktree's changes."))
+            await cleanUp(keep: true)
+            job.setState(.failed(
+                "CCwiki could not read the agent's changes. The worktree has been kept."))
+            return
+        }
+        guard !diff.nameStatus.isEmpty else {
+            job.append(JobLogEntry(.system, Self.nothingChanged))
+            await cleanUp(keep: false)
+            job.setState(.failed(Self.nothingChanged))
+            return
+        }
+
+        job.append(JobLogEntry(.system,
+            "Awaiting review in Jobs. Nothing has been pushed: the draft pull request "
+            + "opens only when you approve the changes."))
+        job.setState(.awaitingReview)
+    }
+
+    nonisolated static let nothingChanged = "The agent finished without changing anything."
+
+    // MARK: Cleaning up
+
+    /// `cleanUp`, from a task that has been cancelled.
+    ///
+    /// A `git worktree remove` started from a cancelled task is killed the
+    /// moment it starts (`Subprocess.lines` honours cancellation). An
+    /// unstructured task does not inherit the cancellation, so the removal
+    /// actually runs.
+    func cleanUpDespiteCancellation(keep: Bool) async {
+        let agent = self
+        await Task { @MainActor in await agent.cleanUp(keep: keep) }.value
+    }
+
+    /// Remove the worktree, its scratch directory and its local branch,
+    /// unless there is something in them worth looking at. Nothing was
+    /// pushed, so nothing on GitHub is touched.
+    func cleanUp(keep: Bool) async {
+        if keep {
+            job.append(JobLogEntry(.system,
+                "Worktree kept at \(job.worktree.path(percentEncoded: false))"))
+            return
+        }
+        job.append(JobLogEntry(.system, "Pruning worktree."))
+        let removed = await git.removeWorktree(clone: paths.clone, at: job.worktree, force: true)
+        if !removed {
+            job.append(JobLogEntry(.system,
+                "Could not remove the worktree; it is still at "
+                + job.worktree.path(percentEncoded: false)))
+        }
+        try? FileManager.default.removeItem(at: job.scratch)
+        if removed { _ = await git.deleteBranch(job.branch, in: paths.clone) }
+    }
+}

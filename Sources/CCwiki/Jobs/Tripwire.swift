@@ -137,7 +137,7 @@ struct Tripwire {
     /// `<ISO8601 createdAt> <head> <url>` lines → the pull requests created
     /// at or after `date`, newest first. A branch name holds no space, so the
     /// three fields split cleanly. The variant of
-    /// `IngestJobRunner.pullRequest(createdAfter:in:)` that keeps the head.
+    /// `Publisher.pullRequest(createdAfter:in:)` that keeps the head.
     nonisolated static func pullRequests(createdAfter date: Date, in listing: String)
         -> [OpenedPullRequest] {
         let formatter = ISO8601DateFormatter()
