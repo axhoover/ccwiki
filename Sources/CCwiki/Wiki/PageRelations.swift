@@ -299,6 +299,15 @@ struct PageRelations: Sendable {
             list.addClass(.against, "Against", barrier.reductionClass, noun: "reductions",
                           rationale: lines(barrier.why("class"), barrier.why("oracle")),
                           manifest: manifest)
+            // The standard model is every barrier's default and says
+            // nothing; any other is what the barrier's theorem is about, and
+            // the derivation does not compose it (wiki-asks.md ask 3).
+            if barrier.model != "standard" {
+                list.add(.model, "Model",
+                         .text(sentenceCased(RelationVocabulary.modelName(barrier.model))),
+                         help: barrier.why("model"),
+                         link: RelationVocabulary.modelPage(barrier.model).map { "[[\($0)]]" })
+            }
         }
 
         for entry in barrier.conditionalOn {

@@ -31,6 +31,9 @@ enum RelationText {
         #"\alpha"#: "α", #"\beta"#: "β", #"\delta"#: "δ", #"\sigma"#: "σ",
         #"\mu"#: "μ", #"\nu"#: "ν", #"\ell"#: "ℓ", #"\poly"#: "poly", #"\negl"#: "negl",
         #"\secpar"#: "λ", #"\bits"#: "{0,1}",
+        // The site's integers, which the curation's quotes use ($\ZZ_p^*$)
+        // and no manifest title does.
+        #"\ZZ"#: "ℤ",
         // Operator names and the site's advantage macro: the security losses
         // use `\Adv`, `\log` and `\min`, and one rationale uses `\bmod` (and
         // `\mapsto`, above). Spelled out although the fallback would produce

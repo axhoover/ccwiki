@@ -246,7 +246,12 @@ extension Derivation {
                 let note = ScopeNote(models: fact.models.sorted(by: Self.precedes),
                                      assumesPrecondition: !fact.assumes.isEmpty,
                                      isWeakened: fact.weakening != nil)
-                let barrierBeside = !recorded.isEmpty || derived.contains { !$0.isRedundant }
+                // The note says the barriers concern standard-model
+                // reductions, so a barrier proved in another model, whose own
+                // row names its model, does not call for it. A stub's model is
+                // not evidence, and every derived barrier is standard-model.
+                let barrierBeside = recorded.contains { $0.status == .stub || $0.model == Self.standardModel }
+                    || derived.contains { !$0.isRedundant }
                 if !note.reasons.isEmpty && barrierBeside {
                     scopeNote = note
                 }

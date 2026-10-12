@@ -588,6 +588,220 @@ struct DerivationTests {
         #expect(fromZ == ["c", "d"])
     }
 
+    // MARK: The upstream fields (relations-followups.md §4.4)
+
+    @Test("an equivalence whose record states its reverse class needs no review, and the record wins")
+    func recordedReverseClass() throws {
+        let manifest = try Fx.manifest(
+            objects: ["x", "y", "u", "v", "s", "t"].map { Fx.object($0) },
+            reductions: [
+                Fx.reduction("red-x-eq-y", ["x"], "y", kind: "equivalence", reverseClass: "unstated"),
+                Fx.reduction("red-u-eq-v", ["u"], "v", kind: "equivalence", reverseClass: "relativizing"),
+                Fx.reduction("red-s-eq-t", ["s"], "t", kind: "equivalence", status: "stub",
+                             reverseClass: "fully-black-box"),
+            ])
+        // The curation says both directions of x ⇔ y take the record's
+        // class; the record itself says the reverse one is unstated.
+        let curation = DerivationCuration(equivalences: [
+            "red-x-eq-y": .init(forward: "record", reverse: "record"),
+        ])
+        let derivation = Derivation(manifest: manifest, curation: curation)
+
+        // R3 still makes a stub unstated both ways.
+        let steps = derivation.steps.map { "\($0.id):\($0.reductionClass)" }
+        #expect(steps == ["red-s-eq-t:unstated", "red-s-eq-t~reverse:unstated",
+                          "red-u-eq-v:fully-black-box", "red-u-eq-v~reverse:relativizing",
+                          "red-x-eq-y:fully-black-box", "red-x-eq-y~reverse:unstated"])
+        #expect(derivation.unreviewedEquivalences.isEmpty)
+
+        let backwards = try #require(derivation.answer(from: ["y"], to: "x", options: .standard).derived)
+        #expect(backwards.fact.chainClass == .unstated)
+        let relativizing = try #require(derivation.answer(from: ["v"], to: "u", options: .standard).derived)
+        #expect(relativizing.fact.chainClass == .relativizing)
+
+        // The entry the record now supersedes is named, as a warning.
+        let sentinels = derivation.sentinels()
+        #expect(sentinels.superseded == ["equivalences:red-x-eq-y"])
+        #expect(sentinels.byName["curationSuperseded"] == false)
+        #expect(sentinels.equivalencesReviewed)
+    }
+
+    @Test("an object the record marks refuted is vacuous, by its own key, and never a source or completion")
+    func recordedRefutation() throws {
+        let manifest = try Fx.manifest(
+            objects: [
+                Fx.object("fake", type: "assumption", refutedBy: ["[[XY99 - An attack on Fake|XY99]]"]),
+                Fx.object("old", type: "assumption",
+                          refutedBy: ["[[ZW01 - Another attack|ZW01]]", "[[AB02 - A third|AB02]]"]),
+                Fx.object("p"), Fx.object("q"), Fx.object("r"), Fx.object("s"),
+            ],
+            reductions: [Fx.reduction("red-fake-to-p", ["fake"], "p"), Fx.reduction("red-p-to-q", ["p"], "q"),
+                         Fx.reduction("red-old-to-q", ["old"], "q"),
+                         Fx.reduction("red-r-and-fake-to-s", ["r", "fake"], "s")])
+        // The file refutes `old` too. The record's refutation replaces the
+        // file's in the engine; the file's entry stays an entry, superseded.
+        let curation = DerivationCuration(
+            refuted: [.init(objectID: "old", source: "OLD", text: "Old is false (OLD).", evidence: "")])
+        let derivation = Derivation(manifest: manifest, curation: curation)
+
+        let vacuous = try #require(derivation.answer(from: ["fake"], to: "q", options: .standard).derived)
+        #expect(vacuous.isVacuous)
+        let refutation = try #require(vacuous.refutedStarts.first)
+        #expect(refutation.source == "XY99")
+        #expect(refutation.text == "Its page records the attack.")
+        #expect(derivation.curation.refuted["old"]?.source == "ZW01, AB02")
+
+        // R11 and R10 read the same table, so neither lists it.
+        let backward = derivation.implying("q", options: .standard)
+        let singles = backward.singles.map { $0.objectID }
+        #expect(singles == ["p"])
+        #expect(backward.refutedExcluded == ["fake", "old"])
+        #expect(derivation.derivedSources(of: "q", options: .standard).isEmpty)
+        let noPath = try #require(derivation.answer(from: ["r"], to: "s", options: .standard).noPath)
+        #expect(noPath.completions.isEmpty)
+
+        // A manifest refutation is the wiki's record, never a curation entry.
+        let entries = derivation.curation.entries.map { $0.id }
+        #expect(entries == ["refuted:old"])
+        let sentinels = derivation.sentinels()
+        #expect(sentinels.superseded == ["refuted:old"])
+        #expect(sentinels.curationResolves)
+    }
+
+    @Test("a barrier proved outside the standard model is not propagated, still checked, and takes no scope note")
+    func barrierModel() throws {
+        let objects = ["x", "a", "y", "u", "t"].map { Fx.object($0) }
+        let reductions = [Fx.reduction("red-x-to-a", ["x"], "a"), Fx.reduction("red-u-to-t", ["u"], "t")]
+        func world(_ model: String?) throws -> Derivation {
+            let manifest = try Fx.manifest(objects: objects, reductions: reductions, barriers: [
+                Fx.barrier("bar-x-to-y", ["x"], "y", model: model),
+                Fx.barrier("bar-u-to-t", ["u"], "t", model: "rom"),
+            ])
+            return Derivation(manifest: manifest, curation: .empty)
+        }
+
+        // In the standard model the barrier composes with x ⇒ a.
+        let standard = try world(nil)
+        let derived = standard.derivedBarriers.map { "\($0.barrier.id):\($0.hypothesis)⇒\($0.conclusion)" }
+        #expect(derived == ["bar-x-to-y:a⇒y"])
+
+        let rom = try world("rom")
+        #expect(rom.derivedBarriers.isEmpty)
+        #expect(rom.derivedBarriers(from: ["a"], to: "y").isEmpty)
+        // It is still a recorded barrier on its own pair, and R8 still
+        // checks it: the recorded u ⇒ t meets the ROM barrier on u ⇒ t.
+        let onPair = try #require(rom.answer(from: ["x"], to: "y", options: .standard).noPath)
+        let recorded = onPair.recordedBarriers.map { $0.id }
+        #expect(recorded == ["bar-x-to-y"])
+        let conflicting = try #require(rom.answer(from: ["u"], to: "t", options: .standard).derived)
+        #expect(conflicting.conflicts == [Derivation.BarrierConflict(
+            barrierID: "bar-u-to-t", isDerived: false, consequenceIndex: 0, chainClass: .fullyBlackBox)])
+        #expect(!rom.invariants().noChainContradictsRecordedBarrier)
+
+        // R8's scope note says the barriers concern standard-model
+        // reductions: a ROM chain gets it beside a standard-model barrier,
+        // not beside a ROM barrier, whose row names its model.
+        func scopeNote(besideBarrierIn model: String?) throws -> Derivation.ScopeNote? {
+            let manifest = try Fx.manifest(
+                objects: [Fx.object("v"), Fx.object("w")],
+                reductions: [Fx.reduction("red-v-to-w-rom", ["v"], "w", model: "rom")],
+                barriers: [Fx.barrier("bar-v-to-w", ["v"], "w", model: model)])
+            let derivation = Derivation(manifest: manifest, curation: .empty)
+            return try #require(derivation.answer(from: ["v"], to: "w", options: .all).derived).scopeNote
+        }
+        #expect(try scopeNote(besideBarrierIn: nil)?.reasons == ["rom"])
+        #expect(try scopeNote(besideBarrierIn: "rom") == nil)
+    }
+
+    @Test("curationSuperseded lists a setting no eligible step takes alone")
+    func supersededSetting() throws {
+        let manifest = try Fx.manifest(
+            objects: ["hm", "hm3", "r", "q", "s"].map { Fx.object($0) },
+            reductions: [Fx.reduction("red-hm-to-q", ["hm"], "q"),
+                         Fx.reduction("red-r-and-hm3-to-s", ["r", "hm3"], "s")])
+        let curation = DerivationCuration(settings: [
+            .init(objectID: "hm", text: "A setting.", evidence: ""),
+            .init(objectID: "hm3", text: "Another.", evidence: ""),
+        ])
+        let sentinels = Derivation(manifest: manifest, curation: curation).sentinels()
+        #expect(sentinels.superseded == ["settings:hm3"])
+        #expect(!sentinels.curationSuperseded)
+        // A warning: the two that fail the corpus test still hold.
+        #expect(sentinels.curationResolves)
+        #expect(sentinels.regimeLossCurated)
+    }
+
+    @Test("a curated edge that changes under its id fails, and a class change off an equivalence warns")
+    func curatedEdges() throws {
+        let curation = DerivationCuration(
+            quarantine: ["red-e-to-f": "The Statement has a second hypothesis."],
+            equivalences: ["red-x-eq-y": .init(forward: "record", reverse: "record")],
+            requires: [.init(relationID: "red-a-to-b", isReverse: false, hypothesis: "a",
+                             notion: "a, strong", metBy: ["red-m-to-a"])],
+            weakens: [.init(relationID: "red-p-to-w", notion: "w, selective", acceptedBy: ["red-w-to-z"])])
+        let objects = ["a", "b", "m", "e", "f", "g", "x", "y", "p", "w", "z"].map { Fx.object($0) }
+        let reviewed = Derivation(manifest: try Fx.manifest(objects: objects, reductions: [
+            Fx.reduction("red-a-to-b", ["a"], "b"),
+            Fx.reduction("red-m-to-a", ["m"], "a"),
+            Fx.reduction("red-e-to-f", ["e"], "f"),
+            Fx.reduction("red-x-eq-y", ["x"], "y", kind: "equivalence"),
+            Fx.reduction("red-p-to-w", ["p"], "w"),
+            Fx.reduction("red-w-to-z", ["w"], "z"),
+        ]), curation: curation)
+
+        // Each entry's edge, its producers and its consumers: what the golden
+        // file's `curatedEdges` snapshots.
+        let naming = reviewed.curatedRelations()
+        #expect(naming.keys.sorted() == ["red-a-to-b", "red-e-to-f", "red-m-to-a", "red-p-to-w",
+                                         "red-w-to-z", "red-x-eq-y"])
+        #expect(naming["red-m-to-a"] == ["requires:red-a-to-b:a"])
+        #expect(naming["red-w-to-z"] == ["weakens:red-p-to-w"])
+        var snapshot: [String: Derivation.CuratedEdge] = [:]
+        for relationID in naming.keys { snapshot[relationID] = reviewed.curatedEdge(relationID) }
+        #expect(reviewed.changedCuratedEdges(since: snapshot).isEmpty)
+
+        // The wiki moves: a model on the curated step, a producer's
+        // conclusion, the quarantined edge's hypotheses, the equivalence's
+        // class, a consumer's class, and the weakened step gone.
+        let moved = Derivation(manifest: try Fx.manifest(objects: objects, reductions: [
+            Fx.reduction("red-a-to-b", ["a"], "b", model: "rom"),
+            Fx.reduction("red-m-to-a", ["m"], "g"),
+            Fx.reduction("red-e-to-f", ["e", "g"], "f"),
+            Fx.reduction("red-x-eq-y", ["x"], "y", reductionClass: "free", kind: "equivalence"),
+            Fx.reduction("red-w-to-z", ["w"], "z", reductionClass: "unstated"),
+        ]), curation: curation)
+        let changed = moved.changedCuratedEdges(since: snapshot)
+        let verdicts = changed.map { "\($0.relationID):\($0.fails ? "fails" : "warns")" }
+        #expect(verdicts == ["red-a-to-b:warns", "red-e-to-f:fails", "red-m-to-a:fails", "red-p-to-w:fails",
+                             "red-w-to-z:warns", "red-x-eq-y:fails"])
+        let gone = try #require(changed.first { $0.relationID == "red-p-to-w" })
+        #expect(gone.now == nil)
+        #expect(gone.entryIDs == ["weakens:red-p-to-w"])
+    }
+
+    @Test("a curated conjunction whose page reorders its hypotheses is the same theorem")
+    func curatedConjunctionReordered() throws {
+        let curation = DerivationCuration(quarantine: ["red-a-and-b-to-c": "The Statement needs one group."])
+        let objects = ["a", "b", "c", "d"].map { Fx.object($0) }
+        func world(_ hypotheses: [String], reductionClass: String = "fully-black-box") throws -> Derivation {
+            let manifest = try Fx.manifest(objects: objects, reductions: [
+                Fx.reduction("red-a-and-b-to-c", hypotheses, "c", reductionClass: reductionClass),
+            ])
+            return Derivation(manifest: manifest, curation: curation)
+        }
+        // Reviewed out of sorted order, as JLS21's conjunction is recorded.
+        let reviewed = try #require(try world(["b", "a"]).curatedEdge("red-a-and-b-to-c"))
+        let snapshot = ["red-a-and-b-to-c": reviewed]
+
+        #expect(try world(["a", "b"]).changedCuratedEdges(since: snapshot).isEmpty)
+        // Reordered and retyped off an equivalence: the retyping alone warns.
+        let retyped = try world(["a", "b"], reductionClass: "unstated").changedCuratedEdges(since: snapshot)
+        #expect(retyped.map(\.fails) == [false])
+        // A different conjunct is a different theorem.
+        let other = try world(["d", "b"]).changedCuratedEdges(since: snapshot)
+        #expect(other.map(\.fails) == [true])
+    }
+
     // MARK: The Statement lint (§2a)
 
     @Test("the Statement lint reads a page whatever its line endings")
@@ -711,7 +925,8 @@ private enum Fx {
         return classes
     }
 
-    static func object(_ id: String, type: String = "primitive", of host: String? = nil) -> [String: Any] {
+    static func object(_ id: String, type: String = "primitive", of host: String? = nil,
+                       refutedBy: [String]? = nil) -> [String: Any] {
         var object: [String: Any] = [
             "id": id,
             "kind": host == nil ? "object" : "variant",
@@ -726,14 +941,15 @@ private enum Fx {
             object["of"] = host
             object["anchor"] = "#" + id
         }
+        if let refutedBy { object["refutedBy"] = refutedBy }
         return object
     }
 
     static func reduction(_ id: String, _ hypotheses: [String], _ conclusion: String,
                           reductionClass: String = "fully-black-box", model: String = "standard",
                           kind: String = "implication", heuristic: Bool = false,
-                          status: String = "draft") -> [String: Any] {
-        [
+                          status: String = "draft", reverseClass: String? = nil) -> [String: Any] {
+        var reduction: [String: Any] = [
             "id": id,
             "kind": kind,
             "hypotheses": hypotheses,
@@ -749,16 +965,19 @@ private enum Fx {
             "slug": id,
             "title": id,
         ]
+        if let reverseClass { reduction["reverseClass"] = reverseClass }
+        return reduction
     }
 
     static func barrier(_ id: String, _ hypotheses: [String], _ conclusion: String,
                         reductionClass: String = "fully-black-box",
                         consequences: [[String: Any]]? = nil, strength: String = "unconditional",
-                        circumventedBy: [String] = [], status: String = "draft") -> [String: Any] {
+                        circumventedBy: [String] = [], status: String = "draft",
+                        model: String? = nil) -> [String: Any] {
         let contradiction: [[String: Any]] = [
             ["kind": "contradiction", "target": "", "class": reductionClass],
         ]
-        return [
+        var barrier: [String: Any] = [
             "id": id,
             "hypotheses": hypotheses,
             "conclusion": conclusion,
@@ -773,6 +992,8 @@ private enum Fx {
             "slug": id,
             "title": id,
         ]
+        if let model { barrier["model"] = model }
+        return barrier
     }
 }
 
