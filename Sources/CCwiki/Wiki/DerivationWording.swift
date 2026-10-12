@@ -241,6 +241,61 @@ enum DerivationWording {
         + "hypothesis than the step before it states; ask the Relations Explorer about the pair "
         + "to see the step."
 
+    // MARK: Adjustments (relations-followups.md §2.5)
+    //
+    // What CCwiki applies that `relations.json` does not record, beside the
+    // wiki's own text. These sentences say what CCwiki did and what the wiki
+    // says, never that the wiki is wrong; quotes and notions are the wiki's
+    // words and are not held to that.
+
+    static let adjustmentsTitle = "Adjustments"
+    static let adjustmentsHelp = "relations.json leaves out some things the wiki's pages state: a "
+        + "condition a step needs, a weaker result a step gives, which direction of an "
+        + "equivalence its class covers, that an assumption is broken, or that an object is a "
+        + "setting rather than an assumption. CCwiki reads each from the page, quoted here, and "
+        + "applies it."
+
+    /// A row's help. Its second sentence vouches for the quotes, so it goes
+    /// when one of them is no longer on its page.
+    static func adjustmentHelp(quotesFound: Bool) -> String {
+        let applied = "CCwiki applies this because relations.json does not record it."
+        return quotesFound ? applied + " The quoted text is the wiki's own." : applied
+    }
+
+    /// In place of a quote the page no longer has. The bundled curation stays
+    /// as reviewed while the clone moves on daily, so the app says which
+    /// review it still applies. `commit` is the reviewed wiki commit.
+    static func unverifiedQuote(pageTitle: String, commit: String?) -> String {
+        let reviewed = commit.map { " at wiki \($0.prefix(7))" } ?? ""
+        return "No longer on \(pageTitle) as quoted; CCwiki still applies this as reviewed\(reviewed)."
+    }
+
+    /// A precondition a producer on the proof establishes: "OT ⇒ MPC (Kil88)
+    /// needs OT secure against malicious parties. cPIR ⇒ OT (DMO00)
+    /// establishes it."
+    static func establishedBy(step: String, notion: String, producer: String) -> String {
+        "\(step) needs \(notion). \(producer) establishes it."
+    }
+
+    /// A step refused on the way that would have concluded an object on the
+    /// proof, as BM84 would have given DDH ⇒ PRG.
+    static func notUsedHere(step: String, notion: String, hypothesis: String,
+                            producer: String) -> String {
+        "Not used here: \(step) needs \(notion), and the \(hypothesis) here comes from \(producer)."
+    }
+
+    /// A step that takes a weaker result for its hypothesis, as its Statement
+    /// allows.
+    static func accepted(consumer: String, producer: String, notion: String) -> String {
+        "\(consumer) accepts what \(producer) gives: \(notion)."
+    }
+
+    /// The direction of an equivalence whose class the record does not cover.
+    static func unstatedDirection(step: String) -> String {
+        "\(step) is used with its class unstated: the record's class holds for the other "
+            + "direction only."
+    }
+
     // MARK: Lists
 
     /// "A and B", "A, B and C".

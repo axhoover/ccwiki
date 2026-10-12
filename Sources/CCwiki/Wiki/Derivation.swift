@@ -354,6 +354,12 @@ struct Derivation: Sendable {
 
     let manifest: RelationsManifest
     let curation: DerivationCuration
+    /// The curation's citations whose quote is no longer on its page in the
+    /// clone (plans/relations-followups.md §2.5, §6.2). Set on every library
+    /// load from the page text, not from the manifest, so a pull that edits a
+    /// cited page changes it; the explorer then says the quote has gone
+    /// rather than showing it.
+    var unverifiedCitations: Set<DerivationCuration.Citation> = []
     /// R1–R4 and R13's quarantine: every eligible directed step, sorted by
     /// reduction id, forward before reverse.
     let steps: [Step]

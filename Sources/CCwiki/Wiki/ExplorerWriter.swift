@@ -427,12 +427,20 @@ struct ExplorerWriter: Sendable {
     /// OIHF ⇒ OT (BH26) is a free (non-black-box) step, which need not carry
     /// over into that model." One sentence per reason, with the recorded
     /// barriers on the step's pair, which often say more.
+    ///
+    /// A reason the curation gives (R13, not R5) carries the wiki's own text
+    /// for it: the entry's quotes as notes, and links to where they are
+    /// (relations-followups.md §2.5).
     func refusalRow(_ refused: Derivation.RefusedStep, closure: Derivation.Closure,
                     id: String) -> ExplorerRow {
         let step = refused.step
         let text = stepText(step)
         var sentences: [String] = []
+        var entries: [DerivationCuration.Entry.Key] = []
         for reason in refused.reasons {
+            if let key = curationKey(of: reason, on: step), !entries.contains(key) {
+                entries.append(key)
+            }
             switch reason {
             case .quarantined(let why):
                 sentences.append("Not used: the wiki's record of \(text) does not match its "
@@ -471,9 +479,17 @@ struct ExplorerWriter: Sendable {
                 target: .page(barrier.path)))
         }
 
+        var notes: [String] = []
+        for key in entries {
+            let evidence = curationEvidence(key, rowID: id + "/" + key.id)
+            notes += evidence.notes
+            links = Self.merging(evidence.links, into: links)
+        }
+
         let sentence = sentences.joined(separator: " ")
         var row = ExplorerRow(id: id, title: sentence, accessibilityLabel: sentence)
         row.wraps = true
+        row.notes = notes
         row.help = stepHelp(step)
         row.links = links
         if let relation = manifest.reduction(step.relationID) {
@@ -485,8 +501,27 @@ struct ExplorerWriter: Sendable {
         return row
     }
 
+    /// The curation entry behind a refusal: the step's own precondition or
+    /// quarantine, or the weakening of the step that produced its input. R5
+    /// is CCwiki's own rule, not a curation entry, and has none.
+    private func curationKey(of reason: Derivation.Refusal,
+                             on step: Derivation.Step) -> DerivationCuration.Entry.Key? {
+        switch reason {
+        case .quarantined:
+            return .quarantine(relationID: step.relationID)
+        case .weakened(_, let producedBy, _):
+            return .weakening(relationID: producedBy)
+        case .requires(let hypothesis, _, _):
+            return .requirement(relationID: step.relationID, isReverse: step.isReverse,
+                                hypothesis: hypothesis)
+        case .idealisedComposition:
+            return nil
+        }
+    }
+
     /// The producer of a hypothesis, named as a step: `GapSVP ⇒ LWE (Reg05)`.
-    private func producer(_ relationID: String) -> String {
+    /// An equivalence reads `⇔`, whichever way it was used.
+    func producer(_ relationID: String) -> String {
         guard let relation = manifest.reduction(relationID) else { return relationID }
         let keys = citations(relation.source)
         let statement = labels.statement(relation)
