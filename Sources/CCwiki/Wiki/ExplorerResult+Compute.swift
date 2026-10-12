@@ -148,10 +148,15 @@ extension ExplorerResult {
         var result = ExplorerResult(query: query, state: .answer)
         result.verdict = verdict
 
-        // The proof, expanded, with Copy Proof as Text on every step.
+        // The proof, expanded, with Copy Proof As on every step.
         let copy = ProofCopy(statement: statement, relationCount: answer.proof.relationIDs.count,
                              depth: fact.depth,
-                             lines: ProofOutline.copyLines(answer.proof, writer: writer))
+                             lines: ProofOutline.copyLines(answer.proof, writer: writer),
+                             export: ProofExport(
+                                proof: answer.proof, start: start, target: answer.target,
+                                depth: fact.depth, chainClass: fact.chainClass,
+                                unstatedSteps: writer.unstatedSteps(answer.proof),
+                                refutations: answer.refutedStarts, manifest: writer.manifest))
         let proofRows = ProofOutline.rows(answer.proof, idPrefix: "proof", writer: writer)
         result.sections.append(ExplorerSection(
             id: "proof",
@@ -162,7 +167,7 @@ extension ExplorerResult {
 
         if let stronger = answer.stronger {
             result.stronger = strongerProof(stronger, start: start, target: answer.target,
-                                            writer: writer)
+                                            refutations: answer.refutedStarts, writer: writer)
         }
 
         result.sections += recordedOnPairSections(answer.recordedOnPair, start: start,
@@ -209,9 +214,11 @@ extension ExplorerResult {
     /// R6's stronger proof, with the verdict it reads under. Its own depth
     /// decides its words, as the shortest proof's does: beside a recorded
     /// result it is usually a chain, which is CCwiki's composition and must
-    /// never pass for the wiki's own result.
+    /// never pass for the wiki's own result. Its copies state its own depth
+    /// and class too.
     private static func strongerProof(_ stronger: Derivation.StrongerChain, start: [String],
-                                      target: String, writer: ExplorerWriter) -> Stronger {
+                                      target: String, refutations: [DerivationCuration.Refutation],
+                                      writer: ExplorerWriter) -> Stronger {
         let proof = stronger.proof
         let recorded = stronger.depth <= 1
         let arrow = recorded ? DerivationWording.recordedArrow : DerivationWording.derivedArrow
@@ -246,7 +253,12 @@ extension ExplorerResult {
 
         let copy = ProofCopy(statement: statement, relationCount: proof.relationIDs.count,
                              depth: stronger.depth,
-                             lines: ProofOutline.copyLines(proof, writer: writer))
+                             lines: ProofOutline.copyLines(proof, writer: writer),
+                             export: ProofExport(
+                                proof: proof, start: start, target: target, depth: stronger.depth,
+                                chainClass: stronger.chainClass,
+                                unstatedSteps: writer.unstatedSteps(proof),
+                                refutations: refutations, manifest: writer.manifest))
         let outline = ProofOutline.attaching(
             copy, to: ProofOutline.rows(proof, idPrefix: "stronger", writer: writer))
         let section = ExplorerSection(

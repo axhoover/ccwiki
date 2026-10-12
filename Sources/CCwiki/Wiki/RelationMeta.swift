@@ -231,7 +231,7 @@ enum RelationMeta {
     /// link: remark-math splits a wikilink whose alias holds math before the
     /// wikilink pass sees it, while a markdown link's text is inline content,
     /// so the math renders. `MarkdownLinkParser` resolves that form.
-    private static func link(_ target: String, _ text: String) -> String {
+    static func link(_ target: String, _ text: String) -> String {
         guard text.contains("$") else { return "[[\(target)|\(linkText(text))]]" }
         let shown = escapeOutsideMath(text.trimmingCharacters(in: .whitespacesAndNewlines))
         return "[\(shown)](<\(target)>)"
