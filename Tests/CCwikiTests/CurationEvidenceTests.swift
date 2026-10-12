@@ -159,7 +159,8 @@ struct CurationEvidenceTests {
             ],
             weakens: [.init(relationID: "red-w2", notion: "w only", acceptedBy: []),
                       .init(relationID: "red-w1", notion: "w only", acceptedBy: [])],
-            statementLint: ["red-l2": "Reviewed.", "red-l1": "Reviewed."],
+            statementLint: ["red-l2": "Reviewed.", "red-l1": "Reviewed.",
+                            "red-f": "Reviewed.", "red-e\u{301}": "Reviewed."],
             citations: [.requirement(relationID: "red-z-to-a", isReverse: false, hypothesis: "z"): [citation]],
             evidence: [.equivalence(relationID: "red-e1"): "One way only."],
             reviewedCommit: "ab81f02")
@@ -172,6 +173,8 @@ struct CurationEvidenceTests {
             "quarantine:red-q10", "quarantine:red-q9",
             "equivalences:red-e1", "equivalences:red-e2",
             "requires:red-z-to-a:z", "requires:red-e1~reverse:e", "requires:red-b-and-c-to-d:c",
+            // Byte order: a decomposed é sorts at its "e"; String's < would put it last.
+            "statementLint:red-e\u{301}", "statementLint:red-f",
             "statementLint:red-l1", "statementLint:red-l2",
             "weakens:red-w2", "weakens:red-w1",
         ])
