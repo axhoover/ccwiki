@@ -5,6 +5,44 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-12 — The next batch, specified; relations follow-ups, built
+
+The maintainer chose three features: correcting a page, reader comforts, and
+relations follow-ups. They also settled four forks: all three correction
+routes (edit it yourself, describe it to an agent, open an issue); a review
+step before anything reaches GitHub, for every job; unmet preconditions stay
+refused; a paper's PDF only on request.
+
+**Specs.** Each feature was drafted, reviewed from three sides
+(architecture, macOS UX, safety and honesty), revised, and then reconciled
+with the other two, which settled the shared files, menus, shortcuts and the
+merge order (relations follow-ups, reader comforts, corrections):
+[relations-followups.md](plans/relations-followups.md),
+[reader-comforts.md](plans/reader-comforts.md),
+[corrections.md](plans/corrections.md). The open questions in each took the
+recommended answers. The explorer section the relations spec first called
+"Corrections CCwiki applied" is "Adjustments", so the word "correction"
+means one thing in the app.
+
+**Relations follow-ups, built** on `claude/relations-followups`: a Phase 0
+seam, then four tracks in worktrees, each reviewed for compile errors and
+behaviour, then fixed.
+
+- **A1:** citations for all 42 curation entries, the generated
+  [curation-review.md](plans/curation-review.md), and
+  [wiki-asks.md](plans/wiki-asks.md).
+- **A2:** decoding for the three fields the asks propose (`reverseClass`,
+  `refutedBy`, a barrier `model`), the quote and curated-edge checks, and
+  the final golden file.
+- **B:** Copy Proof As LaTeX, wiki Markdown and BibTeX.
+- **C:** the Adjustments section and the refusal wording.
+
+Integration found two things the per-track reviews could not. A2 and C had
+each declared `Derivation.unverifiedCitations`, which broke the build. And
+the LaTeX writer never wrote `\item`, which its own tests caught on CI. The
+Adjustments trace was also made to defer to a recorded `reverseClass`, a
+field A2 added after C was written.
+
 ## 2026-10-11 — Why CCwiki came back as 0.1.0, and CCwiki Dev
 
 The maintainer reported two things. After updating to 0.1.1, and again to
