@@ -354,6 +354,12 @@ final class AppModel {
 
     // MARK: Reader
 
+    /// The render pipeline every web view serves: a per-build copy in
+    /// Caches, staged once at launch, not the bundle's `paths.webRoot`. The
+    /// updater swaps the bundle under the running app, and a WebContent
+    /// restart after that must not load the new release's JavaScript
+    /// against this release's Swift.
+    let webRoot: URL
     let webController: WebController
 
     // MARK: Diagnostics
@@ -395,11 +401,11 @@ final class AppModel {
         // the real one as soon as the clone lands.
         let macros = MacroTable.load(cloneRoot: paths.clone)
         self.macros = macros
-        // The render pipeline is served from a per-build copy in Caches, not
-        // from the bundle: the updater swaps the bundle under the running
-        // app, and a WebContent restart after that must not load the new
-        // release's JavaScript against this release's Swift.
-        self.webController = WebController(paths: paths, webRoot: paths.stagedWebRoot())
+        let webRoot = paths.stagedWebRoot()
+        self.webRoot = webRoot
+        let zoom = AppModel.clampedZoom(CCwikiSettings.pageZoom)
+        self.storedPageZoom = zoom
+        self.webController = WebController(paths: paths, webRoot: webRoot, pageZoom: zoom)
 
         try? paths.createDirectories()
         // Tools are looked for in `discoverTools()`, after the first frame:
@@ -410,11 +416,12 @@ final class AppModel {
         vendorManifest = try? String(
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
-        webController.onNavigate = { [weak self] destination, modified in
+        webController.onNavigate = { [weak self] destination, disposition in
             guard let self else { return }
             // ⌘-click: the same page on cryptology.city, in the browser. The
-            // app has one reader window, so "open elsewhere" means the site.
-            if modified, case .page(let path, let anchor) = destination,
+            // app has one reader window, so anywhere but here means the site,
+            // until tabs give the other dispositions somewhere to go.
+            if disposition != .here, case .page(let path, let anchor) = destination,
                let page = index?.pages[path],
                let url = Self.siteURL(slug: page.slug, anchor: anchor) {
                 NSWorkspace.shared.open(url)
@@ -1086,16 +1093,38 @@ final class AppModel {
 
     // MARK: Text size
 
+    /// The reader's text size, as `WKWebView.pageZoom`, where 1 is the CSS
+    /// size. One preference, not a property of a page, so every reader's web
+    /// view follows it (plans/reader-comforts.md Decision 7). Persisted, and
+    /// kept inside `WebController.zoomRange` however it is set.
+    var pageZoom: Double {
+        get { storedPageZoom }
+        set {
+            let zoom = AppModel.clampedZoom(newValue)
+            guard zoom != storedPageZoom else { return }
+            storedPageZoom = zoom
+            CCwikiSettings.pageZoom = zoom
+            webController.setPageZoom(zoom)
+        }
+    }
+
+    /// What `pageZoom` reads, stored and observed, so the menus follow it.
+    private var storedPageZoom: Double = 1
+
+    private static func clampedZoom(_ zoom: Double) -> Double {
+        min(max(zoom, WebController.zoomRange.lowerBound), WebController.zoomRange.upperBound)
+    }
+
     func makeTextBigger() {
-        webController.setPageZoom(webController.pageZoom * WebController.zoomStep)
+        pageZoom *= WebController.zoomStep
     }
 
     func makeTextSmaller() {
-        webController.setPageZoom(webController.pageZoom / WebController.zoomStep)
+        pageZoom /= WebController.zoomStep
     }
 
     func resetTextSize() {
-        webController.setPageZoom(1)
+        pageZoom = 1
     }
 
     // MARK: The published site

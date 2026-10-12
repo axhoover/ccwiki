@@ -150,7 +150,7 @@ struct CCwikiCommands: Commands {
 
             Button("Actual Size") { model?.resetTextSize() }
                 .keyboardShortcut("0", modifiers: .command)
-                .disabled(model == nil || model?.webController.pageZoom == 1)
+                .disabled(model == nil || model?.pageZoom == 1)
 
             Divider()
 

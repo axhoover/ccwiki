@@ -18,12 +18,9 @@ final class WebController: NSObject {
     private(set) var activeHeadingID: String?
     private(set) var lastRenderError: String?
     private(set) var isReady = false
-    /// The reader's text size. Mirrors `WKWebView.pageZoom`, which is not
-    /// observable, and is persisted.
-    private(set) var pageZoom: Double = CCwikiSettings.pageZoom
 
-    /// Set by the owner to act on a link click.
-    var onNavigate: ((CCwikiURL.Destination, _ modified: Bool) -> Void)?
+    /// Set by the owner to act on a link click, and on what the click meant.
+    var onNavigate: ((CCwikiURL.Destination, LinkDisposition) -> Void)?
     /// The page's own address on the site, for the page context menu.
     var siteURLProvider: (() -> URL?)?
     /// What "Explore From This Page…" would ask, for the page context menu;
@@ -45,14 +42,20 @@ final class WebController: NSObject {
     /// Searched for once the next render reports back.
     @ObservationIgnored private var pendingFind: [String]?
 
-    init(paths: AppPaths, webRoot: URL? = nil) {
+    /// An offline reader has nothing worth persisting, and a non-persistent
+    /// store means nothing about the wiki lands in a WebKit cache directory.
+    /// One for every reader: each store brings a network process of its own
+    /// (plans/reader-comforts.md §1.9).
+    @MainActor static let sharedDataStore: WKWebsiteDataStore = .nonPersistent()
+
+    /// `webRoot` is the pipeline to serve, staged once per launch
+    /// (`AppPaths.stagedWebRoot()`); `pageZoom` the text size to start at.
+    init(paths: AppPaths, webRoot: URL, pageZoom: Double) {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(
-            CCwikiSchemeHandler(bundleRoot: webRoot ?? paths.webRoot, contentRoot: paths.content),
+            CCwikiSchemeHandler(bundleRoot: webRoot, contentRoot: paths.content),
             forURLScheme: CCwikiURL.scheme)
-        // An offline reader has nothing worth persisting, and a non-persistent
-        // store means nothing about the wiki lands in a WebKit cache directory.
-        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore = WebController.sharedDataStore
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         // The macro table used to be injected here as a documentStart user
@@ -149,11 +152,10 @@ final class WebController: NSObject {
     static let zoomRange = 0.6...2.4
     static let zoomStep = 1.1
 
+    /// Applies a text size. The size is one preference for every reader, so
+    /// `AppModel.pageZoom` clamps it, persists it and hands it here.
     func setPageZoom(_ zoom: Double) {
-        let clamped = min(max(zoom, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
-        pageZoom = clamped
-        webView.pageZoom = clamped
-        CCwikiSettings.pageZoom = clamped
+        webView.pageZoom = zoom
     }
 
     func scrollTo(anchor: String) {
@@ -249,7 +251,11 @@ final class WebController: NSObject {
             guard let href = message["href"] as? String,
                   let destination = CCwikiURL.destination(of: href)
             else { return }
-            onNavigate?(destination, message["modified"] as? Bool ?? false)
+            // `ccwiki.js` reports ⌘ or ⇧ as one `modified` flag; the table
+            // reads them as it reads every click.
+            let modified = message["modified"] as? Bool ?? false
+            onNavigate?(destination, LinkDisposition.forClick(
+                command: modified, shift: false, option: false, middleButton: false))
 
         case "contextTarget":
             contextTarget = ReaderContextTarget(message: message)
@@ -320,7 +326,7 @@ extension WebController: WKNavigationDelegate {
             if let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) {
                 NSWorkspace.shared.open(url)
             } else if let destination = CCwikiURL.destination(of: url.absoluteString) {
-                onNavigate?(destination, false)
+                onNavigate?(destination, .here)
             }
         }
         decisionHandler(.cancel)
