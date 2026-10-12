@@ -398,20 +398,24 @@ final class EditorSession {
     /// says that instead.
     func keepUnsavedText() async {
         guard hasUnsavedText, let job else { return }
+        let jobCenter = model.jobCenter
         guard Self.isWorktree(job.worktree) else {
-            job.append(JobLogEntry(.error,
-                "The editor's unsaved version of \(target.path) was lost: the worktree is gone."))
+            jobCenter.log(JobLogEntry(.error,
+                "The editor's unsaved version of \(target.path) was lost: the worktree is gone."),
+                in: job)
             return
         }
         let kept = ".ccwiki/" + (target.path as NSString).lastPathComponent + ".unsaved"
         let file = job.worktree.appending(path: kept)
         if let failure = await Self.writeFile(text, to: file, in: job.worktree) {
-            job.append(JobLogEntry(.error,
-                "The editor's unsaved version of \(target.path) could not be kept: \(failure)"))
+            jobCenter.log(JobLogEntry(.error,
+                "The editor's unsaved version of \(target.path) could not be kept: \(failure)"),
+                in: job)
             return
         }
-        job.append(JobLogEntry(.system,
-            "The editor's unsaved version of \(target.path) was kept in \(kept), in the job's worktree."))
+        jobCenter.log(JobLogEntry(.system,
+            "The editor's unsaved version of \(target.path) was kept in \(kept), in the job's worktree."),
+            in: job)
     }
 
     // MARK: The preview

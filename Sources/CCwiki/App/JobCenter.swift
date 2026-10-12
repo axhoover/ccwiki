@@ -54,6 +54,10 @@ final class JobCenter {
     @ObservationIgnored var environment: @MainActor () -> Environment
     /// Saves every open editor of the job. Set by `AppModel.init`.
     @ObservationIgnored var flushEdits: (@MainActor (Job) async -> Void)?
+    /// Why an editor of the job holds text the disk does not, once saved:
+    /// a conflict nobody has settled, or a write that failed. Nil when none
+    /// does. Approve asks it after `flushEdits`. Set by `AppModel.init`.
+    @ObservationIgnored var unsettledEdits: (@MainActor (Job) -> String?)?
     /// CCwiki changed these repository-relative paths in the job's worktree.
     @ObservationIgnored var onFilesChanged: (@MainActor (Job, [String]) -> Void)?
     /// The leftover worktrees were looked for again, with this result. Set
@@ -135,10 +139,32 @@ final class JobCenter {
         let task = Task { @MainActor in
             self.gitHubAccess = await Publisher.gitHubAccess(
                 tools: environment.tools, repository: environment.target.repository)
+            // Cleared with the answer, before anyone waiting hears it, so one
+            // who then asks again (`toolsDidChange`) is asked afresh.
+            self.accessTask = nil
         }
         accessTask = task
         await task.value
-        accessTask = nil
+    }
+
+    /// Every tool has been looked for again (`AppModel.discoverTools`). A
+    /// review shown before git was found has no snapshot, and an answer
+    /// asked of GitHub before gh was found says gh is missing: both are
+    /// asked again, the answer only if one was kept. Approve asks GitHub
+    /// for itself, so this is for the banner and the button's help.
+    func toolsDidChange() async {
+        await refreshMissingReviews()
+        if let accessTask { await accessTask.value }
+        if gitHubAccess != nil { await refreshGitHubAccess() }
+    }
+
+    /// A snapshot for every review that has none, as showing it would take
+    /// one: for reviews shown before git was found (§4.3). Called once git
+    /// is found, before gh is, and from `toolsDidChange`.
+    func refreshMissingReviews() async {
+        for job in jobs where job.review == nil && job.canEdit {
+            await refreshReview(job)
+        }
     }
 
     // MARK: Starting
@@ -245,15 +271,6 @@ final class JobCenter {
         await refresh.value
     }
 
-    /// What showing a job does the first time: the transcript of a job from
-    /// an earlier launch replayed, and a review brought up to date.
-    func prepareToShow(_ job: Job) async {
-        await job.replayTranscript()
-        if job.state == .awaitingReview, job.review == nil, !job.needsRestore {
-            await refreshReview(job)
-        }
-    }
-
     /// Revert File…: `path` (repository-relative) back to the job's base,
     /// a rename on both sides; its editors reload; a new snapshot (§6.5).
     func revert(_ path: String, in job: Job) async {
@@ -342,6 +359,8 @@ final class JobCenter {
             job.setReview(review.snapshot, findings: review.findings)
             job.setState(.awaitingReview)
         }
+        // Whatever Left Behind showed of this worktree goes with the state.
+        await refreshOrphanedWorktrees()
     }
 
     /// The states an agent job can be brought to review from, when its
@@ -377,6 +396,15 @@ final class JobCenter {
                         "Something is already at \(destination), so CCwiki did not restore over "
                         + "it. Your changes are still saved in \(job.patchFile.lastPathComponent)."))
                 }
+                return false
+            }
+            // Gone since the launch: nothing to apply, so git is not asked.
+            // An empty patch is there, and applies as nothing.
+            guard FileManager.default.fileExists(atPath: job.patchFile.path(percentEncoded: false))
+            else {
+                job.setNotice(JobNotice(tone: .failure, text:
+                    "The saved changes are missing: \(job.patchFile.lastPathComponent) is not in "
+                    + "Application Support."))
                 return false
             }
 
@@ -428,6 +456,10 @@ final class JobCenter {
     /// snapshot that finishes while the editors save or the queue drains (a
     /// refresh after a save, or the first one of a job just shown) was
     /// never seen, so it is compared with, not taken as, the reviewed one.
+    ///
+    /// An editor whose text did not reach the disk, whether the review's
+    /// button knew it or the save Approve ran found it, stops it: publishing
+    /// would send the file without that text, and close the editor (§4.4).
     func approve(_ job: Job) async -> ApproveResult {
         guard job.state == .awaitingReview, !job.needsRestore, !approving.contains(job.id) else {
             return .refused(job.state.isPublishing || approving.contains(job.id)
@@ -439,6 +471,9 @@ final class JobCenter {
         defer { approving.remove(job.id) }
 
         await flushEdits?(job)
+        if job.state == .awaitingReview, let unsettled = unsettledEdits?(job) {
+            return settle(job, .refused(unsettled))
+        }
         return await serially(job) { @MainActor () -> ApproveResult in
             await self.publish(job, shown: shown)
         }
@@ -512,6 +547,13 @@ final class JobCenter {
 
     nonisolated static let changedSinceReview = "The files changed since you reviewed them. "
         + "Check the new diff, then open the pull request."
+
+    /// A line in the job's transcript from outside the runners and the job
+    /// center, which alone change a job (§4.2): an editor saying what became
+    /// of text it could not save.
+    func log(_ entry: JobLogEntry, in job: Job) {
+        job.append(entry)
+    }
 
     /// What the footer of the pull request says about where it came from.
     static func provenance(for job: Job, environment: Environment) -> PullRequestDraft.Provenance {
@@ -728,6 +770,7 @@ final class JobCenter {
 
     /// Forget the finished jobs. Their transcripts stay on disk; the records
     /// that bring them back at launch go, and so do their saved patches.
+    /// A worktree one of them kept for Review Anyway is a stray from now on.
     func clearFinishedJobs() {
         for job in jobs where job.state.isTerminal {
             try? FileManager.default.removeItem(at: job.recordFile)
@@ -736,6 +779,7 @@ final class JobCenter {
             queuedRefreshes[job.id] = nil
         }
         jobs.removeAll { $0.state.isTerminal }
+        Task { @MainActor in await self.refreshOrphanedWorktrees() }
     }
 
     // MARK: Stopping
@@ -804,19 +848,31 @@ final class JobCenter {
     // MARK: Leftover worktrees
 
     /// Look for strays. Every job that is not finished owns its worktree, a
-    /// review included, so one is never offered for pruning (§4.3).
+    /// review included, and so does one Review Anyway can still bring to
+    /// review, until Clear Finished drops it: none is ever offered for
+    /// pruning (§4.3).
     func refreshOrphanedWorktrees() async {
         let environment = self.environment()
         guard let git = environment.git else { return }
         let runner = IngestJobRunner(
             paths: paths, tools: environment.tools, git: git, index: environment.index,
             target: environment.target)
-        let known = Set(jobs.filter { !$0.state.isTerminal }.map(\.id))
+        let known = Set(jobs.filter { Self.ownsWorktree($0.state) }.map(\.id))
         orphanedWorktrees = await runner.orphanedWorktrees(knownJobIDs: known).map(\.path)
         onOrphanedWorktreesChanged?(orphanedWorktrees)
     }
 
+    /// Whether a job in `state` still owns its worktree: it is not finished,
+    /// or Review Anyway may yet take what it holds to review.
+    nonisolated static func ownsWorktree(_ state: JobState) -> Bool {
+        !state.isTerminal || mayReviewAnyway(state)
+    }
+
+    /// Prune…, from Left Behind. Never the worktree of a job that owns it,
+    /// whatever a list drawn before the job moved on still shows.
     func pruneOrphan(_ path: String) {
+        let id = (path as NSString).lastPathComponent
+        guard !jobs.contains(where: { $0.id == id && Self.ownsWorktree($0.state) }) else { return }
         let environment = self.environment()
         guard let git = environment.git else { return }
         let runner = IngestJobRunner(

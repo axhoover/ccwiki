@@ -21,13 +21,18 @@ extension AppModel {
 
     /// The signed-in account's login, for the issue sheet's footer: `gh api
     /// user --jq .login`, asked once and cached for the session. Nil when gh
-    /// is missing, signed out or offline; asked again next time.
+    /// is missing, signed out or offline, or does not answer in time; asked
+    /// again next time.
     func githubLogin() async -> String? {
         if let login = IssueSession.login { return login }
         guard let gh = tools.path(for: .gh) else { return nil }
-        let result = await Subprocess.run(
-            executable: gh, arguments: ["api", "user", "--jq", ".login"],
-            environment: tools.childEnvironment())
+        let environment = tools.childEnvironment()
+        let answer = await Subprocess.withDeadline(GitHubAuth.deadline) {
+            await Subprocess.run(
+                executable: gh, arguments: ["api", "user", "--jq", ".login"],
+                environment: environment)
+        }
+        guard let result = answer else { return nil }
         let login = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard result.succeeded, !login.isEmpty, !login.contains(where: \.isWhitespace) else {
             return nil
@@ -105,9 +110,15 @@ extension AppModel {
                 + Self.commandLine(["gh"] + arguments)))
         }
 
+        // Marked before it is sent: from here on, a retry looks first.
         IssueSession.attempted.insert(draft.marker)
-        let result = await Subprocess.run(
-            executable: gh, arguments: arguments, environment: environment)
+        let sent = await Subprocess.withDeadline(Publisher.ghDeadline) {
+            await Subprocess.run(executable: gh, arguments: arguments, environment: environment)
+        }
+        guard let result = sent else {
+            return .failure(JobError("gh did not answer in time. The issue may have been opened; "
+                + "Open Issue checks GitHub for it before sending again."))
+        }
         if result.succeeded, let url = Self.lastURL(in: result.stdout) {
             return .success(url)
         }
@@ -120,16 +131,17 @@ extension AppModel {
     /// An issue by `@me` whose body carries the marker, open or closed: the
     /// newest of them, listed, and each body read here. Not GitHub's
     /// search, whose index lags a new issue by up to minutes and may not
-    /// read inside the comment that holds the marker.
+    /// read inside the comment that holds the marker. Unknown when gh
+    /// fails or does not answer in time.
     private static func issue(
         marked marker: String, gh: String, repository: String, environment: [String: String]
     ) async -> IssueComposer.Lookup {
-        let result = await Subprocess.run(
-            executable: gh,
-            arguments: ["issue", "list", "--repo", repository, "--author", "@me", "--state", "all",
-                        "--limit", "50", "--json", "url,body"],
-            environment: environment)
-        guard result.succeeded else { return .unknown }
+        let arguments = ["issue", "list", "--repo", repository, "--author", "@me", "--state", "all",
+                         "--limit", "50", "--json", "url,body"]
+        let listed = await Subprocess.withDeadline(Publisher.ghDeadline) {
+            await Subprocess.run(executable: gh, arguments: arguments, environment: environment)
+        }
+        guard let result = listed, result.succeeded else { return .unknown }
         return IssueComposer.lookup(marker: marker, inList: result.stdout)
     }
 

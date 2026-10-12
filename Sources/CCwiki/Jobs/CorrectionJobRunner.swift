@@ -7,6 +7,7 @@ import Foundation
 /// git rev-parse --verify <target.baseCommit>^{commit}   (the commit the reader rendered)
 /// git worktree add ../worktrees/<id> -b fix/<slug> <base>
 /// claude -p "<prompts/correct.md, composed>" --model sonnet
+///   --strict-mcp-config --setting-sources project
 ///   --allowedTools Read,Edit,Write,Glob,Grep --max-turns 20   (sealed)
 /// the tripwire, the hand-over file, the change               → awaiting review
 /// ```
@@ -50,7 +51,8 @@ struct CorrectionJobRunner {
             return
         }
         guard page.region == .body else {
-            job.setState(.failed(Self.generatedPassage))
+            job.setState(.failed(page.region == .frontmatter
+                ? CorrectionBlockers.frontmatterLine : CorrectionBlockers.generated))
             return
         }
         guard let claude = tools.path(for: .claude) else {
@@ -110,6 +112,4 @@ struct CorrectionJobRunner {
 
     nonisolated static let snapshotStore = "This copy of the wiki is a snapshot. Sync (⌘R) to "
         + "replace it with a git clone."
-    nonisolated static let generatedPassage = "This passage is generated from the reduction "
-        + "pages. Open an issue, or edit the reduction page it links to."
 }

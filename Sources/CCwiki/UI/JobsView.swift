@@ -50,7 +50,8 @@ struct JobsView: View {
                         } label: {
                             Label("Clear Finished", systemImage: "xmark.bin")
                         }
-                        .help("Remove finished jobs from the list. Transcripts are kept.")
+                        .help("Remove finished jobs from the list. Transcripts are kept; "
+                            + "a discarded job's saved changes are deleted.")
                         .disabled(!model.hasFinishedJobs)
 
                         Button {
@@ -194,7 +195,7 @@ struct JobsView: View {
             }
         }
         if job.state == .awaitingReview {
-            Button("Discard…") { requestDiscard(job) }
+            Button("Discard…", role: .destructive) { requestDiscard(job) }
         }
         // Only work that has not reached review can be cancelled
         // (corrections §4.1).

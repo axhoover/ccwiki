@@ -303,10 +303,11 @@ enum GitHubAccess: Sendable, Equatable {
         case .offline:
             return "Offline. You can edit now; opening the pull request needs a connection."
         case .ghMissing:
+            // Not "or open an issue": opening one needs gh too.
             return "gh is not installed, so this cannot become a pull request yet. "
-                + "Install it, or open an issue."
+                + "Install it with Homebrew (brew install gh), then check again."
         case .notSignedIn:
-            return "gh is not signed in. Run gh auth login in Terminal, then review again."
+            return "gh is not signed in. Run gh auth login in Terminal, then check again."
         case .cannotPush(let repository):
             return "The signed-in account cannot push to \(repository), so this cannot "
                 + "become a pull request. Open an issue instead."

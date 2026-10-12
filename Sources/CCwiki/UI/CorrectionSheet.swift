@@ -21,15 +21,16 @@ struct CorrectionSheet: View {
 
     private var target: CorrectionTarget { request.target }
 
-    /// The relation-meta line, or a "Participates in" section: written by
-    /// the wiki's script from the reduction pages, which this agent cannot
-    /// run (§5.4).
+    /// A "Participates in" section, written by the wiki's script from the
+    /// reduction pages, which this agent cannot run; or the relation-meta
+    /// line, built from this page's own frontmatter (§5.4, §8.1).
     private var isGenerated: Bool { target.region != .body }
 
     /// Local conditions only; the generated passage has a note of its own.
     private var blockers: [String] {
         model.correctionBlockers(.describe, target: target)
             .filter { $0 != CorrectionBlockers.generated }
+            .filter { $0 != CorrectionBlockers.frontmatterLine }
     }
 
     private var trimmedProblem: String {
@@ -114,7 +115,7 @@ struct CorrectionSheet: View {
                 .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 6))
                 .focused($fieldFocused)
                 .accessibilityLabel("What is wrong, and what should it say?")
-            Text(modelLine + " Change it in Settings → Jobs.")
+            Text(modelLine + " Change it in Settings > Jobs.")
                 .font(Theme.Fonts.meta)
                 .foregroundStyle(.tertiary)
         }
@@ -135,7 +136,8 @@ struct CorrectionSheet: View {
     /// the default button.
     private var generatedNote: some View {
         Label {
-            Text(CorrectionBlockers.generated)
+            Text(target.region == .frontmatter
+                 ? CorrectionBlockers.frontmatterLine : CorrectionBlockers.generated)
                 .fixedSize(horizontal: false, vertical: true)
         } icon: {
             Image(systemName: "arrow.triangle.branch")

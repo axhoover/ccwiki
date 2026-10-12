@@ -433,6 +433,11 @@ enum CorrectionBlockers {
     /// script that writes it.
     static let generated = "This passage is generated from the reduction pages. Open an issue, "
         + "or edit the reduction page it links to."
+    /// Route b on the relation line under a reduction or barrier page's
+    /// title (§8.1): it is built from the page's own frontmatter, and its
+    /// links go to classes, models and references, never to a reduction.
+    static let frontmatterLine = "This line is built from this page's own frontmatter, which an "
+        + "agent cannot change here. Open an issue, or edit those fields yourself with Edit Page."
 
     /// Pure. Local conditions only; GitHub is `GitHubAccess`'s, and is never
     /// listed here: editing needs no network, and the reader is built to
@@ -453,7 +458,11 @@ enum CorrectionBlockers {
             }
             if route == .describe {
                 if !claudePresent { blockers.append(claudeMissing) }
-                if region != .body { blockers.append(generated) }
+                switch region {
+                case .body: break
+                case .generated: blockers.append(generated)
+                case .frontmatter: blockers.append(frontmatterLine)
+                }
             }
         case .issue:
             // A snapshot's marker names its commit, which the permalink

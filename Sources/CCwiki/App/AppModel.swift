@@ -684,6 +684,9 @@ final class AppModel {
         // these. Unowned: the model owns the job center and outlives it.
         jobCenter.environment = { [unowned self] in self.jobEnvironment }
         jobCenter.flushEdits = { [unowned self] job in await self.flushEdits(for: job) }
+        jobCenter.unsettledEdits = { [unowned self] job in
+            JobReview.unsettledEditor(of: job, in: self).map { JobReview.unsettledReason(path: $0) }
+        }
         jobCenter.onFilesChanged = { [unowned self] job, changed in
             self.filesChanged(in: job, paths: changed)
         }
@@ -693,23 +696,15 @@ final class AppModel {
 
         // A Dev build pointed at a fork with a value that is not owner/name
         // goes on targeting the wiki, and says so (corrections §10). The
-        // value's shape decides, not `isOverridden` alone, so a valid value
-        // is never called invalid, whether or not `resolve` honours it yet.
+        // value's shape decides, by the test `resolve` makes, not
+        // `isOverridden` alone: a valid value naming the wiki itself is
+        // neither honoured nor wrong.
         if publishTarget.isDevBuild, !publishTarget.isOverridden,
            let requested = ProcessInfo.processInfo.environment["CCWIKI_TARGET_REPO"],
-           !requested.isEmpty, !Self.isRepositorySlug(requested) {
+           !requested.isEmpty, !PublishTarget.isRepositorySlug(requested) {
             warn("CCWIKI_TARGET_REPO is ignored: “\(requested)” is not owner/name. "
                 + "Pull requests and issues go to \(publishTarget.repository).")
         }
-    }
-
-    /// `owner/name`: two parts, neither empty, and no whitespace, the value a
-    /// Dev build honours (corrections §10). `PublishTarget.resolve` accepts
-    /// the same.
-    private static func isRepositorySlug(_ value: String) -> Bool {
-        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
-        return parts.count == 2 && !parts.contains(where: \.isEmpty)
-            && !value.contains(where: \.isWhitespace)
     }
 
     /// What the job center reads at each call: the tools, git, the wiki and
@@ -810,6 +805,9 @@ final class AppModel {
         tools = reading.0
         needsDeveloperTools = reading.1
         refreshToolWarnings()
+        // A review a restored window showed before git was found has no
+        // snapshot yet. In the background: the library loads meanwhile.
+        Task { await jobCenter.refreshMissingReviews() }
 
         Task { await discoverIngestionTools(generation: generation, from: reading.0) }
     }
@@ -823,6 +821,9 @@ final class AppModel {
         guard generation == discoveryGeneration else { return }
         tools = all
         isDiscoveringTools = false
+        // GitHub, if it was asked before gh was found, and any review still
+        // without a snapshot, asked again now (corrections §7.1).
+        Task { await jobCenter.toolsDidChange() }
         isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: all)
         guard generation == discoveryGeneration else { return }
         await refreshPushCapability()
@@ -935,17 +936,14 @@ final class AppModel {
         let revisionBefore = await LibraryRefresh.currentRevision(
             store: paths.wikiStore, git: git, clone: cloneRoot)
         let previous = loaded
-        let update = await Task.detached(priority: .userInitiated) { () -> LibraryUpdate in
+        // The pages are read while git answers for the commit: neither needs
+        // the other.
+        let reading = Task.detached(priority: .userInitiated) { () -> LibraryUpdate in
             guard let previous else {
                 return LibraryUpdate(building: LoadedLibrary.build(cloneRoot: cloneRoot))
             }
             return LoadedLibrary.update(previous, cloneRoot: cloneRoot)
-        }.value
-        apply(update.library)
-
-        // The search index is written while git answers: neither needs the
-        // other, and the page on screen waits for both.
-        async let searched = syncSearchIndex(with: update.library)
+        }
 
         // Git answers for a clone and the marker for a snapshot. When neither
         // can (a clone whose git has gone, or content with no marker), the
@@ -953,11 +951,22 @@ final class AppModel {
         let store = paths.wikiStore
         let facts = await LibraryRefresh.revisionFacts(
             store: store, git: git, paths: paths, after: outcome)
+        let update = await reading.value
+
+        // The library and its commit in one main-actor step, with no await
+        // between them: a page rendered in between would pair the new
+        // markdown with the old revision, and a correction made from it
+        // would read the wrong lines (corrections §3.5).
+        apply(update.library)
         if (git != nil && store == .git) || store == .snapshot {
             modifiedDates = facts.modifiedDates
             headRevision = facts.head
             headDate = facts.date
         }
+
+        // The search index is written while git is asked whether the commit
+        // moved meanwhile; the page on screen waits for both.
+        async let searched = syncSearchIndex(with: update.library)
         let revisionAfter = await LibraryRefresh.currentRevision(
             store: paths.wikiStore, git: git, clone: cloneRoot)
         loadedRevision = revisionBefore == revisionAfter ? revisionAfter : nil

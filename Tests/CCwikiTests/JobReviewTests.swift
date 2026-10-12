@@ -76,22 +76,22 @@ struct JobReviewTests {
 
     @Test("the banner says what the review waits for, and what is already on GitHub")
     func banner() {
-        #expect(Self.bannerText() == "Awaiting your review. Nothing has been pushed.")
+        #expect(Self.bannerText() == "Awaiting your review. CCwiki has pushed nothing.")
         #expect(Self.bannerText(pushed: "abc123") == "Awaiting your review. The branch "
             + "fix/pseudorandom-function is on GitHub; no pull request is open yet.")
         #expect(Self.bannerText(restore: true) == "The worktree is gone. CCwiki kept your changes.")
         #expect(Self.bannerText(.publishing("Pushing fix/pseudorandom-function…"))
             == "Pushing fix/pseudorandom-function…")
-        #expect(Self.bannerText(untouched: true) == "Editing. Nothing has been pushed.")
+        #expect(Self.bannerText(untouched: true) == "Editing. CCwiki has pushed nothing.")
     }
 
-    @Test("a push never confirmed may have reached GitHub, and the banner never says nothing was pushed")
+    @Test("a push never confirmed may have reached GitHub, and the banner never says CCwiki pushed nothing")
     func bannerAfterInterruptedPush() {
         // A quit, a crash or a timeout during the first push.
         let interrupted = Self.bannerText(pushing: "def456")
         #expect(interrupted == "Awaiting your review. A push to fix/pseudorandom-function may have "
             + "reached GitHub; opening the pull request checks GitHub first.")
-        #expect(!interrupted.contains("Nothing has been pushed"))
+        #expect(!interrupted.contains("pushed nothing"))
         // A later push unconfirmed: the branch is on GitHub either way.
         #expect(Self.bannerText(pushing: "def456", pushed: "abc123") == Self.bannerText(pushed: "abc123"))
         // An edit taken back to nothing after a push still says what is there.
@@ -293,10 +293,10 @@ struct JobReviewTests {
         #expect(offers(review: Self.snapshot(Self.changed(Self.pagePath))))
     }
 
-    @Test("an issue is offered when gh is missing or cannot push, and never otherwise")
+    @Test("an issue is offered only when the account cannot push: opening one needs gh too")
     func issue() {
-        #expect(JobReview.offersIssue(for: .ghMissing))
         #expect(JobReview.offersIssue(for: .cannotPush(repository: "axhoover/cryptology.city")))
+        #expect(!JobReview.offersIssue(for: .ghMissing))
         #expect(!JobReview.offersIssue(for: .offline))
         #expect(!JobReview.offersIssue(for: .notSignedIn))
         #expect(!JobReview.offersIssue(for: .ready))

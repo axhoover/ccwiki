@@ -299,10 +299,14 @@ struct CorrectionTargetTests {
         }
     }
 
-    @Test("Describe gives the reason for both generated regions; the others do not")
+    @Test("Describe gives each generated region its own reason; the others give none")
     func describeGenerated() {
+        #expect(blockers(.describe, region: .generated) == [CorrectionBlockers.generated])
+        // The relation line is built from the page's own frontmatter: its
+        // links never lead to a reduction page.
+        #expect(blockers(.describe, region: .frontmatter) == [CorrectionBlockers.frontmatterLine])
+        #expect(!CorrectionBlockers.frontmatterLine.contains("reduction page"))
         for region in [CorrectionTarget.Region.generated, .frontmatter] {
-            #expect(blockers(.describe, region: region) == [CorrectionBlockers.generated])
             #expect(blockers(.edit, region: region).isEmpty)
             #expect(blockers(.issue, region: region).isEmpty)
         }

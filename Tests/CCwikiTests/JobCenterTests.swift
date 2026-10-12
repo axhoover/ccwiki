@@ -452,6 +452,84 @@ struct JobCenterTests {
         #expect(job.notice == JobNotice(tone: .warning, text: JobCenter.changedSinceReview))
     }
 
+    @Test("Approve stops for an editor that could not save, asked once the editors have saved")
+    func approveWithAnUnsettledEditor() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        await scene.center.refreshReview(job)
+
+        // The save Approve runs is the one that fails, so no button could
+        // have known: only the job center, asking after it.
+        let editor = EditorStandIn()
+        let reason = JobReview.unsettledReason(path: "content/page.md")
+        scene.center.flushEdits = { job in await editor.flush(job) }
+        scene.center.unsettledEdits = { _ in editor.flushes > 0 ? reason : nil }
+
+        let result = await scene.center.approve(job)
+        #expect(result == .refused(reason), "\(result)")
+        #expect(editor.flushes == 1)
+        #expect(job.state == .awaitingReview)
+        #expect(job.notice == JobNotice(tone: .warning, text: reason))
+        #expect(reason == "page.md could not be saved. Settle it in its window first.")
+        #expect(await scene.originTip(job.branch) == .absent, "nothing was pushed")
+    }
+
+    // MARK: Tools found late
+
+    @Test("a review shown before the tools were found gets its snapshot, and GitHub is asked again")
+    func toolsFoundLate() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+
+        // A window restored at launch, before git or gh is found.
+        let center = scene.center
+        let found = center.environment
+        let target = scene.target
+        center.environment = {
+            JobCenter.Environment(
+                tools: ToolLocator(), git: nil, index: nil, relations: .empty, labels: .empty,
+                appVersion: "0.3.0", correctionModel: "sonnet", target: target, privatePaths: [])
+        }
+        await center.toolsDidChange()
+        #expect(center.gitHubAccess == nil, "nobody asked, so nothing is asked again")
+        await center.refreshReview(job)
+        #expect(job.review == nil, "no git, no snapshot")
+        await center.refreshGitHubAccess()
+        #expect(center.gitHubAccess == .ghMissing)
+
+        // git is found: the review gets its snapshot.
+        center.environment = found
+        await center.refreshMissingReviews()
+        #expect(job.review?.files.map(\.path) == ["content/page.md"])
+
+        // Then gh, here one that cannot reach GitHub: the answer kept from
+        // before it was found is replaced.
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let gh = directory.appending(path: "gh")
+        try Data("#!/bin/sh\necho 'error connecting to api.github.com' >&2\nexit 1\n".utf8)
+            .write(to: gh)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: gh.path(percentEncoded: false))
+        var located = ToolLocator(overrides: [.gh: gh.path(percentEncoded: false)])
+        located.locate([.gh])
+        let tools = located
+        let git = scene.git
+        center.environment = {
+            JobCenter.Environment(
+                tools: tools, git: git, index: nil, relations: .empty, labels: .empty,
+                appVersion: "0.3.0", correctionModel: "sonnet", target: target, privatePaths: [])
+        }
+        await center.toolsDidChange()
+        #expect(center.gitHubAccess == .offline, "asked again, of the gh now found")
+    }
+
     // MARK: Leaving review
 
     @Test("Discard removes the worktree and the local branch, and keeps the record and patch")
@@ -594,6 +672,33 @@ struct JobCenterTests {
         #expect(head == base)
     }
 
+    @Test("Restore whose saved changes have gone says so, and makes no worktree")
+    func restoreWithoutThePatch() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        await scene.center.refreshReview(job)
+        try FileManager.default.removeItem(at: job.worktree)
+
+        let center = scene.relaunched()
+        let restored = try #require(center.job(id: job.id))
+        try #require(restored.needsRestore)
+        // Deleted by hand since the launch.
+        try FileManager.default.removeItem(at: restored.patchFile)
+
+        #expect(!(await center.restoreWorktree(restored)))
+        #expect(restored.needsRestore)
+        #expect(restored.notice == JobNotice(tone: .failure, text:
+            "The saved changes are missing: \(restored.patchFile.lastPathComponent) is not in "
+            + "Application Support."))
+        #expect(!restored.log.contains { $0.text.hasPrefix("Restoring the worktree") },
+                "git was not asked")
+        #expect(!FileManager.default.fileExists(atPath: JobCenter.restoringWorktree(
+            scratch: restored.scratch).path(percentEncoded: false)))
+        #expect(!FileManager.default.fileExists(atPath: restored.worktree.path(percentEncoded: false)))
+    }
+
     // MARK: Corrections, with a claude that is a shell script
 
     static let readyForReview = #"""
@@ -641,6 +746,8 @@ struct JobCenterTests {
         #expect(value("--model") == "sonnet")
         #expect(value("--allowedTools") == "Read,Edit,Write,Glob,Grep")
         #expect(value("--max-turns") == "20")
+        #expect(value("--setting-sources") == "project")
+        #expect(arguments.contains("--strict-mcp-config"))
         #expect(value("-p")?.contains("content/page.md") == true)
 
         let environment = String(decoding: try Data(contentsOf: job.scratch
@@ -839,5 +946,40 @@ struct JobCenterTests {
         await job.task?.value
         #expect(job.state == .awaitingReview)
         #expect(job.review?.files.map(\.path) == ["content/page.md"])
+    }
+
+    @Test("a worktree Review Anyway can still take to review is never a stray, nor pruned")
+    func reviewAnywayOwnsItsWorktree() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let tools = try JobScene.fakeClaude(#"""
+            printf 'a\nB\nc' > content/page.md
+            echo '{"type":"result","subtype":"error_max_turns","is_error":true,"result":"","num_turns":20}'
+            """#, in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+
+        let job = scene.center.startCorrection(Self.request(scene))
+        await job.task?.value
+        try #require(JobCenter.mayReviewAnyway(job.state), "\(job.state)")
+        let worktree = job.worktree.path(percentEncoded: false)
+        try #require(FileManager.default.fileExists(atPath: worktree))
+        #expect(JobCenter.ownsWorktree(job.state))
+        #expect(!JobCenter.ownsWorktree(.discarded))
+
+        await scene.center.refreshOrphanedWorktrees()
+        #expect(!scene.center.orphanedWorktrees.contains { $0.hasSuffix("/" + job.id) })
+
+        // Prune from a list drawn before the job ended does nothing.
+        scene.center.pruneOrphan(worktree)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(FileManager.default.fileExists(atPath: worktree))
+
+        // Once Clear Finished drops the job, nothing will take the worktree
+        // to review: it is a stray.
+        scene.center.clearFinishedJobs()
+        await scene.center.refreshOrphanedWorktrees()
+        #expect(scene.center.orphanedWorktrees.contains { $0.hasSuffix("/" + job.id) })
     }
 }

@@ -627,21 +627,26 @@ extension JobReview {
             access: model.jobCenter.gitHubAccess, target: model.publishTarget)
         // Publishing would send the file on disk and close an editor whose
         // own version nobody has kept or dropped yet, losing it (§4.4).
+        // Approve asks the same again once it has saved the editors.
         guard gate.isEnabled, let path = unsettledEditor(of: job, in: model) else { return gate }
-        let name = (path as NSString).lastPathComponent
-        return DraftPR(
-            disabledReason: "\(name) changed on disk while its editor was open. "
-                + "Choose which version to keep in that window first.",
-            confirmation: nil)
+        return DraftPR(disabledReason: unsettledReason(path: path), confirmation: nil)
     }
 
-    /// The file of `job` whose editor holds a version the disk does not, a
-    /// conflict nobody has settled; nil when there is none.
+    /// The file of `job` whose editor holds a version the disk does not: a
+    /// conflict nobody has settled, or text a write failed to save. Nil
+    /// when there is none.
     @MainActor
     static func unsettledEditor(of job: Job, in model: AppModel) -> String? {
         for (target, session) in model.editorSessions where target.jobID == job.id {
             if case .conflict = session.saveState { return target.path }
+            if session.saveError != nil, session.hasUnsavedText { return target.path }
         }
         return nil
+    }
+
+    /// Why Open Draft PR waits for the editor of `path` (repository-relative).
+    static func unsettledReason(path: String) -> String {
+        let name = (path as NSString).lastPathComponent
+        return "\(name) could not be saved. Settle it in its window first."
     }
 }

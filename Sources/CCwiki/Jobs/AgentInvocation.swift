@@ -8,7 +8,7 @@ import Foundation
 /// worktree and its pull request's text in the handover file; CCwiki shows
 /// both to a person, and only once they approve does CCwiki commit, push and
 /// open the pull request, with its own unsealed environment. A prompt that
-/// says "do not push" is not enough, so every agent runs inside three
+/// says "do not push" is not enough, so every agent runs inside four
 /// layers:
 ///
 /// 1. **The allow-list** leaves out `gh` and every git command that writes.
@@ -17,6 +17,10 @@ import Foundation
 /// 3. **The environment** (`sealed`): no GitHub token, no SSH agent, an
 ///    empty `gh` configuration, no credential helper, and a push URL that
 ///    goes nowhere.
+/// 4. **Nothing of the user's own Claude configuration**: no MCP server,
+///    whose tools carry their own tokens, and none of the user's allow
+///    rules or hooks, which would widen the allow-list. Only the
+///    worktree's project settings load.
 ///
 /// The seal stops a confused agent and an accident: a plain `git push` or
 /// `gh pr create` fails. It does not stop a determined one. `git -c
@@ -55,6 +59,7 @@ struct AgentInvocation: Sendable, Equatable {
 
     /// ```
     /// claude -p "<prompt>" --output-format stream-json --verbose [--model <m>]
+    ///   --strict-mcp-config --setting-sources project
     ///   --permission-mode acceptEdits --allowedTools … --disallowedTools …
     ///   --max-turns <n>
     /// ```
@@ -65,12 +70,18 @@ struct AgentInvocation: Sendable, Equatable {
     /// has to match the allow-list, so a job that wanders off fails visibly,
     /// with the denied call named in the transcript, rather than doing
     /// something nobody asked for.
+    ///
+    /// `--strict-mcp-config`, with no `--mcp-config`, loads no MCP server,
+    /// and `--setting-sources project` leaves out the user's own settings,
+    /// whose allow rules would add to `--allowedTools` (§5.1).
     private static func arguments(
         prompt: String, model: String, allowed: [String], maxTurns: String
     ) -> [String] {
         var arguments = ["-p", prompt, "--output-format", "stream-json", "--verbose"]
         if !model.isEmpty { arguments += ["--model", model] }
         arguments += [
+            "--strict-mcp-config",
+            "--setting-sources", "project",
             "--permission-mode", "acceptEdits",
             "--allowedTools", allowed.joined(separator: ","),
             "--disallowedTools", denied.joined(separator: ","),

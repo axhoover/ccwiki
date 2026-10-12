@@ -151,10 +151,14 @@ private struct EditorContent: View {
             next: { source.performFind(.nextMatch) },
             previous: { source.performFind(.previousMatch) }))
         .task { await session.load() }
-        .task {
+        .task(id: model.isDiscoveringTools) {
             // Restored, or opened before anyone asked: whether this can
-            // become a pull request is asked in the background (§7.1).
-            if model.jobCenter.gitHubAccess == nil { await model.jobCenter.refreshGitHubAccess() }
+            // become a pull request is asked in the background (§7.1). Once
+            // the tools are found: asked before gh is, the answer would say
+            // it is missing, and be kept.
+            if model.jobCenter.gitHubAccess == nil, !model.isDiscoveringTools {
+                await model.jobCenter.refreshGitHubAccess()
+            }
         }
         .onAppear { wire() }
         .onChange(of: session.pendingReveal, initial: true) { _, _ in takeReveal() }
@@ -162,6 +166,11 @@ private struct EditorContent: View {
         // The readers' text size, which every web view follows (§17).
         .onChange(of: model.pageZoom) { _, zoom in
             if session.hasPreview { session.preview.setPageZoom(zoom) }
+        }
+        // The wiki the preview resolves links, macros and relation labels
+        // against: a restored editor usually loads before it does.
+        .onChange(of: model.libraryGeneration) { _, _ in
+            if session.hasPreview { session.renderPreview() }
         }
         .alert(conflictTitle, isPresented: conflictPresented) {
             if conflictIsCCwikis {

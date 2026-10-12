@@ -29,6 +29,7 @@ struct ReviewView: View {
     var body: some View {
         content
             .task(id: job.id) { await jobShown() }
+            .task(id: model.isDiscoveringTools) { await askGitHubIfNeeded() }
             .onChange(of: RawHTMLKey(job: job), initial: true) { _, key in
                 // Rendered may hide raw HTML, so such a job opens in Source;
                 // once, so Rendered stays one click away.
@@ -239,16 +240,21 @@ struct ReviewView: View {
 
     // MARK: Actions
 
-    /// When the job is first shown: its snapshot if it has none yet, and
-    /// whether GitHub can be reached if nobody has asked (§4.3, §7.1).
+    /// When the job is first shown: its snapshot if it has none yet (§4.3).
+    /// Taken again by the job center once git is found, if it is not yet.
     private func jobShown() async {
         privatePaths = model.jobCenter.environment().privatePaths
         if job.review == nil, job.canEdit {
             await model.jobCenter.refreshReview(job)
         }
-        if model.jobCenter.gitHubAccess == nil {
-            await model.jobCenter.refreshGitHubAccess()
-        }
+    }
+
+    /// Whether GitHub can be reached, if nobody has asked (§7.1). Not while
+    /// the tools are looked for: an answer computed before gh is found says
+    /// it is missing, and would be kept. Run again when they are found.
+    private func askGitHubIfNeeded() async {
+        guard model.jobCenter.gitHubAccess == nil, !model.isDiscoveringTools else { return }
+        await model.jobCenter.refreshGitHubAccess()
     }
 
     private func askToRevert(_ path: String) {
@@ -477,8 +483,8 @@ private struct PullRequestForm: View {
 // MARK: - GitHub, and notices
 
 /// The line the editor and the review show while a change cannot become a
-/// pull request (§7.1), with what can be done instead: an issue, when gh
-/// is missing or cannot push, and asking again.
+/// pull request (§7.1), with what can be done instead: an issue, when the
+/// account cannot push, and asking again.
 struct GitHubAccessLine: View {
     let access: GitHubAccess
     /// The page an issue would be about. Nil offers none.
@@ -669,8 +675,12 @@ enum JobReview {
 
     /// The banner over a job under review (§6.6). A push that was sent and
     /// never confirmed (a quit, a crash or a timeout in the middle of it)
-    /// may have reached GitHub, and the banner says so rather than
-    /// "Nothing has been pushed".
+    /// may have reached GitHub, and the banner says so rather than that
+    /// CCwiki has pushed nothing.
+    ///
+    /// It says what CCwiki did, never what is on GitHub: an agent may have
+    /// pushed for itself, and the tripwire's notice under the banner says
+    /// so (§5.5).
     static func banner(
         state: JobState, needsRestore: Bool, isUntouchedEdit: Bool,
         pushingCommit: String?, pushedCommit: String?, branch: String
@@ -685,7 +695,7 @@ enum JobReview {
             return "\(waiting) A push to \(branch) may have reached GitHub; "
                 + "opening the pull request checks GitHub first."
         }
-        return "\(waiting) Nothing has been pushed."
+        return "\(waiting) CCwiki has pushed nothing."
     }
 
     /// The banner's second line: the branch, then the page and the passage,
@@ -853,11 +863,12 @@ enum JobReview {
         }
     }
 
-    /// An issue is the way out when gh is missing or cannot push (§7.1).
+    /// An issue is the way out when the account cannot push (§7.1). Not
+    /// when gh is missing: opening an issue needs gh too.
     static func offersIssue(for access: GitHubAccess) -> Bool {
         switch access {
-        case .ghMissing, .cannotPush: true
-        case .ready, .offline, .notSignedIn: false
+        case .cannotPush: true
+        case .ready, .offline, .notSignedIn, .ghMissing: false
         }
     }
 

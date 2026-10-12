@@ -44,6 +44,11 @@ struct GitHubAccessTests {
         #expect(GitHubAccess.cannotPush(repository: "owner/fork").banner?.contains("owner/fork") == true)
         #expect(GitHubAccess.offline.banner?.hasPrefix("Offline.") == true)
         #expect(GitHubAccess.notSignedIn.banner?.contains("gh auth login") == true)
+        // Each sits beside Check Again. An issue needs gh too, so the banner
+        // for a missing gh does not offer one.
+        #expect(GitHubAccess.notSignedIn.banner?.hasSuffix("then check again.") == true)
+        #expect(GitHubAccess.ghMissing.banner?.contains("brew install gh") == true)
+        #expect(GitHubAccess.ghMissing.banner?.contains("issue") == false)
     }
 
     @Test("gh's and git's words for an unreachable GitHub read as a network failure")

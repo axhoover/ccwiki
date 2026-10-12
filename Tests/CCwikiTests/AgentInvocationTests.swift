@@ -86,6 +86,18 @@ struct AgentInvocationTests {
         }
     }
 
+    @Test("both leave out the user's MCP servers, and their allow rules and hooks")
+    func userConfiguration() {
+        let ingestion = AgentInvocation.ingestion(
+            prompt: "Ingest.", maxTurns: "200", base: Self.base, scratch: Self.scratch)
+        for invocation in [Self.correction(), ingestion] {
+            let arguments = invocation.arguments
+            #expect(arguments.contains("--strict-mcp-config"))
+            #expect(!arguments.contains("--mcp-config"), "a config would load its servers")
+            #expect(Self.value(of: "--setting-sources", in: arguments) == "project")
+        }
+    }
+
     @Test("an ingestion: no gh, and every git entry is one that only reads")
     func ingestionTools() {
         let ingestion = AgentInvocation.ingestion(
