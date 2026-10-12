@@ -168,8 +168,10 @@ struct FixtureRepository {
     }
 
     static func environment(date: Int? = nil) -> [String: String] {
-        var environment = [
-            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        // The process's own, for PATH, TMPDIR and DEVELOPER_DIR, without any
+        // GIT_ variable that could point git somewhere else.
+        var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
+        environment.merge([
             "HOME": FileManager.default.temporaryDirectory.path(percentEncoded: false),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_NOSYSTEM": "1",
@@ -178,7 +180,7 @@ struct FixtureRepository {
             "GIT_COMMITTER_NAME": "CCwiki Tests",
             "GIT_COMMITTER_EMAIL": "tests@ccwiki.invalid",
             "GIT_TERMINAL_PROMPT": "0",
-        ]
+        ]) { _, fixed in fixed }
         if let date {
             environment["GIT_AUTHOR_DATE"] = "\(date) +0000"
             environment["GIT_COMMITTER_DATE"] = "\(date) +0000"

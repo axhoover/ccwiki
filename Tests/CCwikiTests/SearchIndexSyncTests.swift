@@ -109,8 +109,10 @@ struct SearchIndexSyncTests {
         let built = try await Self.sync(fresh, second)
         #expect(built.rebuiltFromScratch)
 
-        #expect(try Self.rows(of: scratch.file("synced.sqlite3"))
-            == Self.rows(of: scratch.file("fresh.sqlite3")))
+        let syncedRows = try Self.rows(of: scratch.file("synced.sqlite3"))
+        let freshRows = try Self.rows(of: scratch.file("fresh.sqlite3"))
+        #expect(syncedRows.count == 5)
+        #expect(syncedRows == freshRows)
         let expected = try await Self.answers(fresh)
         let actual = try await Self.answers(synced)
         #expect(actual.count == expected.count)
@@ -151,9 +153,10 @@ struct SearchIndexSyncTests {
         let relaunched = SearchIndex(path: file)
         let afterRelaunch = try await Self.sync(relaunched, library)
         #expect(afterRelaunch == SyncReport(unchanged: 5))
-        #expect(try Data(contentsOf: file) == bytes, "the database file is untouched")
-        #expect((try? Data(contentsOf: scratch.file("search.sqlite3-wal"))) == wal,
-                "and nothing went to its log")
+        let bytesAfter = try Data(contentsOf: file)
+        let walAfter = try? Data(contentsOf: scratch.file("search.sqlite3-wal"))
+        #expect(bytesAfter == bytes, "the database file is untouched")
+        #expect(walAfter == wal, "and nothing went to its log")
         let count = await relaunched.indexedCount
         #expect(count == 5)
     }
@@ -268,6 +271,6 @@ struct SearchIndexSyncTests {
 
         let hits = try await index.search("twin")
         #expect(hits.map(\.path) == ["Glossary/alpha.md", "Glossary/beta.md"])
-        #expect(hits.count == 2 && hits[0].score == hits[1].score)
+        #expect(Set(hits.map(\.score)).count == 1, "a tie, which the path breaks")
     }
 }

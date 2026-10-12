@@ -129,7 +129,7 @@ struct IncrementalCorpusTests {
             + "\(runs.count): \(best)")
         lines.append("  in memory: fastest \(LoadTimings.format(best.building)), median "
             + "\(LoadTimings.format(Self.median(runs.map(\.building)))); "
-            + "§3.2 builds reuse only above 300 ms")
+            + "§3.2 builds reuse (D6) only above 300 ms")
 
         let scans = (0..<5).map { _ in
             Self.timed { ContentFingerprints.scan(cloneRoot: clone) }.duration

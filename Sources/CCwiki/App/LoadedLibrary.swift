@@ -206,7 +206,7 @@ extension LibraryUpdate {
             library: library, changes: changes, isFullBuild: isFullBuild,
             rebuilt: Set(LibraryArtifact.allCases),
             resolutionChanged: isFullBuild
-                || Self.resolutionChanged(from: previous.index, to: library.index, by: changes),
+                || Self.resolutionDiffers(from: previous.index, to: library.index, by: changes),
             labelsChanged: isFullBuild || previous.labels != library.labels)
     }
 
@@ -214,7 +214,7 @@ extension LibraryUpdate {
     /// tables are built from the file list and every page's aliases, so a
     /// file that came or went, or a changed page whose aliases differ (or
     /// that parses only on one side), can.
-    static func resolutionChanged(
+    static func resolutionDiffers(
         from old: WikiIndex, to new: WikiIndex, by changes: LibraryChanges
     ) -> Bool {
         if !changes.added.isEmpty || !changes.deleted.isEmpty { return true }

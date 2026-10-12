@@ -31,7 +31,7 @@ struct LibraryChangesTests {
         #expect(changes.changedPages == ["b.md", "c.md", "d.md"], "an asset is not a page")
         #expect(!changes.isEmpty)
 
-        #expect(LibraryChanges.between(new, new) == .none)
+        #expect(LibraryChanges.between(new, new) == LibraryChanges.none)
         #expect(LibraryChanges.between(new, new).isEmpty)
         let macros = LibraryChanges.between(
             new, ContentFingerprints(pages: new.pages, manifest: "m2", macros: "t2"))
