@@ -8,10 +8,12 @@ import Foundation
 /// ├── library/       PDFs dropped on the app; deliberately outside the repo
 /// │   └── papers/    the papers behind reference pages, fetched when asked
 /// ├── index/         search.sqlite3 — derived, safe to delete at any time
-/// └── logs/          per-job transcripts, kept after the worktree is gone
+/// └── logs/          per-job transcripts, records and reviewed patches, kept
+///                    after the worktree is gone
 ///
 /// ~/Library/Caches/CCwiki/
-/// ├── worktrees/     one git worktree per ingestion job, pruned when the PR opens
+/// ├── worktrees/     one git worktree per job, pruned when the PR opens
+/// ├── scratch/       per-job scratch outside the worktree (an agent's gh config)
 /// └── web-builds/    the reader's pipeline, one copy per build (`stagedWebRoot`)
 /// ```
 ///
@@ -279,4 +281,12 @@ struct AppPaths: Sendable {
     func log(forJob id: String) -> URL { logs.appending(path: "\(id).log") }
     /// The small JSON record that brings a job back after a relaunch.
     func record(forJob id: String) -> URL { logs.appending(path: "\(id).json") }
+    /// A job's scratch directory, outside its worktree: the agent's
+    /// `GH_CONFIG_DIR` (plans/corrections.md §5.1). Removed with the worktree.
+    func scratch(forJob id: String) -> URL {
+        cacheRoot.appending(path: "scratch").appending(path: id)
+    }
+    /// The last reviewed diff, byte for byte, beside the transcript: Caches
+    /// can be cleared, and a review must survive that (corrections §4.4).
+    func patch(forJob id: String) -> URL { logs.appending(path: "\(id).patch") }
 }

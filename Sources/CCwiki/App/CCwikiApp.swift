@@ -87,6 +87,7 @@ struct CCwikiApp: App {
     }
 
     static let jobsWindowID = "ccwiki.jobs"
+    static let editorWindowID = "ccwiki.editor"
     static let explorerWindowID = "ccwiki.relations-explorer"
     static let mainWindowID = "ccwiki.main"
     static let paperWindowID = "ccwiki.paper"

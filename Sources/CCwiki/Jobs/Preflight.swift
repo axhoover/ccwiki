@@ -225,3 +225,56 @@ enum GitHubAuth {
         cached = nil
     }
 }
+
+extension GitHubAuth {
+    /// `gh auth status`: nil on a timeout, unlike `isAuthenticated`'s false,
+    /// so an unreachable GitHub reads as offline, not as signed out.
+    ///
+    /// Phase 0: always nil. Track B asks gh (plans/corrections.md §11.3).
+    static func signedIn(tools: ToolLocator) async -> Bool? {
+        nil
+    }
+}
+
+/// Whether a correction can become a pull request now (plans/corrections.md
+/// §7.1). Editing needs no network; opening the pull request does, so the
+/// editor and the review say which of these is in the way, and Approve asks
+/// again.
+enum GitHubAccess: Sendable, Equatable {
+    case ready
+    /// A timeout, or a network failure.
+    case offline
+    case ghMissing
+    case notSignedIn
+    case cannotPush(repository: String)
+
+    /// The banner the editor and the review show. Nil when ready.
+    var banner: String? {
+        switch self {
+        case .ready:
+            return nil
+        case .offline:
+            return "Offline. You can edit now; opening the pull request needs a connection."
+        case .ghMissing:
+            return "gh is not installed, so this cannot become a pull request yet. "
+                + "Install it, or open an issue."
+        case .notSignedIn:
+            return "gh is not signed in. Run gh auth login in Terminal, then review again."
+        case .cannotPush(let repository):
+            return "The signed-in account cannot push to \(repository), so this cannot "
+                + "become a pull request. Open an issue instead."
+        }
+    }
+
+    /// Pure. `signedIn` and `canPush` are nil when gh could not be asked,
+    /// which is offline, never signed out.
+    static func classify(
+        ghPresent: Bool, signedIn: Bool?, canPush: Bool?, repository: String
+    ) -> GitHubAccess {
+        guard ghPresent else { return .ghMissing }
+        guard let signedIn else { return .offline }
+        guard signedIn else { return .notSignedIn }
+        guard let canPush else { return .offline }
+        return canPush ? .ready : .cannotPush(repository: repository)
+    }
+}

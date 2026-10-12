@@ -4,7 +4,7 @@ import SwiftUI
 /// transcript.
 struct JobDetailView: View {
     @Environment(AppModel.self) private var model
-    let job: IngestJob
+    let job: Job
 
     @State private var followsTail = true
 
@@ -14,8 +14,8 @@ struct JobDetailView: View {
             Divider()
             transcript
         }
-        .navigationTitle(job.submission.displayName)
-        .navigationSubtitle(job.state.label)
+        .navigationTitle(job.title)
+        .navigationSubtitle(job.statusLabel)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if case .opened(let url) = job.state {
@@ -26,7 +26,9 @@ struct JobDetailView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-                if !job.state.isTerminal {
+                // Only work that has not reached review can be cancelled
+                // (corrections §4.1).
+                if job.state.isCancellable {
                     Button("Cancel", role: .destructive) { job.cancel() }
                 }
             }
@@ -39,7 +41,7 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: Theme.small) {
             HStack(spacing: Theme.small) {
                 JobStateIcon(state: job.state)
-                Text(job.state.label)
+                Text(job.statusLabel)
                     .font(Theme.Fonts.documentTitle)
                 Spacer(minLength: Theme.small)
                 if let duration = job.duration {
@@ -62,11 +64,15 @@ struct JobDetailView: View {
 
             HStack(spacing: Theme.medium) {
                 metadata("Branch", job.branch)
-                if let source = job.submission.source {
-                    metadata(source.label, source.canonicalURL)
-                }
-                if let pdf = job.submission.localPDF {
-                    metadata("PDF", pdf.lastPathComponent)
+                if let submission = job.submission {
+                    if let source = submission.source {
+                        metadata(source.label, source.canonicalURL)
+                    }
+                    if let pdf = submission.localPDF {
+                        metadata("PDF", pdf.lastPathComponent)
+                    }
+                } else if let target = job.kind.target {
+                    metadata("Page", target.repositoryPath)
                 }
             }
 
@@ -95,6 +101,15 @@ struct JobDetailView: View {
                     .font(Theme.Fonts.log)
                     .textSelection(.enabled)
                     .lineLimit(8)
+            }
+        case .awaitingReview:
+            banner(.accentColor, JobState.awaitingReview.symbolName,
+                   "Awaiting your review. Nothing has been pushed.") {
+                EmptyView()
+            }
+        case .publishing(let step):
+            banner(.accentColor, "arrow.up.circle", step) {
+                EmptyView()
             }
         case .failed(let message):
             banner(.red, "xmark.octagon.fill", message) {

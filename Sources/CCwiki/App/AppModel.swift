@@ -457,10 +457,19 @@ final class AppModel {
 
     // MARK: Jobs
 
-    private(set) var jobs: [IngestJob] = []
+    /// Every job, and everything that moves one along (plans/corrections.md
+    /// §4, §11.6). Made in `init`, so the history is loaded before any window
+    /// is restored.
+    let jobCenter: JobCenter
+    /// Where pull requests and issues go, resolved once (corrections §10).
+    let publishTarget: PublishTarget
+
+    /// The jobs, newest first: the job center's, for the views that read
+    /// them here.
+    var jobs: [Job] { jobCenter.jobs }
     /// Worktrees git still knows about that no live job owns — the residue of
     /// a crash or a force-quit mid-job.
-    private(set) var orphanedWorktrees: [String] = []
+    var orphanedWorktrees: [String] { jobCenter.orphanedWorktrees }
     /// Which reader window shows the ingest sheet: fixed when the sheet is
     /// asked for, so its link, notes and dropped PDF stay on one window
     /// when another becomes key (§1.3).
@@ -494,8 +503,58 @@ final class AppModel {
     /// Bumped to ask the root view to open the jobs window. `openWindow` is an
     /// environment action, so only a view can call it; the model can only ask.
     private(set) var jobsWindowRequests = 0
+    /// The job the last request asked the Jobs window to show, if any.
+    private(set) var jobsWindowSelection: String?
 
-    func requestJobsWindow() { jobsWindowRequests += 1 }
+    /// Opens the Jobs window, on `jobID` when given: a job just started, or
+    /// the review a status-bar count leads to.
+    func requestJobsWindow(selecting jobID: String? = nil) {
+        jobsWindowSelection = jobID
+        jobsWindowRequests += 1
+    }
+
+    // MARK: Editor windows
+
+    /// Bumped to ask a reader window to open an editor (corrections §7.2):
+    /// for AppKit and async callers, which have no `openWindow`. Every
+    /// reader window's root view observes it; the first to take the request
+    /// opens the window, and the others find nil.
+    private(set) var editorWindowRequestCount = 0
+    @ObservationIgnored private var editorWindowRequest: EditorTarget?
+
+    /// Asks for the editor of `target`, at `lines`. A view that has
+    /// `openWindow` calls `showEditor(_:at:using:)` instead.
+    func requestEditor(_ target: EditorTarget, at lines: LineRange?) {
+        editorSession(for: target).reveal(lines)
+        editorWindowRequest = target
+        editorWindowRequestCount += 1
+    }
+
+    /// The editor asked for, once: taking it clears it.
+    func takeEditorRequest() -> EditorTarget? {
+        defer { editorWindowRequest = nil }
+        return editorWindowRequest
+    }
+
+    /// Each open editor's text and preview, by window (corrections §7.5).
+    @ObservationIgnored var editorSessions: [EditorTarget: EditorSession] = [:]
+
+    // MARK: Review
+
+    /// The review's Changes pane shows Source rather than Rendered.
+    var reviewShowsSource = false
+
+    /// The review's own web view: the reader's shell, pipeline and macros,
+    /// rendering changed blocks (corrections §6.3). Made on first use; it
+    /// shares the readers' data store.
+    @ObservationIgnored private(set) lazy var reviewWeb: WebController =
+        WebController(paths: paths, webRoot: webRoot, pageZoom: pageZoom)
+
+    /// The model a described correction runs with: a `claude --model`
+    /// alias, or "" for the CLI's default. Persisted; see `CCwikiSettings`.
+    var correctionModel: String = CCwikiSettings.correctionModel {
+        didSet { CCwikiSettings.correctionModel = correctionModel }
+    }
 
     /// Same pattern for Settings. `openSettings` is an environment action, and
     /// the `showSettingsWindow:` selector that worked before macOS 13 does
@@ -504,7 +563,8 @@ final class AppModel {
 
     func requestSettings() { settingsRequests += 1 }
 
-    var activeJobCount: Int { jobs.filter { $0.state.isActive }.count }
+    /// Preparing, running or publishing.
+    var activeJobCount: Int { jobCenter.activeJobCount }
 
     // MARK: Updates
 
@@ -552,7 +612,7 @@ final class AppModel {
 
     /// Append once. A warning that repeats on every sync is noise, and a
     /// duplicate could not be dismissed on its own.
-    private func warn(_ message: String) {
+    func warn(_ message: String) {
         guard !warnings.contains(message) else { return }
         warnings.append(message)
     }
@@ -586,6 +646,20 @@ final class AppModel {
         self.webRoot = paths.stagedWebRoot()
         self.storedPageZoom = AppModel.clampedZoom(CCwikiSettings.pageZoom)
         self.papers = PaperLibrary(paths: paths)
+        let publishTarget = PublishTarget.resolve(
+            channel: BuildIdentity.current, environment: ProcessInfo.processInfo.environment)
+        self.publishTarget = publishTarget
+        // Made with the model, so the job history is loaded before SwiftUI
+        // restores a window: a restored editor or review finds its job
+        // (corrections §4.3). Until the end of `init` the job center cannot
+        // read the model, and nothing asks it to; it is given the model's
+        // environment below.
+        self.jobCenter = JobCenter(paths: paths) {
+            JobCenter.Environment(
+                tools: ToolLocator(), git: nil, index: nil, relations: .empty,
+                labels: .empty, appVersion: Bundle.main.shortVersion, correctionModel: "",
+                target: publishTarget, privatePaths: [])
+        }
 
         try? paths.createDirectories()
         // Tools are looked for in `discoverTools()`, after the first frame:
@@ -597,6 +671,43 @@ final class AppModel {
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
         refreshMacrosWarning()
+
+        // The job center reads the model, and calls back into it, through
+        // these. Unowned: the model owns the job center and outlives it.
+        jobCenter.environment = { [unowned self] in self.jobEnvironment }
+        jobCenter.flushEdits = { [unowned self] job in await self.flushEdits(for: job) }
+        jobCenter.onFilesChanged = { [unowned self] job, changed in
+            self.filesChanged(in: job, paths: changed)
+        }
+        jobCenter.onOrphanedWorktreesChanged = { [unowned self] worktrees in
+            self.orphanedWorktreesChanged(worktrees)
+        }
+
+        // A Dev build pointed at a fork with a value that is not owner/name
+        // goes on targeting the wiki, and says so (corrections §10).
+        if publishTarget.isDevBuild, !publishTarget.isOverridden,
+           let requested = ProcessInfo.processInfo.environment["CCWIKI_TARGET_REPO"],
+           !requested.isEmpty, requested != publishTarget.repository {
+            warn("CCWIKI_TARGET_REPO is ignored: “\(requested)” is not owner/name. "
+                + "Pull requests and issues go to \(publishTarget.repository).")
+        }
+    }
+
+    /// What the job center reads at each call: the tools, git, the wiki and
+    /// the settings as they are now (SWIFTUI-RULES §3.5).
+    private var jobEnvironment: JobCenter.Environment {
+        JobCenter.Environment(
+            tools: tools, git: gitService, index: index, relations: relations,
+            labels: relationLabels, appVersion: appVersion, correctionModel: correctionModel,
+            target: publishTarget, privatePaths: privatePaths)
+    }
+
+    /// The local paths that must never reach a pull request or an issue
+    /// (`PrivateText`, corrections §6.4): the home folder, and the roots of
+    /// the worktrees, the library and Application Support.
+    private var privatePaths: [String] {
+        [paths.worktrees, paths.library, paths.support].map { $0.path(percentEncoded: false) }
+            + [NSHomeDirectory()]
     }
 
     // MARK: Launch
@@ -624,7 +735,8 @@ final class AppModel {
 
     private func launch() async {
         await discoverTools()
-        loadJobHistory()
+        // The job history is not a step: `JobCenter.init` loaded it with the
+        // model, before any window (corrections §4.3).
         await loadLibrary(reason: .launch)
         // Which copy this is goes to the log on every launch; the other
         // copies are looked for in a release, and not under the harness.
@@ -723,7 +835,7 @@ final class AppModel {
         }
         if needsDeveloperTools {
             blockers.append("git needs Apple's Command Line Tools (reading does not; "
-                + "jobs do). Settings > Tools has the installer.")
+                + "jobs do). Settings > Jobs has the installer.")
         }
         for tool in tools.missingForIngestion where !(tool == .git && needsDeveloperTools) {
             blockers.append("\(tool.rawValue) was not found. It is needed for \(tool.purpose).")
@@ -904,7 +1016,7 @@ final class AppModel {
         refreshQuickSwitcher()
     }
 
-    private var gitService: GitService? {
+    var gitService: GitService? {
         guard let git = tools.path(for: .git) else { return nil }
         return GitService(executable: git, environment: tools.childEnvironment())
     }
@@ -1016,9 +1128,11 @@ final class AppModel {
     /// is lost; the loaded index stays on screen until the new clone lands.
     func resetClone() {
         // A job's worktree keeps its metadata inside the clone's `.git`, so
-        // deleting the clone under a running job breaks every git step it
-        // has left. Settings disables the button; this is the backstop.
-        guard syncTask == nil, activeJobCount == 0 else { return }
+        // deleting the clone under a job that is not finished — running, or
+        // waiting for review — breaks every git step it has left
+        // (corrections §4.3). Settings disables the button; this is the
+        // backstop.
+        guard syncTask == nil, unfinishedJobCount == 0 else { return }
         try? FileManager.default.removeItem(at: paths.clone)
         headRevision = nil
         headDate = nil
@@ -1507,78 +1621,29 @@ final class AppModel {
         return destination
     }
 
+    /// A new ingestion job, shown in the Jobs window as it starts.
     func submitIngestion(source: IngestSubmission.Source?, pdf: URL?, notes: String) {
-        let submission = IngestSubmission(
-            kind: pdf != nil ? .pdf : .url,
-            source: source,
-            localPDF: pdf,
-            notes: notes,
-            submittedAt: Date())
-
-        let job = IngestJob(submission: submission, paths: paths)
-        jobs.insert(job, at: 0)
-        requestJobsWindow()
-        start(job)
-    }
-
-    /// Jobs from earlier launches, from the records beside their transcripts.
-    ///
-    /// A job that was running when the app last quit comes back as failed
-    /// and says why; its worktree, if any, shows up under "Left Behind".
-    func loadJobHistory() {
-        let manager = FileManager.default
-        guard let files = try? manager.contentsOfDirectory(
-            at: paths.logs, includingPropertiesForKeys: nil)
-        else { return }
-        let decoder = JSONDecoder()
-        let known = Set(jobs.map(\.id))
-        var restored: [IngestJob] = []
-        for file in files where file.pathExtension == "json" {
-            guard let data = try? Data(contentsOf: file),
-                  let record = try? decoder.decode(JobRecord.self, from: data),
-                  !known.contains(record.id)
-            else { continue }
-            restored.append(IngestJob(restoring: record, paths: paths))
-        }
-        restored.sort { $0.submission.submittedAt > $1.submission.submittedAt }
-        jobs.append(contentsOf: restored)
+        let job = jobCenter.submitIngestion(source: source, pdf: pdf, notes: notes)
+        requestJobsWindow(selecting: job.id)
     }
 
     /// Forget the finished jobs. Their transcripts stay on disk; only the
     /// records that bring them back at launch go.
     func clearFinishedJobs() {
-        for job in jobs where job.state.isTerminal {
-            try? FileManager.default.removeItem(at: job.recordFile)
-        }
-        jobs.removeAll { $0.state.isTerminal }
+        jobCenter.clearFinishedJobs()
     }
 
-    var hasFinishedJobs: Bool { jobs.contains { $0.state.isTerminal } }
+    var hasFinishedJobs: Bool { jobCenter.hasFinishedJobs }
+
+    /// Jobs that are not finished: running, or waiting for review. Their
+    /// worktrees live in the clone's `.git`.
+    var unfinishedJobCount: Int { jobs.count { !$0.state.isTerminal } }
 
     /// The same submission again, as a new job. The common case after a
     /// failure that was the machine's fault rather than the paper's.
-    func runAgain(_ job: IngestJob) {
-        submitIngestion(
-            source: job.submission.source,
-            pdf: job.submission.localPDF,
-            notes: job.submission.notes)
-    }
-
-    private func start(_ job: IngestJob) {
-        guard let git = gitService else {
-            job.setState(.failed("git was not found."))
-            return
-        }
-        let runner = IngestJobRunner(paths: paths, tools: tools, git: git, index: index)
-        job.task = Task { @MainActor in
-            await runner.run(job)
-            // A job that changed the wiki has changed nothing locally — the PR
-            // lives on GitHub — but the branch and worktree bookkeeping moved,
-            // so refresh what we know about strays. In a fresh task: a
-            // cancelled job's task would kill the `git worktree list` it
-            // needs and report no strays at all.
-            await Task { @MainActor in await self.refreshOrphanedWorktrees() }.value
-        }
+    func runAgain(_ job: Job) {
+        jobCenter.runAgain(job)
+        requestJobsWindow(selecting: jobCenter.jobs.first?.id)
     }
 
     // MARK: Other copies
@@ -1857,18 +1922,12 @@ final class AppModel {
     /// quit would leave two copies of the app on one clone and one search
     /// index. True when nothing is running.
     private func mayStopJobs(then action: String, button: String) -> Bool {
-        let running = activeJobCount
-        guard running > 0 else { return true }
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = running == 1
-            ? "Stop the running job and \(action)?"
-            : "Stop \(running) running jobs and \(action)?"
-        alert.informativeText = "The agent will be stopped before it opens a pull "
-            + "request. Its worktree and transcript are kept."
-        alert.addButton(withTitle: (running == 1 ? "Stop Job and " : "Stop Jobs and ") + button)
-        alert.addButton(withTitle: "Don't \(button)").keyEquivalent = "\u{1b}"
-        return alert.runModal() == .alertFirstButtonReturn
+        let publishing = jobCenter.publishingCount
+        guard let wording = StopJobsWording.make(
+            agents: activeJobCount - publishing, publishing: publishing,
+            action: action, verb: button)
+        else { return true }
+        return wording.confirm()
     }
 
     /// Stops the jobs the person agreed to stop (`mayStopJobs`), and any
@@ -2006,18 +2065,11 @@ final class AppModel {
     /// this window where it is.
     func relaunchToUpdate() {
         Task { @MainActor in
-            let running = activeJobCount
-            if running > 0 {
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = running == 1
-                    ? "Stop the running job and relaunch?"
-                    : "Stop \(running) running jobs and relaunch?"
-                alert.informativeText = "The agent will be stopped before it opens a pull "
-                    + "request. Its worktree and transcript are kept."
-                alert.addButton(withTitle: running == 1 ? "Stop Job and Relaunch" : "Stop Jobs and Relaunch")
-                alert.addButton(withTitle: "Don't Relaunch")
-                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let publishing = jobCenter.publishingCount
+            if let wording = StopJobsWording.make(
+                agents: activeJobCount - publishing, publishing: publishing,
+                action: "relaunch", verb: "Relaunch") {
+                guard wording.confirm() else { return }
                 cancelActiveJobs()
             }
             do {
@@ -2155,39 +2207,34 @@ final class AppModel {
         if alert.runModal() == .alertFirstButtonReturn { relaunchToUpdate() }
     }
 
-    /// Stop every job that has not finished. Called on quit, so no agent
-    /// outlives the window it was reporting to: left alone it would keep
-    /// working in the worktree and could open a PR nobody is watching.
+    /// Stop what is running. Called on quit, so no agent outlives the window
+    /// it was reporting to: left alone it would keep working in the worktree.
+    /// A review is left as it is, and a publish goes back to review
+    /// (corrections §4.1).
     func cancelActiveJobs() {
-        for job in jobs where !job.state.isTerminal { job.cancel() }
-        Subprocess.terminateAll()
+        jobCenter.cancelActiveJobs()
     }
 
-    /// Look for strays, and say so. The warning is rebuilt with the list
-    /// wherever that is refreshed (at launch, after a clone or a reset, after
-    /// a job and after a prune), so it never names worktrees already pruned
-    /// (SWIFTUI-RULES §3.1).
+    /// Look for strays. The job center calls `orphanedWorktreesChanged`
+    /// with what it found, which rebuilds the warning.
     func refreshOrphanedWorktrees() async {
-        guard let git = gitService else { return }
-        let runner = IngestJobRunner(paths: paths, tools: tools, git: git, index: index)
-        let known = Set(jobs.filter { !$0.state.isTerminal }.map(\.id))
-        orphanedWorktrees = await runner.orphanedWorktrees(knownJobIDs: known).map(\.path)
-        warnings.removeAll { $0.hasPrefix(Self.orphansWarningPrefix) }
-        if !orphanedWorktrees.isEmpty {
-            let count = orphanedWorktrees.count
-            warn(Self.orphansWarningPrefix
-                + "\(count) left over from an interrupted job. "
-                + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
-        }
+        await jobCenter.refreshOrphanedWorktrees()
     }
 
     func pruneOrphan(_ path: String) {
-        guard let git = gitService else { return }
-        let runner = IngestJobRunner(paths: paths, tools: tools, git: git, index: index)
-        Task { @MainActor in
-            await runner.prune(worktreeAt: path)
-            await refreshOrphanedWorktrees()
-        }
+        jobCenter.pruneOrphan(path)
+    }
+
+    /// The warning is rebuilt with the list wherever that is refreshed (at
+    /// launch, after a clone or a reset, after a job and after a prune), so
+    /// it never names worktrees already pruned (SWIFTUI-RULES §3.1).
+    private func orphanedWorktreesChanged(_ worktrees: [String]) {
+        warnings.removeAll { $0.hasPrefix(Self.orphansWarningPrefix) }
+        guard !worktrees.isEmpty else { return }
+        let count = worktrees.count
+        warn(Self.orphansWarningPrefix
+            + "\(count) left over from an interrupted job. "
+            + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
     }
 
     /// Open a worktree in Terminal — the escape hatch for a failed job.
@@ -2201,5 +2248,65 @@ final class AppModel {
         configuration.activates = true
         NSWorkspace.shared.open(
             [directory], withApplicationAt: terminal, configuration: configuration)
+    }
+}
+
+/// What an alert says before the app stops jobs: at a quit, a relaunch to
+/// update, or a hand-over to another copy (plans/corrections.md §11.1).
+/// Agents, preparing or running, are stopped; a publishing job is
+/// interrupted and goes back to review. Counted apart, because the two lose
+/// different things.
+struct StopJobsWording: Equatable, Sendable {
+    let message: String
+    let informative: String
+    let confirmTitle: String
+    let cancelTitle: String
+
+    static let agentDetail = "The agent will be stopped. Its worktree and transcript are kept."
+    static let publishingDetail = "Quitting stops it. The job returns to review, and CCwiki "
+        + "checks GitHub before opening the pull request again."
+
+    /// Nil when there is nothing to stop. `action` ends the message, "quit"
+    /// or "open CCwiki 0.3.1"; `verb` is the buttons', "Quit" or "Open".
+    /// `agentsMessage` replaces the message about agents where an alert has
+    /// always put it its own way.
+    static func make(
+        agents: Int, publishing: Int, action: String, verb: String,
+        agentsMessage: String? = nil
+    ) -> StopJobsWording? {
+        guard agents > 0 || publishing > 0 else { return nil }
+        let message: String
+        var detail: [String] = []
+        if agents > 0 {
+            message = agentsMessage ?? (agents == 1
+                ? "Stop the running job and \(action)?"
+                : "Stop \(agents) running jobs and \(action)?")
+            detail.append(agentDetail)
+            if publishing > 0 {
+                detail.append("A pull request is being opened too. " + publishingDetail)
+            }
+        } else {
+            message = action.prefix(1).uppercased() + action.dropFirst()
+                + " while a pull request is being opened?"
+            detail.append(publishingDetail)
+        }
+        let confirm = agents == 0
+            ? verb
+            : (agents == 1 ? "Stop Job and " : "Stop Jobs and ") + verb
+        return StopJobsWording(
+            message: message, informative: detail.joined(separator: " "),
+            confirmTitle: confirm, cancelTitle: "Don't \(verb)")
+    }
+
+    /// Asks, and says whether the person agreed.
+    @MainActor
+    func confirm() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = informative
+        alert.addButton(withTitle: confirmTitle)
+        alert.addButton(withTitle: cancelTitle).keyEquivalent = "\u{1b}"
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }

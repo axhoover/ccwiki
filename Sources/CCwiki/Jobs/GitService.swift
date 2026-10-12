@@ -413,6 +413,17 @@ struct GitService: Sendable {
         return status == 0
     }
 
+    // MARK: Review (plans/corrections.md §11.6)
+
+    /// `git show <spec>`, bytes exact: "<base>:<path>", or ":<path>" for the
+    /// index. Nil when git cannot show it.
+    ///
+    /// Phase 0: always nil. Track B runs it through `Subprocess.runData`, so
+    /// no line splitting touches the bytes (§6.1).
+    func blob(_ spec: String, in directory: URL) async -> Data? {
+        nil
+    }
+
     // MARK: Plumbing
 
     private func run(_ arguments: [String]) async -> Subprocess.Result {

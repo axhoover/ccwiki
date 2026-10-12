@@ -27,7 +27,11 @@ struct IngestJobRunner {
         ProcessInfo.processInfo.environment["CCWIKI_MAX_TURNS"] ?? "200"
     }
 
-    func run(_ job: IngestJob) async {
+    func run(_ job: Job) async {
+        guard let submission = job.submission else {
+            job.setState(.failed("This job is not an ingestion."))
+            return
+        }
         job.setState(.preparing("Checking…"))
 
         let canPush = await git.canAuthenticatePush(clone: paths.clone)
@@ -36,7 +40,7 @@ struct IngestJobRunner {
             ? await GitHubAuth.canPush(tools: tools, repository: AppPaths.repositorySlug)
             : nil
         let findings = Preflight.run(
-            submission: job.submission, index: index, paths: paths, tools: tools,
+            submission: submission, index: index, paths: paths, tools: tools,
             isGitHubAuthenticated: authenticated, canPush: canPush, hasPushRights: pushRights)
         job.setPreflight(findings)
         for finding in findings {
@@ -248,7 +252,7 @@ struct IngestJobRunner {
     /// branch, and created after the job started. A branch name is reused
     /// once its earlier PR has merged and the branch is gone, and `gh pr
     /// view <branch>` happily returns that merged PR; this does not.
-    private func confirmedPullRequest(_ job: IngestJob) async -> URL? {
+    private func confirmedPullRequest(_ job: Job) async -> URL? {
         guard let gh = tools.path(for: .gh) else { return nil }
         let result = await Subprocess.run(
             executable: gh,
@@ -259,7 +263,7 @@ struct IngestJobRunner {
             currentDirectory: job.worktree,
             environment: tools.childEnvironment())
         guard result.succeeded else { return nil }
-        let notBefore = (job.startedAt ?? job.submission.submittedAt).addingTimeInterval(-60)
+        let notBefore = (job.startedAt ?? job.createdAt).addingTimeInterval(-60)
         return Self.pullRequest(createdAfter: notBefore, in: result.stdout)
     }
 
@@ -286,12 +290,12 @@ struct IngestJobRunner {
     /// moment it starts (`Subprocess.lines` honours cancellation). An
     /// unstructured task does not inherit the cancellation, so the removal
     /// actually runs.
-    private func cleanUpDespiteCancellation(_ job: IngestJob, keep: Bool) async {
+    private func cleanUpDespiteCancellation(_ job: Job, keep: Bool) async {
         await Task { @MainActor in await cleanUp(job, keep: keep) }.value
     }
 
     /// Remove the worktree, unless there is something in it worth looking at.
-    private func cleanUp(_ job: IngestJob, keep: Bool) async {
+    private func cleanUp(_ job: Job, keep: Bool) async {
         if keep {
             job.append(JobLogEntry(.system,
                 "Worktree kept at \(job.worktree.path(percentEncoded: false))"))
