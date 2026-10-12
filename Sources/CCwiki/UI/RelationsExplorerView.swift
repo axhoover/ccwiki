@@ -64,6 +64,7 @@ struct RelationsExplorerView: View {
                 if let field { editingField = field }
             }
             .onChange(of: suggestionIDs) { _, ids in announceSuggestions(ids) }
+            .focusedSceneValue(\.proofCopyAction, proofCopyAction)
             .onAppear { focus = .from }
             // One of Recent's two moments: the window closing.
             .onDisappear { model.rememberExplorerQuery() }
@@ -741,10 +742,26 @@ struct RelationsExplorerView: View {
             Button("Copy Statement") { model.copyToPasteboard(statement) }
         }
         if let proof = row.proof {
-            Button("Copy Proof as Text") {
-                model.copyToPasteboard(proof.text(revision: model.headRevision))
+            ProofCopyMenu { model.copyProof(proof, as: $0) }
+            // Hidden rather than dimmed when there is nothing to copy, as
+            // Apple's guidance asks of a context menu.
+            if model.proofWriterContext.hasInlineEntries(proof.export) {
+                Button("Copy BibTeX of Cited Works") { model.copyProof(proof, as: .bibtex) }
             }
         }
+    }
+
+    /// Edit → Copy Proof As: the selected rows' proof, or the answer's. None
+    /// while the suggestions show, since the answer underneath is not on
+    /// screen and may not match what is being typed, and none without an
+    /// answer.
+    private var proofCopyAction: ProofCopyAction? {
+        guard !showsSuggestions, result.state == .answer,
+              let copy = result.proofCopy(selection: selection, showingStronger: showsStronger)
+        else { return nil }
+        return ProofCopyAction(
+            copy: { format in model.copyProof(copy, as: format) },
+            hasInlineEntries: model.proofWriterContext.hasInlineEntries(copy.export))
     }
 
     /// ⌘C: the selected rows' statements, in list order.
