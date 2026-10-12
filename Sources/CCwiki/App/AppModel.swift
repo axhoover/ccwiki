@@ -503,7 +503,8 @@ final class AppModel {
     /// Bumped to ask the root view to open the jobs window. `openWindow` is an
     /// environment action, so only a view can call it; the model can only ask.
     private(set) var jobsWindowRequests = 0
-    /// The job the last request asked the Jobs window to show, if any.
+    /// The job the last request asked the Jobs window to show, if any, until
+    /// the window takes it.
     private(set) var jobsWindowSelection: String?
 
     /// Opens the Jobs window, on `jobID` when given: a job just started, or
@@ -511,6 +512,13 @@ final class AppModel {
     func requestJobsWindow(selecting jobID: String? = nil) {
         jobsWindowSelection = jobID
         jobsWindowRequests += 1
+    }
+
+    /// The job asked for, once: taking it clears it, so a Jobs window
+    /// reopened later without a request opens on the newest job, as before.
+    func takeJobsWindowSelection() -> String? {
+        defer { jobsWindowSelection = nil }
+        return jobsWindowSelection
     }
 
     // MARK: Editor windows
@@ -684,13 +692,24 @@ final class AppModel {
         }
 
         // A Dev build pointed at a fork with a value that is not owner/name
-        // goes on targeting the wiki, and says so (corrections §10).
+        // goes on targeting the wiki, and says so (corrections §10). The
+        // value's shape decides, not `isOverridden` alone, so a valid value
+        // is never called invalid, whether or not `resolve` honours it yet.
         if publishTarget.isDevBuild, !publishTarget.isOverridden,
            let requested = ProcessInfo.processInfo.environment["CCWIKI_TARGET_REPO"],
-           !requested.isEmpty, requested != publishTarget.repository {
+           !requested.isEmpty, !Self.isRepositorySlug(requested) {
             warn("CCWIKI_TARGET_REPO is ignored: “\(requested)” is not owner/name. "
                 + "Pull requests and issues go to \(publishTarget.repository).")
         }
+    }
+
+    /// `owner/name`: two parts, neither empty, and no whitespace, the value a
+    /// Dev build honours (corrections §10). `PublishTarget.resolve` accepts
+    /// the same.
+    private static func isRepositorySlug(_ value: String) -> Bool {
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 2 && !parts.contains(where: \.isEmpty)
+            && !value.contains(where: \.isWhitespace)
     }
 
     /// What the job center reads at each call: the tools, git, the wiki and

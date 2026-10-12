@@ -295,11 +295,16 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
+    /// Work still running can only be waited for; a review can be published
+    /// or discarded (corrections §4.3).
     private var resetCloneHelp: String {
+        if model.jobs.contains(where: { $0.state.isCancellable || $0.state.isActive }) {
+            return "Not while a job is running: its worktree belongs to the clone"
+        }
         switch model.unfinishedJobCount {
-        case 0: "Delete the clone and download the wiki again"
-        case 1: "Publish or discard the job in Jobs first."
-        case let count: "Publish or discard the \(count) jobs in Jobs first."
+        case 0: return "Delete the clone and download the wiki again"
+        case 1: return "Publish or discard the job in Jobs first."
+        case let count: return "Publish or discard the \(count) jobs in Jobs first."
         }
     }
 

@@ -34,9 +34,13 @@ struct JobsView: View {
         .navigationTitle("Jobs")
         .frame(minWidth: Theme.jobsMinWidth, minHeight: Theme.jobsMinHeight)
         // A job just started, or the review a reader's status bar leads to:
-        // the window opens on it (corrections §6.6).
+        // the window opens on it (corrections §6.6). Taken once, so Show
+        // Jobs later opens on the newest job, not on one since cleared.
         .onChange(of: model.jobsWindowRequests, initial: true) { _, _ in
-            if let requested = model.jobsWindowSelection { selection = requested }
+            if let requested = model.takeJobsWindowSelection(),
+               model.jobs.contains(where: { $0.id == requested }) {
+                selection = requested
+            }
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
