@@ -51,6 +51,13 @@ final class WebController: NSObject {
 
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private var pendingRequest: RenderRequest?
+    /// The last review asked for (corrections §6.3), kept so the shell is
+    /// sent it whenever it says "ready": the first review shown is never
+    /// blank, and one comes back after a WebContent crash.
+    @ObservationIgnored private var pendingReviewJSON: String?
+    /// The review on the page now, so asking for the same one again does
+    /// not lay it out again.
+    @ObservationIgnored private var shownReviewJSON: String?
     @ObservationIgnored private var loadedPath: String?
     /// Searched for once the next render reports back.
     @ObservationIgnored private var pendingFind: [String]?
@@ -121,6 +128,9 @@ final class WebController: NSObject {
         }
         guard request.path != loadedPath || request.anchor != nil else { return }
         loadedPath = request.path
+        // A page replaces a review: a reload brings back the page.
+        pendingReviewJSON = nil
+        shownReviewJSON = nil
         outline = []
         lastRenderError = nil
         lastRenderedMarkdown = request.markdown
@@ -229,9 +239,12 @@ final class WebController: NSObject {
             // A fresh document, whether the first or a reload: nothing is on it.
             isReady = true
             loadedPath = nil
+            shownReviewJSON = nil
             if let pending = pendingRequest {
                 pendingRequest = nil
                 render(pending)
+            } else if let review = pendingReviewJSON {
+                sendReview(review)
             } else {
                 onReady?()
             }
@@ -298,21 +311,48 @@ final class WebController: NSObject {
 /// What a correction, the editor's preview and the review ask of the page
 /// (plans/corrections.md §3.3, §6.3). Each page function is guarded, so a
 /// shell without it does nothing.
-///
-/// Phase 0: `selectionSource` is nil, and the page has none of the three
-/// functions yet; Track C writes them (§11.4).
 extension WebController {
 
     /// The selection as `CCwiki.selectionSource()` reports it: the passage's
     /// rendered lines, its text, its heading and the revision it was shown
-    /// at. Nil with nothing selected on the page.
+    /// at. Nil with nothing selected on the page, before the page is ready,
+    /// or if the page cannot be asked.
+    ///
+    /// The page always answers with a string, "null" for nothing, and the
+    /// completion-handler form is used all the same: the async one traps if
+    /// a script's value is ever undefined.
     func selectionSource() async -> ReaderSelection? {
-        nil
+        guard isReady else { return nil }
+        let script = "(function () { try { return window.CCwiki && CCwiki.selectionSource "
+            + "? CCwiki.selectionSource() : \"null\"; } catch (e) { return \"null\"; } })()"
+        let json: String? = await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(script) { value, _ in
+                continuation.resume(returning: value as? String)
+            }
+        }
+        return json.flatMap(ReaderSelection.init(json:))
     }
 
-    /// Shows a review payload (§6.3) in place of a page.
+    /// Shows a review payload (§6.3) in place of a page. Kept until the
+    /// shell is ready, and sent again whenever it reloads.
     func renderReview(json: String) {
-        evaluate("window.CCwiki && CCwiki.renderReview && CCwiki.renderReview(\(json));")
+        pendingReviewJSON = json
+        // The next page asked for renders, whatever was shown before.
+        loadedPath = nil
+        guard isReady, json != shownReviewJSON else { return }
+        sendReview(json)
+    }
+
+    private func sendReview(_ json: String) {
+        shownReviewJSON = json
+        outline = []
+        lastRenderError = nil
+        webView.evaluateJavaScript(
+            "window.CCwiki && CCwiki.renderReview && CCwiki.renderReview(\(json)); true;"
+        ) { [weak self] _, error in
+            guard let error else { return }
+            self?.lastRenderError = error.localizedDescription
+        }
     }
 
     /// Scrolls the first block overlapping the rendered lines, 0-based and
@@ -507,6 +547,21 @@ final class ReaderWebView: WKWebView {
             let onExplore = controller?.onExplore
             menu.addItem(ClosureMenuItem("Explore From This Page…") { onExplore?(query) })
         }
+        // Correcting the page, a group of its own after the page's
+        // (corrections §9): it carries what was selected at the right-click,
+        // a passage, or the block under the pointer.
+        if let onCorrect = controller?.onCorrect {
+            let available = controller?.correctionAvailable?() ?? false
+            let selection = target?.selection
+            for entry in ReaderContextTarget.correctionGroup(available: available, selection: selection) {
+                switch entry {
+                case .separator:
+                    menu.addItem(.separator())
+                case .item(let title, let route):
+                    menu.addItem(ClosureMenuItem(title) { onCorrect(route, selection) })
+                }
+            }
+        }
         // No leading, trailing or doubled separators once the items are gone.
         var cleaned: [NSMenuItem] = []
         for item in menu.items {
@@ -648,6 +703,30 @@ struct ReaderContextTarget: Equatable, Sendable {
                                   disposition: .onSite))
         }
         return items
+    }
+
+    /// One entry of the corrections group.
+    enum CorrectionEntry: Equatable, Sendable {
+        case separator
+        case item(title: String, route: CorrectionRoute)
+    }
+
+    /// The corrections group, as it ends the menu (corrections §9): a
+    /// separator, then Edit, Describe a Correction and Open an Issue. The
+    /// titles say Passage for a selection the right-click was on, and Page
+    /// for a pointer or nothing, which is about the whole page. Nothing
+    /// where the page offers no corrections: a folder, or the app's own
+    /// pages.
+    static func correctionGroup(available: Bool, selection: ReaderSelection?) -> [CorrectionEntry] {
+        guard available else { return [] }
+        let isPassage = selection?.isPassage ?? false
+        let subject = isPassage ? "Passage" : "Page"
+        return [
+            .separator,
+            .item(title: "Edit This \(subject)…", route: .edit),
+            .item(title: "Describe a Correction…", route: .describe),
+            .item(title: "Open an Issue About This \(subject)…", route: .issue),
+        ]
     }
 
     /// WebKit's own Open Link, which the link items follow, where Safari
