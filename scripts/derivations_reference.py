@@ -117,6 +117,12 @@ FIXED_CONSTRUCTION = "fixed-construction"
 #: `requires` entry in the curation (section 2a).
 REGIME_WORDS = ("sub-exponential", "subexponential", "quasi-polynomial", "quasipolynomial")
 
+#: R14 from the record itself (plans/relations-followups.md §4.4, ask 2): the
+#: sentence a refutation the manifest records with `refutedBy` reads. The
+#: engine has the manifest but no labels, so it says where the attack is
+#: rather than naming the object.
+RECORDED_REFUTATION_TEXT = "Its page records the attack."
+
 CLASS_RANK = {"fully-black-box": 0, "relativizing": 1, "free": 2, "unstated": 3}
 STRENGTH_RANK = {"unconditional": 0, "conditional": 1}
 EFFECT_RANK = {"contradiction": 0, "complexity": 1}
@@ -205,6 +211,30 @@ class Manifest:
             return MODEL_NODES[o["of"]]
         return None
 
+    # -- the upstream fields (plans/relations-followups.md §4.4) ---------------
+    # Asked of the wiki in plans/wiki-asks.md and read now, so a regenerated
+    # relations.json takes effect the day it lands. Each reads as the Swift
+    # decoder reads it: absent, null or of the wrong type costs that field its
+    # default and nothing else.
+
+    def reverse_class(self, rid: str) -> str | None:
+        """Ask 1: an equivalence's class from conclusion to hypothesis, or
+        None for a manifest from before the field."""
+        v = self.reductions.get(rid, {}).get("reverseClass")
+        return v if isinstance(v, str) else None
+
+    def refuted_by(self, oid: str) -> list:
+        """Ask 2: the reference wikilinks that refute this object or variant
+        itself (never its variants), or []."""
+        v = self.objects.get(oid, {}).get("refutedBy")
+        return list(v) if isinstance(v, list) and all(isinstance(x, str) for x in v) else []
+
+    def barrier_model(self, bid: str) -> str:
+        """Ask 3: the model a barrier's theorem is proved in, "standard" when
+        the manifest does not say."""
+        v = self.barriers.get(bid, {}).get("model")
+        return v if isinstance(v, str) else "standard"
+
     def counts(self) -> dict:
         return {
             "objects": len(self.objects),
@@ -262,6 +292,18 @@ class Curation:
     def empty(cls) -> "Curation":
         return cls({}, "")
 
+    def adding_refutations(self, refutations: list) -> "Curation":
+        """A copy whose `refuted` also holds these, each replacing the file's
+        for the same object: the manifest's record wins over CCwiki's.
+        Everything else, `data` and `sha256` included, is the file's, so a
+        manifest refutation is never an entry (Swift's
+        `DerivationCuration.adding(refutations:)`)."""
+        merged = copy.copy(self)
+        merged.refuted = dict(self.refuted)
+        for r in refutations:
+            merged.refuted[r["object"]] = r
+        return merged
+
     def unresolved(self, m: Manifest) -> list:
         """Curation ids the manifest no longer has. The corpus test fails on any."""
         bad = []
@@ -288,6 +330,43 @@ class Curation:
         for w in self.weakens.values():
             bad += [f"reduction {p}" for p in w.accepted_by if p not in m.reductions]
         return sorted(set(bad))
+
+
+_CITATION_LINK = re.compile(r"!?\[\[([^\[\]|#\\]+)?(#+[^\[\]|#\\]+)?(\\?\|[^\[\]#]*)?\]\]")
+
+
+def citation_key(entry: str) -> str | None:
+    """The citation key a `source` or `refutedBy` entry is shown by, as
+    Swift's `RelationText.citationKey` reads it: `[[KEY - Title|KEY]]` ->
+    `KEY`; a link with no display text takes the key from its file name;
+    a bare token such as `folklore` is itself. None for an empty entry."""
+    trimmed = entry.strip()
+    m = _CITATION_LINK.search(trimmed)
+    if m is None:
+        return trimmed or None
+    alias = m.group(3)
+    if alias is not None:
+        alias = alias.lstrip("\\")[1:].strip()
+        if alias:
+            return alias
+    base = (m.group(1) or "").strip().split("/")[-1]
+    key = base.split(" - ")[0].strip()
+    return key or base or None
+
+
+def manifest_refutations(m: Manifest) -> list:
+    """R14 from the record (§4.4, ask 2): each object or variant whose
+    manifest record carries `refutedBy`, as a refutation. Its source is the
+    entries' citation keys; its evidence, the entries as recorded."""
+    out = []
+    for oid in sorted(m.objects):
+        entries = m.refuted_by(oid)
+        if not entries:
+            continue
+        keys = [k for k in (citation_key(e) for e in entries) if k]
+        out.append({"object": oid, "source": ", ".join(keys), "text": RECORDED_REFUTATION_TEXT,
+                    "evidence": ", ".join(entries)})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -360,8 +439,14 @@ def build_steps(m: Manifest, cur: Curation):
             model, cls = UNKNOWN_MODEL, "unstated"
         dirs = [(False, tuple(r["hypotheses"]), r["conclusion"], cls)]
         if r["kind"] == "equivalence":  # R1: both directions, each with its own class
-            rv = cur.equivalences.get(rid)
-            if rv is None:
+            rv, recorded = cur.equivalences.get(rid), m.reverse_class(rid)
+            if recorded is not None:
+                # The record states each direction's class (§4.4, ask 1), so
+                # the curation's table is not read for it. R3 still makes a
+                # stub unstated both ways.
+                fwd_cls = cls
+                rev_cls = "unstated" if stub else recorded
+            elif rv is None:
                 unreviewed.append(rid)
                 fwd_cls = rev_cls = "unstated"
             else:
@@ -415,7 +500,10 @@ class Derivation:
                  policy: str = UNSTATED_AFTER_IDEALISED, precondition_policy: str = UNMET_PRECONDITION,
                  *, steps=None, quarantined=None, allow_assume: bool = True, rules: bool = True):
         self.m = m
-        self.cur = cur if cur is not None else Curation.empty()
+        # R14 from the record (§4.4, ask 2): a manifest's `refutedBy` joins
+        # the working curation before anything reads it, so every rule that
+        # reads `refuted` applies it unedited.
+        self.cur = (cur if cur is not None else Curation.empty()).adding_refutations(manifest_refutations(m))
         self.policy = policy
         self.pre_policy = precondition_policy
         self.allow_assume = allow_assume
@@ -756,6 +844,11 @@ class Derivation:
             for bid in sorted(self.m.barriers):
                 b = self.m.barriers[bid]
                 if b.get("status") == "stub" or len(b["hypotheses"]) != 1:
+                    continue
+                # Side reductions are standard-model, so only a barrier proved
+                # in the standard model composes with them (§4.4, ask 3). R8
+                # still checks every barrier.
+                if self.m.barrier_model(bid) != "standard":
                     continue
                 x, y = b["hypotheses"][0], b["conclusion"]
                 if self.m.type(x) != prim or self.m.type(y) != prim:

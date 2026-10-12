@@ -280,6 +280,66 @@ struct ExplorerResultTests {
             + "CCwiki does not apply in this case; see Refused steps."))
     }
 
+    // MARK: The upstream fields (relations-followups.md §4.4)
+
+    @Test("a refutation the manifest records reads as the wiki's own, naming its key once")
+    func recordedRefutation() throws {
+        var sidh = ExplorerFixture.object("sidh", title: "Supersingular isogeny Diffie-Hellman",
+                                          type: "assumption", aliases: ["SIDH"])
+        sidh["refutedBy"] = ["[[CD22 - An efficient key recovery attack on SIDH|CD22]]"]
+        let objects = [sidh, ExplorerFixture.object("ke", title: "Key exchange", aliases: ["KE"])]
+        let reductions = [
+            ExplorerFixture.reduction("red-sidh-to-ke", ["sidh"], "ke", title: "SIDH ⇒ KE", source: "JDF11"),
+        ]
+        let derivation = try ExplorerFixture.derivation(objects: objects, reductions: reductions)
+
+        let result = Self.compute(ExplorerQuery(from: ["sidh"], to: "ke"), over: derivation)
+        let verdict = try #require(result.verdict)
+        let line = try #require(verdict.lines.first { $0.id == "refuted-sidh" })
+        #expect(line.text == "The hypothesis is known to be false (CD22), so this implication is "
+            + "vacuous. Its page records the attack.")
+        #expect(line.style == .caution)
+        let mentions = line.text.components(separatedBy: "CD22").count - 1
+        #expect(mentions == 1)
+
+        // Everything from SIDH carries the same banner.
+        let forward = Self.compute(ExplorerQuery(from: ["sidh"]), over: derivation)
+        let banner = try #require(forward.verdict?.lines.first { $0.id == "refuted-sidh" })
+        #expect(banner.text == "Supersingular isogeny Diffie-Hellman is known to be false (CD22), so "
+            + "everything here follows vacuously. Its page records the attack.")
+    }
+
+    @Test("a barrier proved outside the standard model says so in its meta line and a note")
+    func barrierModelNote() throws {
+        var hmo = ExplorerFixture.barrier("bar-owf-to-ke", ["owf"], "ke",
+                                          title: "No fully black-box reduction from OWF to KE",
+                                          source: "HMO19", reductionClass: "fully-black-box")
+        hmo["model"] = "rom"
+        let objects = [ExplorerFixture.object("owf", title: "One-way function", aliases: ["OWF"]),
+                       ExplorerFixture.object("prg", title: "Pseudorandom generator", aliases: ["PRG"]),
+                       ExplorerFixture.object("ke", title: "Key exchange", aliases: ["KE"])]
+        let reductions = [
+            ExplorerFixture.reduction("red-owf-to-prg", ["owf"], "prg", title: "OWF ⇒ PRG", source: "HILL99"),
+        ]
+        let derivation = try ExplorerFixture.derivation(objects: objects, reductions: reductions,
+                                                        barriers: [hmo])
+        // R12 never composes it with OWF ⇒ PRG.
+        #expect(derivation.derivedBarriers.isEmpty)
+
+        let result = Self.compute(ExplorerQuery(from: ["owf"], to: "ke"), over: derivation)
+        let barriers = try #require(result.sections.first { $0.id == "barriers" })
+        let row = try #require(barriers.rows.first)
+        #expect(row.detail
+            == "against fully black-box reductions · random oracle model · unconditional · HMO19")
+        #expect(row.notes == ["This barrier is proved in the random oracle model."])
+
+        // A standard-model barrier has neither.
+        let shared = try Self.compute(ExplorerQuery(from: ["owf"], to: "pke"))
+        let standard = try #require(shared.sections.first { $0.id == "barriers" }?.rows.first)
+        #expect(standard.detail == "against relativizing reductions · unconditional · IR89")
+        #expect(standard.notes.isEmpty)
+    }
+
     @Test("a complexity class in the question is turned away, never derived")
     func unsupportedClass() throws {
         let result = try Self.compute(ExplorerQuery(from: ["lwe"], to: "bpp"))
