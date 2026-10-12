@@ -35,12 +35,17 @@ struct NavigationHistory: Equatable, Sendable, Codable {
     /// `back` and `forward` are stacks, nearest entry last, as the history
     /// keeps them. Neither ever holds `.empty`, since a visit never records
     /// it, and a history with nothing on screen has nothing behind it or
-    /// ahead of it. Saved state that says otherwise is made to agree.
+    /// ahead of it. Nor does either end on the current location, since a
+    /// visit to it is not a move: going Back or Forward to it would be a
+    /// step that goes nowhere. Saved state that says otherwise is made to
+    /// agree.
     init(current: Location, back: [Location], forward: [Location]) {
         var back = Array(back.filter { $0 != .empty }.suffix(Self.capacity))
         var forward = Array(forward.filter { $0 != .empty }.suffix(Self.capacity))
         var current = current
         if current == .empty, let previous = back.popLast() { current = previous }
+        while back.last == current { back.removeLast() }
+        while forward.last == current { forward.removeLast() }
         if current == .empty { forward = [] }
         self.current = current
         self.back = back
@@ -84,14 +89,14 @@ struct NavigationHistory: Equatable, Sendable, Codable {
     /// How a restored window forgets the pages a pull deleted: Back and
     /// Forward then never land on a page the wiki no longer has, and
     /// removing one between two visits to the same page does not leave a
-    /// step that goes nowhere.
+    /// step that goes nowhere. The result goes through
+    /// `init(current:back:forward:)`, which drops a Back or Forward entry
+    /// left equal to the new current.
     func pruned(keeping keep: (Location) -> Bool) -> NavigationHistory {
         var back = Self.collapsed(self.back.filter(keep))
-        var forward = Self.collapsed(self.forward.filter(keep))
+        let forward = Self.collapsed(self.forward.filter(keep))
         var current = self.current
         if !keep(current) { current = back.popLast() ?? .empty }
-        while back.last == current { back.removeLast() }
-        while forward.last == current { forward.removeLast() }
         return NavigationHistory(current: current, back: back, forward: forward)
     }
 

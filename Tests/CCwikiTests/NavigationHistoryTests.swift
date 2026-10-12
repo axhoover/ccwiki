@@ -227,8 +227,25 @@ struct NavigationHistoryTests {
         #expect(!blank.canGoBack)
         #expect(blank.forward == [Self.c])
 
+        let twice = try Self.decode(Saved(current: .empty, back: [Self.a, Self.a], forward: []))
+        #expect(twice.current == Self.a)
+        #expect(!twice.canGoBack, "Back to the page on screen is a step that goes nowhere")
+
         let nothing = try Self.decode(Saved(current: .empty, back: [], forward: [Self.c]))
         #expect(nothing == NavigationHistory())
+    }
+
+    @Test("a saved history's Back and Forward never end on the location on screen")
+    func decodeDropsStepsToNowhere() throws {
+        let stuck = try Self.decode(Saved(
+            current: Self.b, back: [Self.a, Self.b, Self.b], forward: [Self.c, Self.b]))
+        #expect(stuck.current == Self.b)
+        #expect(stuck.back == [Self.a])
+        #expect(stuck.forward == [Self.c])
+
+        let built = NavigationHistory(
+            current: Self.b, back: [Self.a, Self.b], forward: [Self.c, Self.b])
+        #expect(built == stuck, "the initializer applies the same rule")
     }
 
     @Test("pruning drops the pages the wiki lost from Back and Forward")
