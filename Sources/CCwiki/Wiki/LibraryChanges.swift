@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// What the clone's files held when a load read them: a digest of every file
 /// `WikiIndex` lists, plus the manifest and the macro table
@@ -53,5 +54,15 @@ struct LibraryChanges: Equatable, Sendable {
     /// that changed, for the sync's summary.
     var changedPages: Set<String> {
         added.union(modified).union(deleted).filter { $0.hasSuffix(".md") }
+    }
+}
+
+extension Logger {
+    /// Category `library`: what each load read, built and wrote, and how long
+    /// each part took (plans/reader-comforts.md §3.5, §3.8). Under the app's
+    /// own subsystem, as the launch log is, so `log show --predicate
+    /// 'subsystem BEGINSWITH "com.axhoover.ccwiki"'` finds both.
+    static var library: Logger {
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.axhoover.ccwiki", category: "library")
     }
 }

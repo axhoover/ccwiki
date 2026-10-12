@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Everything the app reads from the clone, built off the main actor and
 /// handed to `AppModel` in one piece, so no view sees half a library. Named
@@ -17,25 +18,46 @@ struct LoadedLibrary: Sendable {
     let fingerprints: ContentFingerprints
 
     /// The definition: everything from the files. The full build stays the
-    /// definition however loads come to reuse parts of it (§3.5).
+    /// definition however loads come to reuse parts of it (§3.5). Logs how
+    /// long each part took, under category `library`.
     static func build(cloneRoot: URL) -> LoadedLibrary {
-        let index = WikiIndex.build(contentRoot: cloneRoot.appending(path: "content"))
+        var timings = LoadTimings()
+        let library = build(cloneRoot: cloneRoot, timings: &timings)
+        let message = "Built the library: \(library.index.pages.count) pages. \(timings)"
+        Logger.library.notice("\(message, privacy: .public)")
+        return library
+    }
+
+    /// `build`, adding how long each phase took to `timings` and logging
+    /// nothing: for `update`, which logs once for the whole load, and for the
+    /// corpus suite's report (§3.8).
+    static func build(cloneRoot: URL, timings: inout LoadTimings) -> LoadedLibrary {
+        let index = timings.measure(.index) {
+            WikiIndex.build(contentRoot: cloneRoot.appending(path: "content"))
+        }
         // 343 KB of JSON, and the labels need every hosting page's
         // headings — both cheap, but neither belongs on the main actor.
-        let manifest = RelationsManifest.load(cloneRoot: cloneRoot)
-        let labels = RelationLabels(manifest: manifest, index: index)
+        let manifest = timings.measure(.manifest) { RelationsManifest.load(cloneRoot: cloneRoot) }
+        let labels = timings.measure(.labels) { RelationLabels(manifest: manifest, index: index) }
+        let backlinks = timings.measure(.backlinks) { index.backlinkMap() }
+        let textGrep = timings.measure(.grep) { TextGrep(pages: index.allPages) }
+        // Every single-object closure in both model settings, the derived
+        // barriers and the inspector's lookups: a few milliseconds, and it
+        // must match this manifest exactly.
+        let derivation = timings.measure(.derivation) { Derivation(manifest: manifest) }
+        let linkPreviews = timings.measure(.previews) {
+            LinkPreviews(index: index, manifest: manifest, labels: labels)
+        }
+        let fingerprints = timings.measure(.read) { ContentFingerprints.scan(cloneRoot: cloneRoot) }
         return LoadedLibrary(
             index: index,
-            backlinks: index.backlinkMap(),
+            backlinks: backlinks,
             manifest: manifest,
             labels: labels,
-            textGrep: TextGrep(pages: index.allPages),
-            // Every single-object closure in both model settings, the
-            // derived barriers and the inspector's lookups: a few
-            // milliseconds, and it must match this manifest exactly.
-            derivation: Derivation(manifest: manifest),
-            linkPreviews: LinkPreviews(index: index, manifest: manifest, labels: labels),
-            fingerprints: ContentFingerprints.scan(cloneRoot: cloneRoot))
+            textGrep: textGrep,
+            derivation: derivation,
+            linkPreviews: linkPreviews,
+            fingerprints: fingerprints)
     }
 
     /// The library after `previous`, equal to `build`. Until there are
@@ -82,4 +104,62 @@ extension LibraryUpdate {
 /// names them.
 enum LibraryArtifact: String, Hashable, Sendable, CaseIterable {
     case pages, resolution, backlinks, grep, manifest, labels, derivation, previews
+}
+
+/// How long each part of a load took: for the log, and for the corpus suite's
+/// report, whose numbers decide whether loads ever reuse what a pull left
+/// alone (plans/reader-comforts.md §3.2, §3.8). Never a test's verdict:
+/// shared runners are too noisy for that.
+struct LoadTimings: Equatable, Sendable, CustomStringConvertible {
+
+    /// The parts of a load that run in memory, in the order a build runs
+    /// them, as §3.1 names them.
+    enum Phase: String, CaseIterable, Sendable {
+        /// Reading the clone's files and hashing their bytes.
+        case read
+        /// `WikiIndex`: the pages and the tables that resolve a link.
+        case index
+        case manifest, labels, backlinks, grep, derivation, previews
+        /// Comparing with the library before: the fingerprint difference and
+        /// what it means for links and labels.
+        case compare
+    }
+
+    private(set) var durations: [Phase: Duration] = [:]
+
+    /// Runs `work`, adding the time it took to `phase`.
+    mutating func measure<T>(_ phase: Phase, _ work: () throws -> T) rethrows -> T {
+        let clock = ContinuousClock()
+        let start = clock.now
+        defer { durations[phase, default: .zero] += start.duration(to: clock.now) }
+        return try work()
+    }
+
+    /// Every phase measured.
+    var total: Duration {
+        durations.values.reduce(.zero, +)
+    }
+
+    /// The phases a build runs, without the comparison: the number §3.2
+    /// holds to its threshold.
+    var building: Duration {
+        durations.filter { $0.key != .compare }.values.reduce(.zero, +)
+    }
+
+    /// "read 9.1 ms · index 31.0 ms · … · total 160.2 ms", in phase order.
+    var description: String {
+        let parts = Phase.allCases.compactMap { phase in
+            durations[phase].map { "\(phase.rawValue) \(Self.format($0))" }
+        }
+        return (parts + ["total \(Self.format(total))"]).joined(separator: " · ")
+    }
+
+    static func milliseconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15
+    }
+
+    static func format(_ duration: Duration) -> String {
+        String(format: "%.1f ms", milliseconds(duration))
+    }
 }
