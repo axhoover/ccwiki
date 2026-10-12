@@ -62,6 +62,7 @@ redesign, not a refactor.
 ├── Makefile                 the entry point for everything — `make help`
 ├── build.sh                 swift build → .app bundle → codesign
 ├── prompts/ingest.md        the agent prompt template for an ingestion job
+├── prompts/correct.md       the agent prompt template for a described correction
 ├── scripts/
 │   ├── vendor-web.sh        fetch the pinned offline render pipeline (run once)
 │   ├── shots.sh             drive the app and capture screenshots
@@ -73,16 +74,21 @@ redesign, not a refactor.
 │   ├── Info.plist
 │   ├── derivation-curation.json  reviewed corrections to relations.json that
 │   │                        the derivation engine reads (plans/derivations.md §2a)
-│   └── web/                 the reader: index.html, app.css, ccwiki.js, vendor/
+│   └── web/                 the reader: index.html, app.css, ccwiki-markdown.js
+│                            (the DOM-free Markdown half), ccwiki.js, vendor/
 ├── CCwiki/                CCwiki.entitlements (NOT sandboxed — see §5)
 ├── Sources/CCwiki/
-│   ├── App/                 CCwikiApp, AppModel, AppPaths, Theme, ScreenshotRunner
+│   ├── App/                 CCwikiApp, AppModel, AppPaths, JobCenter, EditorSession,
+│   │                        Theme, ScreenshotRunner
 │   ├── Wiki/                pure, testable: slugs, wikilinks and markdown links,
 │   │                        frontmatter, macros, index, the relations manifest,
 │   │                        and the site's relation-meta line (RelationMeta)
 │   ├── Reader/              the WKWebView, its scheme handler, and the render request
 │   ├── Search/              SQLite FTS5, the ⌘S and ⇧⌘R rankers, ⇧⌘F grep, the quick switcher
-│   ├── Jobs/                subprocess plumbing, tool discovery, git, ingestion
+│   ├── Corrections/         pure: CorrectionTarget, SourceLineMap, IssueComposer
+│   ├── Jobs/                subprocess plumbing, tool discovery, git; the ingestion
+│   │                        and correction runners, the review snapshot, DiffGuard,
+│   │                        Publisher, Tripwire
 │   └── UI/                  the SwiftUI views
 └── Tests/CCwikiTests/     101 tests; see §6
 ```
@@ -133,8 +139,9 @@ redesign, not a refactor.
 - [plans/design-system.md](plans/design-system.md) — the two type systems (app
   chrome vs document), the macOS idioms applied, and the visual gate.
 - [plans/roadmap.md](plans/roadmap.md) — what we deliberately deferred and how
-  we would build it: a human review step before the PR, a better ingestion
-  pipeline, and page corrections from the reader.
+  we would build it: a better ingestion pipeline, a graph view, and smaller
+  things. §1 (a human review step before the PR) and §3 (page corrections
+  from the reader) are built ([corrections.md](plans/corrections.md)).
 - [plans/audit-2026-09.md](plans/audit-2026-09.md) — a full read-through
   aimed at "what happens when a stranger downloads this": eight first-launch
   breakers, the correctness tail, reader usability gaps, performance, and a

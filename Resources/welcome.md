@@ -30,6 +30,7 @@ right shows what links back.
 | ⇧⌘H | The wiki's front page. |
 | ⌥⌘I | Show or hide the inspector. |
 | ⌥⌘P | On a reference, the paper behind it, in a window of its own. |
+| ⌥⌘E | Edit the page you are reading, at the passage selected. |
 | ⌘+ and ⌘− | Larger or smaller text. ⌘0 goes back to the usual size. |
 | ⌘R | Check for a newer copy of the wiki now. |
 
@@ -60,8 +61,17 @@ for a newer one.)
 
 If you have push access to the wiki, CCwiki can draft a page from a paper:
 drop a PDF on the window, or choose File → Ingest a Paper and paste a link.
-It runs an agent that opens a **draft** pull request for a person to review.
-It needs a few developer tools, and Settings → Jobs says which are
-missing.
+An agent prepares the change in a working copy of its own. Nothing reaches
+GitHub until you have read the change in the Jobs window and chosen Open
+Draft PR; CCwiki then opens a **draft** pull request.
+
+To fix the page you are reading, choose Wiki → Edit Page… (⌥⌘E) to change
+it yourself, or Wiki → Describe a Correction… to have an agent draft the
+fix. Both end in the same review in Jobs. Select a passage first, or
+right-click it, to start there. Wiki → Open an Issue About This Page…
+reports a problem without a pull request.
+
+Jobs need a few developer tools, and Settings → Jobs says which are
+missing; an issue needs only gh, signed in to GitHub.
 
 This page is always in the Help menu, next to What's New.
