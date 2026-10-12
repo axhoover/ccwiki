@@ -333,7 +333,7 @@ GitHub before it does anything twice.
 **The Dock badge** counts the jobs awaiting review, less edits nobody has
 touched, and goes when there are none, as Mail's does.
 
-### Two dev affordances worth keeping
+### Dev affordances worth keeping
 
 - `CCWIKI_INGEST_DRY_RUN=1` stops after composing the prompt and writes it
   into the transcript. Every mechanical step still runs — worktree, submodules,
@@ -343,5 +343,7 @@ touched, and goes when there are none, as Mail's does.
   same harness that gates the reader gates this.
 - `CCWIKI_PUBLISH_DRY_RUN=1` makes Approve stop after committing locally,
   log the push and `gh` commands it would have run, and return the job to
-  review: everything but GitHub, in either channel.
-  `CCWIKI_CORRECTION_MAX_TURNS` overrides a correction's twenty turns.
+  review: everything but GitHub, in either channel. It also stops Open
+  Issue before `gh issue create`, and shows the command instead.
+- `CCWIKI_CORRECTION_MAX_TURNS` overrides a correction's twenty turns, as
+  `CCWIKI_MAX_TURNS` does an ingestion's 200.

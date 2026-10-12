@@ -416,8 +416,15 @@ each step, waits for it to settle, writes a `.ready-N` marker and blocks;
 tabs `window:<path>` (a second reader window), `tab:<path>` (a new tab in
 front) and `bgtab:<path>` (a new tab behind, once background tabs are on),
 and `paper:<path>` (a reference's paper window, served from
-`CCWIKI_PAPER_FIXTURES`; Offline for a paper without a fixture). Each step
-drives the reader window or tab that was key most recently.
+`CCWIKI_PAPER_FIXTURES`; Offline for a paper without a fixture). For
+corrections there are `edit:<path>` (an edit of the page, begun past the
+blockers, in its editor), `review:<path>` (a scripted one-word edit of the
+page, reviewed in Jobs), `source` (that review's changes in Source), and
+`describe:<path>` and `issue:<path>` (the Describe a Correction and Open an
+Issue sheets over the page). The jobs that `edit:` and `review:` begin are
+discarded when the plan ends, so no run leaves a worktree behind
+([corrections.md](corrections.md) §12.3). Each step drives the reader window
+or tab that was key most recently.
 
 The capture needs the **Screen Recording** permission (System Settings → Privacy
 & Security). Without it the script falls back to an in-app composite —

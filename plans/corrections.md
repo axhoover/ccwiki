@@ -1,7 +1,8 @@
 # Corrections, and a review step before anything reaches GitHub
 
 **Spec, 2026-10-11; revised 2026-10-12 after three critics (Review notes,
-§16). Nothing here is built.**
+§16); built on `claude/page-corrections`, 2026-10-12. §6.2 is DiffGuard as
+built.**
 
 This covers two requests in [roadmap.md](roadmap.md): §1, a human step
 between the agent and GitHub, and §3, correcting a page from the reader. It
@@ -706,31 +707,37 @@ claude -p "<prompts/correct.md, composed>"
 compiled in.** It points the agent at the worktree's own `CLAUDE.md`
 ("Writing Style", "Content Conventions", "Citations"), at `macros.ts` before
 it touches math, and at `schema/README.md` on a reduction or barrier page.
-In full, less the explanatory comment:
+In full, as `prompts/correct.md` has it, less its title and the comment
+that explains the placeholders:
 
 `````markdown
 You are correcting one page of the cryptology.city wiki, in a git worktree
-that belongs to you alone.
+that belongs to you alone: `{{WORKTREE}}`.
 
-Page: `{{PAGE_PATH}}` ({{PAGE_URL}}), {{LINES}}{{SECTION}}.
+Page: `{{PAGE_PATH}}`{{#PAGE_URL}} ({{PAGE_URL}}){{/PAGE_URL}}, {{LINES}}{{SECTION}}.
 
+{{#QUOTE}}
 The reader quoted, as rendered:
 
 > {{QUOTE}}
 
+{{/QUOTE}}
+{{#EXCERPT}}
 The source of those lines:
 
 {{FENCE}}
 {{EXCERPT}}
 {{FENCE}}
 
+{{/EXCERPT}}
 What the reader says is wrong:
 
 > {{REQUEST}}
 
 1. Read `CLAUDE.md` § Writing Style, § Content Conventions and § Citations,
    and `macros.ts` if you will touch math. They are the rules; this prompt
-   restates none of them.
+   restates none of them. On a page under `content/Reductions/` or
+   `content/Barriers/`, read `schema/README.md` too.
 2. Read the page. Decide whether the reader is right. If the page is right,
    or the fix needs a source you cannot check from the repository, abort.
 3. Make the smallest edit that does what was asked, in `{{PAGE_PATH}}` only.
@@ -740,19 +747,26 @@ What the reader says is wrong:
 4. Do not commit, push, or open anything. CCwiki shows your edit to a
    maintainer, who approves it. Write nothing except the page and the file
    in step 5.
-5. Write `.ccwiki/pull-request.md`: the first line `# [fix] <page title>: <what
-   changed>`, then two or three sentences saying what you changed and why.
-   No recap, no adjectives.
+5. Write `.ccwiki/pull-request.md`: the first line
+   `# [fix] {{PAGE_TITLE}}: <what changed>`, then two or three sentences
+   saying what you changed and why. No recap, no adjectives, and no local
+   paths: it is published as written.
 
 To abort, change nothing and print a block that starts `ABORTED:` with the
 reason and what a human would need to check. An abort is a good outcome.
 `````
 
 The placeholders are filled by `PromptComposer.composeCorrection`. As with
-ingestion, the template's leading HTML comment is stripped. `{{FENCE}}` is a
-run of backticks one longer than the longest run inside the excerpt, and
-never shorter than three, so a pseudocode fence in the excerpt cannot close
-it early. The quote and the request are prefixed with `> ` line by line.
+ingestion, everything up to the end of the leading HTML comment, the title
+included, is cut before anything is filled in. `{{#NAME}}…{{/NAME}}` keeps
+what it wraps only when NAME has a value: a whole-page target has no quote
+and no excerpt, so the prompt shows neither, and `{{LINES}}` reads "the
+whole page". `{{PAGE_URL}}` is the page on cryptology.city with the section
+as its anchor. `{{FENCE}}` is a run of backticks one longer than the longest
+run inside the excerpt, and never shorter than three, so a pseudocode fence
+in the excerpt cannot close it early. The quote and the request continue the
+template's `> ` on every line after the first. Filling is one pass, so a
+value holding `{{`, as LaTeX does, arrives as it was.
 
 ### 5.5 Outcomes, and the tripwire
 
@@ -846,7 +860,12 @@ it:
 - the correction's target;
 - the local paths that must not appear in text (`PrivateText`).
 
-It returns findings sorted blocking first, then by path and line.
+It returns findings sorted blocking first, then by path and line, and keeps
+one per rule, path and line. Rules about lines look only at the lines the
+change added, so a page that already broke a rule at the base does not block
+a fix elsewhere on it. The rules that read a page's text (the region rules,
+`relationFieldOnObjectPage`, `wikilinkMath`, `proseRelationBullet`,
+`statusComplete` and `rawHTML`) read only `.md` files under `content/`.
 
 **Rules that copy the wiki's lint** name its rule id, and their messages end
 with it, as "(lint: `wikilink-math`)". There are three: `generated-region` and
@@ -860,36 +879,36 @@ offers Revert File.
 
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
-| `outsideContent` | all | any path other than a `.md` file under `content/` (excluding `content/Templates/`) or `.reductions/relations.json`. This is an **allow-list**: `scripts/`, `CLAUDE.md`, `.claude/`, `tsconfig.tsbuildinfo` and a stray `lint.log` at the root are all caught | "CCwiki opens pull requests that change `content/` only. Revert `scripts/lint.mjs`, or make this change outside CCwiki." |
-| `renamedOrDeleted` | all | a rename or a deletion under `content/`, or the deletion of `.reductions/relations.json` | Rename: "Filenames under `content/` are live URLs. Revert the rename." Deletion: "Filenames under `content/` are live URLs. Restore the file." `relations.json`: "`relations.json` is generated, and the site reads it. Restore the file." |
-| `binaryFile` | all | any binary file added or changed, PDFs included; or a page or `relations.json` that git calls binary, or whose text could not be read as UTF-8 (`ReviewSnapshot.assemble` treats a side it could not read as binary) | "PDFs and other binary files never enter the wiki." For a page or `relations.json`: "CCwiki could not read this file as UTF-8 text, so it checked nothing in it. Revert it, or save it as UTF-8." |
-| `generatedRegionEdited` | all | in a changed file, the BEGIN and END marker counts differ, or a `participates-in` region's checksum is not `sha256(trimmed contents)[0..<12]`, or a region is gone, markers and all, while `relations.json` was not regenerated in the same diff | "The “Participates in” section on lines 153–171 was edited by hand. It is rebuilt from the reduction pages; correct those instead. (lint: `generated-region-edited`)" A removed region: "The “Participates in” section was removed by hand. It is rebuilt from the reduction pages; restore it, and correct those instead." |
-| `relationFieldOnObjectPage` | all | an object page gains `implies`, `implied-by`, `reductions`, `from`, `to`, `hypotheses` or `conclusion` in its frontmatter | "Relation fields are not allowed on object pages. A relation is a page in `content/Reductions/`. (lint: `object-relation-field`)" |
-| `wikilinkMath` | all | an added line, outside generated regions, with a `$` inside `[[…]]` | "Math in a wikilink breaks the link on the site. Write `[text $x$](slug)` instead. (lint: `wikilink-math`)" |
-| `privateText` | all | an added line matched by `PrivateText` (§6.4) | "This line contains a local path or a token: `/Users/…/Library/…`." |
+| `outsideContent` | all | any path, or a rename's old path, other than a `.md` file under `content/` (excluding `content/Templates/`, in any case) or `.reductions/relations.json`. This is an **allow-list**: `scripts/`, `CLAUDE.md`, `.claude/`, `tsconfig.tsbuildinfo` and a stray `lint.log` at the root are all caught | "CCwiki opens pull requests that change `content/` only. Revert `scripts/lint.mjs`, or make this change outside CCwiki." |
+| `renamedOrDeleted` | all | a rename to or from a path under `content/`, a deletion under `content/`, or the deletion of `.reductions/relations.json` | Rename: "Filenames under `content/` are live URLs. Revert the rename." Deletion: "Filenames under `content/` are live URLs. Restore the file." `relations.json`: "`relations.json` is generated, and the site reads it. Restore the file." |
+| `binaryFile` | all | a binary file, or any `.pdf`, that the change adds, changes or renames. This includes a page or `relations.json` that git calls binary, or whose text could not be read as UTF-8 (`ReviewSnapshot.assemble` treats a side it could not read as binary) | "PDFs and other binary files never enter the wiki." For a page or `relations.json`: "CCwiki could not read this file as UTF-8 text, so it checked nothing in it. Revert it, or save it as UTF-8." |
+| `generatedRegionEdited` | all | on a page, the BEGIN and END marker counts differ, unless the base had the same counts; or a region the change added or altered fails its checksum, `sha256(trimmed contents)[0..<12]`; or a region is gone, markers and all, while `relations.json` was not regenerated in the same diff | Edited: "The “Participates in” section on lines 153–171 was edited by hand. It is rebuilt from the reduction pages; correct those instead. (lint: `generated-region-edited`)" Unbalanced markers: "The “Participates in” markers are unbalanced (2 BEGIN, 1 END). They are written by the script; restore them, and correct the reduction pages instead. (lint: `generated-region`)" A removed region: "The “Participates in” section was removed by hand. It is rebuilt from the reduction pages; restore it, and correct those instead." |
+| `relationFieldOnObjectPage` | all | an object page gains `implies`, `implied-by`, `implied_by`, `reductions`, `barriers`, `separations`, `from`, `to`, `between`, `hypotheses` or `conclusion` in its frontmatter (lint.mjs `FORBIDDEN_ON_OBJECTS`), one finding per key. An object page has `type:` `primitive`, `assumption`, `complexity-class`, `glossary`, `folklore` or `note`; without a `type:`, it is any page not directly under `References/`, `Reductions/` or `Barriers/` | "Relation fields such as `implies` are not allowed on object pages. A relation is a page in `content/Reductions/`. (lint: `object-relation-field`)" |
+| `wikilinkMath` | all | an added line, outside generated regions, backtick code fences and inline code, with an unescaped `$` inside `[[…]]` | "Math in a wikilink breaks the link on the site. Write `[text $x$](slug)` instead. (lint: `wikilink-math`)" |
+| `privateText` | all | an added line of any text file matched by `PrivateText` (§6.4) | "This line contains a local path or a token: `/Users/…/Library/…`." A path is shown whole, a token by its first eight characters and "…". |
 
 **Warnings.** These need a human's judgement. Open Draft PR asks first
 (§6.6).
 
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
-| `newObjectPage` | all | a new page under `Primitives/`, `Assumptions/`, `Complexity/`, `Glossary/` or `Folklore/` | "This creates an object page. The wiki asks for a human decision on new objects." |
-| `otherPages` | correction, edit | a changed `.md` file other than the target | "This also changes `X.md`, which is not the page you started from." |
-| `largeEdit` | correction, edit | more than 20 changed lines in all, counting hand lines only: not blank, and outside generated regions. A hunk counts the larger of its removed and added sides | "This changes 46 lines. A correction is usually a line or two." |
-| `ingestionScope` | ingestion | more than one new page outside `References/`, `Reductions/` and `Barriers/`, or a hand change outside generated regions to more than one existing page, or more than 5 such lines on one (ingestion.md §4). Lines are counted as for `largeEdit` | "This changes three existing pages. An ingestion normally adds pages and touches at most one." |
-| `proseRelationBullet` | all | an added list item, with two or more wikilinks, inside a `# Other results`, `# Known relationships` or `## Known Results` section | "This adds a relationship as a prose bullet. Relationships are reduction pages." |
-| `derivedFilesStale` | all | without a change to `.reductions/relations.json`, the diff changes a reduction or barrier page's frontmatter; an object page's `id`, `title`, `aliases`, `variants`, `unlisted` or `type`; or a heading a `variants` anchor names | "The “Participates in” sections and `relations.json` are now out of date, and the wiki's checks fail until they are regenerated. In this job's worktree (Open in Terminal), run `npm ci` and `node scripts/generate-relations.mjs`, then review again. Or run them on the branch after the pull request is open." |
+| `newObjectPage` | all | a new `.md` file under `Primitives/`, `Assumptions/`, `Complexity/`, `Glossary/` or `Folklore/` | "This creates an object page. The wiki asks for a human decision on new objects." |
+| `otherPages` | correction, edit | a changed `.md` file under `content/` other than the target, by its new or old path | "This also changes `X.md`, which is not the page you started from." |
+| `largeEdit` | correction, edit | more than 20 changed lines in all, in Markdown files (`relations.json` does not count), counting hand lines only: not blank, and outside generated regions, except a region removed by hand. A hunk counts the larger of its removed and added sides. The finding is on the file that changed most | "This changes 46 lines. A correction is usually a line or two." |
+| `ingestionScope` | ingestion | more than one new page outside `References/`, `Reductions/` and `Barriers/`; or hand changes to more than one existing page; or more than 5 hand-changed lines on one (ingestion.md §4). Lines are counted as for `largeEdit`. Page counts up to nine are spelled out | New pages: "This adds two pages outside `References/`, `Reductions/` and `Barriers/`. An ingestion normally adds a reference and its reductions." Existing pages: "This changes three existing pages. An ingestion normally adds pages and touches at most one." Lines on one page: "This changes 7 lines of `x.md` by hand. An ingestion normally changes at most five lines of an existing page." |
+| `proseRelationBullet` | all | an added list item with two or more wikilinks, outside code fences and generated regions, in a section headed `Other results`, `Known relationships` or `Known results`, at any level and in any case, or in a subsection of one | "This adds a relationship as a prose bullet. Relationships are reduction pages." |
+| `derivedFilesStale` | all | without a regenerated `.reductions/relations.json` (changed, not deleted), the diff changes a reduction or barrier page's frontmatter; an object page's `id`, `title`, `aliases`, `variants`, `unlisted` or `type`; or a heading a `variants` anchor names, reworded, gained or lost. One finding per page | "The “Participates in” sections and `relations.json` are now out of date, and the wiki's checks fail until they are regenerated. In this job's worktree (Open in Terminal), run `npm ci` and `node scripts/generate-relations.mjs`, then review again. Or run them on the branch after the pull request is open." |
 | `relationsJSONByHand` | correction | `.reductions/relations.json` changed | "`relations.json` changed. The correction agent cannot run the generator, so unless you ran it in this worktree, revert this file." |
 | `humanVerified` | all | a changed page whose queue entry at the base is `human_verified`. There are none today: 59 are `bot_flagged`, 30 `unreviewed` | "A human verified this page. The wiki asks that a change to a claim here also marks its queue entry stale; CCwiki does not edit that file." |
 | `statusComplete` | all | `status:` becomes `complete` | "`status: complete` is a human judgement, and the lint then requires the full section contract." |
-| `changedUpstream` | all | a changed path also changed on `origin/<default>` since the base | "This page changed on main after the job started. The pull request may conflict." |
-| `rawHTML` | all | an added line with an HTML tag or `<!--`, outside inline code, math spans and the generated markers. The wiki's 222 `<!--` are all generated markers | "This adds raw HTML, which the Rendered view may hide. Check it in Source." |
+| `changedUpstream` | all | a changed path, or a rename's old path, also changed on `origin/<default>` since the base | "This page changed on main after the job started. The pull request may conflict." For a path that is not a `.md` file: "This file changed on main after the job started. The pull request may conflict." |
+| `rawHTML` | all | an added body line with an HTML tag or `<!--`, outside code fences, display math, inline code, `$…$` spans, backslash escapes and the generated markers. An autolink such as `<https://…>` is not a tag. The wiki's 222 `<!--` are all generated markers | "This adds raw HTML, which the Rendered view may hide. Check it in Source." |
 
 **Notes.**
 
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
-| `regionRegenerated` | all | a generated region changed and its checksum matches; or a region is gone while `relations.json` changed in the same diff and was not deleted, since the generator drops the region from a page left with no relation | "Regenerated by the script, not edited by hand." A removed region: "Removed by the script, not by hand: `relations.json` was regenerated too." |
+| `regionRegenerated` | all | a region the change added or altered, whose checksum matches; or a region is gone while `relations.json` changed in the same diff and was not deleted, since the generator drops the region from a page left with no relation | "Regenerated by the script, not edited by hand." A removed region: "Removed by the script, not by hand: `relations.json` was regenerated too." |
 
 So following `derivedFilesStale`'s advice in an edit or ingestion worktree
 gives notes, never a block. `derivedFilesStale` is a warning, not an
@@ -1413,13 +1432,16 @@ page (§7.1).
 - **The secondary line:** "For when something is wrong and you are not sure
   what it should say. No branch, no pull request."
 - **The fields:**
-  - **Title,** proposed as `<page title>: <section title>`;
+  - **Title,** proposed as `<page title>: <section title>`, or the page
+    title alone when there is no section or it has the page's title;
   - **Body,** one editor in `Theme.Fonts.code`, prefilled by
     `IssueComposer`: the page line, the permalink and the quote, then an
     empty paragraph where the cursor lands. It holds exactly the text sent.
   - Under it, one secondary line showing what CCwiki adds: "CCwiki adds:
-    Opened with CCwiki 0.3.0 · from CCwiki Dev". The hidden marker is not
-    shown.
+    Opened with CCwiki 0.3.0 (CCwiki Dev, a development build) · reported
+    from the reader". That is the footer's visible line, as
+    `PullRequestDraft.footer` writes it; the release leaves out the
+    parenthesis. The hidden marker is not shown.
 
   The body is not rendered: the reader's renderer is not GitHub's, which
   turns a permalink into a code snippet and renders math its own way.
@@ -1435,8 +1457,10 @@ page (§7.1).
   UUID per sheet. `gh` prints the URL, and the sheet changes to "Issue #123
   opened." with Open in Browser and Done.
 - **A retry** after a failure first runs `gh issue list --repo R --author @me
-  --state all --search "<uuid> in:body"`. If the issue exists, gh's reply was
-  lost; the sheet shows it instead of opening another.
+  --state all --limit 50 --json url,body` and looks for the marker in the
+  bodies itself: GitHub's search lags a new issue and may not read inside
+  the HTML comment that holds the marker. If the issue exists, gh's reply was lost; the sheet shows it
+  instead of opening another. If gh cannot answer, nothing is sent.
 - **On failure** the sheet stays open, with the text and gh's error.
 - **`CCWIKI_PUBLISH_DRY_RUN=1`** stops before `gh issue create` and shows the
   command it would have run.
@@ -1464,7 +1488,7 @@ https://github.com/axhoover/cryptology.city/blob/<base commit>/content/Primitive
 - **The path** is percent-encoded segment by segment, because reference
   filenames have spaces and `&`.
 - **Labels.** None are passed. The wiki defines none, and `--label` fails
-  on a missing one. §15 has the question.
+  on a missing one. §15 records the choice.
 
 ---
 
@@ -2464,27 +2488,31 @@ Teardown discards the scripted job, so no shots run leaves a worktree behind.
 - **Line numbers in the editor's gutter.** The status line gives line and
   column.
 
-## 15. Open questions for the maintainer
+## 15. The maintainer's questions, as settled and built
 
-1. **The default model for corrections.** *Recommended: Sonnet.* Haiku is
+1. **The default model for corrections.** *Settled: Sonnet.* Haiku is
    cheaper, but a mangled macro in a security definition costs more than the
-   difference. All four choices are in Settings → Jobs.
+   difference. All four choices are in Settings → Jobs: Sonnet, Haiku, Opus,
+   and the CLI's default.
 2. **Should the correction agent have `WebFetch`, to check a cited paper?**
-   *Recommended: no, not in this version.* It turns a job of seconds and
+   *Settled: no, not in this version.* It turns a job of seconds and
    cents into minutes and dollars. The prompt tells the agent to abort and
    say what to check.
-3. **The title prefix.** *Recommended: `[fix]`*, mirroring the wiki's
+3. **The title prefix.** *Settled: `[fix]`*, mirroring the wiki's
    `[paper]`, in the title and the commit subject.
-4. **Draft or ready for review?** *Recommended: draft.* You have approved
+4. **Draft or ready for review?** *Settled: draft.* You have approved
    it, but "never ready-for-review" is a non-negotiable in PLAN.md §3, and CI
    runs on drafts.
-5. **Where CCwiki Dev publishes.** *Recommended: the same repository, said
+5. **Where CCwiki Dev publishes.** *Settled: the same repository, said
    at every step (§10).* The alternative is a standing sandbox repository.
-6. **Should CCwiki regenerate derived files?** *Recommended: not yet.* Warn,
+   `CCWIKI_TARGET_REPO=owner/name` points a Dev build at a fork for
+   testing.
+6. **Should CCwiki regenerate derived files?** *Settled: not yet.* Warn,
    and build it if the warning fires often.
-7. **A `reader-report` label on the wiki.** *Recommended: only if you want
-   to filter on it.* If you create one, CCwiki passes it with `--label`.
-8. **⌥⌘E for Edit Page.** *Recommended: yes.* It is the only free chord near
+7. **A `reader-report` label on the wiki.** *Settled: none for now.*
+   CCwiki passes no `--label` (§8.2). The wiki defines no such label, and
+   `--label` fails on a missing one.
+8. **⌥⌘E for Edit Page.** *Settled: yes.* It is the only free chord near
    ⇧⌘E that reads as Edit.
 
 ## 16. Review notes (2026-10-12)
