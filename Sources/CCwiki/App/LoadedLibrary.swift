@@ -68,11 +68,42 @@ struct LoadedLibrary: Sendable {
             fingerprints: scan.fingerprints)
     }
 
-    /// The library after `previous`, equal to `build`. Until there are
-    /// fingerprints to compare (D2) it is `build`, and reports what a launch
-    /// reports: everything rebuilt, nothing to compare with.
+    /// The library after `previous`, equal to `build`, with what changed
+    /// between the two. It is `build` plus the fingerprint difference: every
+    /// artifact is built again from the files, and nothing is carried over
+    /// from `previous` but what it is compared with. Reusing what a pull
+    /// left alone (D6) waits for the corpus suite's numbers (§3.2).
     static func update(_ previous: LoadedLibrary, cloneRoot: URL) -> LibraryUpdate {
-        LibraryUpdate(building: build(cloneRoot: cloneRoot))
+        var timings = LoadTimings()
+        let library = build(cloneRoot: cloneRoot, timings: &timings)
+        var result = timings.measure(.compare) {
+            LibraryUpdate(library: library, after: previous)
+        }
+        result.timings = timings
+        let message = "Updated the library: \(result.summary). \(timings)"
+        Logger.library.notice("\(message, privacy: .public)")
+        return result
+    }
+
+    /// Every page and asset a render of `page` links to: the links in its
+    /// body and in the relation line spliced under its H1, as `PageRenderer`
+    /// collects them. When one changes, so does the hover card or the image
+    /// the rendered page carries (§3.6). The line is taken whether or not the
+    /// clone is new enough to show it, so this is never fewer than the
+    /// renderer's links.
+    func linkedPaths(from page: WikiPage) -> Set<String> {
+        var markdown = page.body
+        if let line = RelationMeta.line(for: page.frontmatter, manifest: manifest, labels: labels) {
+            markdown = RelationMeta.insertUnderH1(line, into: markdown)
+        }
+        var paths: Set<String> = []
+        for link in WikiIndex.outgoingLinks(in: markdown) {
+            switch index.resolve(link, from: page.path) {
+            case .page(let path, _), .asset(let path): paths.insert(path)
+            case .folder, .samePage, .external, .unresolved: break
+            }
+        }
+        return paths
     }
 }
 
@@ -82,18 +113,76 @@ struct LibraryUpdate: Sendable {
     let library: LoadedLibrary
     /// The fingerprint difference; nil only when there was no previous library.
     let changes: LibraryChanges?
+    /// Nothing could be trusted to say what changed: there was no previous
+    /// library, it had no fingerprints, or `CCWIKI_FULL_RELOAD=1` is set. Every
+    /// reader renders again. `changes` is still the real difference whenever
+    /// there was something to compare with, so the sync's summary keeps its
+    /// page count (§3.3).
     let isFullBuild: Bool
-    /// What was built rather than reused, for the log.
+    /// What was built rather than reused, for the log: every artifact, until
+    /// loads reuse any (D6).
     let rebuilt: Set<LibraryArtifact>
     /// A file came or went, or a changed page's aliases differ: every link
     /// may now resolve differently.
     let resolutionChanged: Bool
+    /// The plain-text names of relation objects differ from the last load's.
     let labelsChanged: Bool
+    /// How long each phase of the load took, when it was measured.
+    var timings = LoadTimings()
 
     /// Whether a reader showing `location` has to render it again (§3.6).
-    /// Every one does until the changes are known (D3).
+    /// Pure, so each tab decides for itself after a pull, and a pull that
+    /// changed one page does not re-render every tab.
     func requiresRerender(of location: AppModel.Location) -> Bool {
-        true
+        switch location {
+        case .empty:
+            return false
+        case .document:
+            // One synthetic page, and its links come alive with the first
+            // load, which also drops Welcome's "The wiki is downloading".
+            return true
+        case .page(let path, _):
+            guard let changes, !isFullBuild else { return true }
+            // What every page's render reads: how links resolve, the
+            // relation line's names and fields, and the macros.
+            if resolutionChanged || labelsChanged || changes.manifestChanged
+                || changes.macrosChanged {
+                return true
+            }
+            let changed = changes.changedFiles
+            if changed.contains(path) { return true }
+            guard let page = library.index.page(atPath: path) else { return true }
+            // A linked page's hover card is in the payload, and an embedded
+            // asset is drawn from the file.
+            return !library.linkedPaths(from: page).isDisjoint(with: changed)
+        case .folder(let slug):
+            guard let changes, !isFullBuild else { return true }
+            // The listing leaves out the manifest's unlisted pages, and shows
+            // each page's title and status.
+            if resolutionChanged || changes.manifestChanged { return true }
+            return changes.changedPages.contains {
+                QuartzSlug.slugifyFilePath($0).hasPrefix(slug + "/")
+            }
+        }
+    }
+
+    /// One line for the log and the corpus report: what changed, and what
+    /// that meant.
+    var summary: String {
+        guard let changes else { return "built from nothing" }
+        var parts = [
+            "\(changes.added.count) added, \(changes.modified.count) modified, "
+                + "\(changes.deleted.count) deleted",
+        ]
+        if changes.manifestChanged { parts.append("manifest changed") }
+        if changes.macrosChanged { parts.append("macros changed") }
+        if resolutionChanged { parts.append("links resolve anew") }
+        if labelsChanged { parts.append("labels changed") }
+        if isFullBuild { parts.append("full build") }
+        parts.append(rebuilt == Set(LibraryArtifact.allCases)
+            ? "everything built"
+            : "built " + rebuilt.map(\.rawValue).sorted().joined(separator: ", "))
+        return parts.joined(separator: "; ")
     }
 }
 
@@ -105,6 +194,33 @@ extension LibraryUpdate {
             library: library, changes: nil, isFullBuild: true,
             rebuilt: Set(LibraryArtifact.allCases),
             resolutionChanged: true, labelsChanged: true)
+    }
+
+    /// `library`, built in full, compared with `previous`: the fingerprint
+    /// difference, and the flags §3.6 decides with. Every flag is set when
+    /// the comparison cannot be trusted (`isFullBuild`).
+    init(library: LoadedLibrary, after previous: LoadedLibrary) {
+        let changes = LibraryChanges.between(previous.fingerprints, library.fingerprints)
+        let isFullBuild = previous.fingerprints == .empty || LibraryChanges.areIgnored
+        self.init(
+            library: library, changes: changes, isFullBuild: isFullBuild,
+            rebuilt: Set(LibraryArtifact.allCases),
+            resolutionChanged: isFullBuild
+                || Self.resolutionChanged(from: previous.index, to: library.index, by: changes),
+            labelsChanged: isFullBuild || previous.labels != library.labels)
+    }
+
+    /// Whether `changes` can make a link resolve differently: the slug
+    /// tables are built from the file list and every page's aliases, so a
+    /// file that came or went, or a changed page whose aliases differ (or
+    /// that parses only on one side), can.
+    static func resolutionChanged(
+        from old: WikiIndex, to new: WikiIndex, by changes: LibraryChanges
+    ) -> Bool {
+        if !changes.added.isEmpty || !changes.deleted.isEmpty { return true }
+        return changes.modified.contains { path in
+            path.hasSuffix(".md") && old.pages[path]?.aliases != new.pages[path]?.aliases
+        }
     }
 }
 

@@ -60,20 +60,6 @@ struct IncrementalCorpusTests {
         return sorted.isEmpty ? .zero : sorted[sorted.count / 2]
     }
 
-    static func describe(_ update: LibraryUpdate) -> String {
-        guard let changes = update.changes else { return "nothing to compare with" }
-        var parts = [
-            "\(changes.added.count) added, \(changes.modified.count) modified, "
-                + "\(changes.deleted.count) deleted",
-        ]
-        if changes.manifestChanged { parts.append("manifest changed") }
-        if changes.macrosChanged { parts.append("macros changed") }
-        if update.resolutionChanged { parts.append("resolution changed") }
-        if update.labelsChanged { parts.append("labels changed") }
-        if update.isFullBuild { parts.append("full build") }
-        return parts.joined(separator: ", ")
-    }
-
     static func describe(_ report: SyncReport) -> String {
         report.rebuiltFromScratch
             ? "rebuilt, \(report.inserted) rows"
@@ -170,22 +156,32 @@ struct IncrementalCorpusTests {
                 result = run.value
             }
             lines.append("update after \(edit): \(LoadTimings.format(Self.fastest(durations))) "
-                + "(\(Self.describe(result)))")
+                + "(\(result.summary))")
+            lines.append("  the last run: \(result.timings)")
             current = result.library
             return result
         }
 
         let edited = try Self.editBody(in: clone, library: current)
-        _ = measureUpdate(after: "a one-page edit")
+        let bodyEdit = measureUpdate(after: "a one-page edit")
+        #expect(bodyEdit.changes?.changedFiles == Set([edited]))
+        #expect(!bodyEdit.isFullBuild)
+        #expect(!bodyEdit.resolutionChanged)
+        #expect(!bodyEdit.labelsChanged)
         let afterEdit = current
 
-        if try Self.addAlias(in: clone, library: current) != nil {
-            _ = measureUpdate(after: "an alias change")
+        if let aliased = try Self.addAlias(in: clone, library: current) {
+            let aliasChange = measureUpdate(after: "an alias change")
+            #expect(aliasChange.changes?.changedFiles == Set([aliased]))
+            #expect(aliasChange.resolutionChanged)
         } else {
             lines.append("update after an alias change: no page lists its aliases one per line")
         }
         if try Self.editManifest(in: clone) != nil {
-            _ = measureUpdate(after: "a manifest change")
+            let manifestChange = measureUpdate(after: "a manifest change")
+            #expect(manifestChange.changes?.manifestChanged == true)
+            #expect(manifestChange.changes?.changedFiles.isEmpty == true)
+            #expect(manifestChange.labelsChanged)
         } else {
             lines.append("update after a manifest change: the clone has no manifest")
         }
