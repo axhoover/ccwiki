@@ -536,7 +536,7 @@ and the integrator deletes it there (§17).
 | At quit | At the next launch |
 |---|---|
 | `queued`, `preparing`, `running` | A normal quit has cancelled them (`cancelled`). After a crash: `failed("Interrupted — CCwiki quit while this job was running.")`, as today. Review Anyway is offered if the worktree holds changes |
-| `awaitingReview`, worktree present | `awaitingReview`. The transcript is replayed and the snapshot recomputed when the job is first shown |
+| `awaitingReview`, worktree present | `awaitingReview`. The transcript is replayed when the job is first shown. The snapshot is recomputed then, and for every review still without one once git is found (`JobCenter.refreshMissingReviews`): a window macOS restores asks before the tools are known |
 | `awaitingReview`, worktree gone, patch present | `awaitingReview` with `needsRestore`. The review shows "The worktree is gone. CCwiki kept your changes." with a Restore button (§4.4) |
 | `awaitingReview`, both gone | `failed("The worktree and the saved changes are both gone.")` |
 | `publishing` | A normal quit has already returned it to `awaitingReview` (§4.1). After a crash, the same, with the same log line |
@@ -547,9 +547,15 @@ and the integrator deletes it there (§17).
   publishing, closes itself (SWIFTUI-RULES §6.5).
 - **The PR title and body** are in the record; **text typed into an
   editor** is in the worktree (§7.5).
-- `refreshOrphanedWorktrees` treats every non-terminal job as known, as it
-  already does. Because a quit no longer cancels a review, a worktree awaiting
-  review is never offered for pruning under Left Behind.
+- `refreshOrphanedWorktrees` treats as known every job that owns its
+  worktree (`JobCenter.ownsWorktree`): every non-terminal job, as it already
+  did, and every failed, aborted or cancelled one that Review Anyway may still
+  take to review, a job a quit cancelled included. Because a quit no longer
+  cancels a review, a worktree awaiting review is never offered for pruning
+  under Left Behind, and neither is one Review Anyway offers. It becomes a
+  stray only once Clear Finished drops its job, which looks for strays again.
+  Review Anyway looks again too, and `pruneOrphan` refuses a path whose last
+  component is a job that owns it, whatever a list drawn earlier shows.
 - **Reset Clone** (Settings → Storage) is refused while any job is not
   terminal: "Publish or discard the 2 jobs in Jobs first." Their worktrees
   live in the clone's `.git`.
@@ -582,7 +588,7 @@ and the integrator deletes it there (§17).
 Today the ingestion agent pushes and opens the PR itself, with `Bash(git:*)`
 and `Bash(gh:*)` allowed. Under the new rule, a prompt that says "do not
 push" is not enough. PROBLEMS.md makes the point twice: a warning is not a
-fix. So every agent run, ingestion and correction, gets three layers:
+fix. So every agent run, ingestion and correction, gets four layers:
 
 1. **The allow-list leaves out `gh` and every git command that writes.** The
    ingestion agent no longer commits, so its `Bash(git:*)` becomes the
@@ -609,6 +615,18 @@ fix. So every agent run, ingestion and correction, gets three layers:
    Requires git ≥ 2.31 (Apple's is 2.39). Fetching public submodules over
    HTTPS still works, and the runner does that before the agent starts
    anyway.
+4. **Nothing of the user's own Claude configuration.** `claude -p` would
+   otherwise load the allow rules and hooks in `~/.claude/settings.json`,
+   and every MCP server the user has added, and `--allowedTools` only adds
+   to those rules. A user allow rule such as `Bash(git:*)`, or a GitHub MCP
+   server whose tools are pre-approved and which carries its own token,
+   would reach past the other three layers: the deny-list covers only
+   `Bash(...)`, and the environment does not reach a server's token. So both
+   agents run with `--strict-mcp-config` and no `--mcp-config`, which loads
+   no MCP server, and `--setting-sources project`, which loads only the
+   settings checked into the wiki itself, if it has any: rules reviewed in
+   its own repository. Both flags are to be confirmed on the first live job
+   (§13).
 
 **What the seal is, and is not.** It stops a confused agent and an accident:
 a plain `git push` or `gh pr create` fails, and the integration test proves
@@ -1177,7 +1195,10 @@ right ([design-system.md](design-system.md) §4a).
   metadata (branch, page or source) moves into the banner's second line, and
   the pre-flight findings move to the Transcript tab.
 - **The banner**, in the accent colour:
-  - nothing pushed: "Awaiting your review. Nothing has been pushed.";
+  - nothing pushed by CCwiki: "Awaiting your review. CCwiki has pushed
+    nothing." It says what CCwiki did, not what is on GitHub: an agent that
+    pushed for itself is the tripwire's notice beneath, which the banner
+    must not contradict;
   - `pushedCommit` set: "Awaiting your review. The branch fix/… is on GitHub;
     no pull request is open yet.";
   - publishing: the step;
@@ -1202,9 +1223,14 @@ right ([design-system.md](design-system.md) §4a).
       axhoover/cryptology.city", followed by "· from CCwiki Dev" in a Dev
       build.
 - **Open Draft PR** is disabled with a blocking finding, a `PrivateText` hit,
-  or `GitHubAccess` not `.ready`; its help says why. With warnings, or in a
-  Dev build, it confirms: "Open a draft pull request with 2 flagged
-  changes?" (or "Open a draft pull request on axhoover/cryptology.city?"),
+  `GitHubAccess` not `.ready`, or an editor of the job holding text the disk
+  does not, a conflict nobody settled or a write that failed ("page.md could
+  not be saved. Settle it in its window first."); its help says why.
+  `JobCenter.approve` asks the last again once it has saved the editors
+  (`unsettledEdits`), since that save may be the one that fails, and refuses
+  with the same words. With warnings, or in a Dev build, it confirms: "Open
+  a draft pull request with 2 flagged changes?" (or "Open a draft pull
+  request on axhoover/cryptology.city?"),
   with "on axhoover/cryptology.city · from CCwiki Dev" as the informative
   text in a Dev build, and the buttons **Open Draft PR** (default) and
   **Cancel**.
@@ -1258,11 +1284,20 @@ and the review show its banner when it is not `.ready`:
 | `GitHubAccess` | Banner |
 |---|---|
 | `.offline` (a timeout, or a network failure) | "Offline. You can edit now; opening the pull request needs a connection." |
-| `.ghMissing` | "gh is not installed, so this cannot become a pull request yet. Install it, or open an issue." with **Open an Issue…** |
-| `.notSignedIn` | "gh is not signed in. Run gh auth login in Terminal, then review again." |
+| `.ghMissing` | "gh is not installed, so this cannot become a pull request yet. Install it with Homebrew (brew install gh), then check again." No issue is offered: opening one needs gh too (§8.2) |
+| `.notSignedIn` | "gh is not signed in. Run gh auth login in Terminal, then check again." |
 | `.cannotPush` | "The signed-in account cannot push to axhoover/cryptology.city, so this cannot become a pull request. Open an issue instead." with **Open an Issue…** |
 
-Approve asks again (§6.5).
+Each banner sits beside **Check Again**. Approve asks again (§6.5).
+
+**Not before the tools are found.** At launch, gh is found a moment after
+git, in the background, and a window macOS restores asks at once. An answer
+computed before gh is found says it is missing, and would be kept. So the
+editor and the review ask only once `AppModel.isDiscoveringTools` is false,
+and ask then if nobody has; and when discovery finishes,
+`JobCenter.toolsDidChange()` waits for any ask in flight and asks again if an
+answer was kept, so one asked meanwhile from elsewhere (a correction begun
+from the reader) is replaced.
 
 If the target's region is `generated`, the editor opens with a banner: "This
 passage is generated from the reduction pages. Correct the reduction page it
@@ -1397,13 +1432,23 @@ page (§7.1).
 - **The field:** "What is wrong, and what should it say?", focused when the
   sheet opens.
 - **Below the field:** "Uses Claude Sonnet." (or "Uses the claude CLI's
-  default model.") "Change it in Settings → Jobs."
+  default model.") "Change it in Settings > Jobs." (with `>`, as the app's
+  other strings name a settings pane).
 - **The blockers:** git, claude, and a git clone (§7.1). GitHub is asked in
   the background, as for an edit.
-- **A generated passage** (`region` is `generated` or `frontmatter`) shows,
-  in place of the field: "This passage is generated from the reduction pages.
-  Open an issue, or edit the reduction page it links to." with **Open an
-  Issue…** as the default button.
+- **A generated passage** shows, in place of the field, a note with **Open
+  an Issue…** as the default button. The note is
+  `CorrectionBlockers.generated` or `.frontmatterLine`, the blocker
+  `CorrectionBlockers.list` gives route b, and the failure a correction run
+  again later meets (`CorrectionJobRunner`):
+  - a "Participates in" passage (`generated`): "This passage is generated
+    from the reduction pages. Open an issue, or edit the reduction page it
+    links to.";
+  - the relation line under a reduction or barrier page's title
+    (`frontmatter`), whose links go to classes, models and references, never
+    to a reduction page: "This line is built from this page's own
+    frontmatter, which an agent cannot change here. Open an issue, or edit
+    those fields yourself with Edit Page."
 - **Start Job** calls `jobCenter.startCorrection(CorrectionRequest(target:
   description: model:))` and opens the Jobs window on the new job, as
   ingestion does.
@@ -2397,10 +2442,17 @@ Teardown discards the scripted job, so no shots run leaves a worktree behind.
 - **The seal is not a sandbox** (§5.1). Ingestion reads untrusted papers and
   keeps `node`. The tripwire reports a push or a PR CCwiki did not make; it
   cannot undo one.
-- **CLI flags.** `--disallowedTools`, the `Bash(git push:*)` prefix rule and
-  `--model sonnet` are from the CLI's documented surface, not from a run.
-  The first live correction job should be watched. If a flag is refused, the
-  job fails visibly at start, and the environment seal still holds.
+- **CLI flags.** `--disallowedTools`, the `Bash(git push:*)` prefix rule,
+  `--model sonnet`, `--strict-mcp-config` and `--setting-sources project`
+  are from the CLI's documented surface, not from a run. Confirm each
+  against `claude --help` on the first live job, an ingestion and a
+  correction both, and watch that job. If a flag is refused, the job fails
+  visibly at start, and the environment seal still holds.
+  `--setting-sources project` also leaves out an `env` block or an
+  `apiKeyHelper` in the user's own `~/.claude/settings.json`: a maintainer
+  who reaches Claude that way (a provider or a key set there) finds the
+  first job failing to sign in, and must set it where the app's
+  environment, or the CLI's own login, provides it.
   **Path-scoped rules** (`Edit(./content/<path>)`,
   `Write(./.ccwiki/pull-request.md)`, with `--permission-mode default`) would
   enforce the one-page rule before the fact. Adopt them once that first run
