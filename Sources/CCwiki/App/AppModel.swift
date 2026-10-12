@@ -4,10 +4,12 @@ import SwiftUI
 
 /// App-wide state.
 ///
-/// One `@Observable @MainActor` object owns everything the views read. The
-/// expensive parts — walking the clone, parsing 297 files, rebuilding the FTS
-/// index — happen off the main actor and land here as one assignment, so the
-/// UI never sees a half-built library.
+/// One `@Observable @MainActor` object owns everything the windows share:
+/// the wiki, the search index, jobs, sync, updates and settings. What one
+/// reader window shows is its `ReaderSession`'s. The expensive parts —
+/// walking the clone, parsing 297 files, rebuilding the FTS index — happen
+/// off the main actor and land here as one assignment, so the UI never sees
+/// a half-built library.
 @Observable
 @MainActor
 final class AppModel {
@@ -39,8 +41,7 @@ final class AppModel {
         didSet {
             guard showsMaintenanceNotices != oldValue else { return }
             CCwikiSettings.showsMaintenanceNotices = showsMaintenanceNotices
-            webController.invalidate()
-            renderCurrent(preservingScroll: true)
+            primarySession.preferencesDidChange()
         }
     }
 
@@ -50,8 +51,7 @@ final class AppModel {
         didSet {
             guard showsLinkPreviews != oldValue else { return }
             CCwikiSettings.showsLinkPreviews = showsLinkPreviews
-            webController.invalidate()
-            renderCurrent(preservingScroll: true)
+            primarySession.preferencesDidChange()
         }
     }
 
@@ -62,8 +62,7 @@ final class AppModel {
             CCwikiSettings.hidesStubs = hidesStubs
             rebuildBrowseState()
             // The rendered folder page does not follow the preference by itself.
-            webController.invalidate()
-            renderCurrent(preservingScroll: true)
+            primarySession.preferencesDidChange()
         }
     }
 
@@ -134,6 +133,10 @@ final class AppModel {
 
     // MARK: Navigation
 
+    // Where a reader is, and how it got there, is its window's: see
+    // `ReaderSession`. The types that describe it stay here, where
+    // `Location`'s coding is synthesized.
+
     /// A page that ships with the app rather than with the wiki.
     enum Document: String, Hashable, Codable, Sendable {
         case welcome
@@ -172,40 +175,6 @@ final class AppModel {
         }
     }
 
-    /// Where the reader is and how it got there. The rules live in
-    /// `NavigationHistory` so they can be tested without a web view.
-    private var history = NavigationHistory()
-
-    var location: Location { history.current }
-    var canGoBack: Bool { history.canGoBack }
-    var canGoForward: Bool { history.canGoForward }
-
-    /// The directory the sidebar has expanded to, so selection survives a reload.
-    var sidebarSelection: String?
-    /// Which sidebar folders are open. Opening a page from a link, the quick
-    /// switcher or search reveals its folder, so the sidebar always shows where
-    /// you are rather than silently disagreeing with the reader.
-    var expandedFolders: Set<String> = Set(CCwikiSettings.expandedFolders) {
-        didSet {
-            guard expandedFolders != oldValue else { return }
-            CCwikiSettings.expandedFolders = expandedFolders.sorted()
-        }
-    }
-    /// Both persisted: the inspector comes back as it was left.
-    var inspectorTab: InspectorTab =
-        CCwikiSettings.inspectorTab.flatMap(InspectorTab.init(rawValue:)) ?? .outline {
-        didSet { CCwikiSettings.inspectorTab = inspectorTab.rawValue }
-    }
-    var showInspector: Bool = CCwikiSettings.showsInspector {
-        didSet { CCwikiSettings.showsInspector = showInspector }
-    }
-
-    /// ⌥⌘1–3: straight to a tab, opening the inspector if it was closed.
-    func showInspectorTab(_ tab: InspectorTab) {
-        inspectorTab = tab
-        showInspector = true
-    }
-
     enum InspectorTab: String, CaseIterable, Identifiable {
         case outline = "Outline"
         case backlinks = "Backlinks"
@@ -227,6 +196,115 @@ final class AppModel {
             }
         }
     }
+
+    // MARK: The reader's session
+
+    /// The reader window's session: its page, history, web view, sidebar,
+    /// inspector and sheets (plans/reader-comforts.md §1.2). Made last in
+    /// `init`, since it reads the model whole. One until there is a session
+    /// per window (A4b).
+    @ObservationIgnored private(set) lazy var primarySession: ReaderSession =
+        ReaderSession(id: UUID(), model: self)
+
+    // Each member that moved into the session, forwarded under its old name
+    // so that no view changed with the move (A2). A3 gives every reader view
+    // its own window's session and deletes these, all but the API for
+    // windows that are not readers (§1.8): `open`, `openPage`,
+    // `openRelationObject`, `navigate(to:)`, `currentPageExplorerQuery` and
+    // `canExploreCurrentPage`. The model's own code calls `primarySession`
+    // by name, so that what A4b fans out to every session is easy to find.
+
+    var webController: WebController { primarySession.webController }
+    var location: Location { primarySession.location }
+    var canGoBack: Bool { primarySession.canGoBack }
+    var canGoForward: Bool { primarySession.canGoForward }
+
+    var sidebarSelection: String? {
+        get { primarySession.sidebarSelection }
+        set { primarySession.sidebarSelection = newValue }
+    }
+    var expandedFolders: Set<String> {
+        get { primarySession.expandedFolders }
+        set { primarySession.expandedFolders = newValue }
+    }
+    var inspectorTab: InspectorTab {
+        get { primarySession.inspectorTab }
+        set { primarySession.inspectorTab = newValue }
+    }
+    var showInspector: Bool {
+        get { primarySession.showInspector }
+        set { primarySession.showInspector = newValue }
+    }
+
+    var quickSwitcherPresented: Bool {
+        get { primarySession.quickSwitcherPresented }
+        set { primarySession.quickSwitcherPresented = newValue }
+    }
+    var searchPresented: Bool {
+        get { primarySession.searchPresented }
+        set { primarySession.searchPresented = newValue }
+    }
+    var referenceSearchPresented: Bool {
+        get { primarySession.referenceSearchPresented }
+        set { primarySession.referenceSearchPresented = newValue }
+    }
+    var grepPresented: Bool {
+        get { primarySession.grepPresented }
+        set { primarySession.grepPresented = newValue }
+    }
+    var syncLogPresented: Bool {
+        get { primarySession.syncLogPresented }
+        set { primarySession.syncLogPresented = newValue }
+    }
+
+    var currentPage: WikiPage? { primarySession.currentPage }
+    var currentBacklinks: [WikiIndex.Backlink] { primarySession.currentBacklinks }
+    var currentRelations: PageRelations { primarySession.currentRelations }
+    var currentDerivations: PageDerivations { primarySession.currentDerivations }
+    var citingPages: [WikiIndex.Backlink] { primarySession.citingPages }
+    var currentSiteURL: URL? { primarySession.currentSiteURL }
+    var currentTitle: String { primarySession.currentTitle }
+    var currentPageExplorerQuery: ExplorerQuery? { primarySession.currentPageExplorerQuery }
+    var canExploreCurrentPage: Bool { primarySession.canExploreCurrentPage }
+
+    func open(_ newLocation: Location, recordHistory: Bool = true) {
+        primarySession.open(newLocation, recordHistory: recordHistory)
+    }
+
+    func openPage(_ path: String, anchor: String? = nil) {
+        primarySession.openPage(path, anchor: anchor)
+    }
+
+    func navigate(to destination: CCwikiURL.Destination) {
+        primarySession.navigate(to: destination)
+    }
+
+    func goBack() { primarySession.goBack() }
+    func goForward() { primarySession.goForward() }
+    func openHome() { primarySession.openHome() }
+    func openRandomPage() { primarySession.openRandomPage() }
+
+    func openSearchResult(_ hit: SearchHit, query: String) {
+        primarySession.openSearchResult(hit, query: query)
+    }
+
+    func openGrepResult(_ hit: TextGrep.Hit, query: String) {
+        primarySession.openGrepResult(hit, query: query)
+    }
+
+    func openReferenceResult(_ hit: ReferenceHit, query: String) {
+        primarySession.openReferenceResult(hit, query: query)
+    }
+
+    func openRelationObject(_ objectID: String) {
+        primarySession.openRelationObject(objectID)
+    }
+
+    func showWelcome() { primarySession.showWelcome() }
+    func showWhatsNew() { primarySession.showWhatsNew() }
+    func showInspectorTab(_ tab: InspectorTab) { primarySession.showInspectorTab(tab) }
+    func presentQuickSwitcher() { primarySession.presentQuickSwitcher() }
+    func printCurrentPage() { primarySession.printCurrentPage() }
 
     // MARK: Sync
 
@@ -252,9 +330,6 @@ final class AppModel {
     private(set) var syncState: SyncState = .idle
     private(set) var syncLog: [String] = []
     private var syncTask: Task<Void, Never>?
-    /// The sync log sheet. Every failure message ends "see the sync log", so
-    /// there has to be somewhere to see it.
-    var syncLogPresented = false
 
     // MARK: Search
 
@@ -269,8 +344,6 @@ final class AppModel {
     private(set) var searchError: String?
     private var searchTask: Task<Void, Never>?
 
-    var searchPresented = false
-
     /// ⇧⌘R, the reference search: the same shape as ⌘S, kept separate so
     /// each sheet reopens on its own last query.
     var referenceQuery = "" {
@@ -279,7 +352,6 @@ final class AppModel {
     private(set) var referenceResults: [ReferenceHit] = []
     private(set) var referenceError: String?
     private var referenceTask: Task<Void, Never>?
-    var referenceSearchPresented = false
 
     /// ⇧⌘F, literal text across every page. The pages, split into lines,
     /// are rebuilt with the library; a query scans them off the main actor.
@@ -289,8 +361,6 @@ final class AppModel {
     private(set) var grepResults: [TextGrep.Hit] = []
     private var grepTask: Task<Void, Never>?
     @ObservationIgnored private var textGrep = TextGrep.empty
-    var grepPresented = false
-    var quickSwitcherPresented = false
     /// Setting the query recomputes the results, so the two can never drift —
     /// whether the change came from the text field, a menu command, or the
     /// screenshot harness.
@@ -365,7 +435,6 @@ final class AppModel {
     /// restart after that must not load the new release's JavaScript
     /// against this release's Swift.
     let webRoot: URL
-    let webController: WebController
     /// The papers behind reference pages, fetched when asked (§2).
     let papers: PaperLibrary
 
@@ -408,11 +477,8 @@ final class AppModel {
         // the real one as soon as the clone lands.
         let macros = MacroTable.load(cloneRoot: paths.clone)
         self.macros = macros
-        let webRoot = paths.stagedWebRoot()
-        self.webRoot = webRoot
-        let zoom = AppModel.clampedZoom(CCwikiSettings.pageZoom)
-        self.storedPageZoom = zoom
-        self.webController = WebController(paths: paths, webRoot: webRoot, pageZoom: zoom)
+        self.webRoot = paths.stagedWebRoot()
+        self.storedPageZoom = AppModel.clampedZoom(CCwikiSettings.pageZoom)
         self.papers = PaperLibrary(paths: paths)
 
         try? paths.createDirectories()
@@ -424,35 +490,11 @@ final class AppModel {
         vendorManifest = try? String(
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
-        webController.onNavigate = { [weak self] destination, disposition in
-            guard let self else { return }
-            // ⌘-click: the same page on cryptology.city, in the browser. The
-            // app has one reader window, so anywhere but here means the site,
-            // until tabs give the other dispositions somewhere to go.
-            if disposition != .here, case .page(let path, let anchor) = destination,
-               let page = index?.pages[path],
-               let url = Self.siteURL(slug: page.slug, anchor: anchor) {
-                NSWorkspace.shared.open(url)
-                return
-            }
-            navigate(to: destination)
-        }
-        webController.onReady = { [weak self] in
-            self?.renderCurrent()
-        }
-        webController.siteURLProvider = { [weak self] in
-            self?.currentSiteURL
-        }
-        // "Explore From This Page…" in the reader's context menu, which is
-        // AppKit: it asks for the question, and hands it back to `explore`.
-        webController.exploreHere = { [weak self] in
-            self?.currentPageExplorerQuery
-        }
-        webController.onExplore = { [weak self] query in
-            self?.explore(query)
-        }
-
         refreshMacrosWarning()
+
+        // Last: the session reads the model whole, for its web view's root
+        // and text size and for everything it renders.
+        _ = primarySession
     }
 
     // MARK: Tools
@@ -706,17 +748,11 @@ final class AppModel {
         }
     }
 
-    /// What a load means for the reader: re-render what is on screen, since
-    /// the file may have changed, keeping the reader's place, since it
-    /// usually has not. With nothing on screen yet, open the first page.
+    /// What a load means for the reader: its session decides what to render
+    /// again (`ReaderSession.libraryDidLoad`), and the quick switcher's list
+    /// follows the new wiki.
     private func libraryDidLoad(_ update: LibraryUpdate) {
-        if case .empty = location {
-            webController.invalidate()
-            openInitialPage()
-        } else if update.requiresRerender(of: location) {
-            webController.invalidate()
-            renderCurrent(preservingScroll: true)
-        }
+        primarySession.libraryDidLoad(update)
         refreshQuickSwitcher()
     }
 
@@ -853,20 +889,14 @@ final class AppModel {
         }
     }
 
-    // MARK: Navigation
-
-    /// Cold start: the page from last time, if it still exists, else home.
-    /// Not under the screenshot harness, whose plan starts where it says.
     // MARK: The app's own pages
 
     /// The release notes shipped in this build.
     @ObservationIgnored private(set) lazy var changelog =
         Changelog.parse(paths.bundledDocument("CHANGELOG.md") ?? "")
     /// Which releases What's New lists: those after this version, or all of
-    /// them when nil (from the Help menu).
-    @ObservationIgnored private var whatsNewSince: String?
-    /// Set by `openSearchResult` for the render it triggers, then cleared.
-    @ObservationIgnored private var pendingFind: [String]?
+    /// them when nil (from the Help menu, through `ReaderSession.showWhatsNew`).
+    @ObservationIgnored var whatsNewSince: String?
 
     /// What to open before anything else this launch, if anything. Pure, so
     /// it can be tested: a first launch shows Welcome; the first launch of
@@ -902,21 +932,11 @@ final class AppModel {
         if !UpdateChecker.isDevelopmentVersion(seen) { CCwikiSettings.highestSeenVersion = seen }
         guard let decision else { return }
         if decision.document == .whatsNew { whatsNewSince = decision.since }
-        open(.document(decision.document))
+        primarySession.open(.document(decision.document))
     }
 
-    func showWelcome() {
-        open(.document(.welcome))
-    }
-
-    /// Every release's notes, from the Help menu.
-    func showWhatsNew() {
-        whatsNewSince = nil
-        webController.invalidate()
-        if location == .document(.whatsNew) { renderCurrent() } else { open(.document(.whatsNew)) }
-    }
-
-    private func documentRequest(_ document: Document) -> RenderRequest {
+    /// One of the app's own pages, ready to render in any reader.
+    func documentRequest(_ document: Document) -> RenderRequest {
         let markdown: String
         switch document {
         case .welcome:
@@ -950,101 +970,7 @@ final class AppModel {
         return renderer.request(for: page, anchor: nil, notices: notices)
     }
 
-    private func openInitialPage() {
-        if ScreenshotRunner.directory == nil,
-           let last = CCwikiSettings.lastPage, index?.pages[last] != nil {
-            open(.page(path: last, anchor: nil))
-        } else {
-            openHome()
-        }
-    }
-
-    func openHome() {
-        guard let index else { return }
-        if index.pages["index.md"] != nil {
-            open(.page(path: "index.md", anchor: nil))
-        } else if let first = index.allPages.sorted(by: { $0.path < $1.path }).first {
-            open(.page(path: first.path, anchor: nil))
-        }
-    }
-
-    func open(_ newLocation: Location, recordHistory: Bool = true) {
-        // A page the clone does not have is not somewhere the reader can be.
-        // Without this the chrome moved — title, selection, history — while
-        // the web view kept the previous page.
-        if case .page(let path, _) = newLocation, index?.pages[path] == nil { return }
-
-        guard history.visit(newLocation, recording: recordHistory) else {
-            // Not a move. The one case worth acting on: the same page, same
-            // anchor, asked for again — jump back to the anchor.
-            if newLocation == location, case .page(_, let anchor) = newLocation, let anchor {
-                webController.scrollTo(anchor: anchor)
-            }
-            return
-        }
-        if case .page(let path, _) = newLocation {
-            CCwikiSettings.lastPage = path
-            noteRecent(path)
-        }
-        reveal(newLocation)
-        renderCurrent()
-    }
-
-    /// Select the page in the sidebar and open the folder that holds it.
-    private func reveal(_ location: Location) {
-        switch location {
-        case .page(let path, _):
-            sidebarSelection = path
-            expandedFolders.formUnion(
-                PageTreeNode.ancestors(of: path, excluding: Self.kindsOutsideTree))
-        case .folder(let slug):
-            expandedFolders.insert(slug)
-            // A folder listing is not one of the tree's rows, so leaving the
-            // previous page highlighted claims you are somewhere you are not.
-            sidebarSelection = nil
-        case .document, .empty:
-            sidebarSelection = nil
-        }
-    }
-
-    func openPage(_ path: String, anchor: String? = nil) {
-        open(.page(path: path, anchor: anchor))
-    }
-
-    func navigate(to destination: CCwikiURL.Destination) {
-        switch destination {
-        case .page(let path, let anchor): open(.page(path: path, anchor: anchor))
-        case .folder(let slug): open(.folder(slug: slug))
-        case .asset(let path):
-            NSWorkspace.shared.open(paths.content.appending(path: path))
-        case .shell:
-            break
-        }
-    }
-
-    func goBack() {
-        guard let previous = history.goBack() else { return }
-        reveal(previous)
-        renderCurrent(restoringScroll: true)
-    }
-
-    func goForward() {
-        guard let next = history.goForward() else { return }
-        reveal(next)
-        renderCurrent(restoringScroll: true)
-    }
-
-    /// Open a search hit where it matched: at the heading when a section was
-    /// the match, otherwise finding the query on the page, so the reader
-    /// lands on the match rather than the top of a long page.
-    func openSearchResult(_ hit: SearchHit, query: String) {
-        // A find would scroll away from the heading the hit is about.
-        pendingFind = hit.anchor == nil ? Self.findCandidates(for: query) : nil
-        openPage(hit.path, anchor: hit.anchor)
-        // Consumed by the render `openPage` just did; if it did not render
-        // (a page the index lacks), it must not linger for the next one.
-        pendingFind = nil
-    }
+    // MARK: Search hits
 
     /// What to look for on the page, best first: the query as typed, then
     /// its words longest first. Full-text search matches words anywhere on
@@ -1060,51 +986,6 @@ final class AppModel {
         return ([phrase] + words).filter { seen.insert($0.lowercased()).inserted }
     }
 
-    private func renderCurrent(preservingScroll: Bool = false, restoringScroll: Bool = false) {
-        if case .document(let document) = location {
-            var request = documentRequest(document)
-            request.macros = macros.macros
-            request.preservesScroll = preservingScroll
-            request.restoresScroll = restoringScroll
-            webController.render(request)
-            return
-        }
-        guard let index else { return }
-        var renderer = PageRenderer(index: index, hiddenPaths: unlistedPaths)
-        renderer.reportsBrokenLinks = showsMaintenanceNotices
-        renderer.relations = relations
-        renderer.relationLabels = relationLabels
-        renderer.linkPreviews = linkPreviews
-        renderer.buildsPreviews = showsLinkPreviews
-        var notices: [RenderRequest.Notice] = []
-        if macros.isEmpty {
-            notices.append(RenderRequest.Notice(
-                level: "warning",
-                text: "Custom LaTeX macros could not be loaded, so site-specific commands "
-                    + "such as \\calA will not render."))
-        }
-
-        var request: RenderRequest
-        switch location {
-        case .page(let path, let anchor):
-            guard let page = index.pages[path] else { return }
-            request = renderer.request(for: page, anchor: anchor, notices: notices)
-        case .folder(let slug):
-            request = renderer.folderRequest(
-                slug: slug, hidingStubs: hidesStubs, notices: notices)
-        case .document, .empty:
-            return
-        }
-        // The table rides along on every render, so a clone that arrived
-        // after launch, or a pull that changed `macros.ts`, takes effect on
-        // the next page rather than the next launch.
-        request.macros = macros.macros
-        request.preservesScroll = preservingScroll
-        request.restoresScroll = restoringScroll
-        webController.render(request, thenFind: pendingFind)
-        pendingFind = nil
-    }
-
     // MARK: Text size
 
     /// The reader's text size, as `WKWebView.pageZoom`, where 1 is the CSS
@@ -1118,7 +999,7 @@ final class AppModel {
             guard zoom != storedPageZoom else { return }
             storedPageZoom = zoom
             CCwikiSettings.pageZoom = zoom
-            webController.setPageZoom(zoom)
+            primarySession.webController.setPageZoom(zoom)
         }
     }
 
@@ -1155,93 +1036,12 @@ final class AppModel {
         return components.url
     }
 
-    var currentSiteURL: URL? {
-        switch location {
-        case .page(let path, let anchor):
-            guard let page = index?.pages[path] else { return nil }
-            return Self.siteURL(slug: page.slug, anchor: anchor)
-        case .folder(let slug):
-            return Self.siteURL(slug: slug + "/")
-        case .document, .empty:
-            return nil
-        }
-    }
-
-    /// What the window is showing, as a title: for printing, and anything
-    /// else that needs to name the current page.
-    var currentTitle: String {
-        switch location {
-        case .page: currentPage?.displayTitle ?? "CCwiki"
-        case .folder(let slug): slug
-        case .document(let document): document.title
-        case .empty: "CCwiki"
-        }
-    }
-
-    func printCurrentPage() {
-        guard location != .empty else { return }
-        webController.printPage(title: currentTitle)
-    }
-
-    /// A concept page picked at random: not a stub, not a reference or a
-    /// reduction (they are reached through the pages that use them), not
-    /// the one on screen. For wandering.
-    func openRandomPage() {
-        guard let index else { return }
-        let candidates = index.allPages.filter {
-            isBrowsable($0) && !Self.kindsOutsideTree.contains($0.kind)
-                && $0.status != .stub && $0.path != location.path
-        }
-        guard let page = candidates.randomElement() else { return }
-        openPage(page.path)
-    }
-
     func copyToPasteboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    // MARK: Current page accessors
-
-    var currentPage: WikiPage? {
-        guard let path = location.path else { return nil }
-        return index?.pages[path]
-    }
-
-    var currentBacklinks: [WikiIndex.Backlink] {
-        guard let path = location.path else { return [] }
-        return backlinks[path] ?? []
-    }
-
-    /// What the Relations inspector shows for the page being read.
-    ///
-    /// Computed rather than cached: the busiest node in the corpus has 32
-    /// relations, so this is trivial work, and a cache holding a snapshot of
-    /// the manifest is exactly the shape `SWIFTUI-RULES.md` §3.1 warns about.
-    var currentRelations: PageRelations {
-        guard let path = location.path else { return .empty }
-        return PageRelations(path: path, manifest: relations)
-    }
-
-    /// Navigate to a manifest node. A variant is a *section*, so this resolves
-    /// to its host page plus an anchor rather than to a page of its own.
-    func openRelationObject(_ objectID: String) {
-        guard let destination = relationLabels.destination(objectID),
-              index?.pages[destination.path] != nil
-        else { return }
-        openPage(destination.path, anchor: destination.anchor)
-    }
-
-    /// The inspector's derived sections for the page being read: what each
-    /// of its objects implies, and what implies it, in two or more steps.
-    ///
-    /// Computed rather than cached, for the reason `currentRelations` gives:
-    /// every row is a lookup into closures `Derivation` built at load.
-    var currentDerivations: PageDerivations {
-        guard let path = location.path else { return .empty }
-        return PageDerivations(path: path, manifest: relations, derivation: derivation,
-                               labels: relationLabels)
-    }
+    // MARK: Derived sections
 
     func isDerivedSectionExpanded(_ role: PageDerivations.Role) -> Bool {
         derivedSectionsExpanded.contains(role.rawValue)
@@ -1308,30 +1108,6 @@ final class AppModel {
         }
         explorerRecents = recents
         CCwikiSettings.explorerRecents = recents
-    }
-
-    /// What "Explore From This Page" asks on the page being read: the
-    /// section being read when it is an object, so scrolling to *Collision
-    /// resistance* and pressing ⌥⇧⌘E asks about CRHF. `nil` disables it.
-    var currentPageExplorerQuery: ExplorerQuery? {
-        guard case .page(_, let anchor) = location else { return nil }
-        let reading = webController.activeHeadingID ?? anchor
-        guard var query = ExplorerQuery.seed(
-            for: currentRelations.subject, activeAnchor: reading,
-            manifest: relations, derivation: derivation)
-        else { return nil }
-        query.includesIdealisedModels = explorerQuery.includesIdealisedModels
-        return query
-    }
-
-    /// Whether the page being read has anything to explore. The same test
-    /// without the section being read, so a menu's enabled state does not
-    /// re-evaluate on every scroll.
-    var canExploreCurrentPage: Bool {
-        guard location.path != nil else { return false }
-        return ExplorerQuery.seed(
-            for: currentRelations.subject, activeAnchor: nil,
-            manifest: relations, derivation: derivation) != nil
     }
 
     func title(forPath path: String) -> String {
@@ -1417,30 +1193,15 @@ final class AppModel {
         return "\(pages) page\(pages == 1 ? "" : "s"), \(matches) match\(matches == 1 ? "" : "es")"
     }
 
-    /// Open a ⇧⌘F hit and find the text on it.
-    func openGrepResult(_ hit: TextGrep.Hit, query: String) {
-        pendingFind = [query]
-        openPage(hit.path)
-        pendingFind = nil
-    }
-
-    /// Open a reference hit. A paper found by its text is opened with the
-    /// query found on it, as ⌘S does; one found by its key, authors, title
-    /// or a citing page is opened at the top, where those are.
-    func openReferenceResult(_ hit: ReferenceHit, query: String) {
-        pendingFind = hit.field == .text
-            ? Self.findCandidates(for: ReferenceRanker.parse(query).text) : nil
-        openPage(hit.path)
-        pendingFind = nil
-    }
-
     func refreshQuickSwitcher() {
         guard let index else {
             quickSwitcherResults = []
             quickSwitcherRecentCount = 0
             return
         }
-        let recent = recentPages.filter { $0 != location.path && index.pages[$0] != nil }
+        let recent = recentPages.filter {
+            $0 != primarySession.location.path && index.pages[$0] != nil
+        }
         quickSwitcherResults = index.quickSwitch(
             quickSwitcherQuery, excluding: unlistedPaths, recent: recent)
         let isEmptyQuery = quickSwitcherQuery.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1449,19 +1210,17 @@ final class AppModel {
             : 0
     }
 
-    private func noteRecent(_ path: String) {
+    /// A reader opened `path`: it is the page read last, for the next cold
+    /// start, and the most recent of the recent pages, whichever window
+    /// opened it.
+    func noteVisited(_ path: String) {
+        CCwikiSettings.lastPage = path
         recentPages.removeAll { $0 == path }
         recentPages.insert(path, at: 0)
         if recentPages.count > Self.recentPagesLimit {
             recentPages.removeLast(recentPages.count - Self.recentPagesLimit)
         }
         CCwikiSettings.recentPages = recentPages
-    }
-
-    func presentQuickSwitcher() {
-        quickSwitcherQuery = ""
-        refreshQuickSwitcher()
-        quickSwitcherPresented = true
     }
 
     // MARK: Page tree
@@ -1518,17 +1277,6 @@ final class AppModel {
     /// somewhere to navigate to. Nothing here removes a node from the graph.
     func isBrowsable(_ page: WikiPage) -> Bool {
         (!hidesStubs || page.status != .stub) && !unlistedPaths.contains(page.path)
-    }
-
-    /// The pages that cite the page being read.
-    ///
-    /// Shown at the top of the sidebar for a reference, where the tree has
-    /// nothing to say: a citation is reached by following a link, and the
-    /// question you have on arriving is "what brought me here, and what else
-    /// uses this".
-    var citingPages: [WikiIndex.Backlink] {
-        guard let page = currentPage, page.kind == .reference else { return [] }
-        return currentBacklinks
     }
 
     // MARK: Settings
