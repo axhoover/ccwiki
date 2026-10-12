@@ -135,7 +135,7 @@ final class AppModel {
     // MARK: Navigation
 
     /// A page that ships with the app rather than with the wiki.
-    enum Document: String, Equatable, Sendable {
+    enum Document: String, Hashable, Codable, Sendable {
         case welcome
         case whatsNew
 
@@ -148,7 +148,12 @@ final class AppModel {
     }
 
     /// What the reader is showing.
-    enum Location: Equatable, Sendable {
+    ///
+    /// `Codable` so a window's Back and Forward can be saved and restored
+    /// with it (plans/reader-comforts.md §1.7). The coding is synthesized,
+    /// which only this file can do: renaming a case or its labels changes
+    /// what a saved history decodes to.
+    enum Location: Hashable, Codable, Sendable {
         case page(path: String, anchor: String?)
         case folder(slug: String)
         case document(Document)
@@ -361,6 +366,8 @@ final class AppModel {
     /// against this release's Swift.
     let webRoot: URL
     let webController: WebController
+    /// The papers behind reference pages, fetched when asked (§2).
+    let papers: PaperLibrary
 
     // MARK: Diagnostics
 
@@ -406,6 +413,7 @@ final class AppModel {
         let zoom = AppModel.clampedZoom(CCwikiSettings.pageZoom)
         self.storedPageZoom = zoom
         self.webController = WebController(paths: paths, webRoot: webRoot, pageZoom: zoom)
+        self.papers = PaperLibrary(paths: paths)
 
         try? paths.createDirectories()
         // Tools are looked for in `discoverTools()`, after the first frame:

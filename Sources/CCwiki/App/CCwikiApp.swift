@@ -27,12 +27,32 @@ struct CCwikiApp: App {
         .windowResizability(.contentMinSize)
         .commands { CCwikiCommands() }
 
+        // A paper gets a window of its own, one per paper, keyed by its
+        // reference page's path: a PDF is a document, and it stays put while
+        // the reader moves through the wiki (plans/reader-comforts.md §2.2).
+        // After the reader's group, which has to stay the first scene:
+        // SwiftUI opens the first `WindowGroup` when nothing is restored.
+        WindowGroup("Paper", id: CCwikiApp.paperWindowID, for: String.self) { $referencePath in
+            PaperWindowView(referencePath: referencePath)
+                .environment(model)
+                .frame(minWidth: Theme.paperMinWidth, minHeight: Theme.paperMinHeight)
+                // A paper window restored on its own still needs the model.
+                .onAppear { appDelegate.model = model }
+        }
+        .defaultSize(width: Theme.paperDefaultWidth, height: Theme.paperDefaultHeight)
+        .defaultPosition(.trailing)
+        .windowResizability(.contentMinSize)
+        // Never for a ccwiki:// link or a PDF from Finder: those belong to a
+        // reader, and an empty paper window is no answer to either.
+        .handlesExternalEvents(matching: [])
+
         // Jobs get their own window rather than a fourth pane: the thing you
         // actually want is to watch a job run while reading the page it is
-        // going to edit.
+        // going to edit. Never a tab of anything (reader-comforts §1.8).
         Window("Jobs", id: CCwikiApp.jobsWindowID) {
             JobsView()
                 .environment(model)
+                .background { WindowReader { $0.tabbingMode = .disallowed } }
         }
         .defaultSize(width: 1000, height: 640)
         .keyboardShortcut("j", modifiers: [.command, .shift])
@@ -44,6 +64,7 @@ struct CCwikiApp: App {
         Window("Relations Explorer", id: CCwikiApp.explorerWindowID) {
             RelationsExplorerView()
                 .environment(model)
+                .background { WindowReader { $0.tabbingMode = .disallowed } }
         }
         .defaultSize(width: Theme.explorerDefaultWidth, height: Theme.explorerDefaultHeight)
         .windowResizability(.contentMinSize)
@@ -57,6 +78,7 @@ struct CCwikiApp: App {
     static let jobsWindowID = "ccwiki.jobs"
     static let explorerWindowID = "ccwiki.relations-explorer"
     static let mainWindowID = "ccwiki.main"
+    static let paperWindowID = "ccwiki.paper"
 }
 
 /// What a reader window does for the others: it counts itself, so the
@@ -126,6 +148,8 @@ struct CCwikiCommands: Commands {
     @FocusedValue(\.appModel) private var model
     @FocusedValue(\.findAction) private var findAction
     @FocusedValue(\.searchAction) private var searchAction
+    /// Set while a paper window is key: the text-size items zoom the PDF.
+    @FocusedValue(\.paperZoom) private var paperZoom
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -139,18 +163,26 @@ struct CCwikiCommands: Commands {
             }
         }
 
+        // The same three keys zoom a paper while its window is key, titled
+        // as Preview titles them (reader-comforts §1.5).
         CommandGroup(after: .toolbar) {
-            Button("Make Text Bigger") { model?.makeTextBigger() }
-                .keyboardShortcut("+", modifiers: .command)
-                .disabled(model == nil)
+            Button(paperZoom == nil ? "Make Text Bigger" : "Zoom In") {
+                if let paperZoom { paperZoom.zoomIn() } else { model?.makeTextBigger() }
+            }
+            .keyboardShortcut("+", modifiers: .command)
+            .disabled(paperZoom == nil && model == nil)
 
-            Button("Make Text Smaller") { model?.makeTextSmaller() }
-                .keyboardShortcut("-", modifiers: .command)
-                .disabled(model == nil)
+            Button(paperZoom == nil ? "Make Text Smaller" : "Zoom Out") {
+                if let paperZoom { paperZoom.zoomOut() } else { model?.makeTextSmaller() }
+            }
+            .keyboardShortcut("-", modifiers: .command)
+            .disabled(paperZoom == nil && model == nil)
 
-            Button("Actual Size") { model?.resetTextSize() }
-                .keyboardShortcut("0", modifiers: .command)
-                .disabled(model == nil || model?.pageZoom == 1)
+            Button("Actual Size") {
+                if let paperZoom { paperZoom.actualSize() } else { model?.resetTextSize() }
+            }
+            .keyboardShortcut("0", modifiers: .command)
+            .disabled(paperZoom == nil && (model == nil || model?.pageZoom == 1))
 
             Divider()
 
@@ -305,6 +337,17 @@ struct CCwikiCommands: Commands {
                 model.copyToPasteboard(page.wikilink)
             }
             .disabled(model?.currentPage == nil)
+
+            // ⌥⌘P: ⌘P is Print, and ⇧⌘P is Page Setup by convention. Out of
+            // the menu until papers can be fetched.
+            if ShowPaperCommand.isAvailable {
+                Button("Show Paper") {
+                    guard let model, let page = model.currentPage else { return }
+                    ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
+                }
+                .keyboardShortcut("p", modifiers: [.command, .option])
+                .disabled(!ShowPaperCommand.isEnabled(for: model?.currentPage))
+            }
 
             Divider()
 

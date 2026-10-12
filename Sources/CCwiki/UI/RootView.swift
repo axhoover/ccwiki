@@ -76,7 +76,7 @@ struct RootView: View {
             // must not depend on the network.
             let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
             if model.index == nil || launchFetch { model.sync() }
-            ScreenshotRunner.run(model: model)
+            ScreenshotRunner.run(model: model, openWindow: openWindow)
             if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in
