@@ -248,6 +248,10 @@ The engine returns `.derived(DerivedAnswer)`. The wording below follows
   swaps the outline to that proof, and **Show Shortest** to swap back. DDH ⇒
   invertible PRF is the case on today's data: 2 unstated steps through
   HPPY25, or 3 fully black-box steps through NR97 and LR88.
+- **Adjustments**, last: one section per proof, listing each curation entry
+  that bore on it with the wiki's text it cites
+  ([relations-followups.md](relations-followups.md) §2.5). **Show It** swaps
+  it with the outline.
 - **Tags:** one `ModelTag` per model in `fact.models`.
 - **Recorded barriers** on the pair (R8), as context, with one sentence
   relating them to the answer: "A recorded barrier rules out fully-black-box
@@ -370,7 +374,9 @@ The engine returns `.notDerived(NoPathAnswer)`.
    "Derivable with idealised models included: 1 step, algebraic group model"
    (DLOG ⇒ CDH, FKL18). Its **Include Idealised Models** button sets the
    toggle.
-4. **Refused steps** (`refused`, toggle on), in §7's words:
+4. **Refused steps** (`refused`, toggle on), in §7's words. A refused row
+   also carries its curation entry's quotes and links to the quoted sections
+   ([relations-followups.md](relations-followups.md) §2.5):
    - "Not derived: OIHF holds here only in the random oracle model, and OIHF ⇒
      OT (BH26) is a free (non-black-box) step, which need not carry over into
      that model."
@@ -387,6 +393,9 @@ The engine returns `.notDerived(NoPathAnswer)`.
    N more"). Each row reads "iO", then "1 step · SW14 · free". Its **Add**
    button appends the object to From. For `owf ⇒ pke` the rows are iO
    (1 step) and KEM (4 steps). Never "a missing assumption".
+7. **Adjustments** (last; for vacuous and setting starts only), as
+   [relations-followups.md](relations-followups.md) §2.5 has them: each
+   curation entry that bore on the answer, with the wiki's text it cites.
 
 **The footer**, fixed and never collapsible, in R10's words: "CCwiki found no
 derivation from the reductions the wiki records. This is not a separation:

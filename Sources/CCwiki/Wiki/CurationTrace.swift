@@ -171,14 +171,16 @@ struct CurationTrace: Sendable, Hashable {
     ///
     /// Not for a stub: R3 makes its class unstated both ways whatever the
     /// curation says, so the record's class holds for neither direction.
-    /// §2.5 also asks that the manifest record no `reverseClass` for the
-    /// equivalence (§4.4 ask 1): one it records, even `unstated`, is the
-    /// wiki's own and sets aside the curation's directions. This manifest
-    /// has no such field yet; the check belongs here when it does.
+    /// Nor when the manifest records a `reverseClass` for the equivalence
+    /// (§4.4 ask 1): one it records, even `unstated`, is the wiki's own and
+    /// sets aside the curation's directions, so there is nothing of
+    /// CCwiki's to show.
     private static func unstatedDirection(_ step: Derivation.Step,
                                           derivation: Derivation) -> Effect? {
         guard !step.isStub,
-              derivation.manifest.reduction(step.relationID)?.kind == .equivalence,
+              let relation = derivation.manifest.reduction(step.relationID),
+              relation.kind == .equivalence,
+              relation.reverseClass == nil,
               let directions = derivation.curation.equivalences[step.relationID]
         else { return nil }
         let recorded = step.isReverse ? directions.isReverseRecorded : directions.isForwardRecorded

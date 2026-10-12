@@ -2621,9 +2621,8 @@ once (§11.6). If reader-comforts built D6, Track D's copy is deleted. The
 new `GitService` methods sit apart from reader-comforts' (§11.3).
 
 **Words and versions.** "Correction" here is a change a reader proposes to
-a wiki page. The explorer's section "Corrections CCwiki applied"
-(relations-followups §2.5) means something else; the lead decides whether
-one is renamed. This spec says "0.3" for the release that ships it. The
-CHANGELOG's top section is still "0.2.0 — unreleased", so whether the batch
-ships as 0.2.0 or opens 0.3.0 is also the lead's call. Nothing in the code
+a wiki page. The explorer's section for the curation's effects, which
+relations-followups first called "Corrections CCwiki applied", is
+"Adjustments" (decided 2026-10-12), so the word means one thing in the app.
+This spec says "0.3" for the release that ships it; nothing in the code
 depends on the number.
