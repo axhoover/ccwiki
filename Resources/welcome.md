@@ -61,7 +61,7 @@ for a newer one.)
 If you have push access to the wiki, CCwiki can draft a page from a paper:
 drop a PDF on the window, or choose File → Ingest a Paper and paste a link.
 It runs an agent that opens a **draft** pull request for a person to review.
-It needs a few developer tools, and Settings → Ingestion says which are
+It needs a few developer tools, and Settings → Jobs says which are
 missing.
 
 This page is always in the Help menu, next to What's New.

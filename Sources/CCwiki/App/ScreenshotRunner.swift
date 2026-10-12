@@ -66,6 +66,18 @@ enum ScreenshotRunner {
         /// front, `bgtab:` behind, once background tabs are on
         /// (`WindowTabbing.joinsInBackground`); in front until then.
         case tab(String, inBackground: Bool)
+        /// An edit of this page, begun past the blockers, in its editor at
+        /// the section in view (plans/corrections.md §12.3).
+        case edit(String)
+        /// A scripted one-word edit of this page, reviewed in Jobs.
+        case review(String)
+        /// The review's Changes in Source. A step of its own, like `dark`,
+        /// because the plan separates steps with commas.
+        case source
+        /// The Describe a Correction sheet over this page.
+        case describe(String)
+        /// The Open an Issue sheet over this page.
+        case issue(String)
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -89,6 +101,11 @@ enum ScreenshotRunner {
             case "window": return parts.count > 1 ? .window(parts[1]) : nil
             case "tab": return parts.count > 1 ? .tab(parts[1], inBackground: false) : nil
             case "bgtab": return parts.count > 1 ? .tab(parts[1], inBackground: true) : nil
+            case "edit": return parts.count > 1 ? .edit(parts[1]) : nil
+            case "review": return parts.count > 1 ? .review(parts[1]) : nil
+            case "source": return .source
+            case "describe": return parts.count > 1 ? .describe(parts[1]) : nil
+            case "issue": return parts.count > 1 ? .issue(parts[1]) : nil
             default: return nil
             }
         }
@@ -111,6 +128,11 @@ enum ScreenshotRunner {
             case .window(let path): "window-" + Self.slug(ofPage: path)
             case .tab(let path, let inBackground):
                 (inBackground ? "bgtab-" : "tab-") + Self.slug(ofPage: path)
+            case .edit(let path): "edit-" + Self.slug(ofPage: path)
+            case .review(let path): "review-" + Self.slug(ofPage: path)
+            case .source: "source"
+            case .describe(let path): "describe-" + Self.slug(ofPage: path)
+            case .issue(let path): "issue-" + Self.slug(ofPage: path)
             }
         }
 
@@ -126,8 +148,9 @@ enum ScreenshotRunner {
             switch self {
             case .page, .folder, .home, .welcome, .whatsNew, .paper: 1500
             // A new window or tab loads its web view's shell before it can
-            // render.
-            case .window, .tab: 2500
+            // render; so do an editor's preview and the review.
+            case .window, .tab, .edit, .review: 2500
+            case .describe, .issue, .source: 900
             case .search: 900
             // An ingestion job is minutes, not milliseconds; `apply` waits for
             // a terminal state rather than guessing a duration.
@@ -141,6 +164,9 @@ enum ScreenshotRunner {
     /// Whether a reader window has started the plan. Every reader window
     /// asks once its session has started; the plan runs once per process.
     private static var hasStarted = false
+    /// The jobs `edit:` and `review:` began, discarded when the plan ends,
+    /// so no shots run leaves a worktree behind (corrections §12.3).
+    private static var scriptedJobs: [Job] = []
 
     /// `session` is the reader window that started the plan; `openWindow` is
     /// that window's, for the steps that open a window of their own. Each
@@ -180,6 +206,9 @@ enum ScreenshotRunner {
                 await teardown(step, model: model, session: reader)
                 try? await Task.sleep(for: .milliseconds(250))
             }
+
+            for job in scriptedJobs { await model.jobCenter.discard(job) }
+            scriptedJobs = []
 
             if ProcessInfo.processInfo.environment["CCWIKI_SHOT_QUIT"] != "0" {
                 NSApp.terminate(nil)
@@ -274,7 +303,105 @@ enum ScreenshotRunner {
             // As a ⌘-click or ⇧⌘-click would: through the session, which
             // asks its window's view to open the tab.
             session.open(.page(path: path, anchor: nil), .newTab(inBackground: inBackground))
+
+        case .edit(let path):
+            guard let scripted = await beginScriptedEdit(path, model: model, session: session)
+            else { return }
+            let (job, target) = scripted
+            model.requestEditor(
+                EditorTarget(jobID: job.id, path: target.repositoryPath), at: target.lines)
+
+        case .review(let path):
+            guard let scripted = await beginScriptedEdit(path, model: model, session: session)
+            else { return }
+            let (job, target) = scripted
+            let file = job.worktree.appending(path: target.repositoryPath)
+            guard let text = try? String(contentsOf: file, encoding: .utf8),
+                  let edited = shotsEdit(of: text),
+                  (try? edited.write(to: file, atomically: true, encoding: .utf8)) != nil
+            else {
+                note("review: could not make the scripted edit in \(file.path(percentEncoded: false))")
+                return
+            }
+            model.reviewShowsSource = false
+            await model.jobCenter.refreshReview(job)
+            model.requestJobsWindow(selecting: job.id)
+            try? await Task.sleep(for: .milliseconds(600))
+            NSApp.orderedWindows.first { $0.isVisible && $0.title == "Jobs" }?
+                .makeKeyAndOrderFront(nil)
+
+        case .source:
+            model.reviewShowsSource = true
+
+        case .describe(let path), .issue(let path):
+            session.openPage(path)
+            try? await Task.sleep(for: .milliseconds(1500))
+            guard let target = shownTarget(path, model: model, session: session) else { return }
+            if case .describe = step {
+                session.correctionSheet = CorrectionSheetRequest(.describe, target: target)
+            } else {
+                session.correctionSheet = CorrectionSheetRequest(.issue, target: target)
+            }
         }
+    }
+
+    /// Opens `path`, and begins an edit of it through the job center
+    /// directly, past the blockers a person would be shown.
+    private static func beginScriptedEdit(
+        _ path: String, model: AppModel, session: ReaderSession
+    ) async -> (Job, CorrectionTarget)? {
+        session.openPage(path)
+        try? await Task.sleep(for: .milliseconds(1500))
+        guard let target = shownTarget(path, model: model, session: session) else { return nil }
+        switch await model.jobCenter.beginEdit(target) {
+        case .success(let job):
+            scriptedJobs.append(job)
+            return (job, target)
+        case .failure(let error):
+            note("edit: \(error.message)")
+            return nil
+        }
+    }
+
+    /// The whole page at `path` as the reader shows it, at the section in
+    /// view, as Edit Page… would build it with nothing selected.
+    private static func shownTarget(
+        _ path: String, model: AppModel, session: ReaderSession
+    ) -> CorrectionTarget? {
+        guard let page = model.index?.pages[path],
+              let fileText = try? String(
+                  contentsOf: model.paths.content.appending(path: path), encoding: .utf8)
+        else {
+            note("no page at \(path)")
+            return nil
+        }
+        let web = session.webController
+        let heading = web.activeHeadingID.flatMap { id in web.outline.first { $0.id == id } }
+        return CorrectionTarget.make(
+            page: page, fileText: fileText,
+            renderedMarkdown: web.lastRenderedMarkdown ?? page.body,
+            baseCommit: web.lastRenderedRevision ?? model.headRevision ?? "",
+            selection: nil,
+            readingHeading: heading.map {
+                CorrectionTarget.Section(id: $0.id, title: $0.text, level: $0.level)
+            })
+    }
+
+    /// `review:`'s edit: " (shots)" at the end of the body's first line of
+    /// prose. Nil when the page has none.
+    nonisolated static func shotsEdit(of text: String) -> String? {
+        let frontmatter = Frontmatter.parse(text)
+        let bodyLine = text[..<frontmatter.bodyStart].filter { $0 == "\n" }.count
+        var lines = text.components(separatedBy: "\n")
+        guard bodyLine < lines.count,
+              let index = lines[bodyLine...].firstIndex(where: { $0.first?.isLetter == true })
+        else { return nil }
+        lines[index] += " (shots)"
+        return lines.joined(separator: "\n")
+    }
+
+    private static func note(_ message: String) {
+        FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 
     /// Block until the newest job reaches a terminal state, reporting progress
@@ -289,7 +416,8 @@ enum ScreenshotRunner {
                 FileHandle.standardError.write(Data((report + "\n").utf8))
                 lastReport = report
             }
-            if job.state.isTerminal { return }
+            // A job that reached review waits for a person, not for time.
+            if job.state.isTerminal || job.state == .awaitingReview { return }
             try? await Task.sleep(for: .seconds(1))
         }
     }
@@ -301,6 +429,8 @@ enum ScreenshotRunner {
         case .search:
             session.searchPresented = false
             model.searchQuery = ""
+        case .describe, .issue:
+            session.correctionSheet = nil
         case .settings:
             NSApp.windows.first { $0.title == "Settings" || $0.title == "Preferences" }?.close()
         default:

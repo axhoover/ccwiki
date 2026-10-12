@@ -39,8 +39,9 @@ struct IngestSheet: View {
             VStack(alignment: .leading, spacing: Theme.tight) {
                 Text("Ingest a Paper")
                     .font(.title2.weight(.semibold))
-                Text("CCwiki runs an agent in a throwaway git worktree. It opens a "
-                    + "**draft** pull request and never merges one.")
+                Text("CCwiki runs an agent in a throwaway git worktree. Nothing reaches "
+                    + "GitHub until you approve it in Jobs; then CCwiki opens a **draft** "
+                    + "pull request, and never merges one.")
                     .font(Theme.Fonts.meta)
                     .foregroundStyle(.secondary)
             }
@@ -99,7 +100,7 @@ struct IngestSheet: View {
             }
         }
         .padding(Theme.section)
-        .frame(width: 560, height: blockers.isEmpty ? 520 : 600)
+        .frame(width: Theme.sheetWidth, height: blockers.isEmpty ? 520 : 600)
         .onAppear {
             // A PDF dropped on the reader opens this sheet already holding it.
             if let pending = model.pendingDroppedPDF {
