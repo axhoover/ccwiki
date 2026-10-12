@@ -241,7 +241,8 @@ final class JobCenter {
             return
         }
         let runner = IngestJobRunner(
-            paths: paths, tools: environment.tools, git: git, index: environment.index)
+            paths: paths, tools: environment.tools, git: git, index: environment.index,
+            target: environment.target)
         job.task = Task { @MainActor in
             await runner.run(job)
             // A job that changed the wiki has changed nothing locally — the PR
@@ -261,7 +262,8 @@ final class JobCenter {
         let environment = self.environment()
         guard let git = environment.git else { return }
         let runner = IngestJobRunner(
-            paths: paths, tools: environment.tools, git: git, index: environment.index)
+            paths: paths, tools: environment.tools, git: git, index: environment.index,
+            target: environment.target)
         let known = Set(jobs.filter { !$0.state.isTerminal }.map(\.id))
         orphanedWorktrees = await runner.orphanedWorktrees(knownJobIDs: known).map(\.path)
         onOrphanedWorktreesChanged?(orphanedWorktrees)
@@ -271,7 +273,8 @@ final class JobCenter {
         let environment = self.environment()
         guard let git = environment.git else { return }
         let runner = IngestJobRunner(
-            paths: paths, tools: environment.tools, git: git, index: environment.index)
+            paths: paths, tools: environment.tools, git: git, index: environment.index,
+            target: environment.target)
         Task { @MainActor in
             await runner.prune(worktreeAt: path)
             await refreshOrphanedWorktrees()

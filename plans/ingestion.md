@@ -1,8 +1,9 @@
 # Ingestion
 
-**Status: built (M2).** Grounded in what the wiki repo actually does today
-rather than in what would be convenient — see §1, which is the finding the whole
-design turns on.
+**Status: built (M2); since 0.3 the agent stops before GitHub and a person
+approves every pull request ([corrections.md](corrections.md) §5, §6).**
+Grounded in what the wiki repo actually does today rather than in what would be
+convenient — see §1, which is the finding the whole design turns on.
 
 ---
 
@@ -28,18 +29,25 @@ third-party tooling runs. See [PROBLEMS.md](../PROBLEMS.md) — it cost two jobs
 before it was fixed properly.
 
 ```
-git -C repo worktree add <caches>/worktrees/<job-id> -b ingest/<slug> origin/<default>
+git -C repo rev-parse --verify origin/<default>^{commit}   # the base: a commit, recorded
+git -C repo worktree add <caches>/worktrees/<job-id> -b ingest/<slug> <base>
 cd worktrees/<job-id>
 git submodule update --init --depth 1 --recursive     # cryptobib is a submodule
-claude -p "<composed prompt>"
-# …agent works, lints, pushes, opens a draft PR…
-git -C repo worktree remove ../worktrees/<job-id>
+claude -p "<composed prompt>"                         # sealed (§7)
+# …agent works, lints, leaves its change and .ccwiki/pull-request.md…
+# → Awaiting review in Jobs. Approve commits, pushes and opens the draft PR,
+#   then removes the worktree (plans/corrections.md §6.5).
 ```
 
+The base is a SHA, never `origin/main`: a sync during review would otherwise
+move it, and the review would show upstream commits reversed.
+
 A worktree has its own working directory and shares only the object database, so
-the reader's checkout cannot be dirtied and several jobs can run at once. On
-failure the worktree is **kept**, and the jobs panel offers "reveal in Terminal"
-— a job you cannot inspect is a job you cannot debug.
+the reader's checkout cannot be dirtied and several jobs can run at once. The
+worktree is **kept** through review and after any failure, and the jobs panel
+offers "reveal in Terminal" — a job you cannot inspect is a job you cannot
+debug. It is pruned when the pull request opens, when the job is discarded, or
+when the agent changed nothing.
 
 On relaunch, `GitService.listWorktrees` reconciles what git knows about against
 the jobs the app knows about, and offers to prune orphans. A worktree whose
@@ -140,14 +148,34 @@ Conflating these is the most likely metadata error:
 
 ## 7. What CCwiki never does
 
+**Nothing reaches GitHub without a person's approval**
+([corrections.md](corrections.md) §5). The agent never commits, pushes or opens
+anything. It leaves its change in the worktree and the pull request's text in
+`.ccwiki/pull-request.md` (first line `# <title>`, then the body, from the
+contract's template), prints `READY FOR REVIEW`, and the job waits in Jobs,
+"Awaiting review". Only Approve commits, pushes and opens the pull request:
 `gh pr create --draft`, always. Never ready-for-review, never merged, never
-approved. The app's role ends at "draft PR opened, here is the diff" — it
-captures the PR URL from `gh`'s output for the jobs panel and stops.
+approved. Nothing in `.ccwiki/` is ever staged.
+
+`prompts/ingest.md` says so in one sentence that overrides the contract on one
+topic: **the contract decides what the change is; this envelope decides how it
+leaves the machine.** The contract was written for a GitHub Action whose own
+step opens the PR.
+
+**Every agent runs sealed** (`AgentInvocation`). git is read-only in its
+allow-list; `git push`, `commit`, `remote`, `config` and all of `gh` are denied;
+and its environment has no GitHub token, no SSH agent, no credential helper, an
+empty `gh` configuration and an `origin` push URL that goes nowhere. That stops
+an accident, not a determined agent: ingestion keeps `node`, which can run
+anything. So the **tripwire** (`Tripwire`) lists GitHub's branches before the
+agent starts and again after it exits, and asks `gh` for pull requests opened
+meanwhile; anything CCwiki did not make is named in an orange notice, and a pull
+request the agent opened itself makes the job `opened`. The review is the gate.
 
 Aborting is a good outcome and the prompt says so: no branch pushed, no PR, no
-issue, no commit, and a structured `ABORTED:` block explaining what a human
-would need to decide. A wrong page in the wiki costs a maintainer more than a
-submission that did not land.
+issue, no commit, no hand-over file, and a structured `ABORTED:` block
+explaining what a human would need to decide. A wrong page in the wiki costs a
+maintainer more than a submission that did not land.
 
 ## 8. PDFs
 
@@ -163,11 +191,13 @@ eprint/arXiv/DOI.
 ```
 Sources/CCwiki/Jobs/
 ├── IngestSubmission.swift   the input: a recognized URL or a staged PDF
-├── Preflight.swift          what CCwiki checks before the agent starts
-├── PromptComposer.swift     fills prompts/ingest.md — and nothing else
+├── Preflight.swift          what CCwiki checks before the agent starts; GitHubAccess
+├── PromptComposer.swift     fills prompts/ingest.md and prompts/correct.md — and nothing else
+├── AgentInvocation.swift    claude's arguments and the sealed environment; the hand-over file
+├── Tripwire.swift           a push or a PR CCwiki did not make, looked for afterwards
 ├── ClaudeStream.swift       stream-json → a readable transcript + the outcome
-├── IngestJob.swift          @Observable state machine, transcript, log file
-└── IngestJobRunner.swift    worktree → submodules → claude → PR → prune
+├── Job.swift                @Observable state machine, transcript, log file, record
+└── IngestJobRunner.swift    base → worktree → submodules → claude (sealed) → tripwire → review
 ```
 
 ### Driving `claude`
@@ -176,9 +206,14 @@ Sources/CCwiki/Jobs/
 claude -p "<prompt>"
   --output-format stream-json --verbose
   --permission-mode acceptEdits
-  --allowedTools Read,Write,Edit,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(npm:*),…
-  --max-turns 60
+  --allowedTools Read,Write,Edit,Glob,Grep,TodoWrite,Bash(git status:*),Bash(git diff:*),
+                 Bash(git log:*),…,Bash(git submodule update:*),Bash(npm:*),Bash(npx:*),Bash(node:*),…
+  --disallowedTools Bash(git push:*),Bash(git commit:*),Bash(git remote:*),Bash(git config:*),Bash(gh:*)
+  --max-turns 200                     # CCWIKI_MAX_TURNS overrides
 ```
+
+with the environment `AgentInvocation.sealed` builds (§7). A correction's agent
+gets the file tools only, and `--model` (corrections.md §5.4).
 
 `stream-json` is what makes the jobs panel a *log* rather than a wall of text:
 each event is a structured step, so the transcript shows `Bash  npm run lint`
@@ -194,19 +229,23 @@ one that quietly did something nobody asked for.
 
 ### Outcomes
 
-The runner distinguishes four terminal states, and they are not all failures:
+When the agent exits, the runner first runs the tripwire (unless the job was
+cancelled), then reads the outcome. The states, and they are not all failures:
 
 | State | Meaning | Worktree |
 |---|---|---|
-| `opened(url)` | A draft PR exists. The URL comes from the agent's own closing message, not from watching `gh` — it may retry or script the command, but it is asked to make its final statement authoritative. | pruned |
+| `awaitingReview` | The agent changed something and did not abort. Nothing has been pushed; the job waits for Approve or Discard (corrections.md §6). | kept |
+| `opened(url)` | After Approve, the draft PR CCwiki opened. Or the tripwire found a pull request the agent opened itself, with an orange notice. GitHub is believed, never the agent's prose. | pruned after Approve; kept, for inspection, after the tripwire |
 | `aborted(reason)` | The agent declined on purpose. **A good outcome.** | kept |
-| `failed(message)` | Something broke, or the agent finished without a PR and without aborting. | kept |
+| `failed(message)` | Something broke, or the agent ran out of turns. | kept |
+| `failed("The agent finished without changing anything.")` | Nothing to review. | pruned |
 | `cancelled` | The user stopped it. | kept |
 
-The worktree is kept for everything except success, and the panel offers
-"Reveal Worktree in Terminal" — a job you cannot inspect is a job you cannot
-debug. On launch, `orphanedWorktrees` reconciles what git knows against the
-jobs the app knows about and offers to prune the residue of a crash.
+The worktree is kept whenever there is something in it to look at, and the
+panel offers "Reveal Worktree in Terminal" — a job you cannot inspect is a job
+you cannot debug. On launch, `orphanedWorktrees` reconciles what git knows
+against the jobs the app knows about and offers to prune the residue of a
+crash; a job awaiting review owns its worktree and is never offered.
 
 ### Two dev affordances worth keeping
 
@@ -214,5 +253,5 @@ jobs the app knows about and offers to prune the residue of a crash.
   into the transcript. Every mechanical step still runs — worktree, submodules,
   pre-flight, composition — so iterating on `prompts/ingest.md` costs nothing.
 - `make shots PLAN='ingest:<url>'` submits a real job and blocks until it
-  reaches a terminal state, reporting progress to stderr. The same harness that
-  gates the reader gates this.
+  awaits review or reaches a terminal state, reporting progress to stderr. The
+  same harness that gates the reader gates this.

@@ -13,17 +13,27 @@ is maintained by the people who maintain the wiki, and it will drift. Baking a
 paraphrase of it into a Mac app would guarantee the app teaches agents an
 out-of-date style the moment the wiki's own prompt changes.
 
-So this template does three things and nothing else:
+So this template does four things and nothing else:
 
   1. states the job (this paper, this worktree, this branch);
   2. hands the agent the repo's OWN instructions, read from the live worktree;
   3. adds the checks the server-side pipeline cannot run — the local lint and
-     the local build, both of which must pass before the agent pushes.
+     the local build, both of which must pass before the agent hands over;
+  4. stops the agent before GitHub. The contract was written for a GitHub
+     Action that commits and opens the pull request itself. Here the agent
+     leaves its change in the worktree and the PR text in
+     .ccwiki/pull-request.md; CCwiki shows both to a maintainer, and commits,
+     pushes and opens the draft PR only once they approve
+     (plans/corrections.md §5). The agent is not equipped to push either:
+     git is read-only to it, gh is denied, and its environment carries no
+     credentials. That seal stops an accident, not a determined agent; the
+     review is the gate (§5.1).
 
 Placeholders CCwiki substitutes:
 
   {{WORKTREE}}       absolute path of the job's git worktree
-  {{BRANCH}}         the branch created for this job, off origin/<default>
+  {{BRANCH}}         the branch created for this job, at the commit
+                     origin/<default> pointed to when the job started
   {{BASE_BRANCH}}    the default branch this job forked from
   {{SUBMISSION}}     a JSON object: {type, url, source_url, notes, submitted_at}
   {{PAPER_LOCATION}} either a local PDF path or the URL plus canonicalization hints
@@ -31,9 +41,11 @@ Placeholders CCwiki substitutes:
   {{SKILL_NOTE}}     whether .claude/skills/city-style is present in the worktree
 -->
 
-You are opening a **draft** pull request that adds one paper to the
-cryptology.city wiki. You are working inside a git worktree that belongs to you
-alone; nothing else is reading it.
+You are preparing a change that adds one paper to the cryptology.city wiki.
+You are working inside a git worktree that belongs to you alone; nothing else
+is reading it. You do not commit, push or open anything: CCwiki shows your
+change to a maintainer, and once they approve it, CCwiki commits it and opens
+a **draft** pull request.
 
 ## Submission
 
@@ -52,11 +64,13 @@ alone; nothing else is reading it.
   `git status` is allowed — a previous run lost seven turns to exactly this.
 - **Do not redirect output to anywhere outside the worktree.** `npm ci >
   /tmp/log` is refused as a write outside the working directory, which took a
-  previous run's `npm ci` down with it. Redirect inside the worktree, or just
-  let the output come back to you.
+  previous run's `npm ci` down with it. Redirect into `.ccwiki/`, which CCwiki
+  never commits, or just let the output come back to you.
 - **To read a PDF, use the `Read` tool.** It handles PDFs directly. Do not shell
   out to `pdftotext`.
-- Branch: `{{BRANCH}}`, already created for you off `origin/{{BASE_BRANCH}}`.
+- Branch: `{{BRANCH}}`, already created for you at the commit
+  `origin/{{BASE_BRANCH}}` pointed to. Leave it where it is: CCwiki commits to
+  it after review.
 - {{SKILL_NOTE}}
 
 CCwiki already ran these checks; the results are below, and you should trust
@@ -71,9 +85,13 @@ anything. They are the contract; this prompt is only the envelope.
 
 1. `.github/prompts/paper-submission.md` — the paper-ingestion contract:
    scope limits, what requires human approval, abort semantics, and the PR body
-   template. **Follow it exactly.** Where it and this prompt disagree, it
-   wins — without exception. This template is the envelope; the contract is
-   the letter.
+   template. **Follow it exactly.** It was written for a GitHub workflow that
+   commits and opens the pull request itself, so one topic is settled here
+   instead: **the contract decides what the change is; this envelope decides
+   how it leaves the machine.** Committing, branching, pushing and opening the
+   pull request belong to CCwiki. Where the contract tells you to do any of
+   those, do Step 6 of this prompt instead. On everything else, the contract
+   wins.
 2. `CONTRIBUTING.md` — the frontmatter schema and the worked example per page
    type. This is what `scripts/lint.mjs` enforces.
 3. `CLAUDE.md` — the full style guide: voice, the anti-pattern list, section
@@ -161,7 +179,7 @@ full section contract.
 ## Step 5 — Validate locally
 
 CI runs `npm run lint` and `npx quartz build`. Run both, plus the one CI does
-not, before you push. All three must exit 0.
+not, before you hand over. All three must exit 0.
 
 ```sh
 # You are already in the worktree — no `cd`.
@@ -197,30 +215,28 @@ of a turn budget you may need for the lint.
 If the lint reports a problem with your work, fix it and re-run. If it reports a
 pre-existing problem elsewhere, leave it alone and mention it in the PR body.
 
-## Step 6 — Commit, push, open a draft PR
+## Step 6 — Stop and hand over
 
-```sh
-git add <only the files you meant to change>
-git commit -m "[paper] <KEY>: <short description>"
-git push -u origin {{BRANCH}}
-gh pr create --draft --base {{BASE_BRANCH}} \
-  --title "[paper] <KEY>: <Title>" --body-file <(...)
-```
+Do not commit, push or open a pull request. Leave every change you made in the
+working tree. CCwiki shows the diff to a maintainer; once they approve it,
+CCwiki commits it, pushes the branch and opens a **draft** pull request. Your
+job ends when the hand-over file below exists.
 
-`--draft` is not optional. **Never** mark a PR ready for review, never merge,
-never approve. Your job ends when the draft PR exists.
+Write the pull request's text to `.ccwiki/pull-request.md`:
 
-Use the PR body template from `.github/prompts/paper-submission.md` verbatim —
-Summary; Main claims, with locations; Changes in this PR; Things a human should
-verify before merge; Would also do, requires approval; Confidence and
-limitations; Submitter notes. Name the exact theorem or section number behind
-every claim you assert, and say which pages you touched and why each one.
+- the first line is the title, `# [paper] <KEY>: <Title>`;
+- the rest is the body, using the PR body template from
+  `.github/prompts/paper-submission.md` verbatim — Summary; Main claims, with
+  locations; Changes in this PR; Things a human should verify before merge;
+  Would also do, requires approval; Confidence and limitations; Submitter
+  notes. Name the exact theorem or section number behind every claim you
+  assert, and say which pages you touched and why each one.
 
 The style rules in `CLAUDE.md` apply to the **PR description** as well as to the
 wiki content: no marketing adjectives, no throat-clearing, no closing recap.
+Never put a path on this machine in it; it is published as written.
 
-Print the PR URL on its own line as the last thing you do. CCwiki reads it
-from your output.
+Then print `READY FOR REVIEW` on its own line, as the last thing you do.
 
 ## Step 7 — Aborting
 
@@ -228,8 +244,9 @@ If you cannot do the job honestly — the paper is not retrievable, the metadata
 cannot be verified, the result does not belong on any existing page, the key
 collides with an existing paper that is not this one — then **abort**. Follow
 the abort semantics in `.github/prompts/paper-submission.md`: no branch pushed,
-no PR, no issue, no commit. Write a structured block to stdout beginning
-`ABORTED:` that names the reason and what a human would need to decide.
+no PR, no issue, no commit, and no hand-over file. Write a structured block to
+stdout beginning `ABORTED:` that names the reason and what a human would need
+to decide.
 
 An abort is a good outcome. A wrong page in the wiki costs a maintainer more
 than a submission that did not land.

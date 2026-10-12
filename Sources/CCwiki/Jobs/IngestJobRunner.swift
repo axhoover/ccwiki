@@ -1,19 +1,27 @@
 import Foundation
 
-/// Runs one ingestion job end to end.
+/// Runs one ingestion job, up to the review (plans/corrections.md §5.3).
 ///
 /// ```
-/// git worktree add ../worktrees/<id> -b ingest/<slug> origin/<default>
+/// git rev-parse --verify origin/<default>^{commit}  (the base: a commit, recorded)
+/// git worktree add ../worktrees/<id> -b ingest/<slug> <base>
 /// git submodule update --init --recursive          (cryptobib, for citation keys)
-/// claude -p "<composed prompt>"                    (streamed into the transcript)
-/// git worktree remove ../worktrees/<id>            (only when it worked)
+/// git ls-remote --heads                             (the tripwire's "before")
+/// claude -p "<composed prompt>"                     (sealed; streamed into the transcript)
+/// the tripwire, the hand-over file, the changes     → awaiting review
 /// ```
+///
+/// The agent no longer commits, pushes or opens anything. It leaves its
+/// change in the worktree and the pull request's text in
+/// `.ccwiki/pull-request.md`, and the job waits for a person in Jobs. Only
+/// Approve sends anything to GitHub.
 ///
 /// The worktree is the isolation: it has its own working directory and shares
 /// only the object database, so a job cannot dirty the reader's checkout and
-/// several jobs can run at once. On failure the worktree is **kept** — a job
-/// you cannot inspect is a job you cannot debug — and the panel offers to open
-/// it in Terminal.
+/// several jobs can run at once. It is **kept** whenever there is something
+/// in it to look at — a review, a failure, an abort — because a job you
+/// cannot inspect is a job you cannot debug. Only an agent that changed
+/// nothing has its worktree pruned.
 @MainActor
 struct IngestJobRunner {
 
@@ -21,6 +29,9 @@ struct IngestJobRunner {
     let tools: ToolLocator
     let git: GitService
     let index: WikiIndex?
+    /// Where the pull request would go: push rights are asked of it, and
+    /// the tripwire watches it.
+    let target: PublishTarget
 
     /// Overridable for experiments; see the note at the call site.
     static var maxTurns: String {
@@ -34,14 +45,18 @@ struct IngestJobRunner {
         }
         job.setState(.preparing("Checking…"))
 
+        // Nothing is pushed until Approve, but a credential needed at the
+        // end is checked at the beginning: an ingestion takes twenty
+        // minutes, and its review is no use if it can never be published.
         let canPush = await git.canAuthenticatePush(clone: paths.clone)
         let authenticated = await GitHubAuth.isAuthenticated(tools: tools)
         let pushRights = authenticated
-            ? await GitHubAuth.canPush(tools: tools, repository: AppPaths.repositorySlug)
+            ? await GitHubAuth.canPush(tools: tools, repository: target.repository)
             : nil
         let findings = Preflight.run(
             submission: submission, index: index, paths: paths, tools: tools,
-            isGitHubAuthenticated: authenticated, canPush: canPush, hasPushRights: pushRights)
+            isGitHubAuthenticated: authenticated, canPush: canPush, hasPushRights: pushRights,
+            repository: target.repository)
         job.setPreflight(findings)
         for finding in findings {
             job.append(JobLogEntry(
@@ -63,6 +78,19 @@ struct IngestJobRunner {
         let baseBranch = await git.defaultBranch(in: paths.clone)
         job.setState(.preparing("Creating worktree…"))
 
+        // The base is a commit, not a ref. Left as `origin/main`, a sync
+        // during review would move it: the review would show upstream
+        // commits reversed, and Approve would commit their reversal.
+        guard let base = await git.resolveCommit("origin/\(baseBranch)", in: paths.clone) else {
+            // Cancelled meanwhile: `job.cancel()` has set the state.
+            if Task.isCancelled { return }
+            job.setState(.failed(
+                "Could not find origin/\(baseBranch) in the wiki's clone. "
+                + "Sync (⌘R), then run the job again."))
+            return
+        }
+        job.setBaseCommit(base)
+
         // Re-submitting a paper after a failed job is the common case, and the
         // branch from the failed attempt is still there. Take the next free
         // name rather than making the user learn `git branch -D`.
@@ -70,11 +98,11 @@ struct IngestJobRunner {
         job.setBranch(branch)
         job.append(JobLogEntry(.system,
             "git worktree add \(job.worktree.lastPathComponent) "
-            + "-b \(branch) origin/\(baseBranch)"))
+            + "-b \(branch) \(base.prefix(12)) (origin/\(baseBranch))"))
 
         let created = await git.addWorktree(
             clone: paths.clone, at: job.worktree,
-            branch: branch, baseRef: "origin/\(baseBranch)"
+            branch: branch, baseRef: base
         ) { line in
             Task { @MainActor in job.append(JobLogEntry(.system, line.text)) }
         }
@@ -135,35 +163,42 @@ struct IngestJobRunner {
 
         // MARK: The agent
 
+        // What GitHub looked like before, so the tripwire can tell
+        // afterwards what moved while the agent ran (§5.5).
+        let tripwire = Tripwire(git: git, tools: tools, target: target)
+        let headsBefore = await tripwire.headsBefore()
+        if Task.isCancelled { await cleanUpDespiteCancellation(job, keep: true); return }
+        if headsBefore == nil {
+            job.append(JobLogEntry(.system,
+                "Could not list the branches on GitHub, so the tripwire will not be able to "
+                + "check for a push."))
+        }
+
+        // The agent's own, empty gh configuration: the seal (§5.1).
+        try? FileManager.default.createDirectory(
+            at: AgentInvocation.ghConfigDirectory(scratch: job.scratch),
+            withIntermediateDirectories: true)
+        // The wiki's own GitHub workflow caps turns at 40, but that prompt
+        // has no local validation step. Ingesting a paper here means reading
+        // five contract files, fetching the paper, writing a page, then
+        // `npm ci` → lint → `quartz build` → sync-cryptobib with a fix cycle
+        // after each. A first run spent 54 turns before writing a single
+        // file. The real bound on a runaway job is the user's Cancel button
+        // and the cost readout, not an arbitrary count.
+        let invocation = AgentInvocation.ingestion(
+            prompt: prompt, maxTurns: Self.maxTurns,
+            base: tools.childEnvironment(), scratch: job.scratch)
+
         job.setState(.running)
         var parser = ClaudeStreamParser()
-
-        let arguments = [
-            "-p", prompt,
-            "--output-format", "stream-json",
-            "--verbose",
-            // Edits inside a throwaway worktree are safe to auto-accept; every
-            // shell command still has to match the allow-list below, so a job
-            // that wanders off fails loudly instead of doing something unasked.
-            "--permission-mode", "acceptEdits",
-            "--allowedTools", PromptComposer.allowedTools.joined(separator: ","),
-            // The wiki's own GitHub workflow caps this at 40, but that prompt
-            // has no local validation step. Ingesting a paper here means
-            // reading five contract files, fetching the paper, writing a page,
-            // then `npm ci` → lint → `quartz build` → sync-cryptobib with a fix
-            // cycle after each. A first run spent 54 turns before writing a
-            // single file. The real bound on a runaway job is the user's
-            // Cancel button and the cost readout, not an arbitrary count.
-            "--max-turns", Self.maxTurns,
-        ]
 
         var exitStatus: Int32 = -1
         let transcript = TranscriptBuffer(job: job)
         for await line in Subprocess.lines(
             executable: claude,
-            arguments: arguments,
+            arguments: invocation.arguments,
             currentDirectory: job.worktree,
-            environment: tools.childEnvironment()
+            environment: invocation.environment
         ) {
             if let status = line.exitStatus { exitStatus = status; continue }
             job.appendRaw(line.text)
@@ -189,6 +224,27 @@ struct IngestJobRunner {
             return
         }
 
+        // MARK: The tripwire
+
+        // What the agent says is prose; what GitHub says is fact. Asked
+        // after every exit but a cancel, whatever the agent reports.
+        let caught = await tripwire.check(
+            job, headsBefore: headsBefore,
+            otherBranches: Tripwire.otherJobBranches(logs: paths.logs, excluding: job.id))
+        if Task.isCancelled {
+            await cleanUpDespiteCancellation(job, keep: true)
+            return
+        }
+        if let notice = caught.notice { job.setNotice(notice) }
+        if let outcome = parser.outcome { job.setOutcome(outcome) }
+        if let url = caught.pullRequest {
+            // Not CCwiki's pull request, and nothing to review: the change
+            // is already on GitHub. The worktree stays, for inspection.
+            await cleanUp(job, keep: true)
+            job.setState(.opened(url: url))
+            return
+        }
+
         // MARK: Outcome
 
         guard let outcome = parser.outcome else {
@@ -200,7 +256,6 @@ struct IngestJobRunner {
                     : "claude exited \(exitStatus)."))
             return
         }
-        job.setOutcome(outcome)
 
         for denial in outcome.permissionDenials {
             job.append(JobLogEntry(.error, "Permission denied — \(denial)"))
@@ -208,16 +263,10 @@ struct IngestJobRunner {
         if !outcome.result.isEmpty {
             job.append(JobLogEntry(.assistant, outcome.result))
         }
-
-        // What the agent says is prose; what GitHub says is fact. A final
-        // message that quotes the abort protocol or mentions an older PR
-        // used to be misread — this asks `gh` before believing either.
-        if let url = await confirmedPullRequest(job) {
+        if let claimed = outcome.pullRequestURL {
             job.append(JobLogEntry(.system,
-                "GitHub confirms a pull request for \(job.branch): \(url.absoluteString)"))
-            await cleanUp(job, keep: false)
-            job.setState(.opened(url: url))
-            return
+                "The agent's last message names \(claimed.absoluteString). CCwiki takes a "
+                + "pull request from GitHub, never from the agent's words."))
         }
 
         if let reason = outcome.abortReason {
@@ -229,45 +278,68 @@ struct IngestJobRunner {
             return
         }
 
-        if let url = outcome.pullRequestURL {
-            job.append(JobLogEntry(.system, "Draft pull request: \(url.absoluteString)"))
-            await cleanUp(job, keep: false)
-            job.setState(.opened(url: url))
-            return
-        }
-
         if outcome.isError {
             await cleanUp(job, keep: true)
             job.setState(.failed("The agent reported an error (\(outcome.subtype))."))
             return
         }
 
-        await cleanUp(job, keep: true)
-        job.setState(.failed(
-            "The agent finished without opening a pull request and without aborting. "
-            + "The worktree has been kept so you can see what it did."))
+        await handOver(job, base: base)
     }
 
-    /// The PR *this job* opened, if GitHub has one: open, on the job's
-    /// branch, and created after the job started. A branch name is reused
-    /// once its earlier PR has merged and the branch is gone, and `gh pr
-    /// view <branch>` happily returns that merged PR; this does not.
-    private func confirmedPullRequest(_ job: Job) async -> URL? {
-        guard let gh = tools.path(for: .gh) else { return nil }
-        let result = await Subprocess.run(
-            executable: gh,
-            arguments: ["pr", "list", "--repo", AppPaths.repositorySlug,
-                        "--head", job.branch, "--state", "open",
-                        "--json", "url,createdAt",
-                        "--jq", #".[] | "\(.createdAt) \(.url)""#],
-            currentDirectory: job.worktree,
-            environment: tools.childEnvironment())
-        guard result.succeeded else { return nil }
-        let notBefore = (job.startedAt ?? job.createdAt).addingTimeInterval(-60)
-        return Self.pullRequest(createdAfter: notBefore, in: result.stdout)
+    // MARK: Hand-over
+
+    /// The agent finished. Read the pull request text it left, and either
+    /// wait for a person or, when it changed nothing, say so and prune.
+    /// The full snapshot, with DiffGuard's findings, is the job center's,
+    /// taken as the job enters review (§6.1); this asks git only whether
+    /// there is anything to review.
+    private func handOver(_ job: Job, base: String) async {
+        let handover = Handover.pullRequestText(in: job.worktree)
+        if handover == nil {
+            job.append(JobLogEntry(.system,
+                "The agent left no \(Handover.pullRequestPath); CCwiki proposes a title "
+                + "and body of its own."))
+        }
+        job.pullRequest = PullRequestDraft.make(
+            for: job.kind,
+            handover: handover.flatMap { PullRequestDraft.parse(handover: $0) },
+            siteURL: nil)
+
+        let staged = await git.stageAll(in: job.worktree)
+        let diff = staged ? await git.stagedDiff(in: job.worktree, base: base) : nil
+        if Task.isCancelled {
+            await cleanUpDespiteCancellation(job, keep: true)
+            return
+        }
+        guard let diff else {
+            job.append(JobLogEntry(.error,
+                "git could not stage or compare the worktree's changes."))
+            await cleanUp(job, keep: true)
+            job.setState(.failed(
+                "CCwiki could not read the agent's changes. The worktree has been kept."))
+            return
+        }
+        guard !diff.nameStatus.isEmpty else {
+            job.append(JobLogEntry(.system, Self.nothingChanged))
+            await cleanUp(job, keep: false)
+            job.setState(.failed(Self.nothingChanged))
+            return
+        }
+
+        job.append(JobLogEntry(.system,
+            "Awaiting review in Jobs. Nothing has been pushed: the draft pull request "
+            + "opens only when you approve the changes."))
+        job.setState(.awaitingReview)
     }
+
+    nonisolated static let nothingChanged = "The agent finished without changing anything."
 
     /// `<ISO8601 createdAt> <url>` lines → the newest URL created after `date`.
+    /// What `gh pr list --json url,createdAt` prints through `--jq`, for a
+    /// pull request opened on the job's branch since it started. Publisher
+    /// confirms its own pull request with it (§6.5); `Tripwire` keeps a
+    /// variant that reads the head too.
     nonisolated static func pullRequest(createdAfter date: Date, in listing: String) -> URL? {
         let formatter = ISO8601DateFormatter()
         var best: (Date, URL)?
@@ -294,7 +366,9 @@ struct IngestJobRunner {
         await Task { @MainActor in await cleanUp(job, keep: keep) }.value
     }
 
-    /// Remove the worktree, unless there is something in it worth looking at.
+    /// Remove the worktree, its scratch directory and its local branch,
+    /// unless there is something in them worth looking at. Nothing was
+    /// pushed, so nothing on GitHub is touched.
     private func cleanUp(_ job: Job, keep: Bool) async {
         if keep {
             job.append(JobLogEntry(.system,
@@ -308,6 +382,8 @@ struct IngestJobRunner {
                 "Could not remove the worktree; it is still at "
                 + job.worktree.path(percentEncoded: false)))
         }
+        try? FileManager.default.removeItem(at: job.scratch)
+        if removed { _ = await git.deleteBranch(job.branch, in: paths.clone) }
     }
 
     // MARK: Recovery

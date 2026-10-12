@@ -1,41 +1,48 @@
 import Foundation
 
-/// Builds the prompt handed to `claude -p`.
+/// Builds the prompt handed to `claude -p`, from `prompts/ingest.md` for an
+/// ingestion and `prompts/correct.md` for a correction.
 ///
 /// The governing rule, and the reason this type is so small: **house style is
 /// not composed here.** The wiki carries its own editorial contract in
-/// `.github/prompts/paper-submission.md`, maintained by the people who maintain
-/// the wiki, and `prompts/ingest.md` points the agent at it *in the worktree*
-/// rather than restating it. So this only fills in the placeholders that are
-/// specific to one job.
+/// `.github/prompts/paper-submission.md` and `CLAUDE.md`, maintained by the
+/// people who maintain the wiki, and the templates point the agent at them
+/// *in the worktree* rather than restating them. So this only fills in the
+/// placeholders that are specific to one job.
 ///
 /// If the template ever grows a paraphrase of the wiki's style rules, delete it
 /// — the app would then be teaching agents a snapshot that goes stale the day
 /// the wiki's own prompt changes.
 struct PromptComposer: Sendable {
 
-    /// The template, from the app bundle.
-    static func template() -> String? {
-        if let url = Bundle.main.url(forResource: "ingest", withExtension: "md",
+    /// A template from the app bundle's `prompts/`: "ingest" or "correct".
+    static func template(named name: String) -> String? {
+        if let url = Bundle.main.url(forResource: name, withExtension: "md",
                                      subdirectory: "prompts"),
            let text = try? String(contentsOf: url, encoding: .utf8) {
             return text
         }
         // `swift run` and the tests have no .app around them.
         let fallback = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appending(path: "prompts/ingest.md")
+            .appending(path: "prompts/\(name).md")
         return try? String(contentsOf: fallback, encoding: .utf8)
     }
 
+    /// The ingestion template.
+    static func template() -> String? {
+        template(named: "ingest")
+    }
+
     enum ComposeError: LocalizedError {
-        case templateMissing
+        /// The template's name: "ingest", "correct".
+        case templateMissing(String)
         /// `compose` writes an ingestion's prompt, and this job is not one.
         case notAnIngestion
 
         var errorDescription: String? {
             switch self {
-            case .templateMissing:
-                return "prompts/ingest.md is missing from the app bundle. "
+            case .templateMissing(let name):
+                return "prompts/\(name).md is missing from the app bundle. "
                     + "Rebuild with `make` — build.sh copies it in."
             case .notAnIngestion:
                 return "Only an ingestion job has an ingestion prompt."
@@ -50,28 +57,165 @@ struct PromptComposer: Sendable {
         preflight: [PreflightFinding]
     ) throws -> String {
         guard let submission = job.submission else { throw ComposeError.notAnIngestion }
-        guard var text = template() else { throw ComposeError.templateMissing }
+        guard let template = template() else { throw ComposeError.templateMissing("ingest") }
 
-        let worktreePath = job.worktree.path(percentEncoded: false)
-        let substitutions: [String: String] = [
-            "{{WORKTREE}}": worktreePath,
-            "{{BRANCH}}": job.branch,
-            "{{BASE_BRANCH}}": baseBranch,
-            "{{SUBMISSION}}": submission.metadataJSON(),
-            "{{PAPER_LOCATION}}": paperLocation(submission),
-            "{{PREFLIGHT}}": Preflight.promptSection(preflight),
-            "{{SKILL_NOTE}}": skillNote(worktree: job.worktree),
-        ]
-        for (placeholder, value) in substitutions {
-            text = text.replacingOccurrences(of: placeholder, with: value)
+        return fill(template, [
+            "WORKTREE": job.worktree.path(percentEncoded: false),
+            "BRANCH": job.branch,
+            "BASE_BRANCH": baseBranch,
+            "SUBMISSION": submission.metadataJSON(),
+            "PAPER_LOCATION": paperLocation(submission),
+            "PREFLIGHT": Preflight.promptSection(preflight),
+            "SKILL_NOTE": skillNote(worktree: job.worktree),
+        ])
+    }
+
+    /// The prompt for a correction's agent (plans/corrections.md §5.4), from
+    /// `prompts/correct.md`: the page, the lines, the passage the reader
+    /// quoted, the source of those lines, and what the reader says is wrong.
+    /// House style is not here either: the template points the agent at the
+    /// worktree's own `CLAUDE.md`.
+    ///
+    /// `siteURL` is the page on the published site (`AppModel.siteURL`),
+    /// without an anchor; the target's section is added as one. Nil leaves
+    /// the URL out. A whole-page target, with no quote and no excerpt,
+    /// leaves out the paragraphs that would show them.
+    @MainActor
+    static func composeCorrection(
+        _ request: CorrectionRequest, job: Job, siteURL: URL?
+    ) throws -> String {
+        guard let template = template(named: "correct") else {
+            throw ComposeError.templateMissing("correct")
+        }
+        let target = request.target
+        let excerpt = target.excerpt.flatMap { $0.isEmpty ? nil : $0 }
+        // "lines 42–44, in “Security”"; a whole page is only near one.
+        let placement: String
+        switch (target.lines, target.section) {
+        case (_, .none): placement = ""
+        case (.some, .some(let heading)): placement = ", in “\(heading.title)”"
+        case (.none, .some(let heading)): placement = ", near “\(heading.title)”"
         }
 
-        // The HTML comment at the top explains the template to a human editing
-        // it; the agent does not need it, and it is a third of the file.
+        return fill(template, [
+            "WORKTREE": job.worktree.path(percentEncoded: false),
+            "PAGE_PATH": target.repositoryPath,
+            "PAGE_TITLE": target.pageTitle,
+            "PAGE_URL": pageURL(siteURL, section: target.section)?.absoluteString,
+            "LINES": target.lines?.label ?? "the whole page",
+            "SECTION": placement,
+            "QUOTE": target.quote.flatMap { Self.quoted($0) },
+            "EXCERPT": excerpt,
+            "FENCE": fence(for: excerpt ?? ""),
+            "REQUEST": quoted(request.description) ?? "(no description)",
+        ])
+    }
+
+    // MARK: Filling a template
+
+    /// The template, without its leading HTML comment, with each
+    /// `{{NAME}}` replaced by its value.
+    ///
+    /// - The comment explains the template to a human editing it; the agent
+    ///   does not need it. It is cut before anything is filled in, so a
+    ///   value that holds `-->` cannot move the cut.
+    /// - `{{#NAME}}…{{/NAME}}` keeps what it wraps only when NAME has a
+    ///   non-empty value. A marker alone on its line takes its line with it.
+    /// - Filling is one pass over the template. A value is never searched
+    ///   for placeholders, so a quote or an excerpt holding `{{` (LaTeX does)
+    ///   arrives as it was.
+    static func fill(_ template: String, _ values: [String: String?]) -> String {
+        var text = template
         if let end = text.range(of: "-->") {
-            text = String(text[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            text = String(text[end.upperBound...])
         }
-        return text
+        for (name, value) in values {
+            text = section(named: name, in: text, keep: !(value ?? "").isEmpty)
+        }
+        return substitute(text, values.compactMapValues { $0 })
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Every `{{#name}}…{{/name}}` in `text`, kept without its markers or
+    /// removed with them.
+    private static func section(named name: String, in text: String, keep: Bool) -> String {
+        let open = "{{#\(name)}}"
+        let close = "{{/\(name)}}"
+        var result = ""
+        var rest = text[...]
+        while let start = rest.range(of: open),
+              let end = rest[start.upperBound...].range(of: close) {
+            result.append(contentsOf: rest[..<start.lowerBound])
+            let inner = rest[markerEnd(start.upperBound, in: rest)..<end.lowerBound]
+            if keep { result.append(contentsOf: inner) }
+            rest = rest[markerEnd(end.upperBound, in: rest)...]
+        }
+        result.append(contentsOf: rest)
+        return result
+    }
+
+    /// Past a marker: and past the newline after it, when there is one.
+    private static func markerEnd(_ index: Substring.Index, in text: Substring) -> Substring.Index {
+        index < text.endIndex && text[index] == "\n" ? text.index(after: index) : index
+    }
+
+    /// Each `{{NAME}}` in `template` that `values` has, replaced, in one pass.
+    private static func substitute(_ template: String, _ values: [String: String]) -> String {
+        var result = ""
+        var rest = template[...]
+        while let open = rest.range(of: "{{") {
+            result.append(contentsOf: rest[..<open.lowerBound])
+            let after = rest[open.upperBound...]
+            if let close = after.range(of: "}}"),
+               let value = values[String(after[..<close.lowerBound])] {
+                result.append(contentsOf: value)
+                rest = after[close.upperBound...]
+            } else {
+                result.append(contentsOf: "{{")
+                rest = after
+            }
+        }
+        result.append(contentsOf: rest)
+        return result
+    }
+
+    /// Each line after the first prefixed with `> `, to follow the
+    /// template's own `> ` as one blockquote. An empty line is a bare `>`.
+    /// Nil for text that is only whitespace.
+    static func quoted(_ text: String) -> String? {
+        let trimmed = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.components(separatedBy: "\n").enumerated().map { index, line in
+            index == 0 ? line : (line.isEmpty ? ">" : "> " + line)
+        }.joined(separator: "\n")
+    }
+
+    /// A run of backticks one longer than the longest in `text`, and never
+    /// shorter than three, so a pseudocode fence inside an excerpt cannot
+    /// close the excerpt's own (§5.4).
+    static func fence(for text: String) -> String {
+        var longest = 0
+        var run = 0
+        for character in text {
+            if character == "`" {
+                run += 1
+                longest = max(longest, run)
+            } else {
+                run = 0
+            }
+        }
+        return String(repeating: "`", count: max(3, longest + 1))
+    }
+
+    /// The page's URL with its section as the anchor, unless it has one.
+    private static func pageURL(_ siteURL: URL?, section: CorrectionTarget.Section?) -> URL? {
+        guard let siteURL, let section,
+              var components = URLComponents(url: siteURL, resolvingAgainstBaseURL: false),
+              components.fragment == nil
+        else { return siteURL }
+        components.fragment = section.id
+        return components.url ?? siteURL
     }
 
     /// Where the paper is, and how to canonicalize the URL — the part the
@@ -128,34 +272,6 @@ struct PromptComposer: Sendable {
             + "Read `CLAUDE.md` and `CONTRIBUTING.md` in full instead."
     }
 
-    /// The tools the agent may use, mirroring the allow-list the wiki's own
-    /// GitHub workflow grants (`paper-submission.yml`), plus the node and npm
-    /// commands the *local* lint needs — which the server pipeline does not run.
-    ///
-    /// Scoped rather than `bypassPermissions`: a job that hits a denial fails
-    /// visibly, with the denied call recorded in the result event, which is far
-    /// better than one that quietly did something nobody asked for.
-    /// The allow-list matches on a command's **first word**, so `cd X && git …`
-    /// is denied however harmless it looks. The first real job hit seven
-    /// denials, every one of them a `cd`-prefixed or `ln` command — which is
-    /// why `prompts/ingest.md` now says plainly that the shell already starts
-    /// in the worktree and there is nothing to `cd` to.
-    ///
-    /// The entries below are read-only inspection tools plus the four binaries
-    /// the job genuinely drives. Nothing here can write outside a file tool,
-    /// which keeps the guarantee worth having: a job that wanders off fails
-    /// visibly, with the denied call named in the transcript.
-    static let allowedTools = [
-        "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite",
-        // The four the job actually drives.
-        "Bash(git:*)", "Bash(gh:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)",
-        // Read-only inspection.
-        "Bash(find:*)", "Bash(file:*)", "Bash(jq:*)", "Bash(cat:*)", "Bash(ls:*)",
-        "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(rg:*)",
-        "Bash(echo:*)", "Bash(pwd)", "Bash(test:*)", "Bash(diff:*)",
-        "Bash(sort:*)", "Bash(uniq:*)", "Bash(cut:*)", "Bash(basename:*)",
-        "Bash(dirname:*)", "Bash(hexdump:*)", "Bash(xxd:*)", "Bash(od:*)",
-        "Bash(pdftotext:*)", "Bash(mdls:*)",
-        "WebFetch", "WebSearch",
-    ]
+    // The tools an agent may use are `AgentInvocation`'s, beside the seal
+    // they are part of (plans/corrections.md §5.1).
 }
