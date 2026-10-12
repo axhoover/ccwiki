@@ -45,20 +45,31 @@ final class ReaderSession: Identifiable {
     /// Which sidebar folders are open. Opening a page from a link, the quick
     /// switcher or search reveals its folder, so the sidebar always shows where
     /// you are rather than silently disagreeing with the reader.
+    ///
+    /// The folders and the inspector start as the window changed last left
+    /// them, and are written back to the settings for the next new window,
+    /// except while a restored window puts its own back (`restoreChrome`).
     var expandedFolders: Set<String> = Set(CCwikiSettings.expandedFolders) {
         didSet {
-            guard expandedFolders != oldValue else { return }
+            guard expandedFolders != oldValue, !isRestoringChrome else { return }
             CCwikiSettings.expandedFolders = expandedFolders.sorted()
         }
     }
     /// Both persisted: the inspector comes back as it was left.
     var inspectorTab: AppModel.InspectorTab =
         CCwikiSettings.inspectorTab.flatMap(AppModel.InspectorTab.init(rawValue:)) ?? .outline {
-        didSet { CCwikiSettings.inspectorTab = inspectorTab.rawValue }
+        didSet {
+            guard !isRestoringChrome else { return }
+            CCwikiSettings.inspectorTab = inspectorTab.rawValue
+        }
     }
     var showInspector: Bool = CCwikiSettings.showsInspector {
-        didSet { CCwikiSettings.showsInspector = showInspector }
+        didSet {
+            guard !isRestoringChrome else { return }
+            CCwikiSettings.showsInspector = showInspector
+        }
     }
+    @ObservationIgnored private var isRestoringChrome = false
 
     /// ⌥⌘1–3: straight to a tab, opening the inspector if it was closed.
     func showInspectorTab(_ tab: AppModel.InspectorTab) {
@@ -78,7 +89,8 @@ final class ReaderSession: Identifiable {
     /// there has to be somewhere to see it.
     var syncLogPresented = false
 
-    /// Set by `openSearchResult` for the render it triggers, then cleared.
+    /// Set for the render a search hit, or a window opened on one, triggers,
+    /// then cleared.
     @ObservationIgnored private var pendingFind: [String]?
     /// Set for the render that shows a restored page where it was being
     /// read, then cleared: the heading it scrolls to in place of the
@@ -159,7 +171,6 @@ final class ReaderSession: Identifiable {
         guard !isStarted else { return }
         isStarted = true
         history = plan.history
-        if let path = location.path { sidebarSelection = path }
         if let readingAnchor, plan.showsAtOnce == nil, location != .empty {
             readingPosition = (location: location, heading: readingAnchor)
         }
@@ -169,8 +180,11 @@ final class ReaderSession: Identifiable {
             pendingLocation = opening
             pendingLocationFind = plan.find
         }
-        awaitsLibrary = true
+        // Before the session waits, so the launch document is part of the
+        // plan rather than something asked for since, and a pending
+        // location still opens over it.
         if let document = plan.showsAtOnce { open(document) }
+        awaitsLibrary = true
         if model.index != nil { openWhatWaited() }
     }
 
@@ -178,13 +192,18 @@ final class ReaderSession: Identifiable {
     /// restored history forgets the pages the wiki no longer has and shows
     /// its page where it was being read. A location asked for meanwhile then
     /// opens, and with nothing on screen, Home.
-    private func openWhatWaited() {
+    ///
+    /// `superseded`: the reader has asked for a page since, which is about
+    /// to open, so only the forgetting is left to do.
+    private func openWhatWaited(superseded: Bool = false) {
         guard awaitsLibrary, let index = model.index else { return }
         awaitsLibrary = false
+        let position = readingPosition
+        readingPosition = nil
         history = history.pruned { location in
             location.path.map { index.pages[$0] != nil } ?? true
         }
-        if let path = location.path { sidebarSelection = path }
+        guard !superseded else { return }
 
         let shown = location
         if let pending = pendingLocation {
@@ -203,15 +222,62 @@ final class ReaderSession: Identifiable {
             openHome()
         } else if location == shown {
             // Nothing new opened: render what was restored, or shown before
-            // the wiki was there, now that its links resolve.
+            // the wiki was there, now that its links resolve. The sidebar
+            // selects a restored page now that it has a row for it; its
+            // echo of the selection is not a move.
+            sidebarSelection = location.path
             webController.invalidate()
-            if let position = readingPosition, position.location == location {
+            if let position, position.location == location {
                 renderAnchor = position.heading
             }
             renderCurrent(preservingScroll: location.isDocument)
             renderAnchor = nil
         }
-        readingPosition = nil
+    }
+
+    // MARK: Restoration
+
+    /// What macOS keeps of this window when it restores it: where it has
+    /// been, and how its inspector and sidebar were left (§1.3). Its view
+    /// saves it whenever it changes; the reading position is saved apart, so
+    /// scrolling does not encode the history again.
+    var restorationState: ReaderSessionState {
+        ReaderSessionState(
+            history: history, inspectorTab: inspectorTab.rawValue,
+            showsInspector: showInspector, expandedFolders: expandedFolders.sorted())
+    }
+
+    /// A restored window's inspector and folders, as it left them, before
+    /// it starts. Not written to the settings: restoring a window is not
+    /// leaving it, and a new window starts as the window changed last.
+    func restoreChrome(_ state: ReaderSessionState) {
+        isRestoringChrome = true
+        defer { isRestoringChrome = false }
+        if let tab = AppModel.InspectorTab(rawValue: state.inspectorTab) { inspectorTab = tab }
+        showInspector = state.showsInspector
+        expandedFolders = Set(state.expandedFolders)
+    }
+
+    // MARK: Links from outside
+
+    /// A URL from outside, given to this window, which SwiftUI chose and
+    /// brought forward: a PDF from Finder or the Dock, for an ingestion job
+    /// (Info.plist declares the type), or a ccwiki:// link from anywhere
+    /// (Info.plist declares the scheme; CCwiki Dev's is ccwiki-dev://, read
+    /// here as ccwiki://). A link that arrives before the wiki is loaded,
+    /// as one that launches the app does, opens once it is.
+    func handleOpenURL(_ url: URL) {
+        if url.isFileURL {
+            guard url.pathExtension.lowercased() == "pdf",
+                  let staged = try? model.stagePDF(from: url)
+            else { return }
+            model.pendingDroppedPDF = staged
+            model.requestIngestSheet(in: id)
+            model.requestJobsWindow()
+        } else if let destination = CCwikiURL.destination(
+            of: CCwikiURL.internalString(for: url)) {
+            navigate(to: destination)
+        }
     }
 
     // MARK: What the model tells it
@@ -265,12 +331,25 @@ final class ReaderSession: Identifiable {
     }
 
     func open(_ newLocation: Location, recordHistory: Bool = true) {
-        // Before the session starts, what it is asked to open waits, and
-        // opens over the plan's own choice (§1.7).
-        guard isStarted else {
-            pendingLocation = newLocation
-            pendingLocationFind = nil
+        // Until the session has started and the wiki is there, a page or a
+        // folder waits, the latest asked for winning, and opens over the
+        // plan's own choice once it can (§1.7): a ccwiki:// link that
+        // launches the app still lands. The app's own pages need no wiki.
+        guard isStarted, model.index != nil || newLocation.isDocument else {
+            if !isShowing(newLocation) {
+                pendingLocation = newLocation
+                pendingLocationFind = nil
+            }
             return
+        }
+        // Asked for once the window has started, so after everything its
+        // plan knows of: the plan's own choice gives way. If the wiki is
+        // there and its load has yet to say so, a restored history forgets
+        // the pages the wiki no longer has before this joins it.
+        if awaitsLibrary, !isShowing(newLocation) {
+            pendingLocation = nil
+            pendingLocationFind = nil
+            openWhatWaited(superseded: true)
         }
         // A page the clone does not have is not somewhere the reader can be.
         // Without this the chrome moved — title, selection, history — while
@@ -290,6 +369,16 @@ final class ReaderSession: Identifiable {
         }
         reveal(newLocation)
         renderCurrent()
+    }
+
+    /// Whether asking for `location` is not a move: it is what is on
+    /// screen, or names the page on screen without an anchor, as the
+    /// sidebar does when it selects that page's row. The same test as
+    /// `NavigationHistory.visit`.
+    private func isShowing(_ location: Location) -> Bool {
+        if location == self.location { return true }
+        if case .page(let path, nil) = location { return path == self.location.path }
+        return false
     }
 
     /// Select the page in the sidebar and open the folder that holds it.

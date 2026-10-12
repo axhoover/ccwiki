@@ -19,6 +19,16 @@ struct ReaderWindowView: View {
     @Environment(AppModel.self) private var model
     @State private var session: ReaderSession?
     @State private var host = HostWindow()
+    /// URLs from outside that came before the window had its session.
+    @State private var pendingURLs: [URL] = []
+
+    /// What macOS keeps of this window when it restores it (§1.3): the
+    /// session's history, inspector and folders as `ReaderSessionState`,
+    /// and apart from them the heading being read, so scrolling does not
+    /// encode the history again. Declared here, where the window starts,
+    /// rather than in the view that appears once the session is claimed.
+    @SceneStorage("ccwiki.reader.state") private var savedState: Data?
+    @SceneStorage("ccwiki.reader.anchor") private var savedAnchor: String?
 
     /// Readers tab only with readers, whatever the system's "Prefer tabs"
     /// setting says, and never with a paper or the explorer (§1.8).
@@ -27,7 +37,9 @@ struct ReaderWindowView: View {
     var body: some View {
         Group {
             if let session {
-                ReaderSessionView(session: session, window: window)
+                ReaderSessionView(
+                    session: session, window: window,
+                    savedState: $savedState, savedAnchor: $savedAnchor)
             } else {
                 // A plain background until there is a window to claim a
                 // session for: no web view is made for a window that might
@@ -42,6 +54,11 @@ struct ReaderWindowView: View {
         // that is already open, which SwiftUI brings forward. Otherwise
         // SwiftUI opens a new window for each.
         .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+        // Here rather than in RootView, which is not there until the window
+        // has its session: a URL that launches the app arrives about then.
+        .onOpenURL { url in
+            if let session { session.handleOpenURL(url) } else { pendingURLs.append(url) }
+        }
         // The active reader, for the windows that are not readers, is the
         // one key most recently. `controlActiveState` would say as much, but
         // the macOS 15 SDK deprecates it for `appearsActive`, which macOS 14
@@ -90,23 +107,30 @@ struct ReaderWindowView: View {
     /// by a fresh one: this window is then a window of its own.
     private func claim(in nsWindow: NSWindow) {
         guard session == nil else { return }
-        var claimed = model.claimSession(for: window.id, windowNumber: nsWindow.windowNumber)
-        if claimed == nil {
+        let number = nsWindow.windowNumber
+        let claimed: ReaderSession
+        if let forThisID = model.claimSession(for: window.id, windowNumber: number) {
+            claimed = forThisID
+        } else {
             window.id = UUID()
-            claimed = model.claimSession(for: window.id, windowNumber: nsWindow.windowNumber)
+            guard let forFreshID = model.claimSession(for: window.id, windowNumber: number)
+            else { return }
+            claimed = forFreshID
         }
         session = claimed
         // Already key by now, most likely, and its notification gone by
         // with no session to tell.
-        if let claimed, nsWindow.isKeyWindow { model.sessionBecameKey(claimed.id) }
+        if nsWindow.isKeyWindow { model.sessionBecameKey(claimed.id) }
+        for url in pendingURLs { claimed.handleOpenURL(url) }
+        pendingURLs = []
     }
 
     /// The window a notification is about, when it is this view's.
     private func hostWindow(of notification: Notification) -> NSWindow? {
-        guard let window = notification.object as? NSWindow, window === host.window else {
+        guard let nsWindow = notification.object as? NSWindow, nsWindow === host.window else {
             return nil
         }
-        return window
+        return nsWindow
     }
 }
 
@@ -122,9 +146,15 @@ private final class HostWindow {
 private struct ReaderSessionView: View {
     let session: ReaderSession
     let window: ReaderWindow
+    @Binding var savedState: Data?
+    @Binding var savedAnchor: String?
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+
+    /// Restoration is macOS's, and never the screenshot harness's: a capture
+    /// shows what its plan says, whatever was on screen the time before.
+    private var restores: Bool { ScreenshotRunner.directory == nil }
 
     var body: some View {
         RootView()
@@ -141,6 +171,14 @@ private struct ReaderSessionView: View {
             .onChange(of: model.explorerWindowRequests) { _, _ in
                 openWindow(id: CCwikiApp.explorerWindowID)
             }
+            .onChange(of: session.restorationState) { _, state in
+                guard restores else { return }
+                savedState = state.encoded()
+            }
+            .onChange(of: session.webController.activeHeadingID) { _, heading in
+                guard restores else { return }
+                savedAnchor = heading
+            }
     }
 
     /// Start the session as its plan says, then the launch, which runs once
@@ -148,15 +186,21 @@ private struct ReaderSessionView: View {
     /// SwiftUI may run this again when a tab is shown again; the session is
     /// started only the first time, so nothing meant for a new window is
     /// taken by an old one.
+    ///
+    /// A window macOS restored comes back with its history, inspector and
+    /// folders, and its page where it was being read; saved state this build
+    /// cannot read is ignored whole, and the window starts as a new one.
     private func start() async {
         if !session.isStarted {
+            let restored = restores ? ReaderSessionState.decoded(from: savedState) : nil
+            if let restored { session.restoreChrome(restored) }
             let plan = SessionStartPlan.plan(
-                restored: nil, window: window,
+                restored: restored, window: window,
                 pending: model.takePendingReaderLocation(),
                 launchDocument: model.takeLaunchDocument(),
                 isColdStart: model.takeColdStart(),
-                lastPage: ScreenshotRunner.directory == nil ? CCwikiSettings.lastPage : nil)
-            session.start(plan, readingAnchor: nil)
+                lastPage: restores ? CCwikiSettings.lastPage : nil)
+            session.start(plan, readingAnchor: restored == nil ? nil : savedAnchor)
         }
         await model.launchIfNeeded()
         ScreenshotRunner.run(model: model, session: session, openWindow: openWindow)
