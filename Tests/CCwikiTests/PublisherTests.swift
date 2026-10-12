@@ -298,8 +298,7 @@ struct PublisherTests {
 
     // MARK: Checking, which needs the review model
 
-    @Test("Approve refuses a diff that changed since it was reviewed",
-          .disabled("needs Track A: ReviewSnapshot.assemble's digest"))
+    @Test("Approve refuses a diff that changed since it was reviewed")
     func changedSinceReview() async throws {
         guard let scene = try await JobScene.make() else { return }
         defer { scene.delete() }
@@ -313,8 +312,7 @@ struct PublisherTests {
         #expect(job.review?.digest != reviewed, "the review now shows the new diff")
     }
 
-    @Test("Approve asks GitHub last, and without gh nothing is sent",
-          .disabled("needs Track A: a snapshot with files, and a proposed title"))
+    @Test("Approve asks GitHub last, and without gh nothing is sent")
     func withoutGH() async throws {
         guard let scene = try await JobScene.make() else { return }
         defer { scene.delete() }
@@ -330,8 +328,7 @@ struct PublisherTests {
         #expect(await scene.originTip("fix/page") == .absent)
     }
 
-    @Test("Approve refuses without a git identity, before GitHub is asked",
-          .disabled("needs Track A: a snapshot with files, and a proposed title"))
+    @Test("Approve refuses without a git identity, before GitHub is asked")
     func withoutIdentity() async throws {
         guard let scene = try await JobScene.make() else { return }
         defer { scene.delete() }

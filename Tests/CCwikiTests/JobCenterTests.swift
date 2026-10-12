@@ -787,8 +787,7 @@ struct JobCenterTests {
         }
     }
 
-    @Test("Review Anyway takes a failed agent's changes to review",
-          .disabled("needs Track A: an empty snapshot until ReviewSnapshot.assemble lands"))
+    @Test("Review Anyway takes a failed agent's changes to review")
     func reviewAnyway() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
@@ -810,8 +809,7 @@ struct JobCenterTests {
         #expect(job.pullRequest.title.hasPrefix("[fix] Page"))
     }
 
-    @Test("Review Anyway takes the changes of an agent a quit or Cancel stopped to review",
-          .disabled("needs Track A: an empty snapshot until ReviewSnapshot.assemble lands"))
+    @Test("Review Anyway takes the changes of an agent a quit or Cancel stopped to review")
     func reviewAnywayAfterCancel() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")

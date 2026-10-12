@@ -474,8 +474,7 @@ struct ReviewSnapshotIntegrationTests {
             "the scratch stays on disk")
     }
 
-    @Test("the snapshot reports exactly the two files, with a stable digest",
-          .disabled("needs Track A: ReviewSnapshot.assemble and GitNameStatus"))
+    @Test("the snapshot reports exactly the two files, with a stable digest")
     func snapshot() async throws {
         guard let (scene, job) = try await Self.editedScene() else { return }
         defer { scene.delete() }
@@ -497,8 +496,7 @@ struct ReviewSnapshotIntegrationTests {
         #expect(job.review?.digest == review.digest)
     }
 
-    @Test("an agent's commit shows in the review, collapsed onto the base",
-          .disabled("needs Track A: ReviewSnapshot.assemble and GitNameStatus"))
+    @Test("an agent's commit shows in the review, collapsed onto the base")
     func agentCommit() async throws {
         guard let (scene, job) = try await Self.editedScene() else { return }
         defer { scene.delete() }

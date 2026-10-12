@@ -60,7 +60,10 @@ extension AppModel {
         guard let gh = tools.path(for: .gh) else {
             return .failure(JobError(CorrectionBlockers.ghMissing))
         }
-        let body = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A body that ends inside a fence or a comment would swallow the
+        // footer; close it first, as a pull request's body is.
+        let body = PullRequestDraft.closingOpenBlock(
+            draft.body.trimmingCharacters(in: .whitespacesAndNewlines))
             + "\n\n" + issueFooter(marker: draft.marker)
         let found = PrivateText.findings(
             in: title + "\n" + body, privatePaths: jobCenter.environment().privatePaths)
