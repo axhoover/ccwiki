@@ -3,9 +3,6 @@ import Foundation
 // What a correction is about: the page, the section, the source lines and
 // the passage as the reader showed it (plans/corrections.md §3.5), and the
 // small types the three routes share (§11.6).
-//
-// Phase 0 declares these; Track C fills `make`, `ReaderSelection`'s
-// decoding and `CorrectionBlockers` (§11.4).
 
 /// Lines of a file: 1-based, inclusive.
 struct LineRange: Codable, Sendable, Hashable {
@@ -73,16 +70,112 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
     /// the heading at the top of the viewport, used when there is no
     /// selection and no pointer.
     ///
-    /// Phase 0: always the whole page; Track C maps the selection (§3.4).
+    /// `fileText` and `renderedMarkdown` must be the ones that were shown:
+    /// the file at `baseCommit`, and the markdown the reader last rendered
+    /// from it. The lines a selection reports are lines of that markdown.
+    ///
+    /// A pointer, a right-click with nothing selected, names a block, not a
+    /// passage: the target is the whole page, in the pointer's section, so
+    /// the editor opens there. A passage whose lines cannot be mapped keeps
+    /// its quote, for the whole page.
     static func make(
         page: WikiPage, fileText: String, renderedMarkdown: String,
         baseCommit: String, selection: ReaderSelection?,
         readingHeading: Section?
     ) -> CorrectionTarget {
-        CorrectionTarget(
+        var target = CorrectionTarget(
             pagePath: page.path, pageTitle: page.displayTitle, baseCommit: baseCommit,
             section: selection?.heading ?? readingHeading, lines: nil, region: .body,
             quote: nil, excerpt: nil)
+        guard let selection, let text = selection.text else { return target }
+
+        target.quote = Self.quoted(text)
+        let map = SourceLineMap(fileText: fileText, renderedMarkdown: renderedMarkdown)
+        switch map.location(ofRendered: selection.renderedLines) {
+        case .body(let lines):
+            target.lines = lines
+            target.region = GeneratedRegions(fileText).overlap(lines) ? .generated : .body
+            target.excerpt = Self.text(of: lines, in: fileText)
+        case .frontmatter(let lines):
+            target.lines = lines
+            target.region = .frontmatter
+            target.excerpt = Self.text(of: lines, in: fileText)
+        case nil:
+            break
+        }
+        return target
+    }
+
+    /// The target when the file the reader showed cannot be read: a
+    /// snapshot whose marker has moved since the render, or a revision git
+    /// cannot show. The whole page at `head`, in the section the selection
+    /// or the reader was in; nothing selected is carried over (§3.5).
+    static func fallback(
+        page: WikiPage, head: String, selection: ReaderSelection?, readingHeading: Section?
+    ) -> CorrectionTarget {
+        CorrectionTarget(
+            pagePath: page.path, pageTitle: page.displayTitle, baseCommit: head,
+            section: selection?.heading ?? readingHeading, lines: nil, region: .body,
+            quote: nil, excerpt: nil)
+    }
+
+    /// What the sheet says when `fallback` stood in for a passage.
+    static let fallbackNotice =
+        "The page changed since it was shown; the selection was not carried over."
+
+    /// Whether the file on disk is the one the reader showed at `revision`:
+    /// the copy, a snapshot or a clone, is still at it. A render with no
+    /// revision (a copy that has none) was of the disk.
+    static func diskShows(revision: String?, current: String?) -> Bool {
+        revision == nil || revision == current
+    }
+
+    /// The passage as the reader showed it, trimmed, and at most
+    /// `quoteLimit` characters.
+    static func quoted(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(quoteLimit))
+    }
+
+    /// The file's `lines`, verbatim, without their final line break. Nil
+    /// when the file has none of them.
+    static func text(of lines: LineRange, in fileText: String) -> String? {
+        let all = SourceLineMap.lines(of: Substring(fileText))
+        let first = max(lines.first, 1) - 1
+        let last = min(lines.last, all.count) - 1
+        guard first <= last else { return nil }
+        return all[first...last].joined(separator: "\n")
+    }
+}
+
+/// The regions a page's "Participates in" section is generated into, from
+/// the reduction pages, by the wiki's own script: 1-based file lines, the
+/// markers included. A correction must not edit one by hand (§3.5).
+struct GeneratedRegions: Sendable, Equatable {
+    static let begin = "<!-- BEGIN GENERATED participates-in"
+    static let end = "<!-- END GENERATED participates-in"
+
+    let regions: [LineRange]
+
+    init(_ fileText: String) {
+        var regions: [LineRange] = []
+        var open: Int?
+        for (index, line) in SourceLineMap.lines(of: Substring(fileText)).enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(Self.begin) {
+                open = index + 1
+            } else if trimmed.hasPrefix(Self.end), let first = open {
+                regions.append(LineRange(first: first, last: index + 1))
+                open = nil
+            }
+        }
+        self.regions = regions
+    }
+
+    /// Whether any of `lines` is inside a region.
+    func overlap(_ lines: LineRange) -> Bool {
+        regions.contains { $0.overlaps(lines) }
     }
 }
 
@@ -113,15 +206,47 @@ struct ReaderSelection: Sendable, Equatable {
     }
 
     /// `CCwiki.selectionSource()`: nil for "null" or anything malformed.
-    /// Phase 0: always nil.
     init?(json: String) {
-        return nil
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed),
+              let message = object as? [String: Any]
+        else { return nil }
+        self.init(message: message)
     }
 
-    /// The `contextTarget` message's `selection`; `NSNull` reads as absent.
-    /// Phase 0: always nil.
+    /// The `contextTarget` message's `selection`, which `ccwiki.js` writes
+    /// as `{start, end, text, heading: {id, text, level}, path, revision}`.
+    /// `NSNull`, as a JavaScript `null` arrives, reads as absent: a null
+    /// `text` is a pointer, a null `heading` no section. Nil without a page
+    /// or a range of at least one line.
     init?(message: [String: Any]) {
-        return nil
+        guard let start = Self.integer(message["start"]),
+              let end = Self.integer(message["end"]),
+              start >= 0, end > start,
+              let path = message["path"] as? String, !path.isEmpty
+        else { return nil }
+        let text = (message["text"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let heading = (message["heading"] as? [String: Any]).flatMap(Self.section(from:))
+        let revision = (message["revision"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        self.init(
+            renderedLines: start..<end, text: text, heading: heading, path: path,
+            revision: revision)
+    }
+
+    /// A whole number from a bridge message or parsed JSON, where every
+    /// number is an `NSNumber`: the cast to `Int` is exact, so a fraction,
+    /// a string or `NSNull` is nil.
+    private static func integer(_ value: Any?) -> Int? {
+        value as? Int
+    }
+
+    /// `{id, text, level}`, as the outline reports a heading.
+    private static func section(from heading: [String: Any]) -> CorrectionTarget.Section? {
+        guard let id = heading["id"] as? String, !id.isEmpty,
+              let level = integer(heading["level"]), (1...6).contains(level)
+        else { return nil }
+        let title = (heading["text"] as? String) ?? ""
+        return CorrectionTarget.Section(id: id, title: title, level: level)
     }
 }
 
@@ -165,12 +290,15 @@ struct CorrectionSheetRequest: Identifiable, Sendable {
     let id: UUID
     let kind: Kind
     let target: CorrectionTarget
+    /// A line the sheet shows above its fields: why the target is not what
+    /// was selected (§3.5).
+    var notice: String? = nil
 }
 
 extension CorrectionSheetRequest {
     /// A new request, with an identity of its own.
-    init(_ kind: Kind, target: CorrectionTarget) {
-        self.init(id: UUID(), kind: kind, target: target)
+    init(_ kind: Kind, target: CorrectionTarget, notice: String? = nil) {
+        self.init(id: UUID(), kind: kind, target: target, notice: notice)
     }
 }
 
@@ -185,13 +313,48 @@ struct EditorTarget: Codable, Hashable, Sendable {
 /// Why a route cannot start here, in the order the sheet lists them.
 enum CorrectionBlockers {
 
-    /// Pure. Local conditions only; GitHub is `GitHubAccess`'s.
-    /// Phase 0: nothing yet.
+    /// A copy fetched as a tarball, because git was missing (§3.6). Editing
+    /// and an agent both need a worktree, which needs a clone.
+    static let snapshot = "This copy of the wiki is a snapshot. Sync (⌘R) to replace it "
+        + "with a git clone."
+    static let notDownloaded = "The wiki has not been downloaded yet. Sync (⌘R) first."
+    static let gitMissing = "git was not found. Editing needs Apple's Command Line Tools; "
+        + "Settings > Jobs has the installer."
+    static let claudeMissing = "claude was not found. It drafts the edit; install the claude CLI, "
+        + "or edit the page yourself."
+    static let ghMissing = "gh was not found. It opens the issue; install it with Homebrew "
+        + "(brew install gh)."
+    /// Route b on a generated passage (§8.1): the agent cannot run the
+    /// script that writes it.
+    static let generated = "This passage is generated from the reduction pages. Open an issue, "
+        + "or edit the reduction page it links to."
+
+    /// Pure. Local conditions only; GitHub is `GitHubAccess`'s, and is never
+    /// listed here: editing needs no network, and the reader is built to
+    /// work offline.
     static func list(
         route: CorrectionRoute, region: CorrectionTarget.Region,
         gitPresent: Bool, claudePresent: Bool, ghPresent: Bool,
         store: AppPaths.WikiStore
     ) -> [String] {
-        []
+        var blockers: [String] = []
+        switch route {
+        case .edit, .describe:
+            if !gitPresent { blockers.append(gitMissing) }
+            switch store {
+            case .git: break
+            case .snapshot: blockers.append(snapshot)
+            case .none: blockers.append(notDownloaded)
+            }
+            if route == .describe {
+                if !claudePresent { blockers.append(claudeMissing) }
+                if region != .body { blockers.append(generated) }
+            }
+        case .issue:
+            // A snapshot's marker names its commit, which the permalink
+            // uses: an issue needs only gh.
+            if !ghPresent { blockers.append(ghMissing) }
+        }
+        return blockers
     }
 }
