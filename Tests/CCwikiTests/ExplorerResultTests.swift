@@ -755,6 +755,44 @@ struct ExplorerResultTests {
         #expect(row.links.count == 3)
     }
 
+    @Test("entries on one step that quote one sentence show it once, and their rows differ")
+    func sharedQuotes() throws {
+        let derivation = try AdjustmentsFixture.conjunctionDerivation()
+        let page = "JL21: Xi + Psi ⇒ Chi"
+        let hardness = "“Assume sub-exponential hardness of the following:” — \(page) § Statement"
+        let xi = "“Xi with secret dimension k” — \(page) § Statement"
+        let psi = "“Psi over a prime field” — \(page) § Statement"
+        let both = "“requires sub-exponential hardness of both hypotheses” — \(page)"
+
+        // Refused for both hypotheses: one row, each quote on it once.
+        let refused = Self.compute(ExplorerQuery(from: ["a", "b"], to: "chi"), over: derivation)
+        let row = try #require(refused.sections.first { $0.id == "refused" }?.rows.first)
+        #expect(row.notes == [hardness, xi, both, psi])
+        let targets = row.links.map { $0.target }
+        let statement = ExplorerRow.Target.section(path: "Reductions/red-xi-and-psi-to-chi.md",
+                                                   anchor: "statement")
+        #expect(targets == [statement])
+
+        // Assumed of both givens: an item each, which the hypothesis names.
+        let assumed = Self.compute(ExplorerQuery(from: ["xi", "psi"], to: "chi"), over: derivation)
+        let rows = try #require(Self.adjustments(assumed)).rows
+        let titles = rows.map { $0.title }
+        #expect(titles == ["Xi ∧ Psi ⇒ Chi (JL21) · Xi", "Xi ∧ Psi ⇒ Chi (JL21) · Psi"])
+        let notes = rows.map { $0.notes }
+        #expect(notes == [[hardness, xi, both], [hardness, psi, both]])
+
+        // Two quotes gone from one page: the page is named once.
+        var drifted = derivation
+        drifted.unverifiedCitations = [AdjustmentsFixture.hardnessStatement,
+                                       AdjustmentsFixture.xiStatement]
+        let gone = Self.compute(ExplorerQuery(from: ["xi", "psi"], to: "chi"), over: drifted)
+        let goneRows = try #require(Self.adjustments(gone)).rows
+        let missing = "No longer on \(page) as quoted; CCwiki still applies this as reviewed at "
+            + "wiki ab81f02."
+        let goneNotes = goneRows.map { $0.notes }
+        #expect(goneNotes == [[missing, both], [missing, psi, both]])
+    }
+
     @Test("no adjustment repeats a refused row or a verdict line")
     func adjustmentsSayEachThingOnce() throws {
         let derivation = try AdjustmentsFixture.derivation()

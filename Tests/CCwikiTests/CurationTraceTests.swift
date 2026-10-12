@@ -118,6 +118,67 @@ struct CurationTraceTests {
         #expect(try Self.effects(trace) == expected)
     }
 
+    @Test("a step refused on the way that the stronger proof uses is not 'not used here' on the shortest")
+    func refusedOnTheStrongerProof() throws {
+        // H ⇒ C needs H in full, which R ⇒ H gives and the unstated P ⇒ H
+        // does not. The main closure has H from P ⇒ H at layer 2, refuses
+        // H ⇒ C at layer 3 and reaches C through E at layer 4. Without P ⇒ H
+        // the fully black-box engine has H from R ⇒ H, and H ⇒ C fires: the
+        // stronger proof uses the step the shortest one's closure refused.
+        let objects: [[String: Any]] = [
+            ExplorerFixture.object("s", title: "Sigma"), ExplorerFixture.object("p", title: "Pi"),
+            ExplorerFixture.object("q", title: "Kappa"), ExplorerFixture.object("r", title: "Rho"),
+            ExplorerFixture.object("h", title: "Eta"), ExplorerFixture.object("e", title: "Epsilon"),
+            ExplorerFixture.object("c", title: "Chi"),
+        ]
+        let reductions: [[String: Any]] = [
+            ExplorerFixture.reduction("red-s-to-p", ["s"], "p", title: "S ⇒ P", source: "SP01"),
+            ExplorerFixture.reduction("red-p-to-h", ["p"], "h", title: "P ⇒ H", source: "PH02",
+                                      reductionClass: "unstated"),
+            ExplorerFixture.reduction("red-s-to-q", ["s"], "q", title: "S ⇒ Q", source: "SQ03"),
+            ExplorerFixture.reduction("red-q-to-r", ["q"], "r", title: "Q ⇒ R", source: "QR04"),
+            ExplorerFixture.reduction("red-r-to-h", ["r"], "h", title: "R ⇒ H", source: "RH05"),
+            ExplorerFixture.reduction("red-h-to-c", ["h"], "c", title: "H ⇒ C", source: "HC06"),
+            ExplorerFixture.reduction("red-h-to-e", ["h"], "e", title: "H ⇒ E", source: "HE07"),
+            ExplorerFixture.reduction("red-e-to-c", ["e"], "c", title: "E ⇒ C", source: "EC08"),
+        ]
+        let requirement = DerivationCuration.Requirement(
+            relationID: "red-h-to-c", isReverse: false, hypothesis: "h", notion: "h in full",
+            metBy: ["red-r-to-h"])
+        let manifest = try ExplorerFixture.manifest(objects: objects, reductions: reductions)
+        let derivation = Derivation(manifest: manifest,
+                                    curation: DerivationCuration(requires: [requirement]))
+
+        let closure = derivation.closure(from: ["s"], options: .standard)
+        #expect(closure.refused.map { $0.step.relationID } == ["red-h-to-c"])
+        let answer = derivation.answer(from: ["s"], to: "c", options: .standard)
+        let derived = try #require(answer.derivedAnswer)
+        let stronger = try #require(derived.stronger)
+        #expect(derived.proof.relationIDs == ["red-e-to-c", "red-h-to-e", "red-p-to-h", "red-s-to-p"])
+        #expect(stronger.proof.relationIDs == ["red-h-to-c", "red-q-to-r", "red-r-to-h", "red-s-to-q"])
+
+        let shortest = CurationTrace.derived(derived.proof, other: stronger.proof, closure: closure,
+                                             start: ["s"], derivation: derivation)
+        #expect(shortest.isEmpty)
+        // With no other proof to look at, the same refusal would read "not
+        // used here" about the step Show It then displays.
+        let alone = CurationTrace.derived(derived.proof, other: nil, closure: closure,
+                                          start: ["s"], derivation: derivation)
+        let notUsed: [Effect] = [
+            .notUsedHere(relationID: "red-h-to-c", isReverse: false, hypothesis: "h",
+                         producer: "red-p-to-h"),
+        ]
+        #expect(try Self.effects(alone) == notUsed)
+
+        let strong = CurationTrace.derived(stronger.proof, other: derived.proof, closure: closure,
+                                           start: ["s"], derivation: derivation)
+        let established: [Effect] = [
+            .establishedBy(relationID: "red-h-to-c", isReverse: false, hypothesis: "h",
+                           producer: "red-r-to-h"),
+        ]
+        #expect(try Self.effects(strong) == established)
+    }
+
     @Test("a weaker result is kept apart, and the step that accepts it is named, in one item")
     func weakening() throws {
         let derivation = try Fx.derivation()
@@ -147,6 +208,34 @@ struct CurationTraceTests {
         // SIS ⇒ ISIS is the direction the record's class covers.
         let reverse = try Self.trace(["sis"], "isis", over: derivation)
         #expect(reverse.isEmpty)
+    }
+
+    @Test("a stub equivalence is not traced: R3 leaves its class unstated both ways")
+    func stubEquivalence() throws {
+        // The curation reviewed T ⇔ A's directions, but a stub's class is
+        // not evidence, so neither direction has the record's class.
+        var stub = ExplorerFixture.reduction("red-t-eq-a", ["t"], "a", title: "T ⇔ A",
+                                             source: "TA05", kind: "equivalence")
+        stub["status"] = "stub"
+        let objects: [[String: Any]] = [
+            ExplorerFixture.object("a", title: "Alpha"), ExplorerFixture.object("t", title: "Tau"),
+        ]
+        let equivalences = [
+            "red-t-eq-a": DerivationCuration.Directions(forward: "record", reverse: "unstated"),
+        ]
+        let derivation = Derivation(
+            manifest: try ExplorerFixture.manifest(objects: objects, reductions: [stub]),
+            curation: DerivationCuration(equivalences: equivalences))
+
+        // Stubs are used only with the idealised models included.
+        let answer = derivation.answer(from: ["a"], to: "t", options: .all)
+        let derived = try #require(answer.derivedAnswer)
+        #expect(derived.proof.reverseRelationIDs == ["red-t-eq-a"])
+        let trace = CurationTrace.derived(
+            derived.proof, other: derived.stronger?.proof,
+            closure: derivation.closure(from: ["a"], options: .all), start: ["a"],
+            derivation: derivation)
+        #expect(trace.isEmpty)
     }
 
     @Test("a refuted start and a setting are traced, with a derivation and without one")
@@ -424,6 +513,53 @@ enum AdjustmentsFixture {
                 metBy: ["red-a-to-y"]))
         }
         let curation = DerivationCuration(equivalences: equivalences, requires: requires)
+        return Derivation(manifest: try E.manifest(objects: objects, reductions: reductions),
+                          curation: curation)
+    }
+
+    static let conjunctionPage = "content/Reductions/red-xi-and-psi-to-chi.md"
+    static let hardnessStatement = Citation(
+        page: conjunctionPage, section: "Statement",
+        quote: "Assume sub-exponential hardness of the following:")
+    static let xiStatement = Citation(page: conjunctionPage, section: "Statement",
+                                      quote: "Xi with secret dimension k")
+    static let psiStatement = Citation(page: conjunctionPage, section: "Statement",
+                                       quote: "Psi over a prime field")
+    static let hardnessNote = Citation(
+        page: conjunctionPage, section: nil,
+        quote: "requires sub-exponential hardness of both hypotheses")
+
+    /// One step with a precondition on each of its hypotheses, whose entries
+    /// quote the same sentences of its page, as JLS21's four do. Xi ∧ Psi ⇒
+    /// Chi needs both sub-exponentially hard: from Xi and Psi it holds
+    /// assuming both, and from A and B, whose steps establish neither, it is
+    /// refused for both.
+    static func conjunctionDerivation() throws -> Derivation {
+        typealias E = ExplorerFixture
+        let objects: [[String: Any]] = [
+            E.object("a", title: "Alpha"), E.object("b", title: "Beta"), E.object("xi", title: "Xi"),
+            E.object("psi", title: "Psi"), E.object("chi", title: "Chi"),
+        ]
+        let step = "red-xi-and-psi-to-chi"
+        let reductions: [[String: Any]] = [
+            E.reduction("red-a-to-xi", ["a"], "xi", title: "A ⇒ Xi", source: "AX08"),
+            E.reduction("red-b-to-psi", ["b"], "psi", title: "B ⇒ Psi", source: "BP09"),
+            E.reduction(step, ["xi", "psi"], "chi", title: "Xi + Psi ⇒ Chi", source: "JL21"),
+        ]
+        let requires: [DerivationCuration.Requirement] = [
+            .init(relationID: step, isReverse: false, hypothesis: "xi",
+                  notion: "sub-exponentially hard Xi", metBy: []),
+            .init(relationID: step, isReverse: false, hypothesis: "psi",
+                  notion: "sub-exponentially hard Psi", metBy: []),
+        ]
+        let citations: [Key: [Citation]] = [
+            .requirement(relationID: step, isReverse: false, hypothesis: "xi"):
+                [hardnessStatement, xiStatement, hardnessNote],
+            .requirement(relationID: step, isReverse: false, hypothesis: "psi"):
+                [hardnessStatement, psiStatement, hardnessNote],
+        ]
+        let curation = DerivationCuration(requires: requires, citations: citations,
+                                          reviewedCommit: reviewedCommit)
         return Derivation(manifest: try E.manifest(objects: objects, reductions: reductions),
                           curation: curation)
     }

@@ -463,7 +463,9 @@ row whose status is quarantined, keep their sentence and gain the entry's
 citation notes and links (row anatomy below). The entry is the
 `.requirement(relationID:isReverse:hypothesis:)` of the refused step, the
 `.weakening(relationID:)` of the producer, or the `.quarantine` of the
-step. R5 refusals are not curation and are unchanged.
+step. R5 refusals are not curation and are unchanged. A step refused
+for several entries shows each note once: JLS21's entries all quote "Assume
+sub-exponential hardness of the following:".
 
 **The section "Adjustments"** (`id: "adjustments"`). A pure
 function, `CurationTrace` (§6.4), reads the answer the explorer already
@@ -478,7 +480,7 @@ the verdict that describes the proof shown (`ExplorerResult.Stronger`).
 | established by | a requirement on a proof row's step that the row does not assume; the producer is the step of the child row for that hypothesis | `.requirement(…)` |
 | kept apart | a proof row with a `weakening` | `.weakening(relationID:)` of that row's step |
 | accepted | a proof row whose child row is weakened | `.weakening(relationID:)` of the child's step |
-| unstated direction | a step on an equivalence whose `equivalences` entry marks that direction anything but `record`, when the manifest has no `reverseClass` for it (today only ISIS ⇒ SIS) | `.equivalence(relationID:)` |
+| unstated direction | a step on an equivalence whose `equivalences` entry marks that direction anything but `record`, when the manifest has no `reverseClass` for it and the reduction is not a stub, whose class R3 leaves unstated both ways (today only ISIS ⇒ SIS) | `.equivalence(relationID:)` |
 | not used here | a step in `closure.refused` with a `.requires` reason, whose conclusion is an object on the shown proof, and whose (relation, direction) is on **neither** proof | `.requirement(…)` |
 | vacuous | a start with a `refuted` entry, when the manifest records no `refutedBy` on it | `.refuted(objectID:)` |
 | setting | a start with a `settings` entry | `.setting(objectID:)` |
@@ -514,7 +516,11 @@ immediately before `result.initiallyCollapsed` is computed.
 already states gets no sentence of its own:
 
 - *assumed* and *kept apart*: the proof row already says "assuming …" or
-  "only …". The item's title is the step, `writer.stepText(step)`.
+  "only …". The item's title is the step, `writer.stepText(step)`. A step
+  with a precondition on more than one hypothesis has an item for each
+  (Wat09's DBDH and DLIN, JLS21's four), so an assumed item's title adds
+  the hypothesis, `<step> · <writer.label(hypothesis)>`, and the items
+  differ.
 - *vacuous* and *setting*: the verdict lines already say so. The title is
   `writer.label(objectID)`.
 - The other effects have a sentence (table below). An item's title is its
@@ -550,7 +556,9 @@ case in `follow`.
   checks every citation against the clone. A citation that is missing reads
   "No longer on <page title> as quoted; CCwiki still applies this as
   reviewed at wiki <first 7 of `reviewedAgainst.wikiCommit`>." in place of
-  its quote, and the row help loses its second sentence.
+  its quote, and the row help loses its second sentence. That note names
+  only the page, so two missing quotes on one page give one line: a row
+  never shows the same note twice.
 - `links`: one per distinct cited page, titled by the page: a reduction by
   `writer.reductionName`, a barrier by `writer.barrierTitle`, an object page
   by its label, and any other page by its file name without `.md`. Each
@@ -585,9 +593,9 @@ and the explorer is one click away (Show Proof).
 | The review document: a quote with `$\ZZ_p^*$`, `**` and `[[a\|b]]` comes out inside a fence unchanged; a cell with `\|` and `*` is escaped; `--selftest` finds non-zero effects for `refuted:ssddh` and `settings:honest-majority-t-lt-n-over-2`, and BM84's 32 removals | Python `--selftest-units` and `--selftest` (A1) |
 | The review document is current | `CurationReviewTests` (A1) |
 | Quotes are still on their pages; curated edges unchanged | `DerivationCorpusTests` (A2), gated on `CCWIKI_WIKI` |
-| The trace, on fixtures: each effect of the table; an established-by producer named; "not used here" only when the refused step concludes a node on the proof and is on neither proof (a fixture where a step blocked on a weak input later fires); two proofs that use different entries give different traces; a manifest refutation gives no item; one item per entry; curation order; empty for a proof that touches no entry | `CurationTraceTests` (C), on `ExplorerFixture` plus a small curation with citations |
+| The trace, on fixtures: each effect of the table; an established-by producer named; "not used here" only when the refused step concludes a node on the proof and is on neither proof (a fixture where a step blocked on a weak input later fires, and one where the stronger proof uses a step the main closure refused); a stub equivalence gives no item; two proofs that use different entries give different traces; a manifest refutation gives no item; one item per entry; curation order; empty for a proof that touches no entry | `CurationTraceTests` (C), on `ExplorerFixture` plus a small curation with citations |
 | `plainQuote` on BM84's quote and the OT page's "Malicious Security" quote | `CurationTraceTests` |
-| `sections.last?.id == "adjustments"` for a derivable and a no-path answer; Show It swaps, removes or adds the section; a refused row carries its quotes and links; no adjustment row's title equals a refused row's or a verdict line's text; a missing quote's note; CCwiki's template sentences, rendered with fixture notions, contain none of `\b(caveat\|error\|errors\|fix\|fixes\|fixed\|correction\|corrections)\b` (case-insensitive; notes and links excluded) | `ExplorerResultTests` (C) |
+| `sections.last?.id == "adjustments"` for a derivable and a no-path answer; Show It swaps, removes or adds the section; a refused row carries its quotes and links; entries on one step that share a quote show it once, and their assumed items have different titles; no adjustment row's title equals a refused row's or a verdict line's text; a missing quote's note; CCwiki's template sentences, rendered with fixture notions, contain none of `\b(caveat\|error\|errors\|fix\|fixes\|fixed\|correction\|corrections)\b` (case-insensitive; notes and links excluded) | `ExplorerResultTests` (C) |
 
 ## 3. Copy a proof
 

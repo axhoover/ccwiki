@@ -35,7 +35,8 @@ extension ExplorerWriter {
     /// one link per page they are on, for a refused row, a recorded-on-pair
     /// row or an adjustment row. A quote the clone's page no longer has is
     /// not shown as the wiki's: its note says so, and that CCwiki still
-    /// applies the entry as reviewed.
+    /// applies the entry as reviewed. Each note is there once: that note
+    /// names only the page, so two quotes gone from one page say it once.
     func curationEvidence(_ key: DerivationCuration.Entry.Key,
                           rowID: String) -> (notes: [String], links: [ExplorerRow.Link]) {
         guard let entry = derivation.curation.entry(key) else { return ([], []) }
@@ -45,13 +46,15 @@ extension ExplorerWriter {
         for citation in entry.cites {
             let path = citation.contentPath
             let page = citedPageTitle(path)
+            let note: String
             if derivation.unverifiedCitations.contains(citation) {
-                notes.append(DerivationWording.unverifiedQuote(
-                    pageTitle: page, commit: derivation.curation.reviewedCommit))
+                note = DerivationWording.unverifiedQuote(
+                    pageTitle: page, commit: derivation.curation.reviewedCommit)
             } else {
                 let place = citation.section.map { page + " § " + RelationText.plain($0) } ?? page
-                notes.append("“" + CurationTrace.plainQuote(citation.quote) + "” — " + place)
+                note = "“" + CurationTrace.plainQuote(citation.quote) + "” — " + place
             }
+            if !notes.contains(note) { notes.append(note) }
             if !pages.contains(path) { pages.append(path) }
             if sections[path] == nil, let section = citation.section { sections[path] = section }
         }
@@ -161,18 +164,24 @@ extension ExplorerWriter {
         }
     }
 
-    /// What an effect is about: its step, or the start it concerns.
+    /// What an effect is about: its step, or the start it concerns. A step
+    /// with a precondition on more than one hypothesis has an item for each,
+    /// as Wat09's DBDH and DLIN do, so an assumed one names its hypothesis
+    /// too: `DBDH ∧ DLIN ⇒ IBE (Wat09) · DBDH`.
     private func adjustmentSubject(_ effect: CurationTrace.Effect) -> String {
         switch effect {
-        case .assumed(let relationID, let isReverse, _),
-             .establishedBy(let relationID, let isReverse, _, _),
+        case .assumed(let relationID, let isReverse, let hypothesis):
+            let step = stepName(relationID, isReverse: isReverse)
+            let requirements = derivation.curation.requirements(on: relationID, isReverse: isReverse)
+            return requirements.count > 1 ? step + " · " + label(hypothesis) : step
+        case .establishedBy(let relationID, let isReverse, _, _),
              .notUsedHere(let relationID, let isReverse, _, _),
              .unstatedDirection(let relationID, let isReverse):
-            stepName(relationID, isReverse: isReverse)
+            return stepName(relationID, isReverse: isReverse)
         case .keptApart(let relationID), .accepted(let relationID, _):
-            stepName(relationID, isReverse: false)
+            return stepName(relationID, isReverse: false)
         case .vacuous(let objectID), .setting(let objectID):
-            label(objectID)
+            return label(objectID)
         }
     }
 

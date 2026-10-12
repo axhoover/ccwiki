@@ -479,10 +479,12 @@ struct ExplorerWriter: Sendable {
                 target: .page(barrier.path)))
         }
 
+        // The entries on one step often quote the same sentence of its page,
+        // as JLS21's four hypotheses do: each line once.
         var notes: [String] = []
         for key in entries {
             let evidence = curationEvidence(key, rowID: id + "/" + key.id)
-            notes += evidence.notes
+            for note in evidence.notes where !notes.contains(note) { notes.append(note) }
             links = Self.merging(evidence.links, into: links)
         }
 
