@@ -551,16 +551,25 @@ final class AppModel {
             // headings — both cheap, but neither belongs on the main actor.
             let manifest = RelationsManifest.load(cloneRoot: cloneRoot)
             let labels = RelationLabels(manifest: manifest, index: index)
+            // Every single-object closure in both model settings, the
+            // derived barriers and the inspector's lookups: a few
+            // milliseconds, and it must match this manifest exactly.
+            var derivation = Derivation(manifest: manifest)
+            // The bundled curation stays as reviewed while the wiki syncs
+            // daily, so each quote it cites is checked against this clone's
+            // page (about 30 small files), and one that has left its page is
+            // never shown as the page's text (relations-followups.md §2.5).
+            let missing = derivation.missingQuotes { path in
+                try? String(contentsOf: contentRoot.appending(path: path), encoding: .utf8)
+            }
+            derivation.unverifiedCitations = Set(missing.map(\.citation))
             return LoadedLibrary(
                 index: index,
                 backlinks: index.backlinkMap(),
                 manifest: manifest,
                 labels: labels,
                 textGrep: TextGrep(pages: index.allPages),
-                // Every single-object closure in both model settings, the
-                // derived barriers and the inspector's lookups: a few
-                // milliseconds, and it must match this manifest exactly.
-                derivation: Derivation(manifest: manifest),
+                derivation: derivation,
                 linkPreviews: LinkPreviews(index: index, manifest: manifest, labels: labels))
         }.value
 

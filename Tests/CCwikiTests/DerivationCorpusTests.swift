@@ -16,7 +16,9 @@ import Testing
 /// 2. **Drifted, within tolerance.** A hash differs, but objects, reductions
 ///    and barriers are each within the golden file's tolerance of its counts:
 ///    the invariants and sentinels recomputed on this manifest, each record's
-///    `stable` fields, the mutations' invariants and the Statement lint.
+///    `stable` fields, the mutations' invariants, the Statement lint, and
+///    the curation's two checks against the wiki's head: every quote still
+///    on its page, every curated edge the theorem it was reviewed as.
 /// 3. **Drifted beyond tolerance.** Skipped, with the golden commit and counts
 ///    beside the clone's printed once.
 struct DerivationCorpusTests {
@@ -103,11 +105,11 @@ struct DerivationCorpusTests {
             let target = mutation["target"]?.string ?? ""
             let toggle = mutation["includeIdealised"]?.bool ?? false
 
-            let missingBarriers = GoldenPatch.barrierIDs(in: patch).filter { barrierID in
-                !corpus.manifest.barriers.contains { $0.id == barrierID }
-            }
-            guard missingBarriers.isEmpty else {
-                #expect(!corpus.isExact, "\(id) patches \(missingBarriers), which the manifest lacks")
+            let present = Set(corpus.manifest.barriers.map { $0.id })
+                .union(corpus.manifest.reductions.map { $0.id })
+            let missing = GoldenPatch.patchedIDs(in: patch).filter { !present.contains($0) }
+            guard missing.isEmpty else {
+                #expect(!corpus.isExact, "\(id) patches \(missing), which the manifest lacks")
                 continue
             }
             let patched = GoldenPatch.apply(patch, to: corpus.rawManifest)
@@ -141,6 +143,10 @@ struct DerivationCorpusTests {
                 let expectedCount = mutation["derivedBarrierCount"]?.int
                 let count = derivation.derivedBarriers.count
                 #expect(count == expectedCount, "\(id): derived barriers")
+                // The upstream fields' mutations name the entry they
+                // supersede; the others, none.
+                let superseded = derivation.sentinels().superseded
+                #expect(superseded == mutation["superseded"]?.strings, "\(id): superseded entries")
             }
             replayed += 1
         }
@@ -261,10 +267,17 @@ struct DerivationCorpusTests {
             let expectedSentinels = corpus.golden["sentinels"]?.bools
             #expect(invariants.byName == expectedInvariants)
             #expect(sentinels.byName == expectedSentinels)
-        } else if !sentinels.equivalencesReviewed {
-            // A warning only: an unreviewed equivalence is already unstated
-            // both ways.
-            print("derivations corpus: unreviewed equivalences \(sentinels.unreviewedEquivalences)")
+        } else {
+            // Warnings only: an unreviewed equivalence is already unstated
+            // both ways, and a superseded entry says what the record now
+            // says itself, so it is one to retire (plans/wiki-asks.md).
+            if !sentinels.equivalencesReviewed {
+                print("derivations corpus: unreviewed equivalences \(sentinels.unreviewedEquivalences)")
+            }
+            if !sentinels.curationSuperseded {
+                print("derivations corpus: the manifest now records what these curation entries say; "
+                    + "retire them: \(sentinels.superseded)")
+            }
         }
         print("derivations corpus, \(corpus.modeName): invariants "
             + (invariants.byName.values.allSatisfy { $0 } ? "hold" : "FAIL")
@@ -281,6 +294,75 @@ struct DerivationCorpusTests {
         }
         let described = hits.map { "\($0.relationID) \($0.hypotheses) names \($0.unlisted)" }
         #expect(hits.isEmpty, "possible dropped conjuncts: \(described)")
+    }
+
+    /// `curationQuotesFound` (relations-followups.md §2.4): the wiki's review
+    /// rounds rewrite Statements, so this fails CI from time to time, by
+    /// design. The fix is a re-review of the named entries against the page,
+    /// never a quote copied over to make it pass.
+    @Test("every quote the curation cites is still on its page",
+          .enabled(if: DerivationCorpusTests.state.runs, DerivationCorpusTests.state.skipComment))
+    func curationQuotesFound() throws {
+        let corpus = try loadedCorpus()
+        let content = corpus.cloneRoot.appending(path: "content")
+        let missing = corpus.derivation.missingQuotes { path in
+            try? String(contentsOf: content.appending(path: path), encoding: .utf8)
+        }
+        let described = missing.map { quote in
+            let section = quote.citation.section.map { " § \($0)" } ?? ""
+            return "\(quote.entryID): \(quote.citation.page)\(section): “\(quote.citation.quote)”"
+        }
+        #expect(missing.isEmpty, "quotes no longer on their pages; re-review these entries: \(described)")
+        let cited = corpus.curation.entries.reduce(0) { $0 + $1.cites.count }
+        print("derivations corpus, \(corpus.modeName): \(cited - missing.count) of \(cited) quotes found")
+    }
+
+    /// `curationEdgesUnchanged` (relations-followups.md §2.4): an entry
+    /// corrects one theorem, named by its reduction's id, so the theorem must
+    /// still be the one reviewed. The golden file's `curatedEdges` is every
+    /// reduction the curation names, as the reviewed manifest records it.
+    @Test("every reduction the curation names is the one it was reviewed against",
+          .enabled(if: DerivationCorpusTests.state.runs, DerivationCorpusTests.state.skipComment))
+    func curationEdgesUnchanged() throws {
+        let corpus = try loadedCorpus()
+        guard case .object(let edges)? = corpus.golden["curatedEdges"] else {
+            Issue.record("the golden file has no curatedEdges; regenerate it with --golden")
+            return
+        }
+        var snapshot: [String: Derivation.CuratedEdge] = [:]
+        for (relationID, edge) in edges {
+            snapshot[relationID] = Derivation.CuratedEdge(
+                kind: edge["kind"]?.string ?? "", hypotheses: edge["hypotheses"]?.strings ?? [],
+                conclusion: edge["conclusion"]?.string ?? "", reductionClass: edge["class"]?.string ?? "",
+                model: edge["model"]?.string ?? "")
+        }
+        if corpus.isExact {
+            // The snapshot is complete: one record per reduction the curation
+            // names, every one of them in the reviewed manifest.
+            let named = corpus.derivation.curatedRelations().keys.sorted(by: Derivation.precedes)
+            #expect(snapshot.keys.sorted(by: Derivation.precedes) == named)
+        }
+
+        let changed = corpus.derivation.changedCuratedEdges(since: snapshot)
+        for edge in changed {
+            let was = "\(edge.was.hypotheses) ⇒ \(edge.was.conclusion) (\(edge.was.kind), "
+                + "\(edge.was.reductionClass), \(edge.was.model))"
+            let now = edge.now.map {
+                "\($0.hypotheses) ⇒ \($0.conclusion) (\($0.kind), \($0.reductionClass), \($0.model))"
+            } ?? "gone"
+            let message = "\(edge.relationID), named by \(edge.entryIDs): was \(was), now \(now)"
+            if edge.fails {
+                Issue.record("a curated edge changed under its id; re-review its entries: \(message)")
+            } else {
+                // A class or model change off an equivalence touches no
+                // notion requirement: what derivations.md open question 1
+                // asks the wiki for, when it classifies DMO00 or DGI+19.
+                print("derivations corpus: a curated edge's class or model changed: \(message)")
+            }
+        }
+        let failing = changed.filter { $0.fails }.count
+        print("derivations corpus, \(corpus.modeName): \(snapshot.count) curated edges, "
+            + "\(failing) changed, \(changed.count - failing) retyped")
     }
 }
 
@@ -648,11 +730,17 @@ enum GoldenExpect {
 }
 
 /// The golden file's patches: add records, then set fields on existing
-/// barriers and append consequences to them (`apply_patch`).
+/// barriers and reductions and append consequences to barriers
+/// (`apply_patch`).
 enum GoldenPatch {
 
-    static func barrierIDs(in patch: GoldenJSON) -> [String] {
-        (patch["barrierPatches"]?.array ?? []).compactMap { $0["id"]?.string }
+    /// The records a patch edits in place, which the manifest must have:
+    /// the barriers of `barrierPatches`, then the reductions of
+    /// `reductionPatches`.
+    static func patchedIDs(in patch: GoldenJSON) -> [String] {
+        let barriers = (patch["barrierPatches"]?.array ?? []).compactMap { $0["id"]?.string }
+        let reductions = (patch["reductionPatches"]?.array ?? []).compactMap { $0["id"]?.string }
+        return barriers + reductions
     }
 
     static func apply(_ patch: GoldenJSON, to manifest: GoldenJSON) -> GoldenJSON {
@@ -677,6 +765,18 @@ enum GoldenPatch {
             barriers[index] = GoldenJSON.object(barrier)
         }
         root["barriers"] = GoldenJSON.array(barriers)
+
+        var reductions = root["reductions"]?.array ?? []
+        for reductionPatch in patch["reductionPatches"]?.array ?? [] {
+            guard let id = reductionPatch["id"]?.string,
+                  let index = reductions.firstIndex(where: { $0["id"]?.string == id }),
+                  case .object(var reduction) = reductions[index],
+                  case .object(let fields)? = reductionPatch["set"]
+            else { continue }
+            for (field, value) in fields { reduction[field] = value }
+            reductions[index] = GoldenJSON.object(reduction)
+        }
+        root["reductions"] = GoldenJSON.array(reductions)
         return GoldenJSON.object(root)
     }
 }

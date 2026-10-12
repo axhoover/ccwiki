@@ -140,15 +140,24 @@ extension Derivation {
         /// Every eligible equivalence is reviewed. A warning only: an
         /// unreviewed one is already unstated both ways.
         var equivalencesReviewed = true
+        /// No entry is one the manifest now records itself: a `reverseClass`,
+        /// a `refutedBy`, or a setting that is no longer the sole hypothesis
+        /// of any eligible step (relations-followups.md §4.4). A warning
+        /// only: each is an entry to retire, and the engine already reads the
+        /// record over the first two.
+        var curationSuperseded = true
         var unresolved: [String] = []
         var uncuratedRegime: [String] = []
         var unreviewedEquivalences: [String] = []
+        /// The superseded entries' ids, in the curation's order.
+        var superseded: [String] = []
 
         var byName: [String: Bool] {
             [
                 "curationResolves": curationResolves,
                 "regimeLossCurated": regimeLossCurated,
                 "equivalencesReviewed": equivalencesReviewed,
+                "curationSuperseded": curationSuperseded,
             ]
         }
     }
@@ -171,7 +180,189 @@ extension Derivation {
 
         result.unreviewedEquivalences = unreviewedEquivalences
         result.equivalencesReviewed = unreviewedEquivalences.isEmpty
+
+        result.superseded = supersededEntries()
+        result.curationSuperseded = result.superseded.isEmpty
         return result
+    }
+
+    /// The `curationSuperseded` sentinel's entries, the reference engine's
+    /// `superseded`. The curation's `entries` are the file's alone, so a
+    /// manifest refutation merged into `curation` is never one of them.
+    private func supersededEntries() -> [String] {
+        var soleHypotheses: Set<String> = []
+        for step in steps where step.hypotheses.count == 1 {
+            soleHypotheses.insert(step.hypotheses[0])
+        }
+        var ids: [String] = []
+        for entry in curation.entries {
+            switch entry.key {
+            case .equivalence(let relationID):
+                if let relation = manifest.reduction(relationID), relation.kind == .equivalence,
+                   relation.reverseClass != nil {
+                    ids.append(entry.id)
+                }
+            case .refuted(let objectID):
+                if let object = manifest.object(objectID), !object.refutedBy.isEmpty {
+                    ids.append(entry.id)
+                }
+            case .setting(let objectID):
+                if !soleHypotheses.contains(objectID) { ids.append(entry.id) }
+            case .quarantine, .requirement, .statementLint, .weakening:
+                break
+            }
+        }
+        return ids
+    }
+
+    // MARK: Quotes (relations-followups.md §2.2)
+
+    /// A citation whose quote is not on its page, or whose page could not be
+    /// read.
+    struct MissingQuote: Hashable, Sendable {
+        let entryID: String
+        let citation: DerivationCuration.Citation
+    }
+
+    /// Every citation of every curation entry that `CurationQuote.contains`
+    /// does not find, in the curation's order. `pageText` takes a
+    /// content-relative path (`Citation.contentPath`), as
+    /// `statementLint(pageText:)` does, so this type stays free of I/O; a
+    /// page it cannot read counts as missing. Each page is read once.
+    func missingQuotes(pageText: (String) -> String?) -> [MissingQuote] {
+        var texts: [String: String] = [:]
+        var unreadable: Set<String> = []
+        var missing: [MissingQuote] = []
+        for entry in curation.entries {
+            for citation in entry.cites {
+                let path = citation.contentPath
+                if texts[path] == nil, !unreadable.contains(path) {
+                    if let text = pageText(path) {
+                        texts[path] = text
+                    } else {
+                        unreadable.insert(path)
+                    }
+                }
+                let found = texts[path].map {
+                    CurationQuote.contains(citation.quote, section: citation.section, in: $0)
+                } ?? false
+                if !found {
+                    missing.append(MissingQuote(entryID: entry.id, citation: citation))
+                }
+            }
+        }
+        return missing
+    }
+
+    // MARK: Curated edges (relations-followups.md §2.4, §4.4)
+
+    /// A reduction a curation entry names, as the manifest records it: the
+    /// golden file's `curatedEdges` holds one per id, at the reviewed commit.
+    struct CuratedEdge: Hashable, Sendable {
+        let kind: String
+        let hypotheses: [String]
+        let conclusion: String
+        let reductionClass: String
+        let model: String
+
+        /// The same edge with its hypotheses sorted. A conjunction is a set,
+        /// but the manifest keeps each in its page's order, so a page that
+        /// reorders its `hypotheses` states the same theorem.
+        var normalised: CuratedEdge {
+            CuratedEdge(
+                kind: kind, hypotheses: hypotheses.sorted(by: Derivation.precedes),
+                conclusion: conclusion, reductionClass: reductionClass, model: model)
+        }
+    }
+
+    /// A curated edge the manifest records differently from the snapshot.
+    struct ChangedEdge: Hashable, Sendable {
+        let relationID: String
+        /// The entries that name it, in the curation's order.
+        let entryIDs: [String]
+        let was: CuratedEdge
+        /// `nil`: the edge is gone.
+        let now: CuratedEdge?
+        /// Kind, hypotheses or conclusion changed, or class or model on an
+        /// `equivalences` edge. Otherwise a warning.
+        let fails: Bool
+    }
+
+    /// `relationID` as the manifest records it now, or `nil`.
+    func curatedEdge(_ relationID: String) -> CuratedEdge? {
+        guard let relation = manifest.reduction(relationID) else { return nil }
+        return CuratedEdge(
+            kind: relation.kind.rawValue, hypotheses: relation.hypotheses,
+            conclusion: relation.conclusion, reductionClass: relation.reductionClass,
+            model: relation.model)
+    }
+
+    /// Every reduction the curation names (each entry's edge, every `metBy`
+    /// and `acceptedBy` id) → the ids of the entries naming it, in the
+    /// curation's order.
+    func curatedRelations() -> [String: [String]] {
+        var naming: [String: [String]] = [:]
+        func add(_ relationID: String, _ entryID: String) {
+            if !(naming[relationID]?.contains(entryID) ?? false) {
+                naming[relationID, default: []].append(entryID)
+            }
+        }
+        for entry in curation.entries {
+            switch entry.key {
+            case .refuted, .setting:
+                break
+            case .quarantine(let relationID), .equivalence(let relationID),
+                 .statementLint(let relationID):
+                add(relationID, entry.id)
+            case .requirement(let relationID, let isReverse, let hypothesis):
+                add(relationID, entry.id)
+                let requirement = curation.requirements(on: relationID, isReverse: isReverse)
+                    .first { $0.hypothesis == hypothesis }
+                for producer in (requirement?.metBy ?? []).sorted(by: Self.precedes) {
+                    add(producer, entry.id)
+                }
+            case .weakening(let relationID):
+                add(relationID, entry.id)
+                let consumers = curation.weakens[relationID]?.acceptedBy ?? []
+                for consumer in consumers.sorted(by: Self.precedes) {
+                    add(consumer, entry.id)
+                }
+            }
+        }
+        return naming
+    }
+
+    /// The curated edges whose record has moved since `snapshot`, sorted by
+    /// id: the corpus test's `curationEdgesUnchanged`. A changed kind,
+    /// hypothesis or conclusion under a kept id means an entry now corrects a
+    /// different theorem, and so does a class or model change on an edge
+    /// whose directions the curation types; those fail. A class or model
+    /// change elsewhere touches no notion requirement, so it is a warning.
+    /// Hypotheses compare as a set: reordering them changes nothing.
+    func changedCuratedEdges(since snapshot: [String: CuratedEdge]) -> [ChangedEdge] {
+        let naming = curatedRelations()
+        var equivalenceEdges: Set<String> = []
+        for entry in curation.entries {
+            if case .equivalence(let relationID) = entry.key { equivalenceEdges.insert(relationID) }
+        }
+        var changed: [ChangedEdge] = []
+        for relationID in snapshot.keys.sorted(by: Self.precedes) {
+            guard let was = snapshot[relationID] else { continue }
+            let now = curatedEdge(relationID)
+            guard now?.normalised != was.normalised else { continue }
+            var fails = true
+            if let now {
+                let sameTheorem = now.kind == was.kind
+                    && now.normalised.hypotheses == was.normalised.hypotheses
+                    && now.conclusion == was.conclusion
+                let sameTyping = now.reductionClass == was.reductionClass && now.model == was.model
+                fails = !sameTheorem || (equivalenceEdges.contains(relationID) && !sameTyping)
+            }
+            changed.append(ChangedEdge(
+                relationID: relationID, entryIDs: naming[relationID] ?? [], was: was, now: now,
+                fails: fails))
+        }
+        return changed
     }
 
     // MARK: Statement lint (§2a)

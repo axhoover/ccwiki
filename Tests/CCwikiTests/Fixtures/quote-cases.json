@@ -1,0 +1,291 @@
+{
+ "about": "The quote-matching rule of plans/relations-followups.md \u00a72.2, as cases both matchers must pass: Python's locate_quote (scripts/derivations_reference.py --selftest-units) and Swift's CurationQuote.contains (CurationQuoteTests). The rule: turn CRLF and a lone CR into LF, and split lines at LF only; normalise page and quote to NFC; collapse every run of space, tab and LF to one space, in both; then the quote must be a case-sensitive substring of the section, compared as Unicode scalars, never as grapheme clusters. A quote that collapses to nothing or to one space is never found. The section is the body under the first ATX heading whose text equals `section` (null: the whole file, frontmatter included): the lines after the heading line, up to the next heading of the same or a higher level (as many # or fewer), or the end of the file. A heading is a line that starts with 1 to 6 # and then a space; its text is the rest, trimmed of spaces and tabs, without a closing run of # that follows a space or tab. Lines in the frontmatter (a first line '---' up to the next line '---', trailing spaces and tabs ignored) and in fenced code blocks are not headings. A fence opens on a line of at most 3 spaces then 3 or more backticks or tildes, and closes on a line of at most 3 spaces, at least as many of the same character and nothing else but spaces and tabs, or at the end of the file. `line` is what Python reports: the 1-based line where the first match starts, counting lines after line breaks became LF. Swift answers found or not found only.",
+ "cases": [
+  {
+   "name": "CRLF line endings",
+   "page": "# T\r\n\r\n## Statement\r\n\r\nIf DLOG is hard\r\nin Z_p.\r\n",
+   "section": "Statement",
+   "quote": "If DLOG is hard in Z_p.",
+   "found": true,
+   "line": 5
+  },
+  {
+   "name": "a lone CR is a line break",
+   "page": "## Statement\rfirst line\rsecond line\r",
+   "section": "Statement",
+   "quote": "first line second line",
+   "found": true,
+   "line": 2
+  },
+  {
+   "name": "a CRLF in the quote matches a line break on the page",
+   "page": "## S\n\nIf DLOG\nis hard\n",
+   "section": "S",
+   "quote": "If DLOG\r\nis hard",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "NFC: a decomposed page matches a composed quote",
+   "page": "## Notes\n\nCafe\u0301 au lait\n",
+   "section": "Notes",
+   "quote": "Caf\u00e9 au lait",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "NFC: a composed page matches a decomposed quote",
+   "page": "Caf\u00e9\n",
+   "section": null,
+   "quote": "Cafe\u0301",
+   "found": true,
+   "line": 1
+  },
+  {
+   "name": "scalars, not graphemes: a base letter matches before its combining mark",
+   "page": "## S\n\nax\u0301b\n",
+   "section": "S",
+   "quote": "ax",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "a letter does not match its precomposed accented form",
+   "page": "caf\u00e9\n",
+   "section": null,
+   "quote": "cafe",
+   "found": false
+  },
+  {
+   "name": "runs of spaces, tabs and line breaks are one space",
+   "page": "## Statement\n\nOne   way\t\tis\n\n  immediate.\n",
+   "section": "Statement",
+   "quote": "One way is immediate.",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "a quote's line break matches a space on the page",
+   "page": "## S\n\nholds only under conditions\n",
+   "section": "S",
+   "quote": "holds only\nunder conditions",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "the line is where the match starts",
+   "page": "## S\n\nfirst\nsecond third\n",
+   "section": "S",
+   "quote": "second third",
+   "found": true,
+   "line": 4
+  },
+  {
+   "name": "case-sensitive",
+   "page": "## Statement\n\nIf DLOG is hard\n",
+   "section": "Statement",
+   "quote": "if DLOG is hard",
+   "found": false
+  },
+  {
+   "name": "the wiki's source as written: wikilinks, math and emphasis",
+   "page": "## Statement\n\nIf [[discrete-logarithm|DLOG]] is hard in $\\ZZ_p^*$ ($p$ prime), the **Blum\u2013Micali** generator\n",
+   "section": "Statement",
+   "quote": "If [[discrete-logarithm|DLOG]] is hard in $\\ZZ_p^*$ ($p$ prime), the **Blum\u2013Micali** generator",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "a paraphrase without the markup is not the source",
+   "page": "## Statement\n\nIf [[discrete-logarithm|DLOG]] is hard in $\\ZZ_p^*$\n",
+   "section": "Statement",
+   "quote": "If DLOG is hard in Z_p^*",
+   "found": false
+  },
+  {
+   "name": "a quote in another section is not in this one",
+   "page": "## Statement\n\nalpha\n\n## Notes\n\nbeta\n",
+   "section": "Statement",
+   "quote": "beta",
+   "found": false
+  },
+  {
+   "name": "with no section the whole file is searched",
+   "page": "## Statement\n\nalpha\n\n## Notes\n\nbeta\n",
+   "section": null,
+   "quote": "beta",
+   "found": true,
+   "line": 7
+  },
+  {
+   "name": "a match may not run past the section's end",
+   "page": "## Statement\n\nalpha\n\n## Notes\n\nbeta\n",
+   "section": "Statement",
+   "quote": "alpha beta",
+   "found": false
+  },
+  {
+   "name": "a section's own heading line is not in it",
+   "page": "## Statement\n\nalpha\n\n## Notes\n\nbeta\n",
+   "section": "Statement",
+   "quote": "Statement",
+   "found": false
+  },
+  {
+   "name": "a section runs over its subsections",
+   "page": "## Statement\n\nalpha\n\n### Detail\n\ngamma\n\n## Notes\n\nbeta\n",
+   "section": "Statement",
+   "quote": "gamma",
+   "found": true,
+   "line": 7
+  },
+  {
+   "name": "a subsection ends at a heading of a higher level",
+   "page": "## Statement\n\n### Detail\n\ngamma\n\n# More\n\ndelta\n",
+   "section": "Detail",
+   "quote": "delta",
+   "found": false
+  },
+  {
+   "name": "a section ends at a heading of its own level",
+   "page": "### Malicious Security\n\nThe definitions above are **semi-honest**\n\n### Other\n\ndelta\n",
+   "section": "Malicious Security",
+   "quote": "delta",
+   "found": false
+  },
+  {
+   "name": "a heading inside a fence is not a heading",
+   "page": "## Sketch\n\n```pseudocode\n## Statement\nfake\n```\n\n## Statement\n\nreal\n",
+   "section": "Statement",
+   "quote": "real",
+   "found": true,
+   "line": 10
+  },
+  {
+   "name": "text in a fence is in the section around the fence",
+   "page": "## Sketch\n\n```pseudocode\n## Statement\nfake\n```\n\n## Statement\n\nreal\n",
+   "section": "Statement",
+   "quote": "fake",
+   "found": false
+  },
+  {
+   "name": "a heading in a tilde fence is not a heading",
+   "page": "~~~\n## Statement\nno\n~~~\n## Statement\nyes\n",
+   "section": "Statement",
+   "quote": "no",
+   "found": false
+  },
+  {
+   "name": "a fence closes only on at least as many of its character",
+   "page": "````\n```\n## Statement\nno\n````\n## Statement\nyes\n",
+   "section": "Statement",
+   "quote": "yes",
+   "found": true,
+   "line": 7
+  },
+  {
+   "name": "an unclosed fence runs to the end of the file",
+   "page": "## Statement\n\nyes\n\n```\n## Statement\nno\n",
+   "section": "Statement",
+   "quote": "no",
+   "found": true,
+   "line": 7
+  },
+  {
+   "name": "the first of two equal headings",
+   "page": "## Notes\n\nfirst\n\n## Notes\n\nsecond\n",
+   "section": "Notes",
+   "quote": "first",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "not the second of two equal headings",
+   "page": "## Notes\n\nfirst\n\n## Notes\n\nsecond\n",
+   "section": "Notes",
+   "quote": "second",
+   "found": false
+  },
+  {
+   "name": "the frontmatter is quoted with section null",
+   "page": "---\ntitle: X\nsecurity-loss: \"requires sub-exponential hardness\"\n---\n\n# X\n\nbody\n",
+   "section": null,
+   "quote": "requires sub-exponential hardness",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "the frontmatter is in no section",
+   "page": "---\ntitle: X\nsecurity-loss: \"requires sub-exponential hardness\"\n---\n\n# X\n\nbody\n",
+   "section": "X",
+   "quote": "requires sub-exponential hardness",
+   "found": false
+  },
+  {
+   "name": "a comment line in the frontmatter is not a heading",
+   "page": "---\n# Statement\nid: x\n---\n\n## Statement\n\nreal\n",
+   "section": "Statement",
+   "quote": "real",
+   "found": true,
+   "line": 8
+  },
+  {
+   "name": "frontmatter text is not under a heading it looks like",
+   "page": "---\n# Statement\nid: x\n---\n\n## Statement\n\nreal\n",
+   "section": "Statement",
+   "quote": "id: x",
+   "found": false
+  },
+  {
+   "name": "a missing section",
+   "page": "## Statement\n\nalpha\n",
+   "section": "Proof",
+   "quote": "alpha",
+   "found": false
+  },
+  {
+   "name": "closing hashes and trailing spaces are not part of the heading's text",
+   "page": "## Statement ##  \n\nalpha\n",
+   "section": "Statement",
+   "quote": "alpha",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "the heading's text is compared after NFC",
+   "page": "## Cafe\u0301\n\nalpha\n",
+   "section": "Caf\u00e9",
+   "quote": "alpha",
+   "found": true,
+   "line": 3
+  },
+  {
+   "name": "a heading needs a space after its hashes",
+   "page": "#Statement\n\nalpha\n",
+   "section": "Statement",
+   "quote": "alpha",
+   "found": false
+  },
+  {
+   "name": "seven hashes are not a heading",
+   "page": "####### Statement\n\nalpha\n",
+   "section": "Statement",
+   "quote": "alpha",
+   "found": false
+  },
+  {
+   "name": "an empty quote is never found",
+   "page": "anything\n",
+   "section": null,
+   "quote": "",
+   "found": false
+  },
+  {
+   "name": "a quote of whitespace is never found",
+   "page": "any thing\n",
+   "section": null,
+   "quote": " \n\t",
+   "found": false
+  }
+ ]
+}

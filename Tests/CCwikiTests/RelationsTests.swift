@@ -610,6 +610,87 @@ struct RelationsTests {
         #expect(barrier.consequences.count == 1)
     }
 
+    /// The fields plans/wiki-asks.md asks for, decoded before the wiki ships
+    /// them (relations-followups.md §4.4).
+    @Test("the upstream fields decode, and an absent or mistyped one costs nil, [] or standard")
+    func upstreamFields() throws {
+        // Every fixture record predates the fields.
+        let old = Self.manifest()
+        #expect(old.objectsByID.values.allSatisfy { $0.refutedBy.isEmpty })
+        #expect(old.reductions.allSatisfy { $0.reverseClass == nil })
+        #expect(old.barriers.allSatisfy { $0.model == "standard" })
+
+        let json = """
+        { "version": 1, "classes": {}, "classSentinels": ["unstated"], "propositions": {},
+          "objects": [
+            { "id": "sidh", "kind": "object", "type": "assumption",
+              "page": "content/Assumptions/sidh.md", "slug": "sidh", "title": "SIDH",
+              "refutedBy": ["[[CD22 - An efficient key recovery attack on SIDH|CD22]]"] },
+            { "id": "ssddh", "kind": "variant", "type": "assumption", "of": "sidh",
+              "anchor": "#decisional-variant-ssddh", "page": "content/Assumptions/sidh.md",
+              "slug": "sidh", "title": "SSDDH", "refutedBy": "[[CD22|CD22]]" },
+            { "id": "csidh", "kind": "variant", "type": "assumption", "of": "sidh",
+              "anchor": "#csidh", "page": "content/Assumptions/sidh.md", "slug": "sidh",
+              "title": "CSIDH", "refutedBy": ["[[CD22|CD22]]", 4] }],
+          "reductions": [
+            { "id": "red-sidh-eq-ssddh", "kind": "equivalence", "hypotheses": ["sidh"],
+              "conclusion": "ssddh", "class": "fully-black-box", "reverseClass": "unstated",
+              "model": "standard", "source": ["folklore"], "status": "draft",
+              "page": "content/Reductions/a.md", "slug": "a", "title": "A" },
+            { "id": "red-ssddh-eq-csidh", "kind": "equivalence", "hypotheses": ["ssddh"],
+              "conclusion": "csidh", "class": "free", "reverseClass": ["free"],
+              "model": "standard", "source": ["folklore"], "status": "draft",
+              "page": "content/Reductions/b.md", "slug": "b", "title": "B" },
+            { "id": "red-sidh-eq-csidh", "kind": "equivalence", "hypotheses": ["sidh"],
+              "conclusion": "csidh", "class": "free", "reverseClass": null,
+              "model": "standard", "source": ["folklore"], "status": "draft",
+              "page": "content/Reductions/c.md", "slug": "c", "title": "C" }],
+          "barriers": [
+            { "id": "bar-rom", "hypotheses": ["sidh"], "conclusion": "csidh",
+              "class": "fully-black-box", "model": "rom",
+              "consequences": [{ "kind": "contradiction", "target": "", "class": "fully-black-box" }],
+              "strength": "unconditional", "source": ["folklore"], "status": "draft",
+              "page": "content/Barriers/rom.md", "slug": "rom", "title": "No ROM" },
+            { "id": "bar-bad-model", "hypotheses": ["sidh"], "conclusion": "ssddh",
+              "class": "fully-black-box", "model": 7,
+              "consequences": [{ "kind": "contradiction", "target": "", "class": "fully-black-box" }],
+              "strength": "unconditional", "source": ["folklore"], "status": "draft",
+              "page": "content/Barriers/bad.md", "slug": "bad", "title": "No bad" }] }
+        """
+        let m = RelationsManifest.decode(Data(json.utf8))
+        #expect(m.diagnostic == nil)
+        #expect(m.anomalies.isEmpty)
+
+        // Present and well typed: decoded as recorded.
+        #expect(m.object("sidh")?.refutedBy == ["[[CD22 - An efficient key recovery attack on SIDH|CD22]]"])
+        #expect(m.reduction("red-sidh-eq-ssddh")?.reverseClass == "unstated")
+        let rom = try #require(m.barrier(onPage: "Barriers/rom.md"))
+        #expect(rom.model == "rom")
+
+        // Of the wrong type, or null: that field's default, and the record
+        // with every other field kept.
+        let ssddh = try #require(m.object("ssddh"))
+        #expect(ssddh.refutedBy.isEmpty)
+        #expect(ssddh.title == "SSDDH")
+        #expect(m.object("csidh")?.refutedBy.isEmpty == true)
+        let listed = try #require(m.reduction("red-ssddh-eq-csidh"))
+        #expect(listed.reverseClass == nil)
+        #expect(listed.reductionClass == "free")
+        #expect(m.reduction("red-sidh-eq-csidh")?.reverseClass == nil)
+        let bad = try #require(m.barrier(onPage: "Barriers/bad.md"))
+        #expect(bad.model == "standard")
+        #expect(bad.consequences.count == 1)
+
+        // A barrier's page names a model other than the standard one, as a
+        // reduction's does, and leads to the model's own page.
+        let facts = PageRelations.facts(for: rom, manifest: m)
+        #expect(facts.map(\.field) == [.strength, .against, .model, .consequence, .source])
+        let model = try #require(facts.first { $0.field == .model })
+        #expect(model.value == .text("Random oracle model"))
+        #expect(model.link == "[[random-oracle-model]]")
+        #expect(!PageRelations.facts(for: bad, manifest: m).contains { $0.field == .model })
+    }
+
     @Test("`circumventedBy` is decoded, resolved, and indexed both ways")
     func circumventionIsIndexed() throws {
         let m = Self.manifest()

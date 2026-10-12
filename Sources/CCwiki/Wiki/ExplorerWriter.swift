@@ -245,7 +245,9 @@ struct ExplorerWriter: Sendable {
     // MARK: Barriers (R8)
 
     /// "against relativizing reductions · unconditional · IR89 · circumvented
-    /// by BH26". A stub's class is not evidence, so it has none.
+    /// by BH26", with the model after the class when the barrier is proved
+    /// outside the standard model. A stub's class and model are not
+    /// evidence, so it has neither.
     func barrierMeta(_ barrier: Barrier) -> String {
         var parts: [String] = []
         if barrier.status != .stub {
@@ -253,6 +255,9 @@ struct ExplorerWriter: Sendable {
             parts.append(name == Derivation.unstatedClass
                 ? "against reductions of a class the wiki does not state"
                 : "against \(name) reductions")
+            if barrier.model != Derivation.standardModel {
+                parts.append(RelationVocabulary.modelName(barrier.model))
+            }
         }
         parts.append(barrier.strength.rawValue)
         // A believed-true consequence is a major result, never "rules out".
@@ -333,6 +338,13 @@ struct ExplorerWriter: Sendable {
         row.glyph = .barrier
         row.qualifier = Derivation.qualifier(of: barrier, in: manifest)?.explanation
         row.detail = barrierMeta(barrier)
+        // The wiki writes every title as an unqualified "No reduction from A
+        // to B", so a barrier proved outside the standard model says so in a
+        // sentence, as well as in its meta line (wiki-asks.md ask 3).
+        if barrier.status != .stub, barrier.model != Derivation.standardModel {
+            let model = RelationVocabulary.modelName(barrier.model)
+            row.notes.append("This barrier is proved in the \(model).")
+        }
         row.isStub = barrier.status == .stub
         row.help = barrierHelp(barrier)
         row.primary = .page(barrier.path)
