@@ -705,8 +705,11 @@ section at all.
   explorer keeps its models toggle; under R4's two-phase closure a fact
   derivable in the default models keeps its default-model proof either way.
 - **Context menu:** Show Proof, Explore From Here… (From = the row's object),
-  Open *label*, and Copy Statement ("DDH ⇒* Oblivious transfer (derived by
-  CCwiki from 3 recorded reductions)").
+  Open *label*, Copy Statement ("DDH ⇒* Oblivious transfer (derived by
+  CCwiki from 3 recorded reductions)"), and last the submenu **Copy Proof
+  As ▸ Text, LaTeX, Wiki Markdown**, whose proof is computed on click with
+  the default models ([relations-followups.md](relations-followups.md) §3.1;
+  no BibTeX item here).
 - **Collapsed by default.** `Section(isExpanded:content:header:)` is
   macOS 14. `make shots` must confirm that the inset list style draws its
   disclosure. If it does not, the header becomes a `Button` with a rotating
