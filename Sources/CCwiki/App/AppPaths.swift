@@ -6,6 +6,7 @@ import Foundation
 /// ~/Library/Application Support/CCwiki/
 /// ├── repo/          the pull-only clone — the reader's copy, never committed to
 /// ├── library/       PDFs dropped on the app; deliberately outside the repo
+/// │   └── papers/    the papers behind reference pages, fetched when asked
 /// ├── index/         search.sqlite3 — derived, safe to delete at any time
 /// └── logs/          per-job transcripts, kept after the worktree is gone
 ///
@@ -60,6 +61,11 @@ struct AppPaths: Sendable {
     var worktrees: URL { cacheRoot.appending(path: "worktrees") }
     /// Dropped PDFs. These are inputs to a job and never enter the repo.
     var library: URL { support.appending(path: "library") }
+    /// The paper behind each reference page that someone asked to see, and
+    /// `papers.json`, which says where each came from
+    /// (plans/reader-comforts.md §2.5). Under `library/`, so outside the
+    /// clone by construction.
+    var papers: URL { library.appending(path: "papers") }
     var index: URL { support.appending(path: "index") }
     var searchDatabase: URL { index.appending(path: "search.sqlite3") }
     var logs: URL { support.appending(path: "logs") }

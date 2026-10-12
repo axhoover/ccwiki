@@ -47,6 +47,12 @@ struct ReferenceHit: Identifiable, Sendable {
     var id: String { path }
 }
 
+/// What one `SearchIndex.sync` wrote, for the log.
+struct SyncReport: Equatable, Sendable {
+    var inserted = 0, updated = 0, deleted = 0, unchanged = 0
+    var rebuiltFromScratch = false
+}
+
 /// The derived search index: SQLite FTS5, rebuilt after every pull, safe to
 /// delete at any time.
 ///
@@ -207,6 +213,25 @@ actor SearchIndex {
         try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('optimize')")
         try database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         indexedCount = pages.count
+    }
+
+    /// Bring the index in line with a library load: what `AppModel` calls
+    /// after every one (plans/reader-comforts.md §3.4).
+    ///
+    /// For now that is `rebuild`, every row written again. `fingerprints`
+    /// and `builder`, the build that writes the rows, are what will let it
+    /// write only the rows a pull changed, and nothing at all at a launch
+    /// whose index already matches (D4).
+    @discardableResult
+    func sync(
+        pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]],
+        fingerprints: ContentFingerprints, builder: String
+    ) throws -> SyncReport {
+        try rebuild(pages: pages, backlinks: backlinks)
+        var report = SyncReport()
+        report.inserted = pages.count
+        report.rebuiltFromScratch = true
+        return report
     }
 
     /// Strip the markup that makes search results unreadable while keeping the

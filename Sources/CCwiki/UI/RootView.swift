@@ -65,7 +65,7 @@ struct RootView: View {
             model.loadJobHistory()
             // Before the library: Welcome is readable while the wiki downloads.
             model.openLaunchDocumentIfNeeded()
-            await model.loadLibrary()
+            await model.loadLibrary(reason: .launch)
             // Which copy this is goes to the log on every launch; the other
             // copies are looked for in a release, and not under the harness.
             // Before the sync: a copy that hands over to another and quits
@@ -76,7 +76,7 @@ struct RootView: View {
             // must not depend on the network.
             let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
             if model.index == nil || launchFetch { model.sync() }
-            ScreenshotRunner.run(model: model)
+            ScreenshotRunner.run(model: model, openWindow: openWindow)
             if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
         }
         .onChange(of: model.jobsWindowRequests) { _, _ in

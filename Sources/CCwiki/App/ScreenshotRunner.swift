@@ -58,6 +58,8 @@ enum ScreenshotRunner {
         /// The app's own pages.
         case welcome
         case whatsNew
+        /// The paper window for the reference page at this path.
+        case paper(String)
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -77,6 +79,7 @@ enum ScreenshotRunner {
             case "whatsnew": return .whatsNew
             case "settings": return .settings
             case "jobs": return .jobs
+            case "paper": return parts.count > 1 ? .paper(parts[1]) : nil
             default: return nil
             }
         }
@@ -98,13 +101,17 @@ enum ScreenshotRunner {
             case .jobs: "jobs"
             case .welcome: "welcome"
             case .whatsNew: "whats-new"
+            case .paper(let path):
+                "paper-" + (path as NSString).lastPathComponent
+                    .replacingOccurrences(of: ".md", with: "")
+                    .replacingOccurrences(of: " ", with: "-")
             }
         }
 
         /// Rendering a page needs longer to settle than flipping a picker.
         var settleMilliseconds: Int {
             switch self {
-            case .page, .folder, .home, .welcome, .whatsNew: 1500
+            case .page, .folder, .home, .welcome, .whatsNew, .paper: 1500
             case .search: 900
             // An ingestion job is minutes, not milliseconds; `apply` waits for
             // a terminal state rather than guessing a duration.
@@ -115,7 +122,9 @@ enum ScreenshotRunner {
         }
     }
 
-    static func run(model: AppModel) {
+    /// `openWindow` is the reader's, for the steps that open a window of
+    /// their own.
+    static func run(model: AppModel, openWindow: OpenWindowAction) {
         guard let directory else { return }
         let plan = (ProcessInfo.processInfo.environment["CCWIKI_SHOT_PLAN"] ?? "home")
             .components(separatedBy: ",")
@@ -133,7 +142,7 @@ enum ScreenshotRunner {
             try? await Task.sleep(for: .milliseconds(900))
 
             for (offset, step) in plan.enumerated() {
-                await apply(step, model: model)
+                await apply(step, model: model, openWindow: openWindow)
                 try? await Task.sleep(for: .milliseconds(step.settleMilliseconds))
 
                 let name = String(format: "%02d-%@", offset + 1, step.slug)
@@ -168,7 +177,7 @@ enum ScreenshotRunner {
         }
     }
 
-    private static func apply(_ step: Step, model: AppModel) async {
+    private static func apply(_ step: Step, model: AppModel, openWindow: OpenWindowAction) async {
         switch step {
         case .home:
             model.openHome()
@@ -224,6 +233,9 @@ enum ScreenshotRunner {
             }
             model.submitIngestion(source: source, pdf: nil, notes: "")
             await waitForJob(model: model)
+
+        case .paper(let path):
+            await PaperLibrary.applyShot(path, model: model, openWindow: openWindow)
         }
     }
 

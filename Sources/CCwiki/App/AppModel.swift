@@ -135,7 +135,7 @@ final class AppModel {
     // MARK: Navigation
 
     /// A page that ships with the app rather than with the wiki.
-    enum Document: String, Equatable, Sendable {
+    enum Document: String, Hashable, Codable, Sendable {
         case welcome
         case whatsNew
 
@@ -148,7 +148,12 @@ final class AppModel {
     }
 
     /// What the reader is showing.
-    enum Location: Equatable, Sendable {
+    ///
+    /// `Codable` so a window's Back and Forward can be saved and restored
+    /// with it (plans/reader-comforts.md §1.7). The coding is synthesized,
+    /// which only this file can do: renaming a case or its labels changes
+    /// what a saved history decodes to.
+    enum Location: Hashable, Codable, Sendable {
         case page(path: String, anchor: String?)
         case folder(slug: String)
         case document(Document)
@@ -354,7 +359,15 @@ final class AppModel {
 
     // MARK: Reader
 
+    /// The render pipeline every web view serves: a per-build copy in
+    /// Caches, staged once at launch, not the bundle's `paths.webRoot`. The
+    /// updater swaps the bundle under the running app, and a WebContent
+    /// restart after that must not load the new release's JavaScript
+    /// against this release's Swift.
+    let webRoot: URL
     let webController: WebController
+    /// The papers behind reference pages, fetched when asked (§2).
+    let papers: PaperLibrary
 
     // MARK: Diagnostics
 
@@ -395,11 +408,12 @@ final class AppModel {
         // the real one as soon as the clone lands.
         let macros = MacroTable.load(cloneRoot: paths.clone)
         self.macros = macros
-        // The render pipeline is served from a per-build copy in Caches, not
-        // from the bundle: the updater swaps the bundle under the running
-        // app, and a WebContent restart after that must not load the new
-        // release's JavaScript against this release's Swift.
-        self.webController = WebController(paths: paths, webRoot: paths.stagedWebRoot())
+        let webRoot = paths.stagedWebRoot()
+        self.webRoot = webRoot
+        let zoom = AppModel.clampedZoom(CCwikiSettings.pageZoom)
+        self.storedPageZoom = zoom
+        self.webController = WebController(paths: paths, webRoot: webRoot, pageZoom: zoom)
+        self.papers = PaperLibrary(paths: paths)
 
         try? paths.createDirectories()
         // Tools are looked for in `discoverTools()`, after the first frame:
@@ -410,11 +424,12 @@ final class AppModel {
         vendorManifest = try? String(
             contentsOf: paths.webRoot.appending(path: "vendor/VENDOR.txt"), encoding: .utf8)
 
-        webController.onNavigate = { [weak self] destination, modified in
+        webController.onNavigate = { [weak self] destination, disposition in
             guard let self else { return }
             // ⌘-click: the same page on cryptology.city, in the browser. The
-            // app has one reader window, so "open elsewhere" means the site.
-            if modified, case .page(let path, let anchor) = destination,
+            // app has one reader window, so anywhere but here means the site,
+            // until tabs give the other dispositions somewhere to go.
+            if disposition != .here, case .page(let path, let anchor) = destination,
                let page = index?.pages[path],
                let url = Self.siteURL(slug: page.slug, anchor: anchor) {
                 NSWorkspace.shared.open(url)
@@ -536,89 +551,151 @@ final class AppModel {
 
     // MARK: Loading
 
-    /// Parse the clone and rebuild the search index. Cheap enough (a few
-    /// hundred milliseconds for the whole corpus) to do unconditionally after
-    /// every pull rather than trying to work out what changed.
-    func loadLibrary() async {
+    /// The library on screen, kept for the next load to build on. Not
+    /// observed: views read the parts `apply` hands out, never this.
+    @ObservationIgnored private var loaded: LoadedLibrary?
+    /// The commit `loaded` was read at, when nothing moved it during the
+    /// read; nil when it may have, so the next sync reloads.
+    @ObservationIgnored private var loadedRevision: String?
+    /// The load running now, which the next one waits for.
+    @ObservationIgnored private var loadTask: Task<LibraryUpdate?, Never>?
+
+    /// Read the clone and bring everything built from it up to date: the
+    /// parsed wiki, the dates, the search index, then the page on screen
+    /// (plans/reader-comforts.md §3.2).
+    ///
+    /// Serialized: a load waits for the one before it, so ⌘R during the
+    /// launch load cannot finish first and be overwritten by the older one.
+    /// Nil when there is no wiki to read yet.
+    @discardableResult
+    func loadLibrary(reason: LibraryLoadReason) async -> LibraryUpdate? {
+        await loadLibrary(reason: reason, after: nil)
+    }
+
+    /// `loadLibrary(reason:)` for a sync, whose outcome says which commit it
+    /// left the clone at.
+    @discardableResult
+    private func loadLibrary(
+        reason: LibraryLoadReason, after outcome: GitService.SyncOutcome?
+    ) async -> LibraryUpdate? {
+        let previous = loadTask
+        let task = Task { () async -> LibraryUpdate? in
+            _ = await previous?.value
+            return await performLoad(reason: reason, after: outcome)
+        }
+        loadTask = task
+        let update = await task.value
+        if loadTask == task { loadTask = nil }
+        return update
+    }
+
+    private func performLoad(
+        reason: LibraryLoadReason, after outcome: GitService.SyncOutcome?
+    ) async -> LibraryUpdate? {
         guard FileManager.default.fileExists(
-            atPath: paths.content.path(percentEncoded: false)) else { return }
+            atPath: paths.content.path(percentEncoded: false)) else { return nil }
 
-        let contentRoot = paths.content
+        // Rebuild reads every page again and writes the search index from
+        // nothing, whatever the last load left.
+        if reason == .rebuild {
+            loaded = nil
+            await searchIndex.reset()
+        }
+
         let cloneRoot = paths.clone
-        let loaded = await Task.detached(priority: .userInitiated) {
-            let index = WikiIndex.build(contentRoot: contentRoot)
-            // 303 KB of JSON, and the labels need every hosting page's
-            // headings — both cheap, but neither belongs on the main actor.
-            let manifest = RelationsManifest.load(cloneRoot: cloneRoot)
-            let labels = RelationLabels(manifest: manifest, index: index)
-            return LoadedLibrary(
-                index: index,
-                backlinks: index.backlinkMap(),
-                manifest: manifest,
-                labels: labels,
-                textGrep: TextGrep(pages: index.allPages),
-                // Every single-object closure in both model settings, the
-                // derived barriers and the inspector's lookups: a few
-                // milliseconds, and it must match this manifest exactly.
-                derivation: Derivation(manifest: manifest),
-                linkPreviews: LinkPreviews(index: index, manifest: manifest, labels: labels))
+        let git = gitService
+        let revisionBefore = await LibraryRefresh.currentRevision(
+            store: paths.wikiStore, git: git, clone: cloneRoot)
+        let previous = loaded
+        let update = await Task.detached(priority: .userInitiated) { () -> LibraryUpdate in
+            guard let previous else {
+                return LibraryUpdate(building: LoadedLibrary.build(cloneRoot: cloneRoot))
+            }
+            return LoadedLibrary.update(previous, cloneRoot: cloneRoot)
         }.value
+        apply(update.library)
 
-        index = loaded.index
-        backlinks = loaded.backlinks
-        relations = loaded.manifest
-        relationLabels = loaded.labels
-        derivation = loaded.derivation
-        linkPreviews = loaded.linkPreviews
+        // The search index is written while git answers: neither needs the
+        // other, and the page on screen waits for both.
+        async let searched = syncSearchIndex(with: update.library)
+
+        // Git answers for a clone and the marker for a snapshot. When neither
+        // can (a clone whose git has gone, or content with no marker), the
+        // commit and dates already shown stay, as they always have.
+        let store = paths.wikiStore
+        let facts = await LibraryRefresh.revisionFacts(
+            store: store, git: git, paths: paths, after: outcome)
+        if (git != nil && store == .git) || store == .snapshot {
+            modifiedDates = facts.modifiedDates
+            headRevision = facts.head
+            headDate = facts.date
+        }
+        let revisionAfter = await LibraryRefresh.currentRevision(
+            store: paths.wikiStore, git: git, clone: cloneRoot)
+        loadedRevision = revisionBefore == revisionAfter ? revisionAfter : nil
+
+        _ = await searched
+
+        if LibraryRefresh.runsJobHousekeeping(reason) {
+            await refreshJobHousekeeping()
+        }
+
+        libraryDidLoad(update)
+        return update
+    }
+
+    /// Put a new library on screen in one main-actor step, so no view sees
+    /// a manifest and closures from different commits (SWIFTUI-RULES §3.1:
+    /// rebuilt from source, never patched).
+    private func apply(_ library: LoadedLibrary) {
+        loaded = library
+        index = library.index
+        backlinks = library.backlinks
+        relations = library.manifest
+        relationLabels = library.labels
+        derivation = library.derivation
+        linkPreviews = library.linkPreviews
+        textGrep = library.textGrep
         libraryGeneration += 1
-        unlistedPaths = loaded.manifest.unlistedPaths
+        unlistedPaths = library.manifest.unlistedPaths
         rebuildBrowseState()
         macros = MacroTable.load(cloneRoot: paths.clone)
         refreshMacrosWarning()
 
-        // Replaced rather than appended: `loadLibrary` runs after every pull,
-        // and a warning that stacks up once per sync is noise.
+        // Replaced rather than appended: a load follows every pull, and a
+        // warning that stacks up once per sync is noise.
         warnings.removeAll { $0.hasPrefix(Self.relationsWarningPrefix) }
         if let diagnostic = relations.diagnostic {
             warn(Self.relationsWarningPrefix + diagnostic.message)
         }
+    }
 
-        let git = gitService
-        if let git, paths.wikiStore == .git {
-            modifiedDates = await git.modifiedDates(in: paths.clone)
-            headRevision = await git.head(in: paths.clone)
-            headDate = await git.headDate(in: paths.clone)
-        } else if let marker = SnapshotService.marker(in: paths.clone) {
-            // A snapshot has no history to date files by; the commit itself
-            // is dated, which is what the status bar shows.
-            modifiedDates = [:]
-            headRevision = marker.sha
-            headDate = marker.commitDate
+    /// What the search index is stamped with: the build that wrote its rows,
+    /// so a build that writes them differently rewrites them all (§3.4).
+    private static var searchIndexBuilder: String {
+        "\(Bundle.main.buildNumber) schema \(SearchIndex.schemaVersion)"
+    }
+
+    /// Write `library` to the search index, and say so when it cannot.
+    private func syncSearchIndex(with library: LoadedLibrary) async -> SyncReport? {
+        do {
+            return try await searchIndex.sync(
+                pages: library.index.allPages, backlinks: library.backlinks,
+                fingerprints: library.fingerprints, builder: Self.searchIndexBuilder)
+        } catch {
+            warn("Search index could not be rebuilt: \(error.localizedDescription)")
+            return nil
         }
-        // The push credential helper is configured by `refreshPushCapability`
-        // below; doing it here as well cost a second git call per load.
+    }
 
-        let pages = loaded.index.allPages
-        let links = loaded.backlinks
-        textGrep = loaded.textGrep
-        let searchIndex = self.searchIndex
-        Task.detached(priority: .utility) {
-            do {
-                try await searchIndex.rebuild(pages: pages, backlinks: links)
-            } catch {
-                await MainActor.run {
-                    self.warn("Search index could not be rebuilt: \(error.localizedDescription)")
-                }
-            }
-        }
-
-        await refreshPushCapability()
+    /// Re-register moved worktrees and look for strays. A crash or
+    /// force-quit mid-job leaves a worktree behind, and `git worktree add`
+    /// will refuse to reuse the path. Finding them here is cheaper than
+    /// making the user learn `git worktree prune`.
+    private func refreshJobHousekeeping() async {
         if let git = gitService {
             await git.repairWorktrees(clone: paths.clone, worktreeRoot: paths.worktrees)
         }
-        // A crash or force-quit mid-job leaves a worktree behind, and
-        // `git worktree add` will refuse to reuse the path. Finding them at
-        // launch is cheaper than making the user learn `git worktree prune`.
         await refreshOrphanedWorktrees()
         warnings.removeAll { $0.hasPrefix(Self.orphansWarningPrefix) }
         if !orphanedWorktrees.isEmpty {
@@ -627,11 +704,19 @@ final class AppModel {
                 + "\(count) left over from an interrupted job. "
                 + "Open the jobs window (⇧⌘J) to prune \(count == 1 ? "it" : "them").")
         }
+    }
 
-        // Re-render whatever is on screen, since the file may have changed —
-        // keeping the reader's place, since it usually has not.
-        webController.invalidate()
-        if case .empty = location { openInitialPage() } else { renderCurrent(preservingScroll: true) }
+    /// What a load means for the reader: re-render what is on screen, since
+    /// the file may have changed, keeping the reader's place, since it
+    /// usually has not. With nothing on screen yet, open the first page.
+    private func libraryDidLoad(_ update: LibraryUpdate) {
+        if case .empty = location {
+            webController.invalidate()
+            openInitialPage()
+        } else if update.requiresRerender(of: location) {
+            webController.invalidate()
+            renderCurrent(preservingScroll: true)
+        }
         refreshQuickSwitcher()
     }
 
@@ -645,6 +730,12 @@ final class AppModel {
     /// Fast-forward the clone, then reload. Single-flight: pressing ⌘R twice
     /// does not start two clones.
     func sync() {
+        sync(afterReset: false)
+    }
+
+    /// `afterReset`: the clone was just deleted by Reset Clone, so what this
+    /// sync downloads replaces it rather than arriving for the first time.
+    private func sync(afterReset: Bool) {
         guard syncTask == nil else { return }
         let store = paths.wikiStore
         let git = gitService
@@ -678,34 +769,51 @@ final class AppModel {
                     repository: AppPaths.repositorySlug, branch: AppPaths.defaultBranch)
                 outcome = await snapshots.sync(destination: paths.clone, onLine: onLine)
             }
+            let reloads = LibraryRefresh.needsReload(
+                after: outcome, loadedRevision: loadedRevision, isLoaded: loaded != nil)
             switch outcome {
             case .offline:
                 // Reading is unaffected — the whole point of a local clone —
-                // so this is a note, not an alarm. Still reload, in case this
-                // is the first launch after a manual pull.
-                await loadLibrary()
+                // so this is a note, not an alarm. Still reload when asked
+                // to, in case this is the first launch after a manual pull.
+                if reloads { await loadLibrary(reason: .offline, after: outcome) }
+                await refreshPushCapability()
                 syncState = .failed(outcome.summary)
             case .failed(let message):
                 syncState = .failed(message)
                 warn(message)
             default:
-                syncState = .running("Indexing…")
-                await loadLibrary()
-                var summary = outcome.summary
-                if case .updated(let before, let after) = outcome {
-                    if let git, paths.wikiStore == .git {
-                        let changed = await git.changedPages(in: paths.clone, from: before, to: after)
-                        summary = GitService.updateSummary(changedPages: changed.count)
-                    } else {
-                        // A snapshot has no history to compare.
-                        summary = GitService.updateSummary(changedPages: 0)
-                    }
+                var update: LibraryUpdate?
+                if reloads {
+                    syncState = .running("Indexing…")
+                    update = await loadLibrary(
+                        reason: Self.loadReason(after: outcome, afterReset: afterReset),
+                        after: outcome)
                 }
+                // After every outcome that reached the clone, reloading or
+                // not: the ingest sheet's push blocker says "Sync again (⌘R)
+                // to configure it", and that has to stay true.
+                await refreshPushCapability()
+                let summary = await LibraryRefresh.summary(
+                    after: outcome, changes: update?.changes,
+                    store: paths.wikiStore, git: git, clone: paths.clone)
                 syncState = .succeeded(summary)
                 warnings.removeAll { $0.contains("Fast-forward failed") }
                 scheduleStatusReset()
             }
             syncTask = nil
+        }
+    }
+
+    /// What a sync's outcome makes of the load after it. A failure loads
+    /// nothing, so its answer is never used.
+    private static func loadReason(
+        after outcome: GitService.SyncOutcome, afterReset: Bool
+    ) -> LibraryLoadReason {
+        switch outcome {
+        case .cloned: afterReset ? .reset : .cloned
+        case .offline: .offline
+        case .updated, .alreadyCurrent, .failed: .pulled
         }
     }
 
@@ -730,7 +838,7 @@ final class AppModel {
         try? FileManager.default.removeItem(at: paths.clone)
         headRevision = nil
         headDate = nil
-        sync()
+        sync(afterReset: true)
     }
 
     private func appendSyncLine(_ line: ProcessLine) {
@@ -999,16 +1107,38 @@ final class AppModel {
 
     // MARK: Text size
 
+    /// The reader's text size, as `WKWebView.pageZoom`, where 1 is the CSS
+    /// size. One preference, not a property of a page, so every reader's web
+    /// view follows it (plans/reader-comforts.md Decision 7). Persisted, and
+    /// kept inside `WebController.zoomRange` however it is set.
+    var pageZoom: Double {
+        get { storedPageZoom }
+        set {
+            let zoom = AppModel.clampedZoom(newValue)
+            guard zoom != storedPageZoom else { return }
+            storedPageZoom = zoom
+            CCwikiSettings.pageZoom = zoom
+            webController.setPageZoom(zoom)
+        }
+    }
+
+    /// What `pageZoom` reads, stored and observed, so the menus follow it.
+    private var storedPageZoom: Double = 1
+
+    private static func clampedZoom(_ zoom: Double) -> Double {
+        min(max(zoom, WebController.zoomRange.lowerBound), WebController.zoomRange.upperBound)
+    }
+
     func makeTextBigger() {
-        webController.setPageZoom(webController.pageZoom * WebController.zoomStep)
+        pageZoom *= WebController.zoomStep
     }
 
     func makeTextSmaller() {
-        webController.setPageZoom(webController.pageZoom / WebController.zoomStep)
+        pageZoom /= WebController.zoomStep
     }
 
     func resetTextSize() {
-        webController.setPageZoom(1)
+        pageZoom = 1
     }
 
     // MARK: The published site
@@ -1439,15 +1569,12 @@ final class AppModel {
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    func rebuildSearchIndex() {
-        guard let index else { return }
-        let pages = index.allPages
-        let links = backlinks
-        let searchIndex = self.searchIndex
-        Task.detached(priority: .userInitiated) {
-            await searchIndex.reset()
-            try? await searchIndex.rebuild(pages: pages, backlinks: links)
-        }
+    /// Settings ▸ Storage ▸ Rebuild: read every page again and write the
+    /// search index from nothing. The library on screen is dropped and the
+    /// index reset inside the load, behind any load already running, so
+    /// neither can be overwritten by one that started earlier.
+    func rebuildLibrary() {
+        Task { await loadLibrary(reason: .rebuild) }
     }
 
     // MARK: Ingestion
@@ -2162,18 +2289,4 @@ final class AppModel {
         NSWorkspace.shared.open(
             [directory], withApplicationAt: terminal, configuration: configuration)
     }
-}
-
-/// What `AppModel.loadLibrary()` builds off the main actor, assigned in one
-/// main-actor block so no view sees half a library. Named fields rather than
-/// a tuple: the manifest, the labels and the derivations built from it must
-/// all come from the same load.
-private struct LoadedLibrary: Sendable {
-    let index: WikiIndex
-    let backlinks: [String: [WikiIndex.Backlink]]
-    let manifest: RelationsManifest
-    let labels: RelationLabels
-    let textGrep: TextGrep
-    let derivation: Derivation
-    let linkPreviews: LinkPreviews
 }

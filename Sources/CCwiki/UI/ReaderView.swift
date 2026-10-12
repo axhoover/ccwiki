@@ -131,6 +131,7 @@ struct ReaderView: View {
                 }
                 .buttonStyle(.link)
             }
+            ShowPaperButton(page: page)
             if let key = page.frontmatter.string("cryptobib_key") {
                 Button {
                     NSPasteboard.general.clearContents()
