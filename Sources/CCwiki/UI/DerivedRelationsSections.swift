@@ -16,6 +16,7 @@ import SwiftUI
 /// disclosure in the inset list style.
 struct DerivedRelationsSections: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
     let derivations: PageDerivations
 
     var body: some View {
@@ -164,7 +165,12 @@ struct DerivedRelationsSections: View {
             if let query = model.explorerQuestion(from: [row.link.objectID]) {
                 Button("Explore From Here…") { model.explore(query) }
             }
-            Button("Open “\(row.label)”") { model.openRelationObject(row.link.objectID) }
+            Button("Open “\(row.label)”") { session.openRelationObject(row.link.objectID) }
+            // After the row's Open, not first: its click shows a proof, not
+            // a page, so ⌘-click keeps that meaning (reader-comforts §1.1).
+            OpenElsewhereItems {
+                session.openRelationObject(row.link.objectID, disposition: $0)
+            }
             Divider()
             Button("Copy Statement") { model.copyToPasteboard(row.statement) }
         }

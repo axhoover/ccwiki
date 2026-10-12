@@ -7,9 +7,13 @@ import SwiftUI
 /// and `AGGM06` and `sorting network` both find the same reference.
 ///
 /// Deliberately keyboard-shaped: type, arrow, Return. A palette you have to
-/// reach for the mouse in is slower than the sidebar it replaces.
+/// reach for the mouse in is slower than the sidebar it replaces. ⌘Return
+/// opens the page in a tab behind this one and leaves the switcher open;
+/// ⇧⌘Return, in a tab in front (reader-comforts §1.1).
 struct QuickSwitcherView: View {
     @Environment(AppModel.self) private var model
+    /// The window it was opened over, which is where its page opens.
+    @Environment(ReaderSession.self) private var session
     @Environment(\.dismiss) private var dismiss
 
     /// Selection is held by *id*, not by index.
@@ -42,7 +46,7 @@ struct QuickSwitcherView: View {
                     .textFieldStyle(.plain)
                     .font(Theme.Fonts.paletteTitle)
                     .focused($fieldFocused)
-                    .onSubmit(openHighlighted)
+                    .onSubmit { openHighlighted(.here) }
             }
             .padding(.horizontal, Theme.large)
             .padding(.vertical, Theme.medium)
@@ -98,7 +102,10 @@ struct QuickSwitcherView: View {
                             .contentShape(.rect)
                             .onTapGesture {
                                 highlightedID = item.id
-                                openHighlighted()
+                                open(item, LinkDisposition.current)
+                            }
+                            .contextMenu {
+                                OpenElsewhereItems { open(item, $0) }
                             }
                             .accessibilityElement(children: .combine)
                             .accessibilityAddTraits(.isButton)
@@ -175,9 +182,10 @@ struct QuickSwitcherView: View {
 
     private var footer: some View {
         HStack(spacing: Theme.medium) {
-            hint("↑↓", "Move")
-            hint("↩", "Open")
-            hint("esc", "Cancel")
+            KeyHint(key: "↑↓", label: "Move")
+            KeyHint(key: "↩", label: "Open")
+            KeyHint(key: "⌘↩", label: "New Tab")
+            KeyHint(key: "esc", label: "Cancel")
             Spacer()
             Text("\(results.count) match\(results.count == 1 ? "" : "es")")
                 .font(Theme.Fonts.meta)
@@ -186,19 +194,7 @@ struct QuickSwitcherView: View {
         }
         .padding(.horizontal, Theme.large)
         .padding(.vertical, Theme.small)
-    }
-
-    private func hint(_ key: String, _ label: String) -> some View {
-        HStack(spacing: Theme.tight) {
-            Text(key)
-                .font(Theme.Fonts.badge)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(.quaternary, in: .rect(cornerRadius: 3))
-            Text(label)
-                .font(Theme.Fonts.meta)
-                .foregroundStyle(.secondary)
-        }
+        .background { PaletteTabShortcuts { openHighlighted($0) } }
     }
 
     private func move(_ delta: Int) -> KeyPress.Result {
@@ -208,10 +204,16 @@ struct QuickSwitcherView: View {
         return .handled
     }
 
-    private func openHighlighted() {
+    private func openHighlighted(_ disposition: LinkDisposition) {
         guard let id = currentHighlight, let item = results.first(where: { $0.id == id })
         else { return }
-        model.openPage(item.path)
-        dismiss()
+        open(item, disposition)
+    }
+
+    /// Opens `item`'s page, then closes the switcher, unless the page opened
+    /// in a tab behind this window: then the switcher stays for the next.
+    private func open(_ item: QuickSwitchItem, _ disposition: LinkDisposition) {
+        session.open(.page(path: item.path, anchor: nil), disposition)
+        if !disposition.keepsPaletteOpen { dismiss() }
     }
 }

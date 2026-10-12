@@ -3,6 +3,7 @@ import SwiftUI
 /// The centre column: the rendered page, its metadata bar, and find-in-page.
 struct ReaderView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
 
     @State private var findText = ""
     @State private var findPresented = false
@@ -10,15 +11,15 @@ struct ReaderView: View {
 
     var body: some View {
         Group {
-            if model.index == nil, !model.location.isDocument {
+            if model.index == nil, !session.location.isDocument {
                 emptyState
             } else {
-                WebPane(controller: model.webController)
+                WebPane(controller: session.webController)
                     .ignoresSafeArea(edges: .bottom)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if model.index != nil || model.location.isDocument { titleBar }
+            if model.index != nil || session.location.isDocument { titleBar }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if findPresented { findBar }
@@ -49,20 +50,20 @@ struct ReaderView: View {
     private var titleBar: some View {
         VStack(spacing: 0) {
             HStack(spacing: Theme.small) {
-                if let page = model.currentPage {
+                if let page = session.currentPage {
                     KindIcon(kind: page.kind)
                     Text(page.directory.isEmpty ? "Wiki" : page.directory)
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
                     StatusBadge(status: page.status)
-                } else if case .folder(let slug) = model.location {
+                } else if case .folder(let slug) = session.location {
                     Image(systemName: "folder")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(slug)
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
-                } else if case .document = model.location {
+                } else if case .document = session.location {
                     Image(systemName: "book.pages")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -76,7 +77,7 @@ struct ReaderView: View {
                 // On a listing, the one control worth having to hand. Half the
                 // Primitives are stubs, so this is the difference between a
                 // page of things to read and a page of things to write.
-                if case .folder = model.location {
+                if case .folder = session.location {
                     Toggle("Hide stubs", isOn: Binding(
                         get: { model.hidesStubs },
                         set: { model.hidesStubs = $0 }))
@@ -85,7 +86,7 @@ struct ReaderView: View {
                         .help("Also applies to the sidebar. Change it in Settings (⌘,) too.")
                 }
 
-                if let page = model.currentPage, let modified = model.modifiedDates[page.path] {
+                if let page = session.currentPage, let modified = model.modifiedDates[page.path] {
                     Text(modified, format: .relative(presentation: .named))
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.tertiary)
@@ -95,7 +96,7 @@ struct ReaderView: View {
             .padding(.horizontal, Theme.large)
             .padding(.vertical, 6)
 
-            if let page = model.currentPage, page.kind == .reference {
+            if let page = session.currentPage, page.kind == .reference {
                 referenceBar(page)
             }
             Divider()
@@ -166,9 +167,9 @@ struct ReaderView: View {
     }
 
     private var documentTitle: String {
-        if let page = model.currentPage { return page.displayTitle }
-        if case .folder(let slug) = model.location { return slug }
-        if case .document(let document) = model.location { return document.title }
+        if let page = session.currentPage { return page.displayTitle }
+        if case .folder(let slug) = session.location { return slug }
+        if case .document(let document) = session.location { return document.title }
         return "CCwiki"
     }
 
@@ -177,7 +178,7 @@ struct ReaderView: View {
     /// Other pages have nothing worth a subtitle — the info strip carries the
     /// folder.
     private var subtitle: String {
-        guard let page = model.currentPage, page.kind == .reference else { return "" }
+        guard let page = session.currentPage, page.kind == .reference else { return "" }
         return page.title
     }
 
@@ -224,7 +225,7 @@ struct ReaderView: View {
 
     private func find(backwards: Bool) async {
         guard !findText.isEmpty else { return }
-        findFailed = !(await model.webController.find(findText, backwards: backwards))
+        findFailed = !(await session.webController.find(findText, backwards: backwards))
     }
 
     private func dismissFind() {

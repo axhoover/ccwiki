@@ -6,48 +6,58 @@ import UniformTypeIdentifiers
 /// A three-column `NavigationSplitView` is the macOS document-browser idiom
 /// (Mail, Notes, Xcode), and it gets the sidebar's vibrancy, the toolbar's
 /// unified title bar, and column resizing without any of it being hand-built.
+///
+/// What the window shows — its page, history, sidebar, inspector and sheets —
+/// is its `ReaderSession`'s; what every window shares is the model's
+/// (plans/reader-comforts.md §1.2). The window itself, which gives this view
+/// its session and starts it, is `ReaderWindowView`'s.
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @State private var isDropTargeted = false
 
     var body: some View {
-        @Bindable var model = model
+        @Bindable var session = session
 
         NavigationSplitView {
             SidebarView()
         } detail: {
             ReaderView()
-                .inspector(isPresented: $model.showInspector) {
+                .inspector(isPresented: $session.showInspector) {
                     InspectorView()
                 }
         }
         .toolbar { toolbar }
         .navigationTitle("CCwiki")
         .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
-        .sheet(isPresented: $model.quickSwitcherPresented) {
+        .sheet(isPresented: $session.quickSwitcherPresented) {
             QuickSwitcherView()
         }
-        .sheet(isPresented: $model.searchPresented) {
+        .sheet(isPresented: $session.searchPresented) {
             SearchView()
         }
-        .sheet(isPresented: $model.referenceSearchPresented) {
+        .sheet(isPresented: $session.referenceSearchPresented) {
             ReferenceSearchView()
         }
-        .sheet(isPresented: $model.grepPresented) {
+        .sheet(isPresented: $session.grepPresented) {
             GrepView()
         }
-        .sheet(isPresented: $model.ingestSheetPresented) {
+        .sheet(isPresented: ingestSheetPresented) {
             IngestSheet()
         }
-        .sheet(isPresented: $model.syncLogPresented) {
+        .sheet(isPresented: $session.syncLogPresented) {
             SyncLogView()
         }
         // The whole reader is a drop target: when you have the paper open, the
         // natural gesture is to drag it onto the wiki, not to go looking for a
-        // form.
-        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+        // form. Not while an ingest sheet is up, in any window: the sheet
+        // takes its own drops, and one PDF is all it holds.
+        .onDrop(
+            of: model.ingestSheetTarget == nil ? Self.droppedTypes : [],
+            isTargeted: $isDropTargeted
+        ) { providers in
             acceptDroppedPDF(providers)
         }
         // Mounted permanently and faded, not inserted: a transition on a view
@@ -57,53 +67,15 @@ struct RootView: View {
                 .opacity(isDropTargeted ? 1 : 0)
                 .animation(.easeOut(duration: 0.15), value: isDropTargeted)
         }
-        .task {
-            // Find git (one stat), read what is already on disk, and only then
-            // touch the network — so the app is usable instantly and offline.
-            // The ingestion tools are looked for in the background.
-            await model.discoverTools()
-            model.loadJobHistory()
-            // Before the library: Welcome is readable while the wiki downloads.
-            model.openLaunchDocumentIfNeeded()
-            await model.loadLibrary(reason: .launch)
-            // Which copy this is goes to the log on every launch; the other
-            // copies are looked for in a release, and not under the harness.
-            // Before the sync: a copy that hands over to another and quits
-            // must not leave a fetch running on the clone the two share.
-            await model.checkInstallation()
-            // A launch fetch keeps the wiki current for someone who never
-            // presses ⌘R. Not under the screenshot harness, whose captures
-            // must not depend on the network.
-            let launchFetch = model.syncsAtLaunch && ScreenshotRunner.directory == nil
-            if model.index == nil || launchFetch { model.sync() }
-            ScreenshotRunner.run(model: model, openWindow: openWindow)
-            if ScreenshotRunner.directory == nil { await model.checkForUpdatesIfDue() }
-        }
         .onChange(of: model.jobsWindowRequests) { _, _ in
             openWindow(id: CCwikiApp.jobsWindowID)
         }
-        // Two kinds of URL reach the app from outside: a PDF handed to it by
-        // Finder or the Dock (Info.plist declares the type), and a
-        // ccwiki:// link from anywhere (Info.plist declares the scheme;
-        // CCwiki Dev's is ccwiki-dev://, read here as ccwiki://).
-        .onOpenURL { url in
-            if url.isFileURL {
-                guard url.pathExtension.lowercased() == "pdf",
-                      let staged = try? model.stagePDF(from: url)
-                else { return }
-                model.pendingDroppedPDF = staged
-                model.ingestSheetPresented = true
-                openWindow(id: CCwikiApp.jobsWindowID)
-            } else if let destination = CCwikiURL.destination(
-                of: CCwikiURL.internalString(for: url)) {
-                model.navigate(to: destination)
-            }
-        }
+        // A URL from outside is the window's (`ReaderWindowView`), which
+        // hands it to `ReaderSession.handleOpenURL`.
         .onChange(of: model.settingsRequests) { _, _ in
             openSettings()
         }
-        .focusedSceneValue(\.appModel, model)
-        .focusedSceneValue(\.searchAction, FindAction { model.searchPresented = true })
+        .focusedSceneValue(\.searchAction, FindAction { session.searchPresented = true })
     }
 
     // MARK: Toolbar
@@ -111,35 +83,35 @@ struct RootView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            Button { model.goBack() } label: {
+            Button { session.goBack() } label: {
                 Image(systemName: "chevron.left")
             }
-            .disabled(!model.canGoBack)
+            .disabled(!session.canGoBack)
             .help("Back (⌘[)")
             .accessibilityLabel("Back")
 
-            Button { model.goForward() } label: {
+            Button { session.goForward() } label: {
                 Image(systemName: "chevron.right")
             }
-            .disabled(!model.canGoForward)
+            .disabled(!session.canGoForward)
             .help("Forward (⌘])")
             .accessibilityLabel("Forward")
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
-            Button { model.presentQuickSwitcher() } label: {
+            Button { session.presentQuickSwitcher() } label: {
                 Image(systemName: "magnifyingglass")
             }
             .help("Quick switcher (⌘O)")
             .accessibilityLabel("Quick Switcher")
 
-            Button { model.searchPresented = true } label: {
+            Button { session.searchPresented = true } label: {
                 Image(systemName: "text.magnifyingglass")
             }
             .help("Search the wiki (⌘S)")
             .accessibilityLabel("Search the Wiki")
 
-            Button { model.referenceSearchPresented = true } label: {
+            Button { session.referenceSearchPresented = true } label: {
                 Image(systemName: "books.vertical")
             }
             .help("Search references (⇧⌘R)")
@@ -156,7 +128,7 @@ struct RootView: View {
             .help("Sync with GitHub (⌘R)")
             .accessibilityLabel("Sync with GitHub")
 
-            Button { model.showInspector.toggle() } label: {
+            Button { session.showInspector.toggle() } label: {
                 Image(systemName: "sidebar.right")
             }
             .help("Toggle inspector (⌥⌘I)")
@@ -164,7 +136,20 @@ struct RootView: View {
         }
     }
 
+    // MARK: Ingest
+
+    /// The ingest sheet is up on one window only, the one it was pinned to
+    /// when it was asked for, so a click on another reader window never
+    /// moves it, or its link, notes and PDF (§1.3).
+    private var ingestSheetPresented: Binding<Bool> {
+        Binding(
+            get: { model.ingestSheetTarget == session.id },
+            set: { if !$0 { model.dismissIngestSheet() } })
+    }
+
     // MARK: Drop
+
+    private static let droppedTypes: [UTType] = [.pdf, .fileURL]
 
     private var dropOverlay: some View {
         ZStack {
@@ -185,13 +170,13 @@ struct RootView: View {
     }
 
     private func acceptDroppedPDF(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
+        guard model.ingestSheetTarget == nil, let provider = providers.first else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url, url.pathExtension.lowercased() == "pdf" else { return }
             Task { @MainActor in
                 guard let staged = try? model.stagePDF(from: url) else { return }
                 model.pendingDroppedPDF = staged
-                model.ingestSheetPresented = true
+                model.requestIngestSheet(in: session.id)
                 openWindow(id: CCwikiApp.jobsWindowID)
             }
         }
@@ -225,7 +210,7 @@ struct RootView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if !model.syncLog.isEmpty {
-                        Button("Details…") { model.syncLogPresented = true }
+                        Button("Details…") { session.syncLogPresented = true }
                             .buttonStyle(.link)
                             .font(Theme.Fonts.meta)
                             .fixedSize()
@@ -260,7 +245,7 @@ struct RootView: View {
 
                 Spacer(minLength: Theme.small)
 
-                if let error = model.webController.lastRenderError {
+                if let error = session.webController.lastRenderError {
                     Label(error, systemImage: "exclamationmark.bubble")
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.orange)

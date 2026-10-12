@@ -5,7 +5,7 @@ import Foundation
 /// reductions chained together (relations-explorer.md §3).
 ///
 /// Pure and testable, like `PageRelations`, and computed per read for the
-/// same reason (`AppModel.currentRelations`): every lookup is into the
+/// same reason (`ReaderSession.currentRelations`): every lookup is into the
 /// single-object closures `Derivation` precomputed at load, so this only
 /// sorts and words at most a few dozen rows.
 ///
