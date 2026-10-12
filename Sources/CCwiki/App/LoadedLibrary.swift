@@ -32,12 +32,21 @@ struct LoadedLibrary: Sendable {
     /// nothing: for `update`, which logs once for the whole load, and for the
     /// corpus suite's report (§3.8).
     static func build(cloneRoot: URL, timings: inout LoadTimings) -> LoadedLibrary {
+        // Each file is read once, for its fingerprint and its page together,
+        // so the two always describe the same bytes (§3.5).
+        let scan = timings.measure(.read) { ContentScan.read(cloneRoot: cloneRoot) }
         let index = timings.measure(.index) {
-            WikiIndex.build(contentRoot: cloneRoot.appending(path: "content"))
+            WikiIndex.assemble(
+                contentRoot: cloneRoot.appending(path: "content"),
+                files: scan.files, pages: scan.pages)
         }
         // 343 KB of JSON, and the labels need every hosting page's
-        // headings — both cheap, but neither belongs on the main actor.
-        let manifest = timings.measure(.manifest) { RelationsManifest.load(cloneRoot: cloneRoot) }
+        // headings — both cheap, but neither belongs on the main actor. The
+        // manifest is decoded from the bytes its fingerprint was taken of;
+        // without them, `load` says why it is missing.
+        let manifest = timings.measure(.manifest) {
+            scan.manifest.map(RelationsManifest.decode) ?? RelationsManifest.load(cloneRoot: cloneRoot)
+        }
         let labels = timings.measure(.labels) { RelationLabels(manifest: manifest, index: index) }
         let backlinks = timings.measure(.backlinks) { index.backlinkMap() }
         let textGrep = timings.measure(.grep) { TextGrep(pages: index.allPages) }
@@ -48,7 +57,6 @@ struct LoadedLibrary: Sendable {
         let linkPreviews = timings.measure(.previews) {
             LinkPreviews(index: index, manifest: manifest, labels: labels)
         }
-        let fingerprints = timings.measure(.read) { ContentFingerprints.scan(cloneRoot: cloneRoot) }
         return LoadedLibrary(
             index: index,
             backlinks: backlinks,
@@ -57,7 +65,7 @@ struct LoadedLibrary: Sendable {
             textGrep: textGrep,
             derivation: derivation,
             linkPreviews: linkPreviews,
-            fingerprints: fingerprints)
+            fingerprints: scan.fingerprints)
     }
 
     /// The library after `previous`, equal to `build`. Until there are
@@ -115,9 +123,10 @@ struct LoadTimings: Equatable, Sendable, CustomStringConvertible {
     /// The parts of a load that run in memory, in the order a build runs
     /// them, as §3.1 names them.
     enum Phase: String, CaseIterable, Sendable {
-        /// Reading the clone's files and hashing their bytes.
+        /// Listing the clone's files, reading each once, hashing it, and
+        /// parsing the pages: the first half of what `WikiIndex.build` was.
         case read
-        /// `WikiIndex`: the pages and the tables that resolve a link.
+        /// `WikiIndex.assemble`: the tables that resolve a link.
         case index
         case manifest, labels, backlinks, grep, derivation, previews
         /// Comparing with the library before: the fingerprint difference and

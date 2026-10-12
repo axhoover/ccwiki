@@ -38,8 +38,20 @@ struct WikiIndex: Sendable {
 
     static func build(contentRoot: URL) -> WikiIndex {
         let files = Self.contentFiles(root: contentRoot)
-
         var pages: [String: WikiPage] = [:]
+        for path in files where path.hasSuffix(".md") {
+            if let page = WikiPage.load(path: path, in: contentRoot) { pages[path] = page }
+        }
+        return assemble(contentRoot: contentRoot, files: files, pages: pages)
+    }
+
+    /// The second half of `build`: every table, from the sorted file list
+    /// (`contentFiles(root:)`, assets included) and the markdown pages that
+    /// parsed. `build` is `contentFiles`, a `WikiPage` load per `.md` file,
+    /// then this; a library load reads each file once, for its fingerprint
+    /// and its page together, and calls this too
+    /// (plans/reader-comforts.md §3.5, §4.6).
+    static func assemble(contentRoot: URL, files: [String], pages: [String: WikiPage]) -> WikiIndex {
         var assets: [String: String] = [:]
         var slugToPath: [String: String] = [:]
         var allSlugs: [String] = []
@@ -55,9 +67,7 @@ struct WikiIndex: Sendable {
             appendSlug(slug)
             if slugToPath[slug] == nil { slugToPath[slug] = path }
 
-            if path.hasSuffix(".md") {
-                if let page = WikiPage.load(path: path, in: contentRoot) { pages[path] = page }
-            } else {
+            if !path.hasSuffix(".md") {
                 assets[slug] = path
             }
 
