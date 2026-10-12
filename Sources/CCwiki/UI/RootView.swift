@@ -65,7 +65,7 @@ struct RootView: View {
             model.loadJobHistory()
             // Before the library: Welcome is readable while the wiki downloads.
             model.openLaunchDocumentIfNeeded()
-            await model.loadLibrary()
+            await model.loadLibrary(reason: .launch)
             // Which copy this is goes to the log on every launch; the other
             // copies are looked for in a release, and not under the harness.
             // Before the sync: a copy that hands over to another and quits

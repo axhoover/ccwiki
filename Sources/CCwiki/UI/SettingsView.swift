@@ -256,14 +256,15 @@ struct SettingsView: View {
                             .font(Theme.Fonts.meta)
                             .foregroundStyle(.secondary)
                         Spacer(minLength: Theme.small)
-                        Button("Rebuild") { model.rebuildSearchIndex() }
+                        Button("Rebuild") { model.rebuildLibrary() }
                             .controlSize(.small)
                     }
                 }
             } header: {
                 Text("Working files")
             } footer: {
-                Text("The search index is derived and safe to delete at any time. "
+                Text("The search index is derived and safe to delete at any time; Rebuild "
+                    + "reads every page again and rebuilds it. "
                     + "PDFs are kept outside the clone deliberately — they are job inputs "
                     + "and never enter the repository.")
                 .font(Theme.Fonts.meta)
