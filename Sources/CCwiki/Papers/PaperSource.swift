@@ -102,7 +102,7 @@ struct PaperSource: Equatable, Sendable {
 
     /// `url` with an `https` scheme, or nil when it is not an http(s) URL.
     static func secure(_ url: URL) -> URL? {
-        switch url.scheme?.lowercased() {
+        switch url.scheme?.lowercased() ?? "" {
         case "https":
             return url
         case "http":
@@ -138,8 +138,9 @@ struct PaperSource: Equatable, Sendable {
         else { return nil }
 
         let rest = entry[match.upperBound...]
+        guard let opening = rest.first else { return nil }
         var value = ""
-        switch rest.first {
+        switch opening {
         case "{":
             var depth = 0
             for character in rest {
