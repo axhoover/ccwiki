@@ -265,12 +265,18 @@ final class AppModel {
     /// the id is not handed out again. From the window's
     /// `willCloseNotification`, never `onDisappear`, which SwiftUI may send
     /// for a tab that is only deselected (§1.3).
+    ///
+    /// With the last reader closed, the next one starts as the first of a
+    /// launch does, on the page read last: a reader who closes the window
+    /// and clicks the Dock icon is back where they were, as before there
+    /// were tabs (§1.7).
     func sessionDidClose(_ id: UUID) {
         guard sessions.removeValue(forKey: id) != nil else { return }
         closedSessionIDs.insert(id)
         sessionOrder.closed(id)
         mainWindowCount = sessions.count
         ingestTarget.windowClosed(id)
+        if sessions.isEmpty { hasColdStarted = false }
     }
 
     /// The reader that windows which are not readers act on: the reader
@@ -634,10 +640,13 @@ final class AppModel {
         if ScreenshotRunner.directory == nil { await checkForUpdatesIfDue() }
     }
 
-    /// True for the first session of the process only, which opens the page
-    /// read last; every later window opens Home (§1.7).
+    /// Whether a session has taken the cold start since the process began,
+    /// or since the last reader window closed (`sessionDidClose`).
     @ObservationIgnored private var hasColdStarted = false
 
+    /// True for the first session of the process, and for the first after
+    /// every reader window has closed: those open the page read last, and
+    /// every other window opens Home (§1.7).
     func takeColdStart() -> Bool {
         defer { hasColdStarted = true }
         return !hasColdStarted
@@ -871,7 +880,7 @@ final class AppModel {
                 pages: library.index.allPages, backlinks: library.backlinks,
                 fingerprints: library.fingerprints, builder: Self.searchIndexBuilder)
         } catch {
-            warn("Search index could not be rebuilt: \(error.localizedDescription)")
+            warn("Search index could not be updated: \(error.localizedDescription)")
             return nil
         }
     }

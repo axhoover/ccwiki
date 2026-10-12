@@ -20,6 +20,7 @@ right shows what links back.
 
 | | |
 |---|---|
+| ⌘N and ⌘T | A new window, or a new tab, at the wiki's front page. |
 | ⌘O | Jump to a page by name. With nothing typed, recent pages come first. |
 | ⌘S | Search the wiki. The page named for what you typed comes first. |
 | ⇧⌘R | Search the references by citation key, author, title or topic. Add a year to narrow it. |
@@ -28,6 +29,7 @@ right shows what links back.
 | ⌘[ and ⌘] | Back and forward. |
 | ⇧⌘H | The wiki's front page. |
 | ⌥⌘I | Show or hide the inspector. |
+| ⌥⌘P | On a reference, the paper behind it, in a window of its own. |
 | ⌘+ and ⌘− | Larger or smaller text. ⌘0 goes back to the usual size. |
 | ⌘R | Check for a newer copy of the wiki now. |
 
@@ -40,6 +42,10 @@ Select text with formulas and press ⌘C to copy them as LaTeX, or right-click a
 formula for Copy LaTeX. Hover an algorithm to copy its LaTeX source, as on the
 website. Right-click anywhere on a page to open it on cryptology.city or copy a
 link to it.
+
+⌘-click a link to open it in a new tab, or ⌥⌘-click for a new window. To
+open a linked page on cryptology.city, right-click the link and choose Open
+Link on cryptology.city.
 
 ## Staying current
 

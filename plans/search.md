@@ -64,10 +64,11 @@ Every library load calls `SearchIndex.sync(pages:backlinks:fingerprints:builder:
 `ContentFingerprints` digest, and `builder` is the app's `CFBundleVersion` with
 the schema version.
 
-- **A different `builder`** (an app update, a fresh file, Settings ▸ Storage ▸
-  Rebuild, or `CCWIKI_FULL_RELOAD=1`) deletes and writes every row, then
-  `optimize` and a WAL checkpoint, as every load used to. Any change to how a
-  row is built therefore rebuilds once, with no version bump to remember.
+- **A different `builder`** (an app update, or a fresh file after Settings ▸
+  Storage ▸ Rebuild resets it), or `CCWIKI_FULL_RELOAD=1`, deletes and writes
+  every row, then `optimize` and a WAL checkpoint, as every load used to. Any
+  change to how a row is built therefore rebuilds once, with no version bump
+  to remember.
 - **Otherwise** one `SELECT path, hash`, then one transaction: delete the paths
   that are gone, `UPDATE` the rows whose hash differs (the `doc_au` trigger
   keeps FTS in step) and insert the new ones. `optimize` runs only after more

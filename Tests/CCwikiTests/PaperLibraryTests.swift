@@ -243,7 +243,7 @@ struct PaperLibraryTests {
             Issue.record("expected your PDF")
             return
         }
-        papers.remove(aabn.path)
+        try papers.remove(aabn.path)
         #expect(papers.state(for: aabn.path) == .notDownloaded)
         #expect(store.record(for: aabn.path) == nil)
         #expect(FileManager.default.fileExists(

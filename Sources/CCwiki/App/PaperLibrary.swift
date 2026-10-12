@@ -198,15 +198,11 @@ final class PaperLibrary {
     }
 
     /// Remove From Library: the file to the Trash, and the record gone. If
-    /// the Trash refuses it, nothing changes, and the Mac says so with a beep.
-    func remove(_ referencePath: String) {
+    /// the Trash refuses it, the paper stays, and the error says why: the
+    /// paper window shows it.
+    func remove(_ referencePath: String) throws {
         cancel(referencePath)
-        do {
-            try store.remove(referencePath)
-        } catch {
-            NSSound.beep()
-            return
-        }
+        try store.remove(referencePath)
         records[referencePath] = nil
         transient[referencePath] = nil
     }

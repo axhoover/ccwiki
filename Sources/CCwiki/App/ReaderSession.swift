@@ -294,11 +294,11 @@ final class ReaderSession: Identifiable {
 
     // MARK: What the model tells it
 
-    /// What a load means for the reader: re-render what is on screen, since
-    /// the file may have changed, keeping the reader's place, since it
-    /// usually has not. The first load also does what the session's start
-    /// left for the wiki. A session that has not started waits for its
-    /// start, which does the same.
+    /// What a load means for this window: its page renders again, keeping
+    /// the reader's place, only if the load changed something that page
+    /// shows (`LibraryUpdate.requiresRerender`, §3.6). The first load also
+    /// does what the session's start left for the wiki; a session that has
+    /// not started waits for its start, which does the same.
     func libraryDidLoad(_ update: LibraryUpdate) {
         guard isStarted else { return }
         if awaitsLibrary {

@@ -8,7 +8,7 @@ import SwiftUI
 /// chrome. The view takes the keyboard when its window appears, so Space
 /// and Page Down scroll at once. It hands its zoom actions and its page
 /// changes up to the window, which shows the page and gives the View menu's
-/// Zoom In, Zoom Out and Actual Size something to act on. It never takes a
+/// Zoom In, Zoom Out and Zoom to Fit something to act on. It never takes a
 /// dropped file: the window does, and keeps it (§2.6).
 ///
 /// Replacing the paper at the same path is a new view: the window keys this
@@ -80,7 +80,7 @@ struct PDFKitView: NSViewRepresentable {
                 self.onZoom(PaperZoomAction(
                     zoomIn: { [weak self] in self?.view?.zoomIn(nil) },
                     zoomOut: { [weak self] in self?.view?.zoomOut(nil) },
-                    actualSize: { [weak self] in self?.view?.autoScales = true }))
+                    zoomToFit: { [weak self] in self?.view?.autoScales = true }))
                 self.reportPage()
             }
         }

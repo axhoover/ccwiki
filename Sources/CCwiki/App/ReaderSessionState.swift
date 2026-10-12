@@ -70,7 +70,8 @@ struct SessionStartPlan: Equatable, Sendable {
     ///     in any session, over whatever it restored.
     ///   - launchDocument: Welcome or What's New, which the model hands to
     ///     the first session of the process only.
-    ///   - isColdStart: true for the first session of the process only.
+    ///   - isColdStart: true for the first session of the process, and for
+    ///     the first after every reader window has closed.
     ///   - lastPage: the page read last, nil under the screenshot harness.
     static func plan(
         restored: ReaderSessionState?, window: ReaderWindow,

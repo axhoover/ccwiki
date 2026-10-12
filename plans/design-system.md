@@ -102,7 +102,8 @@ do in Finder and Safari.
   last search.
 - **A new window starts as the last one was left.** Its inspector and open
   folders are those of the window changed most recently, and it opens Home.
-  Only the first window of a launch opens the page read last.
+  Only the first window of a launch, or the first after every reader window
+  has closed (the Dock icon, ⌘N), opens the page read last.
 - **The ingest sheet stays on its window.** It is pinned to the window that
   asked for it, and a click on another reader window never moves it or its
   link, notes and PDF.
@@ -134,7 +135,7 @@ discoverable rather than folklore.
 | ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
 | ⌘P | Print, or Save as PDF from the print panel |
 | ⌥⌘P | Show Paper, on a reference page |
-| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size, in every tab; in a paper window, Zoom In / Zoom Out / Actual Size, which fits the page again |
+| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size, in every tab; in a paper window, Zoom In / Zoom Out / Zoom to Fit |
 | ⇧⌘H | Go home |
 | Esc | Dismiss any sheet or the find bar |
 
@@ -349,8 +350,10 @@ each step, waits for it to settle, writes a `.ready-N` marker and blocks;
 `.go-N`. Plan steps: `home`, `page:<path>`, `folder:<slug>`, `switcher:<query>`,
 `search:<query>`, `outline`, `backlinks`, `light`, `dark`, and for windows and
 tabs `window:<path>` (a second reader window), `tab:<path>` (a new tab in
-front) and `bgtab:<path>` (a new tab behind, once background tabs are on).
-Each step drives the reader window or tab that is key when it runs.
+front) and `bgtab:<path>` (a new tab behind, once background tabs are on),
+and `paper:<path>` (a reference's paper window, served from
+`CCWIKI_PAPER_FIXTURES`; Offline for a paper without a fixture). Each step
+drives the reader window or tab that was key most recently.
 
 The capture needs the **Screen Recording** permission (System Settings → Privacy
 & Security). Without it the script falls back to an in-app composite —

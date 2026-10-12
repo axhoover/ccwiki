@@ -43,10 +43,9 @@ struct CCwikiApp: App {
                 .environment(model)
                 .frame(minWidth: Theme.paperMinWidth, minHeight: Theme.paperMinHeight)
                 // A paper window restored on its own still needs the model.
+                // The view itself runs the launch and sets the tabbing
+                // identifier that keeps papers out of a reader's tabs.
                 .onAppear { appDelegate.model = model }
-                // Papers tab with papers when the system prefers tabs, never
-                // with a reader (§1.8, §2.2).
-                .background { WindowReader { $0.tabbingIdentifier = "ccwiki.paper" } }
         }
         .defaultSize(width: Theme.paperDefaultWidth, height: Theme.paperDefaultHeight)
         .defaultPosition(.trailing)
@@ -163,7 +162,9 @@ struct CCwikiCommands: Commands {
         }
 
         // The same three keys zoom a paper while its window is key, titled
-        // as Preview titles them (reader-comforts §1.5).
+        // for what they do there. ⌘0 fits the PDF to the window again, as it
+        // opened, so it is Zoom to Fit: Actual Size means 100% in Preview
+        // (reader-comforts §1.5).
         CommandGroup(after: .toolbar) {
             Button(paperZoom == nil ? "Make Text Bigger" : "Zoom In") {
                 if let paperZoom { paperZoom.zoomIn() } else { model?.makeTextBigger() }
@@ -177,8 +178,8 @@ struct CCwikiCommands: Commands {
             .keyboardShortcut("-", modifiers: .command)
             .disabled(paperZoom == nil && model == nil)
 
-            Button("Actual Size") {
-                if let paperZoom { paperZoom.actualSize() } else { model?.resetTextSize() }
+            Button(paperZoom == nil ? "Actual Size" : "Zoom to Fit") {
+                if let paperZoom { paperZoom.zoomToFit() } else { model?.resetTextSize() }
             }
             .keyboardShortcut("0", modifiers: .command)
             .disabled(paperZoom == nil && (model == nil || model?.pageZoom == 1))
@@ -360,16 +361,13 @@ struct CCwikiCommands: Commands {
             }
             .disabled(session?.currentPage == nil)
 
-            // ⌥⌘P: ⌘P is Print, and ⇧⌘P is Page Setup by convention. Out of
-            // the menu until papers can be fetched.
-            if ShowPaperCommand.isAvailable {
-                Button("Show Paper") {
-                    guard let model, let page = session?.currentPage else { return }
-                    ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
-                }
-                .keyboardShortcut("p", modifiers: [.command, .option])
-                .disabled(!ShowPaperCommand.isEnabled(for: session?.currentPage))
+            // ⌥⌘P: ⌘P is Print, and ⇧⌘P is Page Setup by convention.
+            Button("Show Paper") {
+                guard let model, let page = session?.currentPage else { return }
+                ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
             }
+            .keyboardShortcut("p", modifiers: [.command, .option])
+            .disabled(!ShowPaperCommand.isEnabled(for: session?.currentPage))
 
             Divider()
 

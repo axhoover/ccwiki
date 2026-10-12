@@ -170,8 +170,9 @@ inside pseudocode blocks only.
 
 **Right-click.** A capturing `contextmenu` listener posts `contextTarget`
 with `tex` (the formula under the pointer), `algorithm` (its block's
-`data-source`) and `algorithmExpanded` (the same with the macros written
-out). `ReaderContextTarget` turns that into the menu's copy items, which
+`data-source`), `algorithmExpanded` (the same with the macros written
+out) and `link` (the app's link under the pointer, for the link items of
+§4). `ReaderContextTarget` turns that into the menu's copy items, which
 `ReaderWebView.willOpenMenu` puts at the top: **Copy LaTeX** for the
 formula, then **Copy Algorithm as LaTeX** with **Copy Algorithm as LaTeX (No
 Macros)** as its Option-key alternate. Each item captures its text by value,
@@ -250,11 +251,8 @@ which is where back/forward come from. Where the page opens is Swift's call.
 Safari does: ⌘-click or a middle click opens a tab behind the current one
 (in front until `WindowTabbing.joinsInBackground` is turned on after the
 by-eye check, reader-comforts §1.4), ⇧⌘-click a tab in front, ⌥⌘-click a new
-window, and a plain click, or ⇧ or ⌥ alone, opens it where you are. Tabs and
-windows arrive with reader-comforts' A5. Until then a click that asks for
-one, or the link menu's tab or window item, opens a link to a page on
-cryptology.city, as a ⌘-click always has, and a link to a folder where you
-are. WebKit may not dispatch `auxclick`, so the middle button is read from
+window, and a plain click, or ⇧ or ⌥ alone, opens it where you are.
+WebKit may not dispatch `auxclick`, so the middle button is read from
 `mousedown` and `mouseup`, and a middle `click` or `auxclick` is only
 stopped. A link WebKit follows itself, the page's listener having missed it,
 gets the same table from `WKNavigationAction`'s `buttonNumber` and

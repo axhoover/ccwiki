@@ -2,48 +2,73 @@
 
 ## 1. The layers
 
-Five directories under `Sources/CCwiki/`, in dependency order. Nothing lower
+The directories under `Sources/CCwiki/`, in dependency order. Nothing lower
 imports anything higher.
 
 | Layer | Isolation | Owns |
 |---|---|---|
-| `Wiki/` | none — pure value types | Slugs, wikilinks, frontmatter, macros, the page index, and the relationship manifest. Fully unit-tested; see [wiki-model.md](wiki-model.md) and [relations.md](relations.md). |
+| `Wiki/` | none — pure value types | Slugs, wikilinks, frontmatter, macros, the page index, the relationship manifest, and the content fingerprints that say what a pull changed. Fully unit-tested; see [wiki-model.md](wiki-model.md) and [relations.md](relations.md). |
 | `Search/` | `actor SearchIndex` | The derived FTS5 index and the fuzzy matcher. See [search.md](search.md). |
 | `Jobs/` | none — async free functions | Subprocess streaming, tool discovery, every `git` call. |
-| `Reader/` | `@MainActor` | The one `WKWebView`, its scheme handler, and the request that drives it. See [render-pipeline.md](render-pipeline.md). |
-| `App/` + `UI/` | `@MainActor` | `AppModel` and the SwiftUI views. |
+| `Papers/` | none — value types and an async fetcher | Finding a reference's PDF from its own links, fetching it once, and keeping it in `library/papers/`, outside the clone. Above `Jobs/`, whose `IngestSubmission.Source` reads the links. See [reader-comforts.md](reader-comforts.md) §2. |
+| `Reader/` | `@MainActor` | A `WKWebView` per reader window, its scheme handler, the request that drives it, and what a click means (`LinkDisposition`). See [render-pipeline.md](render-pipeline.md). |
+| `App/` + `UI/` | `@MainActor` | `AppModel`, a `ReaderSession` per reader window, `PaperLibrary`, and the SwiftUI views. |
 
-## 2. One model, one web view
+## 2. One library, one session per window
 
-`AppModel` is a single `@Observable @MainActor` class. The expensive work —
-walking the clone, parsing ~700 files, decoding `relations.json`, rebuilding the
-search index — happens off the main actor and lands as one assignment, so the UI
-never sees a half-built library.
+`AppModel` is a single `@Observable @MainActor` class, and it is app-wide: the
+wiki, the search index, jobs, sync, updates, settings and the papers. The
+expensive work — walking the clone, parsing ~880 files, decoding
+`relations.json`, syncing the search index — happens off the main actor and
+lands as one assignment, so the UI never sees a half-built library.
 
-`WebController` owns the app's only `WKWebView` and outlives the SwiftUI struct
-that shows it. `WebPane.makeNSView` returns the existing instance and
-`updateNSView` is deliberately empty: rendering is driven by
+Each reader window or tab has a `ReaderSession`, also `@Observable
+@MainActor`: its location, history, web view, sidebar selection, inspector and
+sheets. `ReaderWindowView` claims the session from `AppModel`'s registry once
+AppKit says which window it is in, puts it in the environment, and lets it go
+on the window's `willCloseNotification`. Three rules hold the split together
+([reader-comforts.md](reader-comforts.md) §1.2):
+
+- A view inside a reader window reads its own window's session, from
+  `@Environment(ReaderSession.self)`, never "the active one".
+- A window that is not a reader (the explorer, Jobs, a paper, Settings) never
+  reads a session. It opens pages through `AppModel`'s small API for the
+  active reader, the one key most recently (`open`, `revealInReader`).
+- `AppModel` never renders. After a load it hands each session the
+  `LibraryUpdate`, and the session renders its page again only if the update
+  changed something that page shows.
+
+Each session's `WebController` owns its window's `WKWebView` and outlives the
+SwiftUI struct that shows it. `WebPane.makeNSView` returns the existing instance
+and `updateNSView` is deliberately empty: rendering is driven by
 `controller.render(_:)`, not by view updates, because SwiftUI calls
 `updateNSView` on every parent recomposition and doing work there would reset the
-scroll position on every keystroke elsewhere in the window.
+scroll position on every keystroke elsewhere in the window. Every reader's web
+view shares one non-persistent data store (`WebController.sharedDataStore`), so
+there is one network process however many tabs are open.
 
 ## 3. From `git pull` to a rendered page
 
 ```
 AppModel.sync()                       single-flight; ⌘R twice does not clone twice
-  └─ GitService.sync(clone:remote:)   clone, or fetch + merge --ff-only
-       └─ Subprocess.lines(...)       AsyncStream<ProcessLine>, \r-aware
-            └─ appendSyncLine         progress lines REPLACE, they do not stack
+  ├─ GitService.sync(clone:remote:)   clone, or fetch + merge --ff-only
+  │    └─ Subprocess.lines(...)       AsyncStream<ProcessLine>, \r-aware
+  │         └─ appendSyncLine         progress lines REPLACE, they do not stack
+  └─ LibraryRefresh.needsReload       "already up to date" at the loaded revision: no load
 
-AppModel.loadLibrary()
-  ├─ Task.detached: WikiIndex.build(contentRoot:)      glob, parse, slug, alias
-  │                 index.backlinkMap()                one sweep, 673 links
-  ├─ MacroTable.load(cloneRoot:)                       122 macros out of macros.ts
-  ├─ GitService.modifiedDates(in:)                     ONE git log, not one per file
-  └─ Task.detached: SearchIndex.rebuild(pages:)        full FTS5 rebuild
+AppModel.loadLibrary(reason:)         serialized: one load at a time
+  ├─ Task.detached: LoadedLibrary.build, or .update(previous) after a pull
+  │    ├─ ContentScan.read            each file read once: its fingerprint and its page
+  │    ├─ WikiIndex.assemble          slug, alias, the resolution tables
+  │    ├─ manifest, labels, backlinkMap(), TextGrep, Derivation, LinkPreviews
+  │    └─ LibraryChanges.between      the fingerprint difference from the last load
+  ├─ apply(library)                   one main-actor assignment
+  ├─ SearchIndex.sync(…)              only the rows whose fingerprint changed
+  ├─ LibraryRefresh.revisionFacts     HEAD, its date, modified dates (cached, range merge)
+  └─ each ReaderSession.libraryDidLoad(update)   renders again if requiresRerender
 
-AppModel.open(.page(path:anchor:))
-  ├─ reveal()                         select in the sidebar, expand its folder
+ReaderSession.open(.page(path:anchor:))         the window's own session
+  ├─ reveal()                         select in its sidebar, expand its folder
   └─ PageRenderer.request(for:)        resolve every wikilink on the page → hrefs
        └─ WebController.render(_:)     evaluateJavaScript("CCwiki.render({…})")
 
@@ -54,13 +79,19 @@ ccwiki.js
   └─ postMessage {type:"rendered", toc:[…]}  → the inspector's outline
 
 a click
-  └─ postMessage {type:"navigate", href:"ccwiki://wiki/page/…"}
-       └─ AppModel.navigate(to:)      → back to open()
+  └─ postMessage {type:"navigate", href:"ccwiki://wiki/page/…", command, shift, …}
+       └─ ReaderSession.navigate(to:disposition:)
+            ├─ here                   → back to open()
+            └─ a tab or a window      → openInReader → a new ReaderSession
 ```
 
-**Cold start reads before it fetches.** `RootView.task` calls `loadLibrary()`
-first and only calls `sync()` if there is nothing on disk, so a launch with no
-network opens instantly on the last pull.
+**Cold start reads before it fetches.** `AppModel.launchIfNeeded()`, which
+every reader window and paper window calls and which runs once per process,
+calls `loadLibrary(reason: .launch)` first and only then syncs, so a launch
+with no network opens instantly on the last pull. A load whose search index
+already matches writes nothing, and a launch sync that finds the wiki
+already up to date loads nothing again ([reader-comforts.md](reader-comforts.md)
+§3).
 
 ## 4. Where resolution happens, and why
 

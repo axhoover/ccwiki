@@ -13,16 +13,14 @@ struct ShowPaperButton: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        if ShowPaperCommand.isAvailable {
-            Button {
-                ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
-            } label: {
-                Label("Show Paper", systemImage: "doc.richtext")
-                    .font(Theme.Fonts.meta)
-            }
-            .buttonStyle(.link)
-            .help(tooltip)
+        Button {
+            ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
+        } label: {
+            Label("Show Paper", systemImage: "doc.richtext")
+                .font(Theme.Fonts.meta)
         }
+        .buttonStyle(.link)
+        .help(tooltip)
     }
 
     private var tooltip: String {

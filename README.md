@@ -141,6 +141,8 @@ a job that could not push.
 
 | | |
 |---|---|
+| ⌘N / ⌘T | New window / new tab |
+| ⌘-click / ⌥⌘-click | Open a link in a new tab / a new window |
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page / next / previous |
 | ⌘S | Search the wiki |
@@ -151,7 +153,8 @@ a job that could not push.
 | ⌥⌘I | Toggle inspector |
 | ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
 | ⌘P | Print, or Save as PDF from the print panel |
-| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
+| ⌥⌘P | Show the paper behind a reference |
+| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size; in a paper window, zoom in / out / to fit |
 | ⇧⌘H | Go home |
 | ⇧⌘N | Ingest a paper |
 | ⇧⌘J | Show the jobs window |

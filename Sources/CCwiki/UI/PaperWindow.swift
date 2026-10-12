@@ -15,10 +15,9 @@ import UniformTypeIdentifiers
 /// wiki to load, and a window whose reference has gone (and whose PDF was
 /// never kept) closes itself (SWIFTUI-RULES §6.5).
 ///
-/// Track A seam (§1.7, §2.6): a paper window restored on its own must load
-/// the wiki itself. On rebasing onto Track A, `body` gains
-/// `.task { await model.launchIfNeeded() }`; until then it waits for a
-/// reader window's launch, and shows Loading the Wiki if none comes.
+/// It runs the app's launch itself (`launchIfNeeded`, once per process), so
+/// a paper window macOS restores without a reader still loads the wiki
+/// (§1.7, §2.6).
 struct PaperWindowView: View {
     let referencePath: String?
 
@@ -36,6 +35,7 @@ struct PaperWindowView: View {
     @State private var isDropTargeted = false
     @State private var confirmsRemoval = false
     @State private var problem: String?
+    @State private var removalProblem: String?
 
     private struct PageIndicator: Equatable {
         let index: Int
@@ -67,10 +67,11 @@ struct PaperWindowView: View {
                 if closes { dismiss() }
             }
             .task(id: readyFile) { opener = PDFOpener() }
+            // Restored alone, this window is the launch's only caller; beside
+            // a reader, it waits for the same launch (§1.7).
+            .task { await model.launchIfNeeded() }
             .alert("Remove the PDF you added?", isPresented: $confirmsRemoval) {
-                Button("Remove", role: .destructive) {
-                    if let referencePath { model.papers.remove(referencePath) }
-                }
+                Button("Remove", role: .destructive) { removeFromLibrary() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text(removalMessage)
@@ -80,6 +81,12 @@ struct PaperWindowView: View {
                 Button("OK") {}
             } message: {
                 Text(problem ?? "")
+            }
+            .alert("Couldn't Remove the PDF", isPresented: Binding(
+                get: { removalProblem != nil }, set: { if !$0 { removalProblem = nil } })) {
+                Button("OK") {}
+            } message: {
+                Text(removalProblem ?? "")
             }
     }
 
@@ -358,22 +365,16 @@ struct PaperWindowView: View {
 
     // MARK: Actions
 
-    /// An explicit Show, so the page must be seen: in the reader, opening
-    /// one if none is on screen.
-    ///
-    /// Track A seam (§1.8): on rebasing onto Track A, the body becomes
-    /// `model.revealInReader(.page(path: reference.path, anchor: nil))`,
-    /// which brings the reader showing the page forward, and, when that
-    /// returns false, `openWindow(id: CCwikiApp.mainWindowID,
-    /// value: ReaderWindow(opening: location))`. Until then an open reader
-    /// changes page without coming forward, and `model.openPage` here fails
-    /// A3's grep gate.
+    /// An explicit Show, so the page must be seen: a reader tab already
+    /// showing it, else the active reader, brought forward
+    /// (`revealInReader`); with no reader open, a new reader window on the
+    /// page (§1.8).
     private func showReferencePage() {
         guard let reference else { return }
-        if model.mainWindowCount == 0 {
-            openWindow(id: CCwikiApp.mainWindowID)
+        let location = AppModel.Location.page(path: reference.path, anchor: nil)
+        if !model.revealInReader(location) {
+            openWindow(id: CCwikiApp.mainWindowID, value: ReaderWindow(opening: location))
         }
-        model.openPage(reference.path)
     }
 
     private func choosePDF(for page: WikiPage) {
@@ -399,11 +400,22 @@ struct PaperWindowView: View {
     /// A downloaded paper goes to the Trash at once. One you added is the
     /// only copy CCwiki has, so it asks first.
     private func requestRemoval() {
-        guard let referencePath, let readyRecord else { return }
+        guard let readyRecord else { return }
         if readyRecord.origin == .addedByYou {
             confirmsRemoval = true
         } else {
-            model.papers.remove(referencePath)
+            removeFromLibrary()
+        }
+    }
+
+    /// Remove From Library. If the Trash refuses the file, the paper stays,
+    /// and the window says why rather than only beeping.
+    private func removeFromLibrary() {
+        guard let referencePath else { return }
+        do {
+            try model.papers.remove(referencePath)
+        } catch {
+            removalProblem = error.localizedDescription
         }
     }
 
@@ -483,10 +495,13 @@ struct PaperWindowView: View {
     /// Never a reader's tab, and no taller than the screen: a 13-inch laptop
     /// has about 870 pt, and on macOS 14 `.defaultSize` cannot read the
     /// screen (§2.2).
+    ///
+    /// The clamp waits for the next turn of the main actor. This runs inside
+    /// the view update that reported the window, where a frame change is the
+    /// constraint crash of SWIFTUI-RULES §1.1 (as `WindowTabbing.join` says);
+    /// and SwiftUI may still size the window after this first report.
     static func prepare(_ window: NSWindow) {
         window.tabbingIdentifier = tabbingIdentifier
-        fitToScreen(window)
-        // SwiftUI may still size the window after this first report.
         Task { @MainActor in fitToScreen(window) }
     }
 
@@ -581,10 +596,6 @@ extension Theme {
 /// the reference page being read, in its own window.
 enum ShowPaperCommand {
 
-    /// Gates the menu item and the button, so neither ships before papers
-    /// can be fetched (SWIFTUI-RULES §7.4).
-    static let isAvailable = true
-
     /// Only a reference page has a paper behind it.
     @MainActor static func isEnabled(for page: WikiPage?) -> Bool {
         page?.kind == .reference
@@ -601,14 +612,14 @@ enum ShowPaperCommand {
     }
 }
 
-/// View ▸ Zoom In, Zoom Out and Actual Size, while a paper window is key.
+/// View ▸ Zoom In, Zoom Out and Zoom to Fit, while a paper window is key.
 /// The paper's `PDFView` hands these up, and the View menu's text-size items
-/// act on them in its place, retitled as Preview titles them.
+/// act on them in its place, retitled for what they do to a PDF.
 struct PaperZoomAction: Sendable {
     let zoomIn: @MainActor @Sendable () -> Void
     let zoomOut: @MainActor @Sendable () -> Void
     /// Fit to the window again: `autoScales` back on.
-    let actualSize: @MainActor @Sendable () -> Void
+    let zoomToFit: @MainActor @Sendable () -> Void
 }
 
 // `@Entry` on a FocusedValues property is macOS 15; this is the macOS 14 form.
