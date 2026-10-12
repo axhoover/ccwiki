@@ -861,9 +861,9 @@ offers Revert File.
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
 | `outsideContent` | all | any path other than a `.md` file under `content/` (excluding `content/Templates/`) or `.reductions/relations.json`. This is an **allow-list**: `scripts/`, `CLAUDE.md`, `.claude/`, `tsconfig.tsbuildinfo` and a stray `lint.log` at the root are all caught | "CCwiki opens pull requests that change `content/` only. Revert `scripts/lint.mjs`, or make this change outside CCwiki." |
-| `renamedOrDeleted` | all | a rename or a deletion under `content/` | Rename: "Filenames under `content/` are live URLs. Revert the rename." Deletion: "Filenames under `content/` are live URLs. Restore the file." |
-| `binaryFile` | all | any binary file added or changed, PDFs included | "PDFs and other binary files never enter the wiki." |
-| `generatedRegionEdited` | all | in a changed file, the BEGIN and END marker counts differ, or a `participates-in` region's checksum is not `sha256(trimmed contents)[0..<12]` | "The “Participates in” section on lines 153–171 was edited by hand. It is rebuilt from the reduction pages; correct those instead. (lint: `generated-region-edited`)" |
+| `renamedOrDeleted` | all | a rename or a deletion under `content/`, or the deletion of `.reductions/relations.json` | Rename: "Filenames under `content/` are live URLs. Revert the rename." Deletion: "Filenames under `content/` are live URLs. Restore the file." `relations.json`: "`relations.json` is generated, and the site reads it. Restore the file." |
+| `binaryFile` | all | any binary file added or changed, PDFs included; or a page or `relations.json` that git calls binary, or whose text could not be read as UTF-8 (`ReviewSnapshot.assemble` treats a side it could not read as binary) | "PDFs and other binary files never enter the wiki." For a page or `relations.json`: "CCwiki could not read this file as UTF-8 text, so it checked nothing in it. Revert it, or save it as UTF-8." |
+| `generatedRegionEdited` | all | in a changed file, the BEGIN and END marker counts differ, or a `participates-in` region's checksum is not `sha256(trimmed contents)[0..<12]`, or a region is gone, markers and all, while `relations.json` was not regenerated in the same diff | "The “Participates in” section on lines 153–171 was edited by hand. It is rebuilt from the reduction pages; correct those instead. (lint: `generated-region-edited`)" A removed region: "The “Participates in” section was removed by hand. It is rebuilt from the reduction pages; restore it, and correct those instead." |
 | `relationFieldOnObjectPage` | all | an object page gains `implies`, `implied-by`, `reductions`, `from`, `to`, `hypotheses` or `conclusion` in its frontmatter | "Relation fields are not allowed on object pages. A relation is a page in `content/Reductions/`. (lint: `object-relation-field`)" |
 | `wikilinkMath` | all | an added line, outside generated regions, with a `$` inside `[[…]]` | "Math in a wikilink breaks the link on the site. Write `[text $x$](slug)` instead. (lint: `wikilink-math`)" |
 | `privateText` | all | an added line matched by `PrivateText` (§6.4) | "This line contains a local path or a token: `/Users/…/Library/…`." |
@@ -875,8 +875,8 @@ offers Revert File.
 |---|---|---|---|
 | `newObjectPage` | all | a new page under `Primitives/`, `Assumptions/`, `Complexity/`, `Glossary/` or `Folklore/` | "This creates an object page. The wiki asks for a human decision on new objects." |
 | `otherPages` | correction, edit | a changed `.md` file other than the target | "This also changes `X.md`, which is not the page you started from." |
-| `largeEdit` | correction, edit | more than 20 changed lines in all | "This changes 46 lines. A correction is usually a line or two." |
-| `ingestionScope` | ingestion | more than one new page outside `References/`, `Reductions/` and `Barriers/`, or a hand change outside generated regions to more than one existing page, or more than 5 such lines on one (ingestion.md §4) | "This changes three existing pages. An ingestion normally adds pages and touches at most one." |
+| `largeEdit` | correction, edit | more than 20 changed lines in all, counting hand lines only: not blank, and outside generated regions. A hunk counts the larger of its removed and added sides | "This changes 46 lines. A correction is usually a line or two." |
+| `ingestionScope` | ingestion | more than one new page outside `References/`, `Reductions/` and `Barriers/`, or a hand change outside generated regions to more than one existing page, or more than 5 such lines on one (ingestion.md §4). Lines are counted as for `largeEdit` | "This changes three existing pages. An ingestion normally adds pages and touches at most one." |
 | `proseRelationBullet` | all | an added list item, with two or more wikilinks, inside a `# Other results`, `# Known relationships` or `## Known Results` section | "This adds a relationship as a prose bullet. Relationships are reduction pages." |
 | `derivedFilesStale` | all | without a change to `.reductions/relations.json`, the diff changes a reduction or barrier page's frontmatter; an object page's `id`, `title`, `aliases`, `variants`, `unlisted` or `type`; or a heading a `variants` anchor names | "The “Participates in” sections and `relations.json` are now out of date, and the wiki's checks fail until they are regenerated. In this job's worktree (Open in Terminal), run `npm ci` and `node scripts/generate-relations.mjs`, then review again. Or run them on the branch after the pull request is open." |
 | `relationsJSONByHand` | correction | `.reductions/relations.json` changed | "`relations.json` changed. The correction agent cannot run the generator, so unless you ran it in this worktree, revert this file." |
@@ -889,7 +889,7 @@ offers Revert File.
 
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
-| `regionRegenerated` | all | a generated region changed and its checksum matches | "Regenerated by the script, not edited by hand." |
+| `regionRegenerated` | all | a generated region changed and its checksum matches; or a region is gone while `relations.json` changed in the same diff and was not deleted, since the generator drops the region from a page left with no relation | "Regenerated by the script, not edited by hand." A removed region: "Removed by the script, not by hand: `relations.json` was regenerated too." |
 
 So following `derivedFilesStale`'s advice in an edit or ingestion worktree
 gives notes, never a block. `derivedFilesStale` is a warning, not an

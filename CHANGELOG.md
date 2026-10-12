@@ -14,6 +14,28 @@
 
 ## 0.3.0 — unreleased
 
+**Correct a page from the reader.** Three ways, from the Wiki menu, the
+toolbar's pencil button, or a right-click on the page or a passage selected
+on it:
+
+- **Edit Page… (⌥⌘E)** opens the page's Markdown in a window of its own, at
+  the lines you selected, with a live preview drawn the way the reader draws
+  pages.
+- **Describe a Correction…** takes a sentence about what is wrong, and an
+  agent drafts the edit to that one page. Settings → Jobs chooses its model;
+  Sonnet is the default.
+- **Open an Issue About This Page…** fills in a GitHub issue with the page,
+  the section and the passage, and shows the exact text before it is sent.
+
+**Nothing reaches GitHub until you approve it.** Every job now stops under
+Awaiting Review in the Jobs window, paper ingestion included. The review
+shows the changes as rendered pages, marks what the wiki does not allow,
+such as a hand edit to a generated "Participates in" section or a file
+outside `content/`, and lets you edit the pull request's title and body.
+Open Draft PR commits, pushes and opens a draft pull request; Discard…
+throws the work away. Agent jobs run without GitHub credentials, and CCwiki
+checks after each one that nothing was pushed that it did not push itself.
+
 **Tabs and windows.** File → New Tab (⌘T) and New Window (⌘N). Each tab
 keeps its own page and its own Back and Forward. ⌘-click a link, or click it
 with the middle button, to open it in a new tab; ⌥⌘-click opens it in a new

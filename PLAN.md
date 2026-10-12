@@ -50,7 +50,8 @@ redesign, not a refactor.
 | Rendering is **fully offline** | Reading must work on a plane | Vendored into `Resources/web/`; a CSP header and a scheme handler make it structural, not aspirational |
 | The **search index is derived** | Never authoritative, safe to delete at any time | `SearchIndex.reset()` is a legitimate answer to any problem |
 | **PDFs never enter the repo** | They are job inputs; References pages point at eprint/arXiv/DOI | `AppPaths.library` sits outside the clone |
-| **Never merge a PR** | The app's job ends at "draft PR opened" | `prompts/ingest.md` Step 6; `IngestJobRunner` only ever reads the URL |
+| **Never merge a PR** | The app's job ends at "draft PR opened" | `Publisher` opens a draft with `gh pr create --draft`; nothing in CCwiki runs `gh pr merge` or `gh pr ready`. See [plans/corrections.md](plans/corrections.md) §6.5 |
+| **Nothing reaches GitHub without an approval** | An agent, or a slip in the editor, must not be able to publish; the maintainer reads the diff first | Every job stops in `awaitingReview`; only `JobCenter.approve` → `Publisher` pushes. Agent jobs run sealed (no `gh` or push credentials) and a `Tripwire` checks for anything CCwiki did not push; `prompts/ingest.md` Step 6 hands over instead of pushing. See [plans/corrections.md](plans/corrections.md) §5–§6 |
 | **House style is never compiled in** | The wiki maintains its own ingestion contract, and a snapshot of it in a Mac app goes stale immediately | `PromptComposer` fills placeholders only; the rules are read from the worktree |
 | A reduction is a **hyperedge, never a pair** | `hypotheses` is a conjunction. Flattening `{sparse-lpn, ddh} ⇒ she` into two object-to-object edges asserts two implications the wiki does not make — a false mathematical claim, not a rendering shortcut | No API in `RelationsManifest` returns a `(from, to)` pair; see [plans/relations.md](plans/relations.md) §1 |
 
@@ -151,10 +152,11 @@ redesign, not a refactor.
   `claude/reader-comforts` (all but D6), second of the batch**: native tabs and windows, each with its own
   `ReaderSession`; a reference's paper on request, in a window of its own; and
   a library load that rebuilds only what changed.
-- [plans/corrections.md](plans/corrections.md) — **specified 2026-10-12,
-  third**: correct a page yourself, have an agent draft it, or open an issue;
-  and a review step before anything reaches GitHub, for every job, with
-  DiffGuard and a rendered diff.
+- [plans/corrections.md](plans/corrections.md) — **built on
+  `claude/page-corrections`, third of the batch**: correct a page yourself,
+  have an agent draft it, or open an issue; and a review step before anything
+  reaches GitHub, for every job, with DiffGuard and a rendered diff. §16 and
+  §17 record the review notes and the seams with the other two specs.
 - [plans/update-integrity.md](plans/update-integrity.md) — why CCwiki came
   back as 0.1.0 after updates (a second copy with the same bundle id, most
   likely), and the fix: the dev and release channels (`CHANNEL`, CCwiki Dev),
