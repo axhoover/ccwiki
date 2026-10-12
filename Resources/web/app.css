@@ -914,9 +914,10 @@ a.new {
 
 a.new:hover { color: var(--accent); }
 
-/* A narrow window has no gutter to speak of: the label leads the entry. */
-@media (max-width: 600px) {
-  .review-entry { margin-left: 0; }
+/* Without room left of the measure for the label (the page is 42rem and
+ * its gutter 2.75rem, so below about 720px), the label leads the entry.
+ * The review pane in the Jobs window is often that narrow. */
+@media (max-width: 720px) {
   .review-entry.added::before,
   .review-entry.removed::before {
     position: static;
