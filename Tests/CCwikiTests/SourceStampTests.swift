@@ -136,6 +136,27 @@ struct SourceStampTests {
         #expect(Array(second.prefix(2)) == ["- two", "  wrapped"])
     }
 
+    @Test("a passage in a list's last item ends on its text, not on the blank line after it")
+    func listEndsOnText() throws {
+        let blocks = try stampedBlocks()
+        let item = try #require(blocks.filter { $0.tag == "li" }.dropFirst().first)
+        #expect(bodyLines(item)?.last == "", "markdown-it counts the blank line into the item")
+
+        let page = WikiPage(path: "Reductions/x.md", text: Self.fileText)
+        let selection = ReaderSelection(
+            renderedLines: item.lines, text: "two wrapped", heading: nil, path: page.path,
+            revision: "abc")
+        let target = CorrectionTarget.make(
+            page: page, fileText: Self.fileText, renderedMarkdown: Self.renderedMarkdown,
+            baseCommit: "abc", selection: selection, readingHeading: nil)
+        let lines = try #require(target.lines)
+        #expect(Self.fileLines[lines.last - 1] == "  wrapped")
+        #expect(target.excerpt == "- two\n  wrapped")
+        #expect(CorrectionTarget.editorLines(
+            fileText: Self.fileText, renderedMarkdown: Self.renderedMarkdown, selection: selection,
+            section: nil) == lines)
+    }
+
     @Test("a display block's lines end on its closing $$")
     func displayMath() throws {
         let block = try first(stampedBlocks(), tag: "div", class: "math-display")
@@ -173,7 +194,7 @@ struct SourceStampTests {
     @Test("a block in a generated region maps inside it, and a target there is generated")
     func generatedRegion() throws {
         let blocks = try stampedBlocks()
-        let regions = GeneratedRegions(Self.fileText)
+        let regions = CorrectionTarget.GeneratedRegions(Self.fileText)
         let region = try #require(regions.regions.first)
         let lists = blocks.filter { $0.tag == "ul" }
         let generated = try #require(lists.last)

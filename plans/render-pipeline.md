@@ -64,7 +64,7 @@ markdown-it instance with the site's math, wikilinks, heading ids and
 callouts, the source-line stamps (below), and the review's blocks. It touches
 no DOM, wraps itself as `(function (global) {…})(typeof window !== "undefined"
 ? window : this)`, and defines `CCwikiMarkdown = { create, createPreview,
-reviewEntries }`. That is what lets JavaScriptCore load it without a web view,
+reviewEntries, reviewFrontmatter }`. That is what lets JavaScriptCore load it without a web view,
 so `SourceStampTests` and `ReviewEntriesTests` run it in Swift tests, beside
 the vendored bundles (with an `atob` shim, which markdown-it's entity tables
 need and a bare `JSContext` may not have). `ccwiki.js` has everything that
@@ -255,6 +255,9 @@ page, the relation-meta line spliced under the H1. A core rule,
 `SourceLineMap` (Swift) maps a rendered range to the file: past the
 frontmatter, and around the spliced lines, which map to the frontmatter they
 are made from. `SourceStampTests` checks every kind of block against it.
+markdown-it counts the blank line after a list into the list and its last
+item, so `CorrectionTarget` drops blank lines at either end of a range before
+it quotes the file or opens the editor there.
 
 **Reading a selection.** `CCwiki.selectionSource()` returns a JSON string,
 `"null"` when nothing on the page is selected: the union of the lines of the
@@ -287,8 +290,9 @@ their maps: the old blocks a hunk overlaps are `removed`, the new ones
 `added`, one unchanged block either side is `context`, and every other run
 of unchanged blocks one `gap`. `ccwiki.js` lays them out, one `section` per
 file, each entry a `div.review-entry.<kind>` with a `data-entry-id`, the
-frontmatter as signed source lines, and DiffGuard's flags as captions above
-the entries they meet. Added and removed entries carry Before and After in
+frontmatter as signed source lines (`CCwikiMarkdown.reviewFrontmatter`; a
+`gap` row, unchanged lines left out, is a caption with no sign), and
+DiffGuard's flags as captions above the entries they meet. Added and removed entries carry Before and After in
 the gutter and `role="insertion"`/`"deletion"`, so they differ by more than
 colour. A link to a page the change adds (`kind: "new"`) is `a.new`: styled
 as a link, titled "Added by this change", going nowhere.

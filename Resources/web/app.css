@@ -819,6 +819,16 @@ tbody tr:last-child td { border-bottom: none; }
 .review-frontmatter-line.removed { background: var(--removed-wash); }
 .review-frontmatter-line.removed .review-frontmatter-sign { color: var(--removed); }
 
+/* Unchanged lines left out: a caption in the text's column, set like the
+ * body's gaps, so it never reads as a line of the YAML. */
+.review-frontmatter-line.gap {
+  padding-left: calc(0.9rem + 1.2em);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
 /* An entry sits on the page's measure; its rule and tint reach a little
  * into the gutter, and its label sits in the gutter beside it. */
 .review-entry {

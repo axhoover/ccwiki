@@ -1333,17 +1333,20 @@
   }
 
   /** The frontmatter is YAML, not Markdown: its changed lines as source,
-   *  with a line of context, in a box at the top of the file. */
+   *  with a line of context, in a box at the top of the file. A gap, a run
+   *  of unchanged lines left out, is a caption, not a line of the file. */
   function frontmatterHTML(lines) {
-    if (!lines.length) return "";
-    return '<div class="review-frontmatter">' + lines.map(function (line) {
-      var kind = line.kind === "added" || line.kind === "removed" ? line.kind : "context";
-      var sign = kind === "added" ? "+" : kind === "removed" ? "−" : " ";
-      var role = kind === "added" ? ' role="insertion" aria-label="Added"'
-        : kind === "removed" ? ' role="deletion" aria-label="Removed"' : "";
-      return '<div class="review-frontmatter-line ' + kind + '"' + role + ">" +
-        '<span class="review-frontmatter-sign" aria-hidden="true">' + sign + "</span>" +
-        escapeText(line.text || "") + "</div>";
+    var rows = markdownLibrary.reviewFrontmatter(lines);
+    if (!rows.length) return "";
+    return '<div class="review-frontmatter">' + rows.map(function (row) {
+      if (row.kind === "gap") {
+        return '<div class="review-frontmatter-line gap">' + escapeText(row.text) + "</div>";
+      }
+      var role = row.kind === "added" ? ' role="insertion" aria-label="Added"'
+        : row.kind === "removed" ? ' role="deletion" aria-label="Removed"' : "";
+      return '<div class="review-frontmatter-line ' + row.kind + '"' + role + ">" +
+        '<span class="review-frontmatter-sign" aria-hidden="true">' + row.sign + "</span>" +
+        escapeText(row.text) + "</div>";
     }).join("") + "</div>";
   }
 

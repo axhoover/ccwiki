@@ -24,6 +24,8 @@ struct IssueSheet: View {
     /// The local paths that must not be sent, read once when the sheet opens.
     @State private var privatePaths: [String] = []
     @State private var phase: Phase = .editing
+    /// While GitHub is asked again whether gh can reach it, signed in.
+    @State private var isCheckingGitHub = false
     @FocusState private var focus: IssueField?
 
     private enum Phase: Equatable {
@@ -40,12 +42,15 @@ struct IssueSheet: View {
     private var blockers: [String] { model.correctionBlockers(.issue, target: target) }
 
     /// GitHub has to be reachable and gh signed in; push rights do not
-    /// matter for an issue.
+    /// matter for an issue. Check Again asks again; the text stays.
     private var gitHubReason: String? {
         switch model.jobCenter.gitHubAccess {
-        case .offline?: "Offline. The text is kept; open the issue when you are connected."
-        case .notSignedIn?: GitHubAccess.notSignedIn.banner
-        default: nil
+        case .offline?:
+            "GitHub could not be reached. The text is kept; check again once you are connected."
+        case .notSignedIn?:
+            "gh is not signed in. Run gh auth login in Terminal, then check again. The text is kept."
+        default:
+            nil
         }
     }
 
@@ -70,8 +75,15 @@ struct IssueSheet: View {
         }
         .padding(Theme.section)
         .frame(width: Theme.sheetWidth)
+        // Dismissed while gh runs, the sheet could not say which issue it
+        // opened, and a new sheet's marker would not find it.
+        .interactiveDismissDisabled(phase == .sending)
         .onAppear(perform: propose)
-        .task { login = await model.githubLogin() }
+        .task {
+            // An answer cached before the sheet opened may be stale.
+            if gitHubReason != nil { await checkGitHub() }
+            if login == nil { login = await model.githubLogin() }
+        }
     }
 
     // MARK: The form
@@ -91,6 +103,13 @@ struct IssueSheet: View {
 
             if let notice = request.notice {
                 CorrectionNotice(text: notice)
+            }
+
+            if let note = IssueComposer.regionNote(for: target) {
+                Label(note, systemImage: "arrow.triangle.branch")
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: Theme.tight) {
@@ -148,10 +167,19 @@ struct IssueSheet: View {
             } else if !blockers.isEmpty {
                 CorrectionBlockerList(title: "Before an issue can be opened", blockers: blockers)
             } else if let gitHubReason {
-                Label(gitHubReason, systemImage: "exclamationmark.triangle")
-                    .font(Theme.Fonts.meta)
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: Theme.small) {
+                    Label(gitHubReason, systemImage: "exclamationmark.triangle")
+                        .font(Theme.Fonts.meta)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                    Spacer(minLength: Theme.small)
+                    if isCheckingGitHub {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button("Check Again") { Task { await checkGitHub() } }
+                        .controlSize(.small)
+                        .disabled(isCheckingGitHub)
+                }
             }
 
             if case .failed(let message) = phase {
@@ -174,6 +202,7 @@ struct IssueSheet: View {
                 }
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.escape, modifiers: [])
+                    .disabled(phase == .sending)
                 Button("Open Issue") { send() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
@@ -238,7 +267,24 @@ struct IssueSheet: View {
             ?? QuartzSlug.slugifyFilePath(target.pagePath)
         text = IssueComposer.body(
             for: target, siteURL: AppModel.siteURL(slug: slug), repository: repository)
-        focus = .body
+        // From macOS 15 the body's cursor starts in its last, empty
+        // paragraph. Before, a TextEditor cannot be given a selection, and
+        // typing would start above the page line: the title has it there.
+        if #available(macOS 15.0, *) {
+            focus = .body
+        } else {
+            focus = .title
+        }
+    }
+
+    /// Asks GitHub again whether gh can reach it, signed in, then the login
+    /// the footer names, if it was not known.
+    private func checkGitHub() async {
+        guard !isCheckingGitHub else { return }
+        isCheckingGitHub = true
+        await model.jobCenter.refreshGitHubAccess()
+        isCheckingGitHub = false
+        if login == nil { login = await model.githubLogin() }
     }
 
     private func send() {
@@ -261,7 +307,8 @@ private enum IssueField: Hashable {
 
 /// The issue's body. From macOS 15 the cursor starts at the end, in the
 /// empty paragraph IssueComposer leaves for what the reader has to say; on
-/// macOS 14 a TextEditor cannot be given a selection.
+/// macOS 14 a TextEditor cannot be given a selection, and the sheet opens
+/// with the title focused instead.
 private struct IssueBodyEditor: View {
     @Binding var text: String
     var focus: FocusState<IssueField?>.Binding

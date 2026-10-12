@@ -77,7 +77,8 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
     /// A pointer, a right-click with nothing selected, names a block, not a
     /// passage: the target is the whole page, in the pointer's section, so
     /// the editor opens there. A passage whose lines cannot be mapped keeps
-    /// its quote, for the whole page.
+    /// its quote, for the whole page. A passage's lines leave out the blank
+    /// lines markdown-it counts into a list's last item.
     static func make(
         page: WikiPage, fileText: String, renderedMarkdown: String,
         baseCommit: String, selection: ReaderSelection?,
@@ -92,7 +93,8 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
         target.quote = Self.quoted(text)
         let map = SourceLineMap(fileText: fileText, renderedMarkdown: renderedMarkdown)
         switch map.location(ofRendered: selection.renderedLines) {
-        case .body(let lines):
+        case .body(let mapped):
+            let lines = Self.trimmingBlankLines(mapped, in: fileText)
             target.lines = lines
             target.region = GeneratedRegions(fileText).overlap(lines) ? .generated : .body
             target.excerpt = Self.text(of: lines, in: fileText)
@@ -106,19 +108,63 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
         return target
     }
 
-    /// Where the editor opens for what was shown (§3.3): a passage's lines,
-    /// or the block a right-click pointed at, though a pointer's target is
-    /// the whole page. Nil with nothing selected, or lines that map nowhere;
-    /// the editor then opens at the target's section.
+    /// Where the editor opens for what was shown (§3.3, §3.5): a passage's
+    /// lines, or the block a right-click pointed at, though a pointer's
+    /// target is the whole page; else the heading of `section`, the one the
+    /// reader is on. Nil when none of them is in the file.
     static func editorLines(
-        fileText: String, renderedMarkdown: String, selection: ReaderSelection?
+        fileText: String, renderedMarkdown: String, selection: ReaderSelection?,
+        section: Section?
     ) -> LineRange? {
-        guard let selection else { return nil }
-        let map = SourceLineMap(fileText: fileText, renderedMarkdown: renderedMarkdown)
-        switch map.location(ofRendered: selection.renderedLines) {
-        case .body(let lines), .frontmatter(let lines): return lines
-        case nil: return nil
+        if let selection {
+            let map = SourceLineMap(fileText: fileText, renderedMarkdown: renderedMarkdown)
+            switch map.location(ofRendered: selection.renderedLines) {
+            case .body(let lines): return trimmingBlankLines(lines, in: fileText)
+            case .frontmatter(let lines): return lines
+            case nil: break
+            }
         }
+        return section.flatMap { headingLine(of: $0, in: fileText) }
+    }
+
+    /// The line of the heading whose id is `section.id`, as the outline
+    /// gives ids: GithubSlugger over each ATX heading's plain text, counting
+    /// repeats, outside fenced code (`WikiPage.headings()`). Nil when no
+    /// heading has it.
+    static func headingLine(of section: Section, in fileText: String) -> LineRange? {
+        let bodyStart = Frontmatter.parse(fileText).bodyStart
+        let body = String(fileText[bodyStart...])
+        let bodyOffset = SourceLineMap.lines(of: fileText[..<bodyStart]).count - 1
+        let inert = CodeMask.inertRanges(in: body)
+        var slugger = GithubSlugger()
+        for (index, line) in SourceLineMap.lines(of: Substring(body)).enumerated() {
+            guard let heading = WikiPage.atxHeading(line),
+                  !inert.contains(where: { $0.contains(line.startIndex) })
+            else { continue }
+            let text = WikiPage.Heading.plainText(heading.text)
+            guard !text.isEmpty else { continue }
+            if slugger.slug(text) == section.id {
+                let number = bodyOffset + index + 1
+                return LineRange(first: number, last: number)
+            }
+        }
+        return nil
+    }
+
+    /// `lines` without the blank lines at either end, which markdown-it
+    /// counts into a list and its last item; the first line alone when
+    /// every one is blank.
+    static func trimmingBlankLines(_ lines: LineRange, in fileText: String) -> LineRange {
+        let all = SourceLineMap.lines(of: Substring(fileText))
+        func isBlank(_ number: Int) -> Bool {
+            guard number >= 1, number <= all.count else { return true }
+            return all[number - 1].allSatisfy(\.isWhitespace)
+        }
+        var first = lines.first
+        var last = lines.last
+        while last > first, isBlank(last) { last -= 1 }
+        while first < last, isBlank(first) { first += 1 }
+        return LineRange(first: first, last: last)
     }
 
     /// The target when the file the reader showed cannot be read: a
@@ -145,6 +191,44 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
         revision == nil || revision == current
     }
 
+    /// Where the file the reader showed is read from (§3.5).
+    enum ShownFile: Sendable, Equatable {
+        /// `git show <revision>:content/<path>`, in the clone.
+        case blob
+        /// The file on disk: the copy is still at the revision shown.
+        case disk
+        /// Neither: the copy has moved on since the render. The target is
+        /// `fallback`.
+        case unavailable
+    }
+
+    /// Pure. A clone shows the file at the revision whenever git has it, at
+    /// any age; else the disk, while HEAD is still that revision. A snapshot
+    /// has no history: the disk, while its marker is still at the revision.
+    /// `blobAvailable` says whether `git show` gave the file.
+    static func shownFile(
+        store: AppPaths.WikiStore, revision: String?, head: String?, marker: String?,
+        blobAvailable: Bool
+    ) -> ShownFile {
+        switch store {
+        case .git:
+            if revision != nil, blobAvailable { return .blob }
+            return diskShows(revision: revision, current: head) ? .disk : .unavailable
+        case .snapshot:
+            return diskShows(revision: revision, current: marker) ? .disk : .unavailable
+        case .none:
+            return .unavailable
+        }
+    }
+
+    /// Whether `selection` was made on a render the web view has since
+    /// replaced, at another revision: its lines are lines of a markdown it
+    /// no longer keeps, and cannot be mapped (§3.5).
+    static func outlived(_ selection: ReaderSelection?, renderedRevision: String?) -> Bool {
+        guard let revision = selection?.revision else { return false }
+        return revision != renderedRevision
+    }
+
     /// The passage as the reader showed it, trimmed, and at most
     /// `quoteLimit` characters.
     static func quoted(_ text: String) -> String? {
@@ -164,33 +248,39 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
     }
 }
 
-/// The regions a page's "Participates in" section is generated into, from
-/// the reduction pages, by the wiki's own script: 1-based file lines, the
-/// markers included. A correction must not edit one by hand (§3.5).
-struct GeneratedRegions: Sendable, Equatable {
-    static let begin = "<!-- BEGIN GENERATED participates-in"
-    static let end = "<!-- END GENERATED participates-in"
+extension CorrectionTarget {
 
-    let regions: [LineRange]
+    /// The regions a page's "Participates in" section is generated into, from
+    /// the reduction pages, by the wiki's own script: 1-based file lines, the
+    /// markers included. A correction must not edit one by hand (§3.5).
+    ///
+    /// Nested, so that its name stays out of the module's scope: DiffGuard has
+    /// a file-private type of the same name.
+    struct GeneratedRegions: Sendable, Equatable {
+        static let begin = "<!-- BEGIN GENERATED participates-in"
+        static let end = "<!-- END GENERATED participates-in"
 
-    init(_ fileText: String) {
-        var regions: [LineRange] = []
-        var open: Int?
-        for (index, line) in SourceLineMap.lines(of: Substring(fileText)).enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix(Self.begin) {
-                open = index + 1
-            } else if trimmed.hasPrefix(Self.end), let first = open {
-                regions.append(LineRange(first: first, last: index + 1))
-                open = nil
+        let regions: [LineRange]
+
+        init(_ fileText: String) {
+            var regions: [LineRange] = []
+            var open: Int?
+            for (index, line) in SourceLineMap.lines(of: Substring(fileText)).enumerated() {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix(Self.begin) {
+                    open = index + 1
+                } else if trimmed.hasPrefix(Self.end), let first = open {
+                    regions.append(LineRange(first: first, last: index + 1))
+                    open = nil
+                }
             }
+            self.regions = regions
         }
-        self.regions = regions
-    }
 
-    /// Whether any of `lines` is inside a region.
-    func overlap(_ lines: LineRange) -> Bool {
-        regions.contains { $0.overlaps(lines) }
+        /// Whether any of `lines` is inside a region.
+        func overlap(_ lines: LineRange) -> Bool {
+            regions.contains { $0.overlaps(lines) }
+        }
     }
 }
 

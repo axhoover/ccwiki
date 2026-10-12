@@ -692,9 +692,28 @@
     });
   }
 
+  /** The signs the frontmatter box shows in its gutter, by kind. */
+  var FRONTMATTER_SIGNS = { added: "+", removed: "\u2212", context: " ", gap: "" };
+
+  /**
+   * The frontmatter of one file of the payload (§6.3), as the review's box
+   * shows it: `[{ kind, sign, text }]`. `added`, `removed` and `context`
+   * are lines of the YAML, each with its sign; a `gap` is a run of
+   * unchanged lines left out, and its text a caption ("3 unchanged lines"),
+   * never a line of the file. Any other kind reads as context.
+   */
+  function reviewFrontmatter(lines) {
+    return (Array.isArray(lines) ? lines : []).map(function (line) {
+      var kind = line && Object.prototype.hasOwnProperty.call(FRONTMATTER_SIGNS, line.kind)
+        ? line.kind : "context";
+      return { kind: kind, sign: FRONTMATTER_SIGNS[kind], text: String((line && line.text) || "") };
+    });
+  }
+
   global.CCwikiMarkdown = {
     create: create,
     createPreview: createPreview,
     reviewEntries: reviewEntries,
+    reviewFrontmatter: reviewFrontmatter,
   };
 })(typeof window !== "undefined" ? window : this);

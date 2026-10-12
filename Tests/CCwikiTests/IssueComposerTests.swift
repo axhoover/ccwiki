@@ -115,6 +115,33 @@ struct IssueComposerTests {
         #expect(IssueComposer.visibleFooter("").isEmpty)
     }
 
+    @Test("a retry finds the issue whose body carries the sheet's marker, in gh's list")
+    func lookup() throws {
+        let list = #"""
+            [{"url": "https://github.com/axhoover/cryptology.city/issues/9", "body": "Other.\n<!-- ccwiki-issue: B -->"},
+             {"url": "https://github.com/axhoover/cryptology.city/issues/8", "body": "Text.\n---\nOpened with CCwiki\n<!-- ccwiki-issue: A -->"}]
+            """#
+        let url = try #require(URL(string: "https://github.com/axhoover/cryptology.city/issues/8"))
+        #expect(IssueComposer.lookup(marker: "A", inList: list) == .found(url))
+        #expect(IssueComposer.lookup(marker: "C", inList: list) == .notFound)
+        #expect(IssueComposer.lookup(marker: "A", inList: "[]") == .notFound)
+        // What cannot be read is never taken for "not there".
+        #expect(IssueComposer.lookup(marker: "A", inList: "") == .unknown)
+        #expect(IssueComposer.lookup(marker: "A", inList: "gh: HTTP 502") == .unknown)
+    }
+
+    @Test("a generated passage says where its fix belongs; the page's own text says nothing")
+    func regionNote() {
+        #expect(IssueComposer.regionNote(for: Self.target) == nil)
+        var generated = Self.target
+        generated.region = .generated
+        #expect(IssueComposer.regionNote(for: generated)?.contains("reduction page") == true)
+        var meta = Self.target
+        meta.region = .frontmatter
+        meta.lines = LineRange(first: 2, last: 12)
+        #expect(IssueComposer.regionNote(for: meta)?.contains("frontmatter (lines 2–12)") == true)
+    }
+
     @Test("the issue's number comes from its URL")
     func issueNumber() throws {
         let url = try #require(URL(string: "https://github.com/axhoover/cryptology.city/issues/123"))

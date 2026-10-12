@@ -163,6 +163,29 @@ struct ReviewEntriesTests {
         #expect(found.filter { $0.flags > 0 }.count == 1)
     }
 
+    @Test("the frontmatter's rows: lines of the YAML with their signs, and gaps as captions")
+    func frontmatterRows() throws {
+        let script = try MarkdownScript.load()
+        // As ReviewPayload sends them (§6.3), and a kind it never sends.
+        let lines: [[String: Any]] = [
+            ["kind": "context", "text": "type: primitive"],
+            ["kind": "removed", "text": "status: draft"],
+            ["kind": "added", "text": "status: complete"],
+            ["kind": "gap", "text": "3 unchanged lines"],
+            ["kind": "unknown", "text": "title: X"],
+        ]
+        let payload = MarkdownScript.literal(["lines": lines])
+        let raw = try script.json("CCwikiMarkdown.reviewFrontmatter(\(payload).lines)")
+        let rows = try #require(raw as? [[String: Any]])
+        #expect(rows.map { $0["kind"] as? String } == ["context", "removed", "added", "gap", "context"])
+        #expect(rows.map { $0["sign"] as? String } == [" ", "\u{2212}", "+", "", " "])
+        #expect(rows.map { $0["text"] as? String }
+            == ["type: primitive", "status: draft", "status: complete", "3 unchanged lines", "title: X"])
+
+        let none = try script.json("CCwikiMarkdown.reviewFrontmatter(null)")
+        #expect((none as? [Any])?.isEmpty == true)
+    }
+
     @Test("a file that is not Markdown has no entries")
     func notMarkdown() throws {
         var json = file(old: ["{}"], new: ["{\"a\": 1}"], hunks: [([0, 1], [0, 1])])

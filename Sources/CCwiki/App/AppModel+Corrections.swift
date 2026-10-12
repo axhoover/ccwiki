@@ -71,10 +71,18 @@ extension AppModel {
 
         let repository = publishTarget.repository
         let environment = tools.childEnvironment()
-        if IssueSession.attempted.contains(draft.marker),
-           let existing = await Self.issue(
-               marked: draft.marker, gh: gh, repository: repository, environment: environment) {
-            return .success(existing)
+        if IssueSession.attempted.contains(draft.marker) {
+            switch await Self.issue(
+                marked: draft.marker, gh: gh, repository: repository, environment: environment) {
+            case .found(let existing):
+                return .success(existing)
+            case .notFound:
+                break
+            case .unknown:
+                // Sending again blind could open the issue twice.
+                return .failure(JobError("CCwiki could not check whether the last attempt "
+                    + "opened the issue. Nothing was sent; try again."))
+            }
         }
 
         let bodyFile = FileManager.default.temporaryDirectory
@@ -106,17 +114,20 @@ extension AppModel {
             : "gh issue create failed: \(output)"))
     }
 
-    /// An issue by `@me` whose body carries the marker, open or closed.
+    /// An issue by `@me` whose body carries the marker, open or closed: the
+    /// newest of them, listed, and each body read here. Not GitHub's
+    /// search, whose index lags a new issue by up to minutes and may not
+    /// read inside the comment that holds the marker.
     private static func issue(
         marked marker: String, gh: String, repository: String, environment: [String: String]
-    ) async -> URL? {
+    ) async -> IssueComposer.Lookup {
         let result = await Subprocess.run(
             executable: gh,
             arguments: ["issue", "list", "--repo", repository, "--author", "@me", "--state", "all",
-                        "--search", "\"\(marker)\" in:body", "--json", "url", "--jq", ".[0].url"],
+                        "--limit", "50", "--json", "url,body"],
             environment: environment)
-        guard result.succeeded else { return nil }
-        return lastURL(in: result.stdout)
+        guard result.succeeded else { return .unknown }
+        return IssueComposer.lookup(marker: marker, inList: result.stdout)
     }
 
     /// The last line of `output` that is an https URL: gh prints the new

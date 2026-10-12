@@ -107,6 +107,21 @@ enum IssueComposer {
         return String(repeating: "`", count: max(3, longest + 1))
     }
 
+    /// What the sheet says about a passage the page's own text does not
+    /// hold (§3.5): where its fix belongs. Nil for the body.
+    static func regionNote(for target: CorrectionTarget) -> String? {
+        switch target.region {
+        case .body:
+            return nil
+        case .generated:
+            return "This passage is generated from the reduction pages: the fix belongs on "
+                + "the reduction page it links to."
+        case .frontmatter:
+            let lines = target.lines.map { " (\($0.label))" } ?? ""
+            return "This line is generated from the page's frontmatter\(lines): the fix belongs there."
+        }
+    }
+
     /// What CCwiki adds under the body, as the sheet names it: the footer's
     /// visible lines, without the rule and the hidden marker.
     static func visibleFooter(_ footer: String) -> String {
@@ -116,6 +131,28 @@ enum IssueComposer {
                 !line.isEmpty && !line.allSatisfy { $0 == "-" } && !line.hasPrefix("<!--")
             }
             .joined(separator: " ")
+    }
+
+    /// Whether an issue already carries a sheet's marker: what a retry asks
+    /// before it sends again (§4.4, §8.2).
+    enum Lookup: Sendable, Equatable {
+        case found(URL)
+        case notFound
+        /// gh could not be asked, or its answer could not be read.
+        case unknown
+    }
+
+    /// `gh issue list --json url,body`'s answer, searched for the issue whose
+    /// body carries "ccwiki-issue: <marker>". Pure.
+    static func lookup(marker: String, inList json: String) -> Lookup {
+        guard let data = json.data(using: .utf8),
+              let issues = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return .unknown }
+        let needle = "ccwiki-issue: \(marker)"
+        guard let issue = issues.first(where: { ($0["body"] as? String)?.contains(needle) == true })
+        else { return .notFound }
+        guard let address = issue["url"] as? String, let url = URL(string: address) else { return .unknown }
+        return .found(url)
     }
 
     /// The number GitHub gave an issue, from its URL: ".../issues/123".

@@ -34,8 +34,21 @@ extension ReaderSession {
 
     // MARK: Routes
 
+    /// Sessions with a correction on its way, from the click to the editor
+    /// or the sheet: a second one meanwhile, from ⌥⌘E held down or the menu
+    /// and the context menu together, would make a second job for the page
+    /// before the first is in Jobs (§4.4).
+    @MainActor private static var sessionsStartingCorrection: Set<ObjectIdentifier> = []
+
     private func correct(_ route: CorrectionRoute, selection: ReaderSelection?) async {
         guard canCorrectCurrentPage, let page = currentPage else { return }
+        // A sheet already open on this window keeps what was typed in it.
+        guard correctionSheet == nil else { return }
+        let key = ObjectIdentifier(self)
+        guard !Self.sessionsStartingCorrection.contains(key) else { return }
+        Self.sessionsStartingCorrection.insert(key)
+        defer { Self.sessionsStartingCorrection.remove(key) }
+
         // A selection made on another page, as one the shell kept across a
         // render could be, is not about this one.
         let onPage = selection?.path == page.path ? selection : nil
@@ -50,25 +63,33 @@ extension ReaderSession {
 
         switch route {
         case .edit:
-            await beginEdit(shown.target, at: shown.editorLines)
+            await beginEdit(shown.target, at: shown.editorLines, notice: shown.notice)
         case .describe:
-            correctionSheet = CorrectionSheetRequest(
-                .describe, target: shown.target, notice: shown.notice)
+            showSheet(.describe, for: shown)
         case .issue:
-            correctionSheet = CorrectionSheetRequest(
-                .issue, target: shown.target, notice: shown.notice)
+            showSheet(.issue, for: shown)
         }
     }
 
-    /// Route a (§7.1): the local blockers, then a job already on the page,
-    /// then a new edit job and its editor, open at `lines`: the passage, or
-    /// the block a right-click pointed at.
-    private func beginEdit(_ target: CorrectionTarget, at lines: LineRange?) async {
+    /// Describe a Correction or Open an Issue, unless a sheet is already
+    /// open: replacing it would lose what was typed in it.
+    private func showSheet(_ kind: CorrectionSheetRequest.Kind, for shown: Shown) {
+        guard correctionSheet == nil else { return }
+        correctionSheet = CorrectionSheetRequest(kind, target: shown.target, notice: shown.notice)
+    }
+
+    /// Route a (§7.1): the local blockers, then, when the selection could
+    /// not be carried over, a word saying so, then a job already on the
+    /// page, then a new edit job and its editor, open at `lines`: the
+    /// passage, the block a right-click pointed at, or the heading the
+    /// reader is on.
+    private func beginEdit(_ target: CorrectionTarget, at lines: LineRange?, notice: String?) async {
         let blockers = model.correctionBlockers(.edit, target: target)
         guard blockers.isEmpty else {
             explainBlockers(blockers)
             return
         }
+        if notice != nil, !Self.confirmWholePage() { return }
 
         let existing = model.jobCenter.jobs(touching: target.pagePath)
         // An edit of this page that can still be edited: its editor, at the
@@ -116,6 +137,20 @@ extension ReaderSession {
         }
     }
 
+    /// The editor's word for `CorrectionTarget.fallbackNotice` (§3.5): the
+    /// page changed since it was shown, so the editor opens on all of it.
+    /// Whether to go on.
+    fileprivate static func confirmWholePage() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "The page changed since it was shown."
+        alert.informativeText = "The selection was not carried over. "
+            + "The editor opens on the whole page, as it is now."
+        alert.addButton(withTitle: "Edit Page")
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     fileprivate enum JobChoice {
         case showJob, startAnother, cancel
     }
@@ -145,15 +180,23 @@ extension ReaderSession {
     /// section, with a notice saying the selection was not carried over.
     private func shownTarget(of page: WikiPage, selection: ReaderSelection?) async -> Shown {
         let reading = readingSection
-        let revision = selection?.revision ?? webController.lastRenderedRevision
+        // What the web view shows, read before anything is awaited: a render
+        // that lands meanwhile must not pair its markdown with the file an
+        // earlier one was made from.
+        let rendered = webController.lastRenderedMarkdown ?? page.body
+        let renderedRevision = webController.lastRenderedRevision
+        let revision = selection?.revision ?? renderedRevision
         let head = model.headRevision
-        if let text = await shownFileText(of: page, revision: revision, head: head) {
-            let rendered = webController.lastRenderedMarkdown ?? page.body
+        // A selection made on a render since replaced, a sync's, has lines
+        // of a markdown no longer kept.
+        if !CorrectionTarget.outlived(selection, renderedRevision: renderedRevision),
+           let text = await shownFileText(of: page, revision: revision, head: head) {
             let target = CorrectionTarget.make(
                 page: page, fileText: text, renderedMarkdown: rendered,
                 baseCommit: revision ?? head ?? "", selection: selection, readingHeading: reading)
             let lines = CorrectionTarget.editorLines(
-                fileText: text, renderedMarkdown: rendered, selection: selection)
+                fileText: text, renderedMarkdown: rendered, selection: selection,
+                section: target.section)
             return Shown(target: target, notice: nil, editorLines: lines)
         }
         let target = CorrectionTarget.fallback(
@@ -170,28 +213,27 @@ extension ReaderSession {
         let editorLines: LineRange?
     }
 
-    /// The page's file at `revision`: `git show` for a clone, and for a
-    /// snapshot, or a clone git cannot show it from, the file on disk while
-    /// the copy is still at that revision. Nil when it has moved since.
+    /// The page's file at `revision`, from where `CorrectionTarget.shownFile`
+    /// says: `git show` for a clone, and for a snapshot, or a clone git
+    /// cannot show it from, the file on disk while the copy is still at that
+    /// revision. Nil when it has moved since.
     private func shownFileText(of page: WikiPage, revision: String?, head: String?) async -> String? {
         let paths = model.paths
-        let disk: () -> String? = {
-            try? String(contentsOf: paths.content.appending(path: page.path), encoding: .utf8)
+        let store = paths.wikiStore
+        var blob: String?
+        if store == .git, let revision, let git = model.gitService,
+           let data = await git.blob("\(revision):content/\(page.path)", in: paths.clone) {
+            blob = String(data: data, encoding: .utf8)
         }
-        switch paths.wikiStore {
-        case .git:
-            if let revision, let git = model.gitService,
-               let data = await git.blob("\(revision):content/\(page.path)", in: paths.clone),
-               let text = String(data: data, encoding: .utf8) {
-                return text
-            }
-            guard CorrectionTarget.diskShows(revision: revision, current: head) else { return nil }
-            return disk()
-        case .snapshot:
-            let marker = SnapshotService.marker(in: paths.clone)?.sha
-            guard CorrectionTarget.diskShows(revision: revision, current: marker) else { return nil }
-            return disk()
-        case .none:
+        let marker = store == .snapshot ? SnapshotService.marker(in: paths.clone)?.sha : nil
+        switch CorrectionTarget.shownFile(
+            store: store, revision: revision, head: head, marker: marker,
+            blobAvailable: blob != nil) {
+        case .blob:
+            return blob
+        case .disk:
+            return try? String(contentsOf: paths.content.appending(path: page.path), encoding: .utf8)
+        case .unavailable:
             return nil
         }
     }
