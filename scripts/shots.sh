@@ -13,9 +13,9 @@
 #   search:<query>            the ⇧⌘F full-text sheet, pre-filled
 #   outline | backlinks       flip the inspector
 #   light | dark              switch NSAppearance
-#   paper:<content-relative>  a reference page's paper window (Track C, C6;
-#                             until then the step changes nothing and
-#                             captures the reader)
+#   paper:<content-relative>  a reference page's paper window, served from
+#                             CCWIKI_PAPER_FIXTURES (Offline for any paper
+#                             without a fixture); it stays in front
 #   window:<content-relative> a second reader window on that page; the
 #                             steps after it drive the new window
 #   tab:<content-relative>    a new tab of the key reader window on that
