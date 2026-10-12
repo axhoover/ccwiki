@@ -47,9 +47,16 @@ struct JobScene {
         """
 
     /// A new root for a scene, so a test can know where its origin will be
-    /// (`root/origin.git`) before it makes it.
+    /// (`root/origin.git`) before it makes it. A real path: `git worktree
+    /// list` reports real paths, and macOS's temporary directory is under
+    /// `/var`, a symbolic link to `/private/var`, so a path through it would
+    /// never be the one git lists, and a test of what git lists could pass
+    /// for the wrong reason.
     nonisolated static func newRoot() -> URL {
-        FileManager.default.temporaryDirectory.appending(path: "ccwiki-review-\(UUID().uuidString)")
+        let temporary = GitService.realPath(
+            FileManager.default.temporaryDirectory.path(percentEncoded: false))
+        return URL(fileURLWithPath: temporary, isDirectory: true)
+            .appending(path: "ccwiki-review-\(UUID().uuidString)")
     }
 
     static func make(root: URL = JobScene.newRoot(), tools: ToolLocator = ToolLocator()) async throws
@@ -403,6 +410,34 @@ struct JobCenterTests {
         #expect(job.state == .awaitingReview)
     }
 
+    @Test("Approve pressed while a snapshot is under way approves only what was on screen")
+    func approveDuringSnapshot() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+
+        // The first snapshot of a job just shown, still being taken when
+        // Open Draft PR is pressed: no diff is on screen yet.
+        let center = scene.center
+        let refresh = Task { await center.refreshReview(job) }
+        var waited = 0
+        while center.snapshotCounts[job.id] == nil, waited < 10_000 {
+            await Task.yield()
+            waited += 1
+        }
+        try #require(center.snapshotCounts[job.id] == 1 && job.review == nil,
+                     "the snapshot was not under way when Approve was pressed")
+
+        let result = await center.approve(job)
+        await refresh.value
+        #expect(result == .changedSinceReview, "\(result)")
+        #expect(job.review != nil, "the review now shows the diff")
+        #expect(job.state == .awaitingReview)
+        #expect(job.notice == JobNotice(tone: .warning, text: JobCenter.changedSinceReview))
+        #expect(await scene.originTip(job.branch) == .absent, "nothing was pushed")
+    }
+
     @Test("a job never reviewed is shown its diff before anything is sent")
     func approveUnreviewed() async throws {
         guard let scene = try await JobScene.make() else { return }
@@ -465,6 +500,27 @@ struct JobCenterTests {
         #expect(try scene.read("content/page.md", in: touched) == "a\nB\nc")
     }
 
+    @Test("an edit that has pushed, or tried to, is never discarded on close")
+    func discardIfUntouchedAfterAPush() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        // Approve pushed the branch and gh then failed, or the reply to the
+        // push was lost; the maintainer reverted everything and closed the
+        // editor. The branch may be on GitHub, and only the record says so.
+        let pushed = try await scene.beginEdit()
+        pushed.setPushedCommit(scene.base)
+        let pushing = try await scene.beginEdit()
+        pushing.setPushingCommit(scene.base)
+
+        for job in [pushed, pushing] {
+            await scene.center.discardIfUntouched(job)
+            #expect(scene.center.job(id: job.id) === job)
+            #expect(job.state == .awaitingReview)
+            #expect(FileManager.default.fileExists(atPath: job.recordFile.path(percentEncoded: false)))
+            #expect(FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false)))
+        }
+    }
+
     @Test("Restore makes the worktree again from the saved patch, and it is never a stray")
     func restore() async throws {
         guard let scene = try await JobScene.make() else { return }
@@ -490,9 +546,52 @@ struct JobCenterTests {
         #expect(try scene.read("content/References/A - B & é.md", in: restored) == "new\n")
         #expect(try Data(contentsOf: restored.patchFile) == reviewed, "byte for byte")
         #expect(!(await center.restoreWorktree(restored)), "a worktree that is there is not restored")
+        #expect(!FileManager.default.fileExists(atPath: JobCenter.restoringWorktree(
+            scratch: restored.scratch).path(percentEncoded: false)), "nothing is left aside")
 
         await center.refreshOrphanedWorktrees()
         #expect(!center.orphanedWorktrees.contains { $0.hasSuffix(restored.id) })
+
+        // And the check can fail: a worktree no job owns is listed.
+        let stray = scene.paths.worktree(forJob: "20261012-120000-000-edit-stray")
+        let added = await scene.git.addWorktree(
+            clone: scene.paths.clone, at: stray, branch: "stray", baseRef: scene.base,
+            onLine: { _ in })
+        try #require(added)
+        await center.refreshOrphanedWorktrees()
+        #expect(center.orphanedWorktrees.contains { $0.hasSuffix("/" + stray.lastPathComponent) })
+        #expect(!center.orphanedWorktrees.contains { $0.hasSuffix(restored.id) })
+    }
+
+    @Test("a Restore cut short leaves no worktree where the job looks, so it runs again")
+    func restoreInterrupted() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        await scene.center.refreshReview(job)
+        let reviewed = try Data(contentsOf: job.patchFile)
+        try FileManager.default.removeItem(at: job.worktree)
+
+        // What a quit in the middle of Restore leaves: the worktree made and
+        // the patch applied, aside, on the job's branch, not yet moved.
+        let staging = JobCenter.restoringWorktree(scratch: job.scratch)
+        let base = try #require(job.baseCommit)
+        try #require(await scene.git.addWorktree(
+            clone: scene.paths.clone, at: staging, resettingBranch: job.branch, to: base))
+        try #require(await scene.git.applyPatch(job.patchFile, in: staging))
+
+        let center = scene.relaunched()
+        let restored = try #require(center.job(id: job.id))
+        #expect(restored.needsRestore, "the next launch offers Restore again")
+
+        #expect(await center.restoreWorktree(restored))
+        #expect(!restored.needsRestore && restored.notice == nil)
+        #expect(try scene.read("content/page.md", in: restored) == "a\nB\nc")
+        #expect(try Data(contentsOf: restored.patchFile) == reviewed, "byte for byte")
+        #expect(!FileManager.default.fileExists(atPath: staging.path(percentEncoded: false)))
+        let head = await scene.git.resolveCommit("HEAD", in: restored.worktree)
+        #expect(head == base)
     }
 
     // MARK: Corrections, with a claude that is a shell script
@@ -516,7 +615,6 @@ struct JobCenterTests {
             printf '%s\0' "$@" > "$GH_CONFIG_DIR/../arguments"
             env > "$GH_CONFIG_DIR/../environment"
             printf 'a\nB\nc' > content/page.md
-            mkdir -p .ccwiki
             printf '# [fix] Page: B\n\nCapitalised b, as the reader asked.\n' > .ccwiki/pull-request.md
             printf 'lint ok\n' > .ccwiki/lint.log
             """# + "\n" + Self.readyForReview, in: directory)
@@ -551,6 +649,12 @@ struct JobCenterTests {
         #expect(environment.contains(
             "GH_CONFIG_DIR=" + job.scratch.appending(path: "gh").path(percentEncoded: false)))
         #expect(!environment.contains("GH_TOKEN="))
+
+        // .ccwiki/ was there before the agent started: it has no mkdir, and a
+        // shell redirect does not make the directory.
+        #expect(Handover.pullRequestText(in: job.worktree) != nil)
+        #expect(FileManager.default.fileExists(atPath: job.worktree
+            .appending(path: ".ccwiki/lint.log").path(percentEncoded: false)))
 
         // The review was taken as the job entered it; .ccwiki/ is never in it.
         let patch = scene.patch(of: job)
@@ -593,22 +697,28 @@ struct JobCenterTests {
         #expect(await scene.git.resolveCommit("refs/heads/fix/page", in: scene.clone.root) == nil)
     }
 
+    /// A determined agent: it commits, and pushes `fix/page` to the
+    /// scene's origin by URL, which the seal does not stop and the
+    /// deny-list would not see in a script.
+    static func agentThatPushes(git: String, origin: String) -> String {
+        """
+        printf 'a\\nB\\nc' > content/page.md
+        '\(git)' -c user.name=Agent -c user.email=agent@ccwiki.invalid \\
+            -c commit.gpgsign=false commit -q --no-verify -a -m agent
+        '\(git)' push -q --no-verify '\(origin)' HEAD:refs/heads/fix/page
+        """ + "\n" + readyForReview
+    }
+
     @Test("the tripwire names a push the agent made itself, and the job still waits for review")
     func tripwireCatchesAPush() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         guard let git = ToolLocator.locate(.git, override: nil) else { return }
-        // A determined agent: it commits, and pushes to GitHub by URL, which
-        // the seal does not stop and the deny-list would not see in a script.
         let root = JobScene.newRoot()
         let origin = root.appending(path: "origin.git").path(percentEncoded: false)
-        let tools = try JobScene.fakeClaude("""
-            printf 'a\\nB\\nc' > content/page.md
-            '\(git)' -c user.name=Agent -c user.email=agent@ccwiki.invalid \\
-                -c commit.gpgsign=false commit -q --no-verify -a -m agent
-            '\(git)' push -q --no-verify '\(origin)' HEAD:refs/heads/fix/page
-            """ + "\n" + Self.readyForReview, in: directory)
+        let tools = try JobScene.fakeClaude(
+            Self.agentThatPushes(git: git, origin: origin), in: directory)
         guard let scene = try await JobScene.make(root: root, tools: tools) else { return }
         defer { scene.delete() }
 
@@ -621,6 +731,60 @@ struct JobCenterTests {
         #expect(job.state == .awaitingReview)
         #expect(job.notice == JobNotice(
             tone: .warning, text: "The agent pushed fix/page itself, bypassing review."))
+        // The transcript says what CCwiki did, which the notice does not
+        // contradict: the push was the agent's.
+        #expect(job.log.contains {
+            $0.text.hasPrefix("Awaiting review in Jobs. CCwiki has pushed nothing")
+        })
+        #expect(!job.log.contains { $0.text.contains("Nothing has been pushed") })
+    }
+
+    @Test("the tripwire names the agent's push of a branch name an earlier job left free")
+    func tripwireWithAReusedBranch() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        guard let git = ToolLocator.locate(.git, override: nil) else { return }
+        let root = JobScene.newRoot()
+        let origin = root.appending(path: "origin.git").path(percentEncoded: false)
+        let tools = try JobScene.fakeClaude(
+            Self.agentThatPushes(git: git, origin: origin), in: directory)
+        guard let scene = try await JobScene.make(root: root, tools: tools) else { return }
+        defer { scene.delete() }
+
+        // An earlier correction of the page that changed nothing: its local
+        // branch went with its worktree, and its record, naming fix/page,
+        // stays. Run Again takes the same name.
+        try JobRecordTests.write(JobRecordTests.record(
+            "20261001-090000-000-correction-page", kind: .correction(Self.request(scene)),
+            state: .failed(AgentRun.nothingChanged)), in: scene.paths)
+
+        let job = scene.center.startCorrection(Self.request(scene))
+        await job.task?.value
+        #expect(job.branch == "fix/page")
+        guard case .at = await scene.originTip("fix/page") else {
+            Issue.record("the stand-in agent could not push; nothing for the tripwire to find")
+            return
+        }
+        #expect(job.state == .awaitingReview)
+        #expect(job.notice == JobNotice(
+            tone: .warning, text: "The agent pushed fix/page itself, bypassing review."))
+    }
+
+    @Test("Review Anyway is offered for every way an agent job ends but opened and discarded")
+    func reviewAnywayStates() throws {
+        let offered: [JobState] = [.failed("claude exited 1."), .aborted(reason: "ABORTED: no."),
+                                   .cancelled]
+        for state in offered {
+            #expect(JobCenter.mayReviewAnyway(state), "\(state)")
+        }
+        let url = try #require(URL(string: "https://github.com/axhoover/cryptology.city/pull/41"))
+        let refused: [JobState] = [.queued, .preparing("Fetching submodules…"), .running,
+                                   .awaitingReview, .publishing("Checking…"), .opened(url: url),
+                                   .discarded]
+        for state in refused {
+            #expect(!JobCenter.mayReviewAnyway(state), "\(state)")
+        }
     }
 
     @Test("Review Anyway takes a failed agent's changes to review",
@@ -644,5 +808,38 @@ struct JobCenterTests {
         #expect(job.state == .awaitingReview)
         #expect(job.review?.files.map(\.path) == ["content/page.md"])
         #expect(job.pullRequest.title.hasPrefix("[fix] Page"))
+    }
+
+    @Test("Review Anyway takes the changes of an agent a quit or Cancel stopped to review",
+          .disabled("needs Track A: an empty snapshot until ReviewSnapshot.assemble lands"))
+    func reviewAnywayAfterCancel() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let tools = try JobScene.fakeClaude(#"""
+            printf 'a\nB\nc' > content/page.md
+            sleep 30
+            """#, in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+
+        // Stopped mid-run, once it has changed the page.
+        let job = scene.center.startCorrection(Self.request(scene))
+        let page = job.worktree.appending(path: "content/page.md")
+        var waited = 0
+        while (try? String(contentsOf: page, encoding: .utf8)) != "a\nB\nc", waited < 500 {
+            try await Task.sleep(for: .milliseconds(20))
+            waited += 1
+        }
+        try #require(job.state == .running, "\(job.state)")
+        job.cancel()
+        #expect(job.state == .cancelled)
+
+        // At once, while the runner may still be winding down: it finishes
+        // first, and does not set `cancelled` again over the review.
+        await scene.center.reviewAnyway(job)
+        await job.task?.value
+        #expect(job.state == .awaitingReview)
+        #expect(job.review?.files.map(\.path) == ["content/page.md"])
     }
 }

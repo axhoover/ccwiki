@@ -157,25 +157,29 @@ Conflating these is the most likely metadata error:
 ## 7. What CCwiki never does
 
 **Nothing reaches GitHub without a person's approval**
-([corrections.md](corrections.md) §5). The agent never commits, pushes or opens
-anything. It leaves its change in the worktree and the pull request's text in
-`.ccwiki/pull-request.md` (first line `# <title>`, then the body, from the
-contract's template), prints `READY FOR REVIEW`, and the job waits in Jobs,
-"Awaiting review". Only Approve commits, pushes and opens the pull request,
-through `Publisher`: `gh pr create --draft`, always. Never ready-for-review,
-never merged, never set to merge itself, never approved. Nothing in
-`.ccwiki/` is ever staged. Nothing on GitHub is ever deleted: Discard removes
-the worktree and the local branch, and leaves a pushed branch and an open
-pull request where they are.
+([corrections.md](corrections.md) §5). The agent never commits, pushes or
+opens anything. It leaves its change in the worktree and the pull request's
+text in `.ccwiki/pull-request.md` (first line `# <title>`, then the body, from
+the contract's template), prints `READY FOR REVIEW`, and the job waits in
+Jobs, "Awaiting review". CCwiki makes `.ccwiki/` before the agent starts: the
+prompt sends scratch output there too, and a shell redirect does not make a
+directory. Only Approve commits, pushes and opens the pull request, through
+`Publisher`: `gh pr create --draft`, always. Never ready-for-review, never
+merged, never set to merge itself, never approved. Nothing in `.ccwiki/` is
+ever staged. Nothing on GitHub is ever deleted: Discard removes the worktree
+and the local branch, and leaves a pushed branch and an open pull request
+where they are.
 
-**Approve sends only what was reviewed.** It saves every editor of the job,
-waits for the job's git queue, and snapshots again: if the staged patch's
-SHA-256 differs from the one on screen, nothing is sent and the new diff is
-shown. Then DiffGuard, the title and body (`PrivateText`), git's identity and
-GitHub (`GitHubAccess`) are checked, in that order, before anything leaves.
-The commit is `git reset --soft <base>` and `git commit --no-verify`, so
-whatever the agent committed collapses into one commit and no hook rewrites a
-reviewed file.
+**Approve sends only what was reviewed.** It notes the digest of the diff on
+screen when it is pressed, saves every editor of the job, waits for the job's
+git queue, and snapshots again: if the staged patch's SHA-256 differs from the
+one on screen, nothing is sent and the new diff is shown. A snapshot that
+finished during the wait was never seen, so it is not what is approved. Then
+DiffGuard, the title and body (`PrivateText`), git's identity and GitHub
+(`GitHubAccess`) are checked, in that order, before anything leaves. The
+commit is `git reset --soft <base>` and `git commit --no-verify`, so whatever
+the agent committed collapses into one commit and no hook rewrites a reviewed
+file.
 
 **No pull request twice, no branch overwritten.** The commit being pushed is
 recorded before the push is sent, and the push leases on the last one GitHub
@@ -184,9 +188,11 @@ the branch is: a commit CCwiki pushed (it is in the branch's reflog) is
 adopted and pushed over; a branch someone else made is left alone and the job
 takes the next free name; commits someone else added after CCwiki's are never
 overwritten. Before opening a pull request, CCwiki asks for an open one from
-the branch and updates it instead. A publish a quit interrupts goes back to
-review, and every outcome but an open pull request returns the job to review
-with a notice saying what was, and was not, sent.
+the branch, in the repository itself (a fork's branch of the same name is not
+ours), and updates it instead. A push that fails may still have landed, and
+the notice says so; the next one's lease finds out. A publish a quit
+interrupts goes back to review, and every outcome but an open pull request
+returns the job to review with a notice saying what was, and was not, sent.
 
 `prompts/ingest.md` says so in one sentence that overrides the contract on one
 topic: **the contract decides what the change is; this envelope decides how it
@@ -201,7 +207,9 @@ an accident, not a determined agent: ingestion keeps `node`, which can run
 anything. So the **tripwire** (`Tripwire`) lists GitHub's branches before the
 agent starts and again after it exits, and asks `gh` for pull requests opened
 meanwhile; anything CCwiki did not make is named in an orange notice, and a pull
-request the agent opened itself makes the job `opened`. The review is the gate.
+request the agent opened itself makes the job `opened`. Other jobs' branches
+are CCwiki's own, but never this job's: a branch name is used again once its
+local branch is gone, so an old record can carry it. The review is the gate.
 
 Aborting is a good outcome and the prompt says so: no branch pushed, no PR, no
 issue, no commit, no hand-over file, and a structured `ABORTED:` block
@@ -274,18 +282,21 @@ cancelled), then reads the outcome. The states, and they are not all failures:
 
 | State | Meaning | Worktree |
 |---|---|---|
-| `awaitingReview` | The agent changed something and did not abort. Nothing has been pushed; the job waits for Approve or Discard (corrections.md §6). | kept |
+| `awaitingReview` | The agent changed something and did not abort. CCwiki has pushed nothing; the job waits for Approve or Discard (corrections.md §6). | kept |
 | `opened(url)` | After Approve, the draft PR CCwiki opened. Or the tripwire found a pull request the agent opened itself, with an orange notice. GitHub is believed, never the agent's prose. | pruned after Approve; kept, for inspection, after the tripwire |
 | `aborted(reason)` | The agent declined on purpose. **A good outcome.** | kept |
 | `failed(message)` | Something broke, or the agent ran out of turns. | kept |
 | `failed("The agent finished without changing anything.")` | Nothing to review. | pruned |
-| `cancelled` | The user stopped it. | kept |
+| `cancelled` | The user stopped it, or a quit did. | kept |
 
 The worktree is kept whenever there is something in it to look at, and the
 panel offers "Reveal Worktree in Terminal" — a job you cannot inspect is a job
-you cannot debug. On launch, `orphanedWorktrees` reconciles what git knows
-against the jobs the app knows about and offers to prune the residue of a
-crash; a job awaiting review owns its worktree and is never offered.
+you cannot debug. A failed, aborted or cancelled job whose worktree holds
+changes offers Review Anyway, which snapshots it and brings it to review, so
+twenty minutes of work a quit interrupted are not lost. On launch,
+`orphanedWorktrees` reconciles what git knows against the jobs the app knows
+about and offers to prune the residue of a crash; a job awaiting review owns
+its worktree and is never offered.
 
 ### The review
 
@@ -296,9 +307,12 @@ file's old and new text (the new from the index, so what is shown is exactly
 what was digested). The patch is written to `logs/<id>.patch`, beside the
 transcript and outside Caches, at every snapshot: a worktree deleted with
 Caches comes back with Restore, which makes it again at the base and applies
-the patch. A snapshot is taken as a job enters review, when it is first
-shown, a second after an editor saves, after Revert File and Restore, and at
-Approve; only for a job awaiting review.
+the patch. It builds the worktree in the job's scratch directory and moves it
+into place only once the patch has applied, so a Restore cut short leaves no
+worktree whose first snapshot could overwrite the patch, and is offered again.
+A snapshot is taken as a job enters review, when it is first shown, a second
+after an editor saves, after Revert File and Restore, and at Approve; only for
+a job awaiting review.
 
 **One git queue per job.** `JobCenter` runs every git command for a job's
 worktree through one serial chain, so two `git add -A` never meet on

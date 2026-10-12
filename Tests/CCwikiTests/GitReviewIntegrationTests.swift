@@ -244,6 +244,33 @@ struct GitReviewIntegrationTests {
         #expect(await git.applyPatch(empty, in: scene.worktree))
     }
 
+    @Test("a worktree moves into place with its changes, and never into a folder already there")
+    func moving() async throws {
+        guard let scene = try await Scene.make() else { return }
+        defer { scene.delete() }
+        let git = scene.git
+        try scene.write("content/page.md", Data("a\nB\nc".utf8))
+        #expect(await git.stageAll(in: scene.worktree))
+        let moved = scene.worktree.deletingLastPathComponent()
+            .appending(path: scene.worktree.lastPathComponent + "-moved")
+        defer { try? FileManager.default.removeItem(at: moved) }
+
+        #expect(await git.moveWorktree(clone: scene.clone.root, from: scene.worktree, to: moved))
+        #expect(!FileManager.default.fileExists(atPath: scene.worktree.path(percentEncoded: false)))
+        #expect(try Data(contentsOf: moved.appending(path: "content/page.md")) == Data("a\nB\nc".utf8))
+        #expect(await git.blob(":content/page.md", in: moved) == Data("a\nB\nc".utf8),
+                "the index moved with it")
+        let listed = await git.listWorktrees(clone: scene.clone.root).map(\.path)
+        #expect(listed.contains { $0.hasSuffix("/" + moved.lastPathComponent) })
+        #expect(!listed.contains { $0.hasSuffix("/" + scene.worktree.lastPathComponent) })
+
+        // git would move it inside a folder that is there; CCwiki refuses.
+        try FileManager.default.createDirectory(at: scene.worktree, withIntermediateDirectories: true)
+        #expect(!(await git.moveWorktree(clone: scene.clone.root, from: moved, to: scene.worktree)))
+        #expect(FileManager.default.fileExists(
+            atPath: moved.appending(path: "content/page.md").path(percentEncoded: false)))
+    }
+
     // MARK: Committing and pushing
 
     @Test("the commit collapses whatever the agent committed into one, of exactly what is staged")

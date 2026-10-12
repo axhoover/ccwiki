@@ -57,8 +57,15 @@ struct PublisherTests {
 
         let list = Publisher.listArguments(target: Self.target, branch: "fix/x")
         #expect(Array(list.prefix(2)) == ["pr", "list"])
+        #expect(list.firstIndex(of: "--repo").map { list[$0 + 1] } == "axhoover/cryptology.city")
         #expect(list.firstIndex(of: "--head").map { list[$0 + 1] } == "fix/x")
         #expect(list.firstIndex(of: "--state").map { list[$0 + 1] } == "open")
+        // `--head` matches a name alone: a fork's pull request from its own
+        // fix/x is someone else's, never edited and never taken for ours.
+        #expect(list.firstIndex(of: "--json").map { list[$0 + 1] }
+            == "url,createdAt,isCrossRepository")
+        #expect(list.firstIndex(of: "--jq").map { list[$0 + 1] }
+            == #".[] | select(.isCrossRepository | not) | "\(.createdAt) \(.url)""#)
     }
 
     @Test("the commit message is the title, a blank line, and where it came from")
@@ -87,6 +94,11 @@ struct PublisherTests {
         #expect(Publisher.reason(in: "") == "")
         #expect(Publisher.pushFailure("fix/x", output: output).hasPrefix(
             "The push of fix/x failed: '/tmp/nowhere.git' does not appear to be a git repository."))
+        // A push stopped at the deadline, or cut off after GitHub moved the
+        // branch, may have landed: the message never says nothing was sent.
+        #expect(Publisher.pushFailure("fix/x", output: "") == "The push of fix/x failed. "
+            + "It may or may not have reached GitHub; opening the pull request again checks "
+            + "where the branch is on GitHub before pushing.")
     }
 
     // MARK: Recovering a refused lease
@@ -260,7 +272,7 @@ struct PublisherTests {
         #expect(job.pushedCommit == first)
     }
 
-    @Test("a push to nowhere fails, and says nothing new is on GitHub")
+    @Test("a push to nowhere fails, and remembers what it was pushing")
     func unreachable() async throws {
         guard let scene = try await JobScene.make() else { return }
         defer { scene.delete() }
@@ -279,6 +291,7 @@ struct PublisherTests {
             return
         }
         #expect(message.hasPrefix("The push of fix/page failed"))
+        #expect(message.contains("It may or may not have reached GitHub"))
         #expect(job.pushingCommit == commit && job.pushedCommit == nil,
                 "what was being pushed is remembered for next time")
     }

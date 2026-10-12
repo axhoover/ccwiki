@@ -283,12 +283,17 @@ final class JobCenter {
         }
     }
 
-    /// Review Anyway: a failed or aborted agent job whose worktree holds
-    /// changes goes to review (§6.5). A record from before 0.3 has no base;
-    /// it is computed once, as where HEAD left the default branch, and
-    /// recorded.
+    /// Review Anyway: a failed, aborted or cancelled agent job whose
+    /// worktree holds changes goes to review (§4.1, §6.5). A quit cancels
+    /// an agent that has not finished and keeps its worktree, so its work
+    /// can still reach review. A record from before 0.3 has no base; it is
+    /// computed once, as where HEAD left the default branch, and recorded.
     func reviewAnyway(_ job: Job) async {
         guard job.kind.tag != .edit, Self.mayReviewAnyway(job.state) else { return }
+        // A job cancelled a moment ago may still be winding down, and its
+        // runner sets the state last. It finishes first, or it would set
+        // `cancelled` again over the review.
+        await job.task?.value
         await serially(job) { @MainActor in
             guard Self.mayReviewAnyway(job.state) else { return }
             let environment = self.environment()
@@ -333,47 +338,75 @@ final class JobCenter {
                     siteURL: job.kind.target.flatMap { CorrectionJobRunner.siteURL(for: $0) })
             }
             job.append(JobLogEntry(.system,
-                "Review Anyway: the worktree's changes await review. Nothing has been pushed."))
+                "Review Anyway: the worktree's changes await review. CCwiki has pushed nothing."))
             job.setReview(review.snapshot, findings: review.findings)
             job.setState(.awaitingReview)
         }
     }
 
+    /// The states an agent job can be brought to review from, when its
+    /// worktree holds changes: every way it can end without a review but
+    /// opened and discarded.
     nonisolated static func mayReviewAnyway(_ state: JobState) -> Bool {
         switch state {
-        case .failed, .aborted: true
+        case .failed, .aborted, .cancelled: true
         default: false
         }
     }
 
     /// Restore: the worktree made again at the base, on the job's own
     /// branch, and the saved patch applied to it and its index (§4.4).
-    /// If the patch does not apply, the bare worktree is removed again, so
-    /// the patch is never overwritten by an empty snapshot.
+    ///
+    /// It is built aside, in the job's scratch directory, and moved to
+    /// where the job keeps its worktree only once the patch has applied. A
+    /// Restore cut short by a quit or a crash therefore leaves no worktree
+    /// there, and the next launch offers Restore again. A worktree there
+    /// without its changes would be taken for the job's own, and its first
+    /// snapshot would overwrite the saved patch, the only copy of them. A
+    /// patch that does not apply leaves things as they were.
     func restoreWorktree(_ job: Job) async -> Bool {
         await flushEdits?(job)
         return await serially(job) { @MainActor () -> Bool in
-            let worktreeExists = FileManager.default.fileExists(
-                atPath: job.worktree.path(percentEncoded: false))
-            guard job.state == .awaitingReview, job.needsRestore || !worktreeExists,
-                  let base = job.baseCommit, let git = self.environment().git
+            guard job.state == .awaitingReview, let base = job.baseCommit,
+                  let git = self.environment().git
             else { return false }
+            let destination = job.worktree.path(percentEncoded: false)
+            guard !FileManager.default.fileExists(atPath: destination) else {
+                if job.needsRestore {
+                    job.setNotice(JobNotice(tone: .failure, text:
+                        "Something is already at \(destination), so CCwiki did not restore over "
+                        + "it. Your changes are still saved in \(job.patchFile.lastPathComponent)."))
+                }
+                return false
+            }
 
+            let staging = Self.restoringWorktree(scratch: job.scratch)
+            // Whatever an interrupted Restore left there, branch and all.
+            await self.removeRestoring(at: staging, git: git)
             job.append(JobLogEntry(.system,
                 "Restoring the worktree from \(job.patchFile.lastPathComponent)."))
             guard await git.addWorktree(
-                clone: self.paths.clone, at: job.worktree, resettingBranch: job.branch, to: base)
+                clone: self.paths.clone, at: staging, resettingBranch: job.branch, to: base)
             else {
+                await self.removeRestoring(at: staging, git: git)
                 job.setNotice(JobNotice(tone: .failure, text:
                     "git could not make the worktree again. The changes are still saved in "
                     + "\(job.patchFile.lastPathComponent)."))
                 return false
             }
-            guard await git.applyPatch(job.patchFile, in: job.worktree) else {
-                _ = await git.removeWorktree(clone: self.paths.clone, at: job.worktree, force: true)
+            guard await git.applyPatch(job.patchFile, in: staging) else {
+                await self.removeRestoring(at: staging, git: git)
                 job.setNotice(JobNotice(tone: .failure, text:
                     "The saved changes did not apply to the commit the job started from. They are "
                     + "still in \(job.patchFile.lastPathComponent)."))
+                return false
+            }
+            guard await git.moveWorktree(clone: self.paths.clone, from: staging, to: job.worktree)
+            else {
+                await self.removeRestoring(at: staging, git: git)
+                job.setNotice(JobNotice(tone: .failure, text:
+                    "git could not move the restored worktree into place. The changes are still "
+                    + "saved in \(job.patchFile.lastPathComponent)."))
                 return false
             }
             job.setNeedsRestore(false)
@@ -390,22 +423,30 @@ final class JobCenter {
     /// `opened` returns the job to review with a notice; nothing is left
     /// half done. Acts only from review, and a second press while the first
     /// is answered does nothing.
+    ///
+    /// What is approved is the diff on screen when it was pressed. A
+    /// snapshot that finishes while the editors save or the queue drains (a
+    /// refresh after a save, or the first one of a job just shown) was
+    /// never seen, so it is compared with, not taken as, the reviewed one.
     func approve(_ job: Job) async -> ApproveResult {
         guard job.state == .awaitingReview, !job.needsRestore, !approving.contains(job.id) else {
             return .refused(job.state.isPublishing || approving.contains(job.id)
                 ? "The pull request is already being opened."
                 : "Only a job awaiting review can be published.")
         }
+        let shown = job.review?.digest
         approving.insert(job.id)
         defer { approving.remove(job.id) }
 
         await flushEdits?(job)
         return await serially(job) { @MainActor () -> ApproveResult in
-            await self.publish(job)
+            await self.publish(job, shown: shown)
         }
     }
 
-    private func publish(_ job: Job) async -> ApproveResult {
+    /// `shown` is the digest of the diff on screen when Open Draft PR was
+    /// pressed, or nil when none was.
+    private func publish(_ job: Job, shown: String?) async -> ApproveResult {
         guard job.state == .awaitingReview else {
             return .refused("Only a job awaiting review can be published.")
         }
@@ -413,8 +454,8 @@ final class JobCenter {
         guard let git = environment.git else {
             return settle(job, .refused("git was not found. Nothing was sent."))
         }
-        guard let reviewed = job.review else {
-            // Never snapshotted: show the diff before anything is sent.
+        guard let digest = shown else {
+            // No diff was on screen: show it before anything is sent.
             await takeSnapshot(job)
             return settle(job, .changedSinceReview)
         }
@@ -427,7 +468,6 @@ final class JobCenter {
             paths: paths, tools: environment.tools, git: git, target: environment.target,
             privatePaths: environment.privatePaths)
         let provenance = Self.provenance(for: job, environment: environment)
-        let digest = reviewed.digest
         let id = job.id
         // The job's task, so a quit can interrupt the push or the gh call
         // (`Job.interruptPublishing`).
@@ -524,10 +564,17 @@ final class JobCenter {
     /// worktree holds no change, the job goes and leaves nothing behind,
     /// with no dialog (§7.5). Judged on the worktree now, not on the last
     /// snapshot, so a failed or stale snapshot never discards an edit.
+    ///
+    /// An edit that has pushed, or tried to, is not untouched whatever its
+    /// worktree holds now: its branch may be on GitHub, and only its record
+    /// says so. It stays in Jobs, where Discard… names the branch.
     func discardIfUntouched(_ job: Job) async {
-        guard job.kind.tag == .edit, job.state == .awaitingReview else { return }
+        guard job.kind.tag == .edit, job.state == .awaitingReview,
+              job.pushedCommit == nil, job.pushingCommit == nil
+        else { return }
         await serially(job) { @MainActor in
             guard job.kind.tag == .edit, job.state == .awaitingReview, !job.needsRestore,
+                  job.pushedCommit == nil, job.pushingCommit == nil,
                   let base = job.baseCommit, let git = self.environment().git,
                   FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false)),
                   await git.stageAll(in: job.worktree),
@@ -588,10 +635,29 @@ final class JobCenter {
         job.setReview(review.snapshot, findings: review.findings)
     }
 
-    /// The job's worktree, scratch directory and local branch. Never a
-    /// branch on GitHub.
+    /// Where Restore builds a job's worktree before moving it into place:
+    /// in its scratch directory, outside `worktrees/`, so it is never taken
+    /// for a stray while it is built.
+    nonisolated static func restoringWorktree(scratch: URL) -> URL {
+        scratch.appending(path: "restoring")
+    }
+
+    /// The worktree Restore was building at `staging`, and its directory,
+    /// if they are there. It has the job's branch checked out, which no
+    /// other worktree can then take, nor can the branch be deleted.
+    private func removeRestoring(at staging: URL, git: GitService) async {
+        guard FileManager.default.fileExists(atPath: staging.path(percentEncoded: false)) else {
+            return
+        }
+        _ = await git.removeWorktree(clone: paths.clone, at: staging, force: true)
+        try? FileManager.default.removeItem(at: staging)
+    }
+
+    /// The job's worktree, scratch directory and local branch, and anything
+    /// an interrupted Restore left. Never a branch on GitHub.
     private func removeWorktree(of job: Job) async {
         if let git = environment().git {
+            await removeRestoring(at: Self.restoringWorktree(scratch: job.scratch), git: git)
             let removed = await git.removeWorktree(
                 clone: paths.clone, at: job.worktree, force: true)
             if !removed, FileManager.default.fileExists(

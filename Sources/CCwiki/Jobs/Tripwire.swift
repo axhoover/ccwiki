@@ -43,9 +43,10 @@ struct Tripwire {
     func check(
         _ job: Job, headsBefore before: [String: String]?, otherBranches: Set<String>
     ) async -> (pullRequest: URL?, notice: JobNotice?) {
+        let ignoring = Self.branchesToIgnore(otherBranches, jobBranch: job.branch)
         var moved: [String] = []
         if let before, let after = await heads() {
-            moved = Self.movedBranches(before: before, after: after, ignoring: otherBranches)
+            moved = Self.movedBranches(before: before, after: after, ignoring: ignoring)
         } else {
             job.append(JobLogEntry(.system,
                 "The tripwire could not list the branches on GitHub before and after the "
@@ -56,7 +57,7 @@ struct Tripwire {
         var opened: [OpenedPullRequest] = []
         if let listing = await pullRequestListing() {
             opened = Self.pullRequests(createdAfter: since, in: listing)
-                .filter { !otherBranches.contains($0.head) }
+                .filter { !ignoring.contains($0.head) }
         } else {
             job.append(JobLogEntry(.system,
                 "The tripwire could not ask GitHub for open pull requests, so it did not "
@@ -123,6 +124,17 @@ struct Tripwire {
     }
 
     // MARK: Pure
+
+    /// The branches whose pushes and pull requests are CCwiki's own: other
+    /// jobs', never this job's. A name is used again once its local branch
+    /// is gone, after an agent that changed nothing or a Discard, so an old
+    /// record can carry this job's own branch; a push of it is still this
+    /// agent's.
+    nonisolated static func branchesToIgnore(
+        _ otherBranches: Set<String>, jobBranch: String
+    ) -> Set<String> {
+        otherBranches.subtracting([jobBranch])
+    }
 
     /// Branches that are new in `after`, or at another commit than in
     /// `before`, less `ignoring`. Sorted. A branch that went away is not a

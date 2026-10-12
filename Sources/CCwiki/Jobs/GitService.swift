@@ -667,6 +667,21 @@ struct GitService: Sendable {
         ]).succeeded
     }
 
+    /// `git worktree move`: a worktree, and git's record of it, to
+    /// `destination`, which must not exist yet (git would move it inside an
+    /// existing directory). Restore builds a job's worktree aside and moves
+    /// it into place only once the patch has applied (§4.4).
+    func moveWorktree(clone: URL, from source: URL, to destination: URL) async -> Bool {
+        let target = destination.path(percentEncoded: false)
+        guard !FileManager.default.fileExists(atPath: target) else { return false }
+        try? FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        return await run([
+            "-C", clone.path(percentEncoded: false),
+            "worktree", "move", source.path(percentEncoded: false), target,
+        ]).succeeded
+    }
+
     /// `git apply --index`: the saved patch back into the worktree and its
     /// index. An empty patch is nothing to apply, which git calls an error.
     /// Whitespace is applied as it is, whatever `apply.whitespace` says: the
@@ -698,6 +713,16 @@ struct GitService: Sendable {
     /// last one.
     static func fields(nulSeparated data: Data) -> [String] {
         data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    /// `path` with every symbolic link resolved, as `git worktree list`
+    /// reports a worktree's; `path` itself when it does not exist.
+    /// Foundation's `resolvingSymlinksInPath` will not do: it takes a
+    /// leading `/private` back off.
+    static func realPath(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     private static func nonEmpty(_ text: String) -> String? {

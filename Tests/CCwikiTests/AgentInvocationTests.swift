@@ -209,6 +209,17 @@ struct TripwireTests {
         #expect(Tripwire.movedBranches(before: before, after: before, ignoring: []).isEmpty)
     }
 
+    @Test("an old record with this job's own branch never hides this job's push")
+    func reusedBranch() {
+        // fix/prf was an earlier job's, which changed nothing or was
+        // discarded, and the name was free again for this one.
+        let ignoring = Tripwire.branchesToIgnore(["fix/prf", "ingest/other"], jobBranch: "fix/prf")
+        #expect(ignoring == ["ingest/other"])
+        let after = ["main": "a1", "fix/prf": "e1", "ingest/other": "d2"]
+        #expect(Tripwire.movedBranches(before: ["main": "a1"], after: after, ignoring: ignoring)
+            == ["fix/prf"])
+    }
+
     @Test("only pull requests created since the job started count, newest first")
     func pullRequestListing() {
         let listing = """

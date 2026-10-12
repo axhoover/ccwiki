@@ -291,12 +291,17 @@ struct Publisher {
             + "check the branch on GitHub."
     }
 
+    /// A push that failed may still have landed: one stopped at the
+    /// deadline, or one whose connection dropped after GitHub moved the
+    /// branch. So the message does not say nothing was sent. The next
+    /// Approve is safe either way: its push is leased, and a refused lease
+    /// asks GitHub where the branch is and recognises CCwiki's own commit.
     nonisolated static func pushFailure(_ branch: String, output: String) -> String {
         let reason = Self.reason(in: output)
         return "The push of \(branch) failed"
-            + (reason.isEmpty ? "." : ": \(reason)")
-            + " Nothing new is on GitHub unless the transcript says so; open the pull "
-            + "request again to retry."
+            + (reason.isEmpty ? "." : ": \(reason).")
+            + " It may or may not have reached GitHub; opening the pull request again "
+            + "checks where the branch is on GitHub before pushing."
     }
 
     /// The line of a tool's output that says what went wrong: git's and
@@ -396,12 +401,17 @@ struct Publisher {
         }
     }
 
-    /// `gh pr list` for the open pull requests from `branch`, one
-    /// `<createdAt> <url>` line each.
+    /// `gh pr list` for the open pull requests from `branch` in the target
+    /// repository itself, one `<createdAt> <url>` line each. `--head`
+    /// matches the branch's name alone, so a pull request from someone's
+    /// fork, from a branch that happens to share the name, would match too;
+    /// those are left out, so CCwiki never edits a stranger's pull request
+    /// or takes it for its own.
     nonisolated static func listArguments(target: PublishTarget, branch: String) -> [String] {
         [
             "pr", "list", "--repo", target.repository, "--head", branch, "--state", "open",
-            "--json", "url,createdAt", "--jq", #".[] | "\(.createdAt) \(.url)""#,
+            "--json", "url,createdAt,isCrossRepository",
+            "--jq", #".[] | select(.isCrossRepository | not) | "\(.createdAt) \(.url)""#,
         ]
     }
 

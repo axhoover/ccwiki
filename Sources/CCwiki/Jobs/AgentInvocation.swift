@@ -297,6 +297,12 @@ struct AgentRun {
         try? FileManager.default.createDirectory(
             at: AgentInvocation.ghConfigDirectory(scratch: job.scratch),
             withIntermediateDirectories: true)
+        // `.ccwiki/`, where the prompts send the hand-over and any scratch
+        // output. A shell redirect does not make the directory, and the
+        // agent has no `mkdir`; `stageAll` never stages anything in it.
+        try? FileManager.default.createDirectory(
+            at: job.worktree.appending(path: Handover.directory),
+            withIntermediateDirectories: true)
 
         job.setState(.running)
         var parser = ClaudeStreamParser()
@@ -433,9 +439,11 @@ struct AgentRun {
             return
         }
 
+        // "CCwiki has pushed nothing", not "nothing has been pushed": the
+        // tripwire may just have found a push the agent made itself.
         job.append(JobLogEntry(.system,
-            "Awaiting review in Jobs. Nothing has been pushed: the draft pull request "
-            + "opens only when you approve the changes."))
+            "Awaiting review in Jobs. CCwiki has pushed nothing: it opens the draft pull "
+            + "request only when you approve the changes."))
         job.setState(.awaitingReview)
     }
 

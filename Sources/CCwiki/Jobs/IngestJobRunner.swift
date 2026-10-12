@@ -157,9 +157,12 @@ struct IngestJobRunner {
     /// add` will refuse to reuse the path. Offering to prune them on launch is
     /// cheaper than making the user learn the `git worktree` subcommands.
     func orphanedWorktrees(knownJobIDs: Set<String>) async -> [(path: String, branch: String?)] {
-        let prefix = paths.worktrees.path(percentEncoded: false)
+        // git lists real paths, and the worktrees folder may be reached
+        // through a symbolic link (the temporary directory is under /var,
+        // which is one), so both sides are compared resolved.
+        let prefix = GitService.realPath(paths.worktrees.path(percentEncoded: false))
         return await git.listWorktrees(clone: paths.clone).filter { entry in
-            guard entry.path.hasPrefix(prefix) else { return false }
+            guard GitService.realPath(entry.path).hasPrefix(prefix) else { return false }
             let id = (entry.path as NSString).lastPathComponent
             return !knownJobIDs.contains(id)
         }
