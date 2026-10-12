@@ -307,9 +307,11 @@ and nothing leaves for GitHub from anywhere else
   it, and the pre-flight findings move to the Transcript.
 - **Changes** is a `VSplitView`: DiffGuard's findings and the diff above,
   the pull request below, never shorter than 150 pt, so the form never
-  covers the diff. A finding's glyph says its severity as well as its
-  colour (an octagon blocks, a triangle warns, an `i` informs); a click
-  scrolls the diff to it.
+  covers the diff. The findings take about a third of their pane at most and
+  scroll past it, so the diff keeps the larger share however many there
+  are. A finding's glyph says its severity as well as its colour (an
+  octagon blocks, a triangle warns, an `i` informs); a click scrolls the
+  diff to it.
 - **Rendered or Source.** Rendered is the reader's own pipeline drawing
   only the changed blocks, Before and After labelled in the gutter so they
   differ by more than colour. Source is the lines, both line numbers in the
@@ -317,10 +319,12 @@ and nothing leaves for GitHub from anywhere else
   set in **bold** on a stronger tint, so a one-letter fix is findable. A job
   whose diff adds raw HTML opens in Source.
 - **Open Draft PR** is disabled, with its reason as its help, by a blocking
-  finding, a local path in the title or body, or GitHub not ready. With
-  warnings, or in a Dev build, it asks first, naming the repository. The
-  line under the body names where it goes before anything is sent:
-  "Opens a draft pull request on axhoover/cryptology.city · from CCwiki Dev".
+  finding, a local path in the title or body, GitHub not ready, or an
+  editor of the job whose file changed on disk and still asks which
+  version to keep. With warnings, or in a Dev build, it asks first, naming
+  the repository. The line under the body names where it goes before
+  anything is sent: "Opens a draft pull request on
+  axhoover/cryptology.city · from CCwiki Dev".
   No shortcut: Review Changes brings this window forward, and a key pressed
   twice from the editor would publish.
 
@@ -335,12 +339,15 @@ The preview hides by width, never leaving the split view.
 
 Under the toolbar, on the bar, a strip carries what came from the reader: the
 quoted passage in two lines at most, with Show to select it again, and,
-when they apply, why the file is read-only, a generated passage, the GitHub
-line and a failed save. Saving is automatic, so there is no Save; the status
-line says "Saved to the job's worktree" or "Saving…", then the line and
-column, then "CCwiki Dev" in a Dev build. **Review Changes** (⌘↩) saves,
-takes the review again and opens Jobs on the job. Revert File… waits in the
-toolbar's More menu, behind a confirmation.
+when they apply, why the file is read-only, what a generated passage or a
+line built from the frontmatter is, the GitHub line and a failed save.
+Saving is automatic, so there is no Save; the status line says "Saved to the
+job's worktree" or "Saving…", then the line and column, then "CCwiki Dev" in
+a Dev build. Text an editor could not save when it or the app closes, such
+as a conflict nobody settled, is kept in the worktree's `.ccwiki/` and the
+job's log says where. **Review Changes** (⌘↩) saves, takes the review again
+and opens Jobs on the job. Revert File… waits in the toolbar's More menu,
+behind a confirmation.
 
 ## 4b. Error states
 

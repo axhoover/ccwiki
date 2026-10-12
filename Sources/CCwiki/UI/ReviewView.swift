@@ -53,7 +53,7 @@ struct ReviewView: View {
 
     @ViewBuilder
     private var content: some View {
-        if job.needsRestore {
+        if JobReview.isWorktreeGone(job) {
             ContentUnavailableView {
                 Label("The Worktree Is Gone", systemImage: "folder.badge.questionmark")
             } description: {
@@ -91,12 +91,17 @@ struct ReviewView: View {
 
     private func changes(_ review: ReviewSnapshot) -> some View {
         VSplitView {
-            VStack(spacing: 0) {
-                findingsStrip
-                Divider()
-                diffBar(review)
-                Divider()
-                diff(review)
+            // The findings take at most a share of the pane and scroll past
+            // it, so however many there are, the diff keeps the larger part
+            // and the form never covers it (§6.6, §12.3).
+            GeometryReader { pane in
+                VStack(spacing: 0) {
+                    findingsStrip(maxHeight: pane.size.height * ReviewMetrics.findingsMaxShare)
+                    Divider()
+                    diffBar(review)
+                    Divider()
+                    diff(review)
+                }
             }
             .frame(minHeight: ReviewMetrics.diffMinHeight)
             .layoutPriority(1)
@@ -117,7 +122,10 @@ struct ReviewView: View {
 
     // MARK: Findings
 
-    private var findingsStrip: some View {
+    /// DiffGuard's findings, no taller than `maxHeight`: at their own height
+    /// while they fit it, and scrolling beyond. Show More stays outside the
+    /// scroll, so it is never scrolled away.
+    private func findingsStrip(maxHeight: CGFloat) -> some View {
         let findings = job.findings
         let shown = showsAllFindings ? findings : Array(findings.prefix(ReviewMetrics.findingsShown))
         return VStack(alignment: .leading, spacing: 0) {
@@ -128,15 +136,11 @@ struct ReviewView: View {
                     .padding(.horizontal, Theme.medium)
                     .padding(.vertical, Theme.small)
             } else {
-                ForEach(shown) { finding in
-                    FindingRow(
-                        finding: finding,
-                        canRevert: finding.severity == .blocking && !finding.path.isEmpty
-                            && job.canEdit,
-                        onShow: { show(finding) },
-                        onRevert: { askToRevert(finding.path) },
-                        onOpenInTerminal: { model.openInTerminal(job.worktree) })
+                ViewThatFits(in: .vertical) {
+                    findingRows(shown)
+                    ScrollView { findingRows(shown) }
                 }
+                .frame(maxHeight: maxHeight)
                 if findings.count > ReviewMetrics.findingsShown {
                     let hidden = findings.count - ReviewMetrics.findingsShown
                     let title: String = showsAllFindings ? "Show Fewer" : "Show \(hidden) More"
@@ -152,6 +156,20 @@ struct ReviewView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.bar)
+    }
+
+    private func findingRows(_ findings: [DiffFinding]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(findings) { finding in
+                FindingRow(
+                    finding: finding,
+                    canRevert: finding.severity == .blocking && !finding.path.isEmpty
+                        && job.canEdit,
+                    onShow: { show(finding) },
+                    onRevert: { askToRevert(finding.path) },
+                    onOpenInTerminal: { model.openInTerminal(job.worktree) })
+            }
+        }
     }
 
     /// Clicking a finding scrolls the diff to it.
@@ -304,6 +322,9 @@ enum ReviewMetrics {
     static let formIdealHeight: CGFloat = 230
     /// Findings listed before Show More.
     static let findingsShown = 4
+    /// The most of the findings and diff pane the findings take before
+    /// they scroll: the diff keeps the larger share.
+    static let findingsMaxShare: CGFloat = 0.35
     /// A status line under an editor, as under a reader.
     static let statusBarHeight: CGFloat = 26
 }
@@ -533,8 +554,8 @@ struct DiscardRequest: Identifiable {
         return DiscardRequest(
             jobID: job.id,
             question: JobReview.discardQuestion(
-                kind: job.kind.tag, branch: job.branch, isPushed: job.pushedCommit != nil,
-                openPullRequest: openPullRequest))
+                kind: job.kind.tag, branch: job.branch, pushingCommit: job.pushingCommit,
+                pushedCommit: job.pushedCommit, openPullRequest: openPullRequest))
     }
 }
 
@@ -646,19 +667,25 @@ enum JobReview {
 
     // MARK: The banner
 
-    /// The banner over a job under review (§6.6).
+    /// The banner over a job under review (§6.6). A push that was sent and
+    /// never confirmed (a quit, a crash or a timeout in the middle of it)
+    /// may have reached GitHub, and the banner says so rather than
+    /// "Nothing has been pushed".
     static func banner(
         state: JobState, needsRestore: Bool, isUntouchedEdit: Bool,
-        pushedCommit: String?, branch: String
+        pushingCommit: String?, pushedCommit: String?, branch: String
     ) -> String {
         if case .publishing(let step) = state { return step }
         if needsRestore { return "The worktree is gone. CCwiki kept your changes." }
-        if isUntouchedEdit { return "Editing. Nothing has been pushed." }
+        let waiting = isUntouchedEdit ? "Editing." : "Awaiting your review."
         if pushedCommit != nil {
-            return "Awaiting your review. The branch \(branch) is on GitHub; "
-                + "no pull request is open yet."
+            return "\(waiting) The branch \(branch) is on GitHub; no pull request is open yet."
         }
-        return "Awaiting your review. Nothing has been pushed."
+        if pushingCommit != nil {
+            return "\(waiting) A push to \(branch) may have reached GitHub; "
+                + "opening the pull request checks GitHub first."
+        }
+        return "\(waiting) Nothing has been pushed."
     }
 
     /// The banner's second line: the branch, then the page and the passage,
@@ -743,9 +770,12 @@ enum JobReview {
 
     // MARK: Questions
 
-    /// Discard…, per kind, with what CCwiki leaves on GitHub (§6.5).
+    /// Discard…, per kind, with what CCwiki leaves on GitHub (§6.5): the
+    /// branch it pushed, or may have pushed when a push was never confirmed,
+    /// and an open pull request.
     static func discardQuestion(
-        kind: JobKind.Tag, branch: String, isPushed: Bool, openPullRequest: URL?
+        kind: JobKind.Tag, branch: String, pushingCommit: String?, pushedCommit: String?,
+        openPullRequest: URL?
     ) -> Question {
         var message: String
         switch kind {
@@ -756,8 +786,10 @@ enum JobReview {
         case .ingestion:
             message = "Its worktree and changes are deleted. The transcript is kept."
         }
-        if isPushed {
+        if pushedCommit != nil {
             message += " The branch \(branch) is already on GitHub; CCwiki leaves it there."
+        } else if pushingCommit != nil {
+            message += " The branch \(branch) may already be on GitHub; CCwiki leaves it there."
         }
         if let openPullRequest {
             message += " An open pull request exists: \(openPullRequest.absoluteString). "

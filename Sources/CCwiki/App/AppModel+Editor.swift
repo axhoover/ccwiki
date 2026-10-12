@@ -6,9 +6,14 @@ import SwiftUI
 extension AppModel {
 
     /// The session for an editor window, made the first time it is asked
-    /// for and kept until the window closes.
+    /// for and kept until the window closes. Asked for again while its
+    /// window is still closing, it stays, for the window that asked: its
+    /// `close()` then neither discards the job nor lets the session go.
     func editorSession(for target: EditorTarget) -> EditorSession {
-        if let existing = editorSessions[target] { return existing }
+        if let existing = editorSessions[target] {
+            existing.isClosing = false
+            return existing
+        }
         let session = EditorSession(target: target, model: self)
         editorSessions[target] = session
         return session
@@ -37,10 +42,15 @@ extension AppModel {
         for session in sessions { await session.saveNow() }
     }
 
-    /// Saves every open editor: before the app quits.
+    /// Saves every open editor: before the app quits. What an editor could
+    /// not save, a conflict nobody settled above all, is kept in its job's
+    /// worktree rather than lost with the app (§4.4).
     func flushAllEditors() async {
         let sessions = Array(editorSessions.values)
-        for session in sessions { await session.saveNow() }
+        for session in sessions {
+            await session.saveNow()
+            await session.keepUnsavedText()
+        }
     }
 
     /// CCwiki changed these repository-relative paths in `job`'s worktree:

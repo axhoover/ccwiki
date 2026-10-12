@@ -49,7 +49,10 @@ struct EditorWindow: View {
                   let session
             else { return }
             // Save, bring the review up to date, and let an untouched edit
-            // go with its last editor (§7.5).
+            // go with its last editor (§7.5). Marked closing now, not when
+            // the task starts, so a window that asks for the file meanwhile
+            // keeps the session.
+            session.isClosing = true
             Task { await session.close() }
         }
     }
@@ -232,15 +235,18 @@ private struct EditorContent: View {
     // MARK: The context strip
 
     /// Under the toolbar, on the bar: the quote carried from the reader, why
-    /// the text cannot be edited, a generated passage, GitHub, a failed save.
+    /// the text cannot be edited, what a generated passage or a line built
+    /// from the frontmatter is, GitHub, a failed save.
     @ViewBuilder
     private var contextStrip: some View {
         let quote = hidesQuote ? nil : pageTarget?.quote
         let readOnly = session.isLoaded ? session.readOnlyReason : nil
         let generated = pageTarget?.region == .generated
+        let fromFrontmatter = pageTarget?.region == .frontmatter
         let access = model.jobCenter.gitHubAccess.flatMap { $0 == .ready ? nil : $0 }
         let saveError = session.saveError
-        if quote != nil || readOnly != nil || generated || access != nil || saveError != nil {
+        let explains = generated || fromFrontmatter
+        if quote != nil || readOnly != nil || explains || access != nil || saveError != nil {
             VStack(alignment: .leading, spacing: Theme.tight) {
                 if let quote { quoteRow(quote) }
                 if let readOnly {
@@ -250,6 +256,12 @@ private struct EditorContent: View {
                     stripRow("arrow.triangle.branch", .orange,
                              "This passage is generated from the reduction pages. Correct the "
                              + "reduction page it links to; edits here are refused at review.")
+                }
+                // The relation line under a reduction or barrier page's title
+                // (§3.1, §3.5): the quoted line is not in the file; the
+                // fields it is built from are, and they are what is selected.
+                if fromFrontmatter {
+                    stripRow("list.bullet.rectangle", .orange, frontmatterNote)
                 }
                 if let access {
                     GitHubAccessLine(
@@ -301,6 +313,14 @@ private struct EditorContent: View {
             .help("Hide the quote")
             .accessibilityLabel("Hide the Quote")
         }
+    }
+
+    /// What a passage from the relation line is: the frontmatter fields on
+    /// the lines the editor opened at.
+    private var frontmatterNote: String {
+        let fields = pageTarget?.lines.map { "the frontmatter fields on \($0.label)" }
+            ?? "this page's frontmatter fields"
+        return "The quoted line is built from \(fields). Edit those fields to change it."
     }
 
     private func stripRow(_ symbol: String, _ tint: Color, _ text: String) -> some View {
@@ -368,9 +388,12 @@ private struct EditorContent: View {
         Task { await session.keepMyVersion() }
     }
 
+    /// Whether the job added the file is the review's to say, as in the
+    /// review's own Revert File…; the original, read once when the window
+    /// loads, can be missing for other reasons (no git yet, a failed read).
     private var revertQuestion: JobReview.Question {
-        JobReview.revertQuestion(
-            path: target.path, isNew: session.isLoaded && session.original == nil)
+        let status = job?.review?.files.first(where: { $0.path == target.path })?.status
+        return JobReview.revertQuestion(path: target.path, isNew: status == .added)
     }
 
     // MARK: A changed file under the editor

@@ -65,23 +65,39 @@ struct JobReviewTests {
 
     // MARK: The banner
 
+    static func bannerText(
+        _ state: JobState = .awaitingReview, restore: Bool = false, untouched: Bool = false,
+        pushing: String? = nil, pushed: String? = nil
+    ) -> String {
+        JobReview.banner(
+            state: state, needsRestore: restore, isUntouchedEdit: untouched,
+            pushingCommit: pushing, pushedCommit: pushed, branch: "fix/pseudorandom-function")
+    }
+
     @Test("the banner says what the review waits for, and what is already on GitHub")
     func banner() {
-        func banner(
-            _ state: JobState = .awaitingReview, restore: Bool = false, untouched: Bool = false,
-            pushed: String? = nil
-        ) -> String {
-            JobReview.banner(
-                state: state, needsRestore: restore, isUntouchedEdit: untouched,
-                pushedCommit: pushed, branch: "fix/pseudorandom-function")
-        }
-        #expect(banner() == "Awaiting your review. Nothing has been pushed.")
-        #expect(banner(pushed: "abc123") == "Awaiting your review. The branch "
+        #expect(Self.bannerText() == "Awaiting your review. Nothing has been pushed.")
+        #expect(Self.bannerText(pushed: "abc123") == "Awaiting your review. The branch "
             + "fix/pseudorandom-function is on GitHub; no pull request is open yet.")
-        #expect(banner(restore: true) == "The worktree is gone. CCwiki kept your changes.")
-        #expect(banner(.publishing("Pushing fix/pseudorandom-function…"))
+        #expect(Self.bannerText(restore: true) == "The worktree is gone. CCwiki kept your changes.")
+        #expect(Self.bannerText(.publishing("Pushing fix/pseudorandom-function…"))
             == "Pushing fix/pseudorandom-function…")
-        #expect(banner(untouched: true) == "Editing. Nothing has been pushed.")
+        #expect(Self.bannerText(untouched: true) == "Editing. Nothing has been pushed.")
+    }
+
+    @Test("a push never confirmed may have reached GitHub, and the banner never says nothing was pushed")
+    func bannerAfterInterruptedPush() {
+        // A quit, a crash or a timeout during the first push.
+        let interrupted = Self.bannerText(pushing: "def456")
+        #expect(interrupted == "Awaiting your review. A push to fix/pseudorandom-function may have "
+            + "reached GitHub; opening the pull request checks GitHub first.")
+        #expect(!interrupted.contains("Nothing has been pushed"))
+        // A later push unconfirmed: the branch is on GitHub either way.
+        #expect(Self.bannerText(pushing: "def456", pushed: "abc123") == Self.bannerText(pushed: "abc123"))
+        // An edit taken back to nothing after a push still says what is there.
+        #expect(Self.bannerText(untouched: true, pushed: "abc123") == "Editing. The branch "
+            + "fix/pseudorandom-function is on GitHub; no pull request is open yet.")
+        #expect(Self.bannerText(untouched: true, pushing: "def456").hasPrefix("Editing. A push to"))
     }
 
     @Test("the banner's second line is the branch, then the page and passage, or the paper")
@@ -174,23 +190,41 @@ struct JobReviewTests {
     @Test("Discard asks per kind, and says what CCwiki leaves on GitHub")
     func discard() {
         let correction = JobReview.discardQuestion(
-            kind: .correction, branch: "fix/x", isPushed: false, openPullRequest: nil)
+            kind: .correction, branch: "fix/x", pushingCommit: nil, pushedCommit: nil,
+            openPullRequest: nil)
         #expect(correction == JobReview.Question(
             title: "Discard this correction?",
             message: "Its worktree and changes are deleted. The transcript is kept."))
         let edit = JobReview.discardQuestion(
-            kind: .edit, branch: "fix/x", isPushed: false, openPullRequest: nil)
+            kind: .edit, branch: "fix/x", pushingCommit: nil, pushedCommit: nil, openPullRequest: nil)
         #expect(edit == JobReview.Question(title: "Discard this edit?", message: "Your changes are deleted."))
         let ingestion = JobReview.discardQuestion(
-            kind: .ingestion, branch: "ingest/x", isPushed: false, openPullRequest: nil)
+            kind: .ingestion, branch: "ingest/x", pushingCommit: nil, pushedCommit: nil,
+            openPullRequest: nil)
         #expect(ingestion.title == "Discard this ingestion?")
 
         let url = URL(string: "https://github.com/axhoover/cryptology.city/pull/12")!
         let pushed = JobReview.discardQuestion(
-            kind: .edit, branch: "fix/x", isPushed: true, openPullRequest: url)
+            kind: .edit, branch: "fix/x", pushingCommit: nil, pushedCommit: "abc123",
+            openPullRequest: url)
         #expect(pushed.message == "Your changes are deleted. The branch fix/x is already on "
             + "GitHub; CCwiki leaves it there. An open pull request exists: "
             + "https://github.com/axhoover/cryptology.city/pull/12. CCwiki leaves it open.")
+    }
+
+    @Test("Discard after a push never confirmed says the branch may already be on GitHub")
+    func discardAfterInterruptedPush() {
+        let interrupted = JobReview.discardQuestion(
+            kind: .correction, branch: "fix/x", pushingCommit: "def456", pushedCommit: nil,
+            openPullRequest: nil)
+        #expect(interrupted.message == "Its worktree and changes are deleted. The transcript is "
+            + "kept. The branch fix/x may already be on GitHub; CCwiki leaves it there.")
+        // A confirmed push is said as such, whatever came after it.
+        let confirmed = JobReview.discardQuestion(
+            kind: .correction, branch: "fix/x", pushingCommit: "def456", pushedCommit: "abc123",
+            openPullRequest: nil)
+        #expect(confirmed.message?.hasSuffix(
+            "The branch fix/x is already on GitHub; CCwiki leaves it there.") == true)
     }
 
     @Test("Revert File names the file, and says a new file is deleted")

@@ -38,6 +38,12 @@ final class EditorSession {
     /// Text typed that is not yet on disk.
     var hasUnsavedText: Bool { isLoaded && text != (diskText ?? "") }
 
+    /// The window is closing and nobody has asked for the file since. The
+    /// window sets it before calling `close()`; `AppModel.editorSession(for:)`
+    /// clears it when the file is asked for again meanwhile, and the session
+    /// then stays, for the window that asked.
+    @ObservationIgnored var isClosing = false
+
     /// The preview's own web view, made on first use with the readers'
     /// data store and text size (§7.4, §17).
     @ObservationIgnored private(set) lazy var preview: WebController =
@@ -133,8 +139,7 @@ final class EditorSession {
         isLoading = true
         defer { isLoading = false }
 
-        let worktree = job.worktree.path(percentEncoded: false)
-        guard FileManager.default.fileExists(atPath: worktree) else {
+        guard Self.isWorktree(job.worktree) else {
             loadError = "The worktree is gone. Restore it in Jobs to edit this file."
             return
         }
@@ -243,6 +248,15 @@ final class EditorSession {
         // Read fresh: an editor writes only while its job is awaiting review
         // (§4.4), and the job may have moved on since the keystroke.
         guard job.canEdit else { return }
+        // A worktree deleted under the editor (Caches cleared by hand, or a
+        // Discard under way) is never made again as a plain folder holding
+        // this one file: git would not know it, every snapshot would fail,
+        // and Restore would refuse the folder. Asked before the disk is read,
+        // so a missing file is not mistaken for a change made elsewhere.
+        guard Self.isWorktree(job.worktree) else {
+            saveError = Self.worktreeGone
+            return
+        }
 
         let file = fileURL(of: job)
         let disk = await Self.readFile(file)
@@ -251,7 +265,7 @@ final class EditorSession {
             return
         }
         let written = text
-        if let failure = await Self.writeFile(written, to: file) {
+        if let failure = await Self.writeFile(written, to: file, in: job.worktree) {
             saveError = failure
             return
         }
@@ -301,7 +315,12 @@ final class EditorSession {
         await writeTask?.value
         guard let job else { return }
         let disk = await Self.readFile(fileURL(of: job))
-        guard (disk ?? "") != (diskText ?? "") else { return }
+        guard (disk ?? "") != (diskText ?? "") else {
+            // The file is as this editor left it. Text a save refused while
+            // the worktree was gone is saved now that Restore has brought it back.
+            if hasUnsavedText, saveError != nil { scheduleSave() }
+            return
+        }
 
         saveTask?.cancel()
         saveTask = nil
@@ -329,17 +348,24 @@ final class EditorSession {
 
     // MARK: Closing
 
-    /// The window is closing: save, bring the review up to date, and, for
-    /// the last editor of an edit nobody changed, discard the job (§7.5).
-    /// Then the model lets the session go.
+    /// The window is closing: save, keep what could not be saved, bring the
+    /// review up to date, and, for the last editor of an edit nobody
+    /// changed, discard the job (§7.5). Then the model lets the session go.
+    ///
+    /// The window sets `isClosing` first. When the file is asked for again
+    /// before this has finished, the session belongs to the new window: from
+    /// the next step on, nothing is discarded and the session is kept.
     func close() async {
+        await saveNow()
+        guard isClosing else { return }
         previewTask?.cancel()
         previewTask = nil
         revealTask?.cancel()
         revealTask = nil
-        await saveNow()
         refreshTask?.cancel()
         refreshTask = nil
+        await keepUnsavedText()
+        guard isClosing else { return }
 
         if let job, job.state == .awaitingReview {
             let isLastEditor = !model.editorSessions.contains {
@@ -351,13 +377,41 @@ final class EditorSession {
             if hasWritten || (isLastEditor && isEdit) {
                 await model.jobCenter.refreshReview(job)
             }
-            if isLastEditor, isEdit, !hasUnsavedText {
+            // Only an edit that never reached GitHub leaves nothing behind;
+            // one with a branch there waits in Jobs for its Discard, which
+            // says what stays on GitHub.
+            if isClosing, isLastEditor, isEdit, !hasUnsavedText,
+               job.pushingCommit == nil, job.pushedCommit == nil {
                 await model.jobCenter.discardIfUntouched(job)
             }
         }
-        if model.editorSessions[target] === self {
+        if isClosing, model.editorSessions[target] === self {
             model.closeEditorSession(target)
         }
+    }
+
+    /// What could not be saved as the editor or the app closes (a conflict
+    /// nobody settled, a failed write, a save refused while a publish ran)
+    /// is kept in the worktree's `.ccwiki/`, which no snapshot stages (§6.1),
+    /// and the job's log says where. Text is never dropped without a word
+    /// (§4.4): without a worktree there is nowhere to keep it, and the log
+    /// says that instead.
+    func keepUnsavedText() async {
+        guard hasUnsavedText, let job else { return }
+        guard Self.isWorktree(job.worktree) else {
+            job.append(JobLogEntry(.error,
+                "The editor's unsaved version of \(target.path) was lost: the worktree is gone."))
+            return
+        }
+        let kept = ".ccwiki/" + (target.path as NSString).lastPathComponent + ".unsaved"
+        let file = job.worktree.appending(path: kept)
+        if let failure = await Self.writeFile(text, to: file, in: job.worktree) {
+            job.append(JobLogEntry(.error,
+                "The editor's unsaved version of \(target.path) could not be kept: \(failure)"))
+            return
+        }
+        job.append(JobLogEntry(.system,
+            "The editor's unsaved version of \(target.path) was kept in \(kept), in the job's worktree."))
     }
 
     // MARK: The preview
@@ -409,10 +463,27 @@ final class EditorSession {
         }.value
     }
 
-    /// Writes `text` atomically, making the folders it needs. The error's
-    /// description on failure, nil on success.
-    private nonisolated static func writeFile(_ text: String, to file: URL) async -> String? {
+    /// A git worktree is there: its root holds `.git`, a file pointing into
+    /// the clone. A folder without one is not the job's worktree.
+    nonisolated static func isWorktree(_ root: URL) -> Bool {
+        FileManager.default.fileExists(atPath: root.appending(path: ".git").path(percentEncoded: false))
+    }
+
+    /// Why a save was refused when the worktree had gone. Jobs offers
+    /// Restore for it (`JobReview.isWorktreeGone`).
+    nonisolated static let worktreeGone = "The worktree is gone. Your text stays in this editor; "
+        + "restore the worktree in Jobs."
+
+    /// Writes `text` atomically into `worktree`, making the folders it needs
+    /// below its root and never the root itself. The error's description on
+    /// failure, nil on success.
+    nonisolated static func writeFile(
+        _ text: String, to file: URL, in worktree: URL
+    ) async -> String? {
         await Task.detached(priority: .userInitiated) { () -> String? in
+            // Asked again just before the write: the worktree may have gone
+            // since the editor looked.
+            guard EditorSession.isWorktree(worktree) else { return EditorSession.worktreeGone }
             do {
                 try FileManager.default.createDirectory(
                     at: file.deletingLastPathComponent(), withIntermediateDirectories: true)

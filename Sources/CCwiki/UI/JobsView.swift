@@ -31,10 +31,12 @@ struct JobsView: View {
         (job.state == .awaitingReview && !job.isUntouchedEdit) || job.state.isPublishing
     }
 
-    /// The selected job; with none, the first in the list, as it reads.
+    /// The selected job; with none, or once it has left the list (Clear
+    /// Finished, an untouched edit gone with its editor), the first in the
+    /// list, as it reads.
     private var selectedJob: Job? {
-        guard let selection else { return awaitingReview.first ?? otherJobs.first }
-        return model.jobs.first { $0.id == selection }
+        if let selection, let job = model.jobs.first(where: { $0.id == selection }) { return job }
+        return awaitingReview.first ?? otherJobs.first
     }
 
     var body: some View {
@@ -61,7 +63,10 @@ struct JobsView: View {
                 }
         } detail: {
             if let job = selectedJob {
+                // A view per job: its pane, its publish under way and its
+                // restore are that job's, never the next one's.
                 JobDetailView(job: job)
+                    .id(job.id)
             } else {
                 ContentUnavailableView {
                     Label("No Jobs Yet", systemImage: "tray")

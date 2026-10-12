@@ -61,8 +61,9 @@ struct JobDetailView: View {
             // A restored job's transcript, from its file: once (§4.3).
             await job.replayTranscript()
         }
-        // Changes is what a job shows as it enters review (§6.6).
-        .onChange(of: job.id) { _, _ in pane = .changes }
+        // Changes is what a job shows as it enters review (§6.6). Each job
+        // has a view of its own (JobsView gives it the job's id), so a pane,
+        // a publish under way or a restore never carries over to the next.
         .onChange(of: job.state == .awaitingReview) { _, inReview in
             if inReview { pane = .changes }
         }
@@ -205,12 +206,13 @@ struct JobDetailView: View {
     }
 
     /// In the accent colour: what the review waits for, and what is
-    /// already on GitHub (§6.6).
+    /// already on GitHub, or may be (§6.6).
     private var reviewBanner: some View {
-        banner(.accentColor, reviewSymbol, JobReview.banner(
-            state: job.state, needsRestore: job.needsRestore,
-            isUntouchedEdit: job.isUntouchedEdit, pushedCommit: job.pushedCommit,
-            branch: job.branch)
+        let worktreeIsGone = JobReview.isWorktreeGone(job)
+        return banner(.accentColor, reviewSymbol(worktreeIsGone: worktreeIsGone), JobReview.banner(
+            state: job.state, needsRestore: worktreeIsGone,
+            isUntouchedEdit: job.isUntouchedEdit, pushingCommit: job.pushingCommit,
+            pushedCommit: job.pushedCommit, branch: job.branch)
         ) {
             Text(JobReview.metadata(kind: job.kind, branch: job.branch))
                 .font(Theme.Fonts.meta)
@@ -218,7 +220,7 @@ struct JobDetailView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
-            if job.needsRestore {
+            if worktreeIsGone {
                 Button("Restore") { restore() }
                     .controlSize(.small)
                     .disabled(isRestoring)
@@ -227,9 +229,9 @@ struct JobDetailView: View {
         }
     }
 
-    private var reviewSymbol: String {
+    private func reviewSymbol(worktreeIsGone: Bool) -> String {
         if job.state.isPublishing { return "arrow.up.circle" }
-        if job.needsRestore { return "folder.badge.questionmark" }
+        if worktreeIsGone { return "folder.badge.questionmark" }
         return JobState.awaitingReview.symbolName
     }
 
@@ -602,15 +604,44 @@ private struct DraftPRCommand: View {
 }
 
 extension JobReview {
+    /// The worktree of a job under review is gone, and Restore can bring
+    /// its changes back: restored without it at launch, or deleted since,
+    /// as clearing Caches by hand does (§4.3, §4.4). The review then offers
+    /// Restore, as the banner's "no worktree" case says (§6.6).
+    @MainActor
+    static func isWorktreeGone(_ job: Job) -> Bool {
+        if job.needsRestore { return true }
+        guard job.state == .awaitingReview else { return false }
+        return !FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false))
+    }
+
     /// Open Draft PR for `job` as it is now.
     @MainActor
     static func draftPR(for job: Job, privatePaths: [String], model: AppModel) -> DraftPR {
         let request = job.pullRequest
-        return draftPR(
-            state: job.state, needsRestore: job.needsRestore, review: job.review,
+        let gate = draftPR(
+            state: job.state, needsRestore: isWorktreeGone(job), review: job.review,
             findings: job.findings, title: request.title,
             privateFindings: privateFindings(
                 title: request.title, body: request.body, privatePaths: privatePaths),
             access: model.jobCenter.gitHubAccess, target: model.publishTarget)
+        // Publishing would send the file on disk and close an editor whose
+        // own version nobody has kept or dropped yet, losing it (§4.4).
+        guard gate.isEnabled, let path = unsettledEditor(of: job, in: model) else { return gate }
+        let name = (path as NSString).lastPathComponent
+        return DraftPR(
+            disabledReason: "\(name) changed on disk while its editor was open. "
+                + "Choose which version to keep in that window first.",
+            confirmation: nil)
+    }
+
+    /// The file of `job` whose editor holds a version the disk does not, a
+    /// conflict nobody has settled; nil when there is none.
+    @MainActor
+    static func unsettledEditor(of job: Job, in model: AppModel) -> String? {
+        for (target, session) in model.editorSessions where target.jobID == job.id {
+            if case .conflict = session.saveState { return target.path }
+        }
+        return nil
     }
 }
