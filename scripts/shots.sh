@@ -16,6 +16,8 @@
 #   paper:<content-relative>  a reference page's paper window (Track C, C6;
 #                             until then the step changes nothing and
 #                             captures the reader)
+#   window:<content-relative> a second reader window on that page; the
+#                             steps after it drive the new window
 #
 # The app pauses at each step and writes `.ready-N`; this script captures the
 # window with `screencapture -l` and answers with `.go-N`. That handshake is

@@ -387,7 +387,10 @@ final class ReaderSession: Identifiable {
         openPage(page.path)
     }
 
+    /// ⌘O. The query is app-wide; the page left out of the list is this
+    /// window's (§1.6).
     func presentQuickSwitcher() {
+        model.quickSwitcherExcludedPath = location.path
         model.quickSwitcherQuery = ""
         model.refreshQuickSwitcher()
         quickSwitcherPresented = true

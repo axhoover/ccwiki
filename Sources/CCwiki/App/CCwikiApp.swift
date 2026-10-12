@@ -44,6 +44,9 @@ struct CCwikiApp: App {
                 .frame(minWidth: Theme.paperMinWidth, minHeight: Theme.paperMinHeight)
                 // A paper window restored on its own still needs the model.
                 .onAppear { appDelegate.model = model }
+                // Papers tab with papers when the system prefers tabs, never
+                // with a reader (§1.8, §2.2).
+                .background { WindowReader { $0.tabbingIdentifier = "ccwiki.paper" } }
         }
         .defaultSize(width: Theme.paperDefaultWidth, height: Theme.paperDefaultHeight)
         .defaultPosition(.trailing)
@@ -208,11 +211,20 @@ struct CCwikiCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
+            // A window of its own at Home, whichever window is key: only the
+            // first window of a launch opens the page read last (§1.7).
+            Button("New Window") {
+                openWindow(id: CCwikiApp.mainWindowID, value: ReaderWindow())
+            }
+            .keyboardShortcut("n", modifiers: .command)
+
+            Divider()
+
             Button("Quick Switcher…") { session?.presentQuickSwitcher() }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(session == nil)
 
-            Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
+            Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
         }
@@ -362,7 +374,7 @@ struct CCwikiCommands: Commands {
         }
 
         CommandMenu("Jobs") {
-            Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
+            Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
 

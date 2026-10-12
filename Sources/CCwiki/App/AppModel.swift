@@ -216,10 +216,14 @@ final class AppModel {
     /// The windows of this process that have closed. A closed id never comes
     /// back: a window that turns up with one is given a new id.
     @ObservationIgnored private var closedSessionIDs: Set<UUID> = []
-    /// The reader windows, the active one first: for now the one opened
-    /// first. Observed, unlike the registry, so what follows the active
-    /// reader updates with it.
+    /// The reader windows, most recently key first. Observed, unlike the
+    /// registry, so what follows the active reader updates with it: the
+    /// explorer's Explore From This Page follows the key reader.
     private var sessionOrder = SessionOrder<UUID>()
+    /// How the windows the app is opening itself join the others: as a tab
+    /// of which window, in front or behind. Taken by the new window when it
+    /// first sees its `NSWindow`, inside a view update, so not observed.
+    @ObservationIgnored private var windowRequests = ReaderWindowRequests()
 
     /// The session for the reader window `id`, created the first time the
     /// window asks (§1.3). `windowNumber` is its `NSWindow`'s.
@@ -239,7 +243,15 @@ final class AppModel {
         sessions[id] = session
         sessionOrder.opened(id)
         mainWindowCount = sessions.count
+        // An ingest sheet asked for while no reader was open appears here.
+        _ = ingestTarget.claim(by: id)
         return session
+    }
+
+    /// The reader window `id` became key: it is the active reader now.
+    func sessionBecameKey(_ id: UUID) {
+        guard sessions[id] != nil else { return }
+        sessionOrder.becameKey(id)
     }
 
     /// The reader window `id` is closing: its session and web view go, and
@@ -251,12 +263,30 @@ final class AppModel {
         closedSessionIDs.insert(id)
         sessionOrder.closed(id)
         mainWindowCount = sessions.count
+        ingestTarget.windowClosed(id)
     }
 
-    /// The reader that windows which are not readers act on (§1.8). Nil
-    /// with no reader open.
+    /// The reader that windows which are not readers act on: the reader
+    /// window that was key most recently (§1.8). Nil with no reader open.
     var activeSession: ReaderSession? {
         sessionOrder.mostRecent.flatMap { sessions[$0] }
+    }
+
+    /// The caller is about to open `request.window`: the request says which
+    /// window it joins as a tab, if any (§1.4).
+    func expectReaderWindow(_ request: ReaderWindowRequest) {
+        windowRequests.expect(request)
+    }
+
+    /// The tabbing a new window was opened with, once, by that window.
+    func takeTabbing(for windowID: UUID) -> ReaderWindowRequest? {
+        windowRequests.takeTabbing(for: windowID)
+    }
+
+    /// Brings the reader window `session` forward, selecting its tab.
+    private func bringForward(_ session: ReaderSession) {
+        guard let number = session.windowNumber else { return }
+        NSApp.window(withWindowNumber: number)?.makeKeyAndOrderFront(nil)
     }
 
     // MARK: For windows that are not readers
@@ -309,6 +339,21 @@ final class AppModel {
         case .asset(let path): NSWorkspace.shared.open(paths.content.appending(path: path))
         case .shell: break
         }
+    }
+
+    /// Opens `location` in a reader and brings that window forward: for an
+    /// explicit Show, such as a paper window's Show Reference Page, which
+    /// must be seen. A reader tab already showing the page is preferred,
+    /// else the active reader. False with no reader open, and the caller
+    /// opens one.
+    func revealInReader(_ location: Location) -> Bool {
+        let showing = location.path.flatMap { path in
+            sessions.values.first { $0.location.path == path }
+        }
+        guard let session = showing ?? activeSession else { return false }
+        session.open(location)
+        bringForward(session)
+        return true
     }
 
     /// The explorer's own Explore From This Page, about the active reader's
@@ -385,6 +430,9 @@ final class AppModel {
     /// switcher's list, so ⌘O then Return goes back to the page before it.
     private var recentPages: [String] = CCwikiSettings.recentPages
     static let recentPagesLimit = 12
+    /// The page on screen in the window that presented the quick switcher,
+    /// which its list leaves out. Set by `ReaderSession.presentQuickSwitcher`.
+    @ObservationIgnored var quickSwitcherExcludedPath: String?
 
     // MARK: Jobs
 
@@ -392,9 +440,31 @@ final class AppModel {
     /// Worktrees git still knows about that no live job owns — the residue of
     /// a crash or a force-quit mid-job.
     private(set) var orphanedWorktrees: [String] = []
-    var ingestSheetPresented = false
+    /// Which reader window shows the ingest sheet: fixed when the sheet is
+    /// asked for, so its link, notes and dropped PDF stay on one window
+    /// when another becomes key (§1.3).
+    private var ingestTarget = IngestSheetTarget()
+    /// The reader window showing the ingest sheet, if one is.
+    var ingestSheetTarget: UUID? { ingestTarget.window }
     /// A PDF dropped on the reader, waiting for the sheet to pick it up.
     var pendingDroppedPDF: URL?
+
+    /// Ingest a Paper: the sheet, on the window that asked (the one a PDF
+    /// was dropped on, or whose menu or link asked), else on the active
+    /// reader. With no reader open it waits for the next one. While it is
+    /// up, another request only brings its window forward, as one from
+    /// outside a reader (the Jobs window) always does.
+    func requestIngestSheet(in session: UUID?) {
+        ingestTarget.request(in: session, active: activeSession?.id)
+        if let target = ingestTarget.window, target != session, let shown = sessions[target] {
+            bringForward(shown)
+        }
+    }
+
+    func dismissIngestSheet() {
+        ingestTarget.dismiss()
+    }
+
     /// Bumped to ask the root view to open the jobs window. `openWindow` is an
     /// environment action, so only a view can call it; the model can only ask.
     private(set) var jobsWindowRequests = 0
@@ -1262,7 +1332,7 @@ final class AppModel {
             return
         }
         let recent = recentPages.filter {
-            $0 != activeSession?.location.path && index.pages[$0] != nil
+            $0 != quickSwitcherExcludedPath && index.pages[$0] != nil
         }
         quickSwitcherResults = index.quickSwitch(
             quickSwitcherQuery, excluding: unlistedPaths, recent: recent)

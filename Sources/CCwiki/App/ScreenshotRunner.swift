@@ -60,6 +60,8 @@ enum ScreenshotRunner {
         case whatsNew
         /// The paper window for the reference page at this path.
         case paper(String)
+        /// A second reader window, opened on this page.
+        case window(String)
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -80,6 +82,7 @@ enum ScreenshotRunner {
             case "settings": return .settings
             case "jobs": return .jobs
             case "paper": return parts.count > 1 ? .paper(parts[1]) : nil
+            case "window": return parts.count > 1 ? .window(parts[1]) : nil
             default: return nil
             }
         }
@@ -105,6 +108,10 @@ enum ScreenshotRunner {
                 "paper-" + (path as NSString).lastPathComponent
                     .replacingOccurrences(of: ".md", with: "")
                     .replacingOccurrences(of: " ", with: "-")
+            case .window(let path):
+                "window-" + (path as NSString).lastPathComponent
+                    .replacingOccurrences(of: ".md", with: "")
+                    .replacingOccurrences(of: " ", with: "-")
             }
         }
 
@@ -112,6 +119,8 @@ enum ScreenshotRunner {
         var settleMilliseconds: Int {
             switch self {
             case .page, .folder, .home, .welcome, .whatsNew, .paper: 1500
+            // A new window loads its web view's shell before it can render.
+            case .window: 2500
             case .search: 900
             // An ingestion job is minutes, not milliseconds; `apply` waits for
             // a terminal state rather than guessing a duration.
@@ -126,9 +135,10 @@ enum ScreenshotRunner {
     /// asks once its session has started; the plan runs once per process.
     private static var hasStarted = false
 
-    /// `session` is the reader window that started the plan, which its page
-    /// steps drive; `openWindow` is that window's, for the steps that open a
-    /// window of their own.
+    /// `session` is the reader window that started the plan; `openWindow` is
+    /// that window's, for the steps that open a window of their own. Each
+    /// step drives the reader window that is key when it runs, which is
+    /// `session` until a `window:` step opens another.
     static func run(model: AppModel, session: ReaderSession, openWindow: OpenWindowAction) {
         guard let directory, !hasStarted else { return }
         hasStarted = true
@@ -148,7 +158,8 @@ enum ScreenshotRunner {
             try? await Task.sleep(for: .milliseconds(900))
 
             for (offset, step) in plan.enumerated() {
-                await apply(step, model: model, session: session, openWindow: openWindow)
+                let reader = model.activeSession ?? session
+                await apply(step, model: model, session: reader, openWindow: openWindow)
                 try? await Task.sleep(for: .milliseconds(step.settleMilliseconds))
 
                 let name = String(format: "%02d-%@", offset + 1, step.slug)
@@ -157,7 +168,7 @@ enum ScreenshotRunner {
                 } else {
                     await capture(to: directory.appending(path: name + ".png"))
                 }
-                await teardown(step, model: model, session: session)
+                await teardown(step, model: model, session: reader)
                 try? await Task.sleep(for: .milliseconds(250))
             }
 
@@ -244,6 +255,11 @@ enum ScreenshotRunner {
 
         case .paper(let path):
             await PaperLibrary.applyShot(path, model: model, openWindow: openWindow)
+
+        case .window(let path):
+            openWindow(
+                id: CCwikiApp.mainWindowID,
+                value: ReaderWindow(opening: .page(path: path, anchor: nil)))
         }
     }
 

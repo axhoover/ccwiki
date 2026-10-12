@@ -42,10 +42,23 @@ struct ReaderWindowView: View {
         // that is already open, which SwiftUI brings forward. Otherwise
         // SwiftUI opens a new window for each.
         .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+        // The active reader, for the windows that are not readers, is the
+        // one key most recently. `controlActiveState` would say as much, but
+        // the macOS 15 SDK deprecates it for `appearsActive`, which macOS 14
+        // lacks.
+        .onReceive(Self.windowDidBecomeKey) { notification in
+            guard let session, let nsWindow = hostWindow(of: notification) else { return }
+            session.windowNumber = nsWindow.windowNumber
+            model.sessionBecameKey(session.id)
+        }
         .onReceive(Self.windowWillClose) { notification in
-            guard let session, isHost(notification) else { return }
+            guard let session, hostWindow(of: notification) != nil else { return }
             model.sessionDidClose(session.id)
         }
+    }
+
+    private static var windowDidBecomeKey: NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)
     }
 
     private static var windowWillClose: NotificationCenter.Publisher {
@@ -57,6 +70,16 @@ struct ReaderWindowView: View {
     private func found(_ nsWindow: NSWindow) {
         host.window = nsWindow
         nsWindow.tabbingIdentifier = Self.tabbingIdentifier
+        // A window the app opened as a tab joins its group before it is
+        // ever shown on its own (§1.4). Background tabs wait for the
+        // maintainer's check on a Mac; until then every tab opens in front.
+        if let request = model.takeTabbing(for: window.id),
+           let number = request.tabbingInto,
+           let source = NSApp.window(withWindowNumber: number), source !== nsWindow {
+            WindowTabbing.join(
+                nsWindow, to: source,
+                inBackground: request.inBackground && WindowTabbing.joinsInBackground)
+        }
         // Claiming changes what the model's observers read, which must not
         // happen inside the update that reported the window.
         Task { @MainActor in claim(in: nsWindow) }
@@ -67,17 +90,23 @@ struct ReaderWindowView: View {
     /// by a fresh one: this window is then a window of its own.
     private func claim(in nsWindow: NSWindow) {
         guard session == nil else { return }
-        if let claimed = model.claimSession(for: window.id, windowNumber: nsWindow.windowNumber) {
-            session = claimed
-            return
+        var claimed = model.claimSession(for: window.id, windowNumber: nsWindow.windowNumber)
+        if claimed == nil {
+            window.id = UUID()
+            claimed = model.claimSession(for: window.id, windowNumber: nsWindow.windowNumber)
         }
-        window.id = UUID()
-        session = model.claimSession(for: window.id, windowNumber: nsWindow.windowNumber)
+        session = claimed
+        // Already key by now, most likely, and its notification gone by
+        // with no session to tell.
+        if let claimed, nsWindow.isKeyWindow { model.sessionBecameKey(claimed.id) }
     }
 
-    private func isHost(_ notification: Notification) -> Bool {
-        guard let window = notification.object as? NSWindow else { return false }
-        return window === host.window
+    /// The window a notification is about, when it is this view's.
+    private func hostWindow(of notification: Notification) -> NSWindow? {
+        guard let window = notification.object as? NSWindow, window === host.window else {
+            return nil
+        }
+        return window
     }
 }
 

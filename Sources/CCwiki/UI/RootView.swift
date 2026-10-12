@@ -19,7 +19,6 @@ struct RootView: View {
     @State private var isDropTargeted = false
 
     var body: some View {
-        @Bindable var model = model
         @Bindable var session = session
 
         NavigationSplitView {
@@ -45,7 +44,7 @@ struct RootView: View {
         .sheet(isPresented: $session.grepPresented) {
             GrepView()
         }
-        .sheet(isPresented: $model.ingestSheetPresented) {
+        .sheet(isPresented: ingestSheetPresented) {
             IngestSheet()
         }
         .sheet(isPresented: $session.syncLogPresented) {
@@ -53,8 +52,12 @@ struct RootView: View {
         }
         // The whole reader is a drop target: when you have the paper open, the
         // natural gesture is to drag it onto the wiki, not to go looking for a
-        // form.
-        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+        // form. Not while an ingest sheet is up, in any window: the sheet
+        // takes its own drops, and one PDF is all it holds.
+        .onDrop(
+            of: model.ingestSheetTarget == nil ? Self.droppedTypes : [],
+            isTargeted: $isDropTargeted
+        ) { providers in
             acceptDroppedPDF(providers)
         }
         // Mounted permanently and faded, not inserted: a transition on a view
@@ -77,7 +80,7 @@ struct RootView: View {
                       let staged = try? model.stagePDF(from: url)
                 else { return }
                 model.pendingDroppedPDF = staged
-                model.ingestSheetPresented = true
+                model.requestIngestSheet(in: session.id)
                 openWindow(id: CCwikiApp.jobsWindowID)
             } else if let destination = CCwikiURL.destination(
                 of: CCwikiURL.internalString(for: url)) {
@@ -148,7 +151,20 @@ struct RootView: View {
         }
     }
 
+    // MARK: Ingest
+
+    /// The ingest sheet is up on one window only, the one it was pinned to
+    /// when it was asked for, so a click on another reader window never
+    /// moves it, or its link, notes and PDF (§1.3).
+    private var ingestSheetPresented: Binding<Bool> {
+        Binding(
+            get: { model.ingestSheetTarget == session.id },
+            set: { if !$0 { model.dismissIngestSheet() } })
+    }
+
     // MARK: Drop
+
+    private static let droppedTypes: [UTType] = [.pdf, .fileURL]
 
     private var dropOverlay: some View {
         ZStack {
@@ -169,13 +185,13 @@ struct RootView: View {
     }
 
     private func acceptDroppedPDF(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
+        guard model.ingestSheetTarget == nil, let provider = providers.first else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url, url.pathExtension.lowercased() == "pdf" else { return }
             Task { @MainActor in
                 guard let staged = try? model.stagePDF(from: url) else { return }
                 model.pendingDroppedPDF = staged
-                model.ingestSheetPresented = true
+                model.requestIngestSheet(in: session.id)
                 openWindow(id: CCwikiApp.jobsWindowID)
             }
         }

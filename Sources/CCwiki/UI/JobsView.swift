@@ -27,7 +27,7 @@ struct JobsView: View {
                 } description: {
                     Text("Drop a PDF on the reader, or paste an ePrint, arXiv or DOI link.")
                 } actions: {
-                    Button("New Ingestion Job…") { model.ingestSheetPresented = true }
+                    Button("New Ingestion Job…") { model.requestIngestSheet(in: nil) }
                 }
             }
         }
@@ -44,7 +44,7 @@ struct JobsView: View {
                 .disabled(!model.hasFinishedJobs)
 
                 Button {
-                    model.ingestSheetPresented = true
+                    model.requestIngestSheet(in: nil)
                 } label: {
                     Label("New Job", systemImage: "plus")
                 }
