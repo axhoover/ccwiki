@@ -524,15 +524,16 @@ struct RelationsView: View {
     // MARK: Context menus
 
     /// The actions the sidebar and Backlinks offer for a page, plus the row's
-    /// own text, which is what you want when quoting a result. A new tab or
-    /// window follows Open, which is the row's own click (reader-comforts
-    /// §1.1).
+    /// own text, which is what you want when quoting a result. A new tab and
+    /// a new window come first, as on every row that is a button; Open, the
+    /// row's own click, follows them (reader-comforts §1.1).
     @ViewBuilder
     private func pageMenu(
         _ path: String, anchor: String? = nil, copyTitle: String, copyText: String
     ) -> some View {
-        Button("Open") { session.openPage(path, anchor: anchor) }
         OpenElsewhereItems { session.open(.page(path: path, anchor: anchor), $0) }
+        Divider()
+        Button("Open") { session.openPage(path, anchor: anchor) }
         if let page = model.index?.pages[path] {
             if let url = AppModel.siteURL(slug: page.slug, anchor: anchor) {
                 Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }

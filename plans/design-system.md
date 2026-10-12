@@ -152,12 +152,14 @@ SwiftUI draws, answers only the primary button:
 | ⌥⌘-click, with or without ⇧ | A new window |
 
 The same choices are in the context menus: **Open in New Tab** and **Open in
-New Window** come first in a row's menu, or straight after its own Open item,
-and a link in the page also offers **Open Link on cryptology.city**, which is
-what ⌘-click used to do. Two kinds of row keep their own ⌘-click: the
-sidebar tree's pages, which are `List` selection, as in Finder's and Mail's
-sidebars, and the inspector's derived rows, whose click shows a proof in the
-explorer rather than a page. Both still offer the menu items.
+New Window** come first in a row's menu, and a link in the page also offers
+**Open Link on cryptology.city**, which is what ⌘-click used to do. Two kinds
+of row keep their own ⌘-click: the sidebar tree's pages, which are `List`
+selection, as in Finder's and Mail's sidebars, and the inspector's derived
+rows, whose click shows a proof in the explorer rather than a page. Both
+still offer the menu items, a derived row straight after its Open “…”. A
+folder label's menu is Open Folder Page, then the same in a new tab and in a
+new window.
 
 The palettes (⌘O, ⌘S, ⇧⌘R, ⇧⌘F) are keyboard-shaped: type, arrow, Return,
 with the shortcut hints rendered in the footer as keycaps (`KeyHint`). A
