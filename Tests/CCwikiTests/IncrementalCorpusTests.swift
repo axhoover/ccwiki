@@ -8,9 +8,16 @@ import Testing
 /// Every run prints a report, which lands in the CI log beside the relevance
 /// report: the full build phase by phase, the update after three kinds of
 /// edit, and the search index synced in full, as a no-op and after one page
-/// changed. Those numbers replace §3.1's estimates and decide whether loads
-/// ever reuse what a pull left alone (§3.2). No assertion is about time:
-/// shared runners are too noisy for that.
+/// changed. Those numbers replace §3.1's estimates. No assertion is about
+/// time: shared runners are too noisy for that.
+///
+/// **Only a release build decides D6.** `make test-corpus` runs a debug
+/// build (-Onone) beside every other corpus suite, and the pure Swift a
+/// load runs can be several times slower that way than in the app, so the
+/// report says which it was and holds only a release build's in-memory
+/// total against §3.2's 300 ms. That run is this suite alone:
+/// `CCWIKI_WIKI=… swift test -c release -Xswiftc -enable-testing
+/// --no-parallel --filter IncrementalCorpusTests`.
 ///
 /// **It never touches the clone it reads.** `make test-corpus` defaults to
 /// the release's own clone, and an edit there would make the next pull fail
@@ -18,6 +25,18 @@ import Testing
 /// edits only the copy, and checks afterwards that the clone's fingerprints
 /// are what they were.
 struct IncrementalCorpusTests {
+
+    #if DEBUG
+    /// What the numbers were measured on, at the head of the report.
+    static let configuration = "a debug build (-Onone) run beside the other suites, "
+        + "so not comparable with §3.2's 300 ms"
+    /// The threshold, beside the in-memory total only when it can be held
+    /// against it.
+    static let threshold = ""
+    #else
+    static let configuration = "a release build"
+    static let threshold = "; §3.2 builds reuse (D6) only above 300 ms"
+    #endif
 
     /// The clone `CCWIKI_WIKI` names, when it has a `content/`.
     static var source: URL? {
@@ -128,8 +147,7 @@ struct IncrementalCorpusTests {
         lines.append("full build of \(original.index.pages.count) pages, the fastest of "
             + "\(runs.count): \(best)")
         lines.append("  in memory: fastest \(LoadTimings.format(best.building)), median "
-            + "\(LoadTimings.format(Self.median(runs.map(\.building)))); "
-            + "§3.2 builds reuse (D6) only above 300 ms")
+            + "\(LoadTimings.format(Self.median(runs.map(\.building))))" + Self.threshold)
 
         let scans = (0..<5).map { _ in
             Self.timed { ContentFingerprints.scan(cloneRoot: clone) }.duration
@@ -199,7 +217,8 @@ struct IncrementalCorpusTests {
         #expect(reports.map(\.rebuiltFromScratch) == [true, false, false])
         #expect(reports.map(\.writes) == [original.index.pages.count, 0, 1])
 
-        print("Incremental indexing on the real wiki (plans/reader-comforts.md §3.8):\n"
+        print("Incremental indexing on the real wiki (plans/reader-comforts.md §3.8), "
+            + "measured on \(Self.configuration):\n"
             + lines.map { "  " + $0 }.joined(separator: "\n"))
 
         #expect(ContentFingerprints.scan(cloneRoot: source) == untouched,
