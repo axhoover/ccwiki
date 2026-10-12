@@ -110,7 +110,7 @@
   {
    "id": "ccw:node-hypothesis-regimes",
    "kind": "node-granularity",
-   "summary": "Fifteen hypotheses need a hardness regime, group or field their node does not define; re-point each at a variant that states it",
+   "summary": "Fourteen hypotheses need a hardness regime, group or field their node does not define; re-point each at a variant that states it (YZW+19's and AMR25's are already proposed by ffr:node-granularity-3 and -11)",
    "pages": [
     "content/Reductions/dlog-to-prg-bm84.md",
     "content/Assumptions/discrete-logarithm.md",

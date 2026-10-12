@@ -990,8 +990,8 @@ anywhere else a derived claim appears.
 ## 8. Testing
 
 **The self-test.** `scripts/derivations_reference.py RELATIONS_JSON
---selftest` runs one check per review finding: 38 on the real
-manifest and 7 on patched copies of it. It exits non-zero on any failure.
+--selftest` runs one check per review finding, most on the real manifest
+and the rest on patched copies of it. It exits non-zero on any failure.
 
 **The golden file.** `Tests/CCwikiTests/Fixtures/derivations-golden.json` is
 written by

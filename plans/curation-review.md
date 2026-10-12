@@ -68,13 +68,13 @@ Each entry is something `relations.json` does not record and CCwiki reads from t
 
 Answers from **LWE § Circular evasive LWE** are vacuous. CCwiki's sentence: Public-coin circular evasive LWE is false (AMYY25).
 
-[`content/Assumptions/learning-with-errors.md:113`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-with-errors.md#L113), § Evasive LWE counterexamples
+[`content/Assumptions/learning-with-errors.md:113`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-with-errors.md?plain=1#L113), § Evasive LWE counterexamples
 
 ```markdown
 Public-coin [[#Circular evasive LWE|circular evasive LWE]], the assumption behind ABE for unbounded-depth circuits ([[HLL23 - Attribute-Based Encryption for Circuits of Unbounded Depth from Lattices Garbled Circuits of Optimal Size, Laconic Functional Evaluation, and More|HLL23]]; [[evasive-lwe-to-abe]]), is false: some sampler satisfies the pre-condition but not the post-condition — [[AMYY25 - Evasive LWE Attacks, Variants & Obfustopia|AMYY25]]
 ```
 
-[`content/Assumptions/learning-with-errors.md:272`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-with-errors.md#L272), § Circular evasive LWE
+[`content/Assumptions/learning-with-errors.md:272`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-with-errors.md?plain=1#L272), § Circular evasive LWE
 
 ```markdown
 It is false — [[AMYY25 - Evasive LWE Attacks, Variants & Obfustopia|AMYY25]]
@@ -88,13 +88,13 @@ CCwiki's note: content/Assumptions/learning-with-errors.md:113, :272
 
 Answers from **SIDH** are vacuous. CCwiki's sentence: SIDH is broken classically in polynomial time (CD22).
 
-[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:16`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md#L16), § Supersingular Isogeny Diffie-Hellman
+[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:16`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md?plain=1#L16), § Supersingular Isogeny Diffie-Hellman
 
 ```markdown
 In 2022, a classical polynomial-time attack was discovered that completely breaks SIDH — [[CD22 - An efficient key recovery attack on SIDH|CD22]]
 ```
 
-[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:62`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md#L62), § Known Results
+[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:62`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md?plain=1#L62), § Known Results
 
 ```markdown
 the conjecture is false: SIDH is broken classically — [[CD22 - An efficient key recovery attack on SIDH|CD22]]
@@ -108,19 +108,19 @@ CCwiki's note: content/Assumptions/supersingular-isogeny-diffie-hellman.md:16, :
 
 Answers from **SIDH § Decisional variant (SSDDH)** are vacuous. CCwiki's sentence: SSDDH is the decisional variant of SIDH, which CD22 breaks classically in polynomial time from the same transcript.
 
-[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:33`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md#L33), § Decisional variant (SSDDH)
+[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:33`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md?plain=1#L33), § Decisional variant (SSDDH)
 
 ```markdown
 The _supersingular decision Diffie-Hellman (SSDDH)_ problem is to distinguish the shared curve $E_{AB}$ from the quotient of $E$ by an independent pair of kernel points, given the SIDH transcript
 ```
 
-[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:64`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md#L64), § Known Results
+[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:64`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md?plain=1#L64), § Known Results
 
 ```markdown
 A classical polynomial-time attack on SIDH, using Kani's theorem and the auxiliary torsion-point information — [[CD22 - An efficient key recovery attack on SIDH|CD22]]
 ```
 
-[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:65`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md#L65), § Known Results
+[`content/Assumptions/supersingular-isogeny-diffie-hellman.md:65`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/supersingular-isogeny-diffie-hellman.md?plain=1#L65), § Known Results
 
 ```markdown
 The attack breaks SIDH completely
@@ -134,13 +134,13 @@ CCwiki's note: content/Assumptions/supersingular-isogeny-diffie-hellman.md:16, :
 
 **MPC § Honest majority (\$t < n/2\$)** is a setting, not an assumption: listed apart, and never a completion. CCwiki's sentence: A corruption setting, not an assumption: MPC with t < n/2 exists unconditionally given broadcast (RB89).
 
-[`content/Primitives/secure-multi-party-computation.md:50`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md#L50), § Honest majority
+[`content/Primitives/secure-multi-party-computation.md:50`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md?plain=1#L50), § Honest majority
 
 ```markdown
 When fewer than a threshold fraction of parties are corrupt, information-theoretic (unconditional) security is achievable.
 ```
 
-[`content/Primitives/secure-multi-party-computation.md:58`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md#L58), § Honest majority (\$t < n/2\$)
+[`content/Primitives/secure-multi-party-computation.md:58`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md?plain=1#L58), § Honest majority (\$t < n/2\$)
 
 ```markdown
 For $t < n/2$, statistical security against malicious adversaries is achievable with broadcast — [[RB89 - Verifiable Secret Sharing and Multiparty Protocols with Honest Majority|RB89]].
@@ -154,13 +154,13 @@ CCwiki's note: content/Primitives/secure-multi-party-computation.md:56-58
 
 **MPC § Honest majority (\$t < n/3\$)** is a setting, not an assumption: listed apart, and never a completion. CCwiki's sentence: A corruption setting, not an assumption: MPC with t < n/3 exists unconditionally (BGW88).
 
-[`content/Primitives/secure-multi-party-computation.md:50`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md#L50), § Honest majority
+[`content/Primitives/secure-multi-party-computation.md:50`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md?plain=1#L50), § Honest majority
 
 ```markdown
 When fewer than a threshold fraction of parties are corrupt, information-theoretic (unconditional) security is achievable.
 ```
 
-[`content/Primitives/secure-multi-party-computation.md:54`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md#L54), § Honest majority (\$t < n/3\$)
+[`content/Primitives/secure-multi-party-computation.md:54`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/secure-multi-party-computation.md?plain=1#L54), § Honest majority (\$t < n/3\$)
 
 ```markdown
 For $t < n/3$, perfect security against malicious adversaries is achievable — [[BGW88 - Completeness theorems for non-cryptographic fault-tolerant distributed computation|BGW88]].
@@ -174,13 +174,13 @@ CCwiki's note: content/Primitives/secure-multi-party-computation.md:52-54
 
 **BDH ⇒ HVE (BW07)** is never used: its recorded hypotheses do not match its Statement.
 
-[`content/Reductions/bdh-to-hve-bw07.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hve-bw07.md#L21), § Statement
+[`content/Reductions/bdh-to-hve-bw07.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hve-bw07.md?plain=1#L21), § Statement
 
 ```markdown
 In bilinear groups of composite order
 ```
 
-[`content/Reductions/bdh-to-hve-bw07.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hve-bw07.md#L21), § Statement
+[`content/Reductions/bdh-to-hve-bw07.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hve-bw07.md?plain=1#L21), § Statement
 
 ```markdown
 under three assumptions jointly: the decisional bilinear Diffie–Hellman assumption ([[bilinear-map-assumptions|DBDH]]), the bilinear subgroup decision assumption, and the composite 3-party Diffie–Hellman assumption (C3DH, introduced there)
@@ -194,7 +194,7 @@ CCwiki's note: The Statement needs composite-order groups and three assumptions 
 
 **Evasive LWE + Tensor LWE ⇒ ABE (Wee22)** is never used: its recorded hypotheses do not match its Statement.
 
-[`content/Reductions/evasive-lwe-to-abe-wee22.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/evasive-lwe-to-abe-wee22.md#L21), § Statement
+[`content/Reductions/evasive-lwe-to-abe-wee22.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/evasive-lwe-to-abe-wee22.md?plain=1#L21), § Statement
 
 ```markdown
 [[learning-with-errors#evasive-lwe|Evasive LWE]] together with [[learning-with-errors#tensor-lwe|tensor LWE]] (introduced in the same work) and [[learning-with-errors|LWE]] yields ciphertext-policy [[attribute-based-encryption|ABE]]
@@ -208,13 +208,13 @@ CCwiki's note: The Statement assumes evasive LWE, tensor LWE and LWE; the record
 
 **Evasive LWE ⇒ BE (Wee22)** is never used: its recorded hypotheses do not match its Statement.
 
-[`content/Reductions/evasive-lwe-to-be-wee22.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/evasive-lwe-to-be-wee22.md#L21), § Statement
+[`content/Reductions/evasive-lwe-to-be-wee22.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/evasive-lwe-to-be-wee22.md?plain=1#L21), § Statement
 
 ```markdown
 [[learning-with-errors#evasive-lwe|Evasive LWE]] together with [[learning-with-errors|LWE]] yields optimal [[broadcast-encryption|BE]]
 ```
 
-[`content/Assumptions/learning-with-errors.md:194`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-with-errors.md#L194), § Evasive LWE
+[`content/Assumptions/learning-with-errors.md:194`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-with-errors.md?plain=1#L194), § Evasive LWE
 
 ```markdown
 Unlike a single-game hardness assumption, it is stated as an **implication** between two indistinguishability conditions, quantified over a PPT sampler.
@@ -228,13 +228,13 @@ CCwiki's note: The Statement assumes evasive LWE together with LWE; the record d
 
 **IND-CPA ⇔ Semantic security (GM84, MRS88)**, recorded as fully-black-box: left to right takes the record's class, right to left takes the record's class.
 
-[`content/Reductions/cpa-security-to-cpa-security.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpa-security-to-cpa-security.md#L24), § Statement
+[`content/Reductions/cpa-security-to-cpa-security.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpa-security-to-cpa-security.md?plain=1#L24), § Statement
 
 ```markdown
 [[GM84 - Probabilistic encryption|GM84]] prove that indistinguishability implies semantic security, and [[MRS88 - The Notion of Security for Probabilistic Cryptosystems|MRS88]] the converse.
 ```
 
-[`content/Reductions/cpa-security-to-cpa-security.md:17`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpa-security-to-cpa-security.md#L17), anywhere on the page
+[`content/Reductions/cpa-security-to-cpa-security.md:17`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpa-security-to-cpa-security.md?plain=1#L17), anywhere on the page
 
 ```markdown
 Both directions keep the scheme unchanged, and each fixed reduction runs the given adversary once as an oracle.
@@ -248,13 +248,13 @@ CCwiki's note: GM84 and MRS88 prove the two directions; both are black-box.
 
 **ISIS (Inhomogeneous SIS) ⇔ SIS (folklore)**, recorded as fully-black-box: left to right is unstated, right to left takes the record's class.
 
-[`content/Reductions/isis-inhomogeneous-sis-to-sis.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/isis-inhomogeneous-sis-to-sis.md#L22), § Statement
+[`content/Reductions/isis-inhomogeneous-sis-to-sis.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/isis-inhomogeneous-sis-to-sis.md?plain=1#L22), § Statement
 
 ```markdown
 One direction is immediate: if SIS is hard for $(n, m, q, \sqrt{\beta^2 + 1})$, then ISIS is hard for $(n, m - 1, q, \beta)$.
 ```
 
-[`content/Reductions/isis-inhomogeneous-sis-to-sis.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/isis-inhomogeneous-sis-to-sis.md#L22), § Statement
+[`content/Reductions/isis-inhomogeneous-sis-to-sis.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/isis-inhomogeneous-sis-to-sis.md?plain=1#L22), § Statement
 
 ```markdown
 The other, ISIS hardness implying SIS hardness (solving ISIS with a SIS oracle), holds only under conditions on the column count and norm bound.
@@ -268,13 +268,13 @@ CCwiki's note: SIS => ISIS is immediate; ISIS => SIS holds only under conditions
 
 **Linear secret sharing schemes (LSSS) ⇔ MSP (KW93)**, recorded as free: left to right takes the record's class, right to left takes the record's class.
 
-[`content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md#L23), § Statement
+[`content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md?plain=1#L23), § Statement
 
 ```markdown
 an MSP of size $m$ computing an access structure $\Gamma$ yields an LSSS for $\Gamma$ with total share size $m$ field elements, and every LSSS for $\Gamma$ induces an MSP of the same size computing $\Gamma$
 ```
 
-[`content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md:16`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md#L16), anywhere on the page
+[`content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md:16`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md?plain=1#L16), anywhere on the page
 
 ```markdown
 The equivalence is an unconditional linear-algebraic correspondence, with no assumption or adversary to use as an oracle.
@@ -288,13 +288,13 @@ CCwiki's note: KW93 and Bei96: both directions are size-preserving translations.
 
 **Module LWE (degree 1) ⇔ LWE (LS15)**, recorded as fully-black-box: left to right takes the record's class, right to left takes the record's class.
 
-[`content/Reductions/module-lwe-to-lwe-ls15.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-lwe-ls15.md#L23), § Statement
+[`content/Reductions/module-lwe-to-lwe-ls15.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-lwe-ls15.md?plain=1#L23), § Statement
 
 ```markdown
 [[learning-with-errors#degree-1-module-lwe|Module LWE]] over the degree-1 ring $R = \ZZ$ at module rank $n$ is [[learning-with-errors|LWE]] in dimension $n$ with the same modulus, error distribution and number of samples, so each is hard if and only if the other is
 ```
 
-[`content/Reductions/module-lwe-to-lwe-ls15.md:27`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-lwe-ls15.md#L27), § Sketch
+[`content/Reductions/module-lwe-to-lwe-ls15.md:27`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-lwe-ls15.md?plain=1#L27), § Sketch
 
 ```markdown
 the identity map is a reduction in both directions
@@ -308,13 +308,13 @@ CCwiki's note: Degree-1 module LWE is LWE with the same parameters.
 
 **Module LWE (rank 1) ⇔ Ring LWE (LS15)**, recorded as fully-black-box: left to right takes the record's class, right to left takes the record's class.
 
-[`content/Reductions/module-lwe-to-ring-lwe-ls15.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-ring-lwe-ls15.md#L23), § Statement
+[`content/Reductions/module-lwe-to-ring-lwe-ls15.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-ring-lwe-ls15.md?plain=1#L23), § Statement
 
 ```markdown
 [[learning-with-errors#rank-1-module-lwe|Module LWE]] at module rank $k = 1$ over $R_q$ is [[learning-with-errors#ring-lwe|Ring LWE]] over $R_q$ with the same error distribution and number of samples, so each is hard if and only if the other is
 ```
 
-[`content/Reductions/module-lwe-to-ring-lwe-ls15.md:27`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-ring-lwe-ls15.md#L27), § Sketch
+[`content/Reductions/module-lwe-to-ring-lwe-ls15.md:27`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/module-lwe-to-ring-lwe-ls15.md?plain=1#L27), § Sketch
 
 ```markdown
 The identity map is a reduction in both directions.
@@ -328,13 +328,13 @@ CCwiki's note: Rank-1 module LWE is Ring LWE with the same parameters.
 
 **Rabin OT ⇔ OT (Cre87)**, recorded as fully-black-box: left to right takes the record's class, right to left takes the record's class.
 
-[`content/Reductions/rabin-ot-to-ot.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rabin-ot-to-ot.md#L23), § Statement
+[`content/Reductions/rabin-ot-to-ot.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rabin-ot-to-ot.md?plain=1#L23), § Statement
 
 ```markdown
 each is realized from the other by an information-theoretically secure protocol making polynomially many calls
 ```
 
-[`content/Reductions/rabin-ot-to-ot.md:16`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rabin-ot-to-ot.md#L16), anywhere on the page
+[`content/Reductions/rabin-ot-to-ot.md:16`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rabin-ot-to-ot.md?plain=1#L16), anywhere on the page
 
 ```markdown
 Each direction calls the given OT only as a subprotocol on locally chosen inputs, and its security is information-theoretic given ideal calls, so the simulators use the adversary only as a black box.
@@ -348,19 +348,19 @@ CCwiki's note: Cre87: each direction is an information-theoretic protocol.
 
 **RSA ⇔ FAC (DLO24)**, recorded as free: left to right takes the record's class, right to left takes the record's class.
 
-[`content/Reductions/rsa-to-fac-dlo24.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-fac-dlo24.md#L24), § Statement
+[`content/Reductions/rsa-to-fac-dlo24.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-fac-dlo24.md?plain=1#L24), § Statement
 
 ```markdown
 Against generic ring algorithms, which access $\ZZ_n$ only through ring operations and equality tests, computing $e$-th roots modulo $n$ ([[rsa-assumption|RSA]]) is equivalent to [[factoring|factoring]] $n$
 ```
 
-[`content/Reductions/rsa-to-fac-dlo24.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-fac-dlo24.md#L24), § Statement
+[`content/Reductions/rsa-to-fac-dlo24.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-fac-dlo24.md?plain=1#L24), § Statement
 
 ```markdown
 The converse holds unconditionally: the factorization of $n$ gives $\phi(n)$ and hence $d \equiv e^{-1} \pmod{\phi(n)}$
 ```
 
-[`content/Reductions/rsa-to-fac-dlo24.md:17`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-fac-dlo24.md#L17), anywhere on the page
+[`content/Reductions/rsa-to-fac-dlo24.md:17`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-fac-dlo24.md?plain=1#L17), anywhere on the page
 
 ```markdown
 The theorem is proved in the generic ring model with preprocessing, which is none of the named models and differs from the generic group model.
@@ -374,13 +374,13 @@ CCwiki's note: RSA => FAC is trivial in the standard model, FAC => RSA is DLO24'
 
 **SXDH + LWE + LPN + NC0-PRG ⇒ iO (JLS21)** needs *SXDH sub-exponentially hard, on asymmetric bilinear groups of prime order p = O(2^lambda)* of its hypothesis DDH § SXDH (Symmetric External Diffie-Hellman). Met by: nothing; the notion must be given.
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L23), § Statement
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L23), § Statement
 
 ```markdown
 Assume sub-exponential hardness of the following: [[decisional-diffie-hellman#sxdh-symmetric-external-diffie-hellman|SXDH]] on asymmetric bilinear groups of prime order $p = O(2^\secpar)$
 ```
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L14), anywhere on the page
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L14), anywhere on the page
 
 ```markdown
 requires sub-exponential hardness of all four hypotheses
@@ -394,19 +394,19 @@ CCwiki's note: Statement: 'Assume sub-exponential hardness of the following: SXD
 
 **SXDH + LWE + LPN + NC0-PRG ⇒ iO (JLS21)** needs *LWE sub-exponentially hard over Z\_p (p the SXDH group order), with modulus-to-noise ratio 2^(k^eps)* of its hypothesis LWE. Met by: nothing; the notion must be given.
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L23), § Statement
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L23), § Statement
 
 ```markdown
 Assume sub-exponential hardness of the following:
 ```
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L23), § Statement
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L23), § Statement
 
 ```markdown
 [[learning-with-errors|LWE]] over $\ZZ_p$ with secret dimension $k$ and modulus-to-noise ratio $2^{k^\varepsilon}$
 ```
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L14), anywhere on the page
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L14), anywhere on the page
 
 ```markdown
 requires sub-exponential hardness of all four hypotheses
@@ -420,19 +420,19 @@ CCwiki's note: Statement: 'LWE over Z\_p with secret dimension k and modulus-to-
 
 **SXDH + LWE + LPN + NC0-PRG ⇒ iO (JLS21)** needs *LPN sub-exponentially hard over the field Z\_p (not binary LPN), with polynomially many samples and error rate l^(-delta)* of its hypothesis LPN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L23), § Statement
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L23), § Statement
 
 ```markdown
 Assume sub-exponential hardness of the following:
 ```
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L23), § Statement
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L23), § Statement
 
 ```markdown
 [[learning-parity-with-noise#assumption|LPN]] over $\ZZ_p$ (the field generalization, not binary LPN) with secret dimension $\ell$, polynomially many samples and error rate $\ell^{-\delta}$
 ```
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L14), anywhere on the page
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L14), anywhere on the page
 
 ```markdown
 requires sub-exponential hardness of all four hypotheses
@@ -446,19 +446,19 @@ CCwiki's note: Statement: 'LPN over Z\_p (the field generalization, not binary L
 
 **SXDH + LWE + LPN + NC0-PRG ⇒ iO (JLS21)** needs *a sub-exponentially secure Boolean PRG in NC0 with stretch n^(1+tau)* of its hypothesis PRG in NC0 § Polynomial-stretch PRG in NC0. Met by: nothing; the notion must be given.
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L23), § Statement
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L23), § Statement
 
 ```markdown
 Assume sub-exponential hardness of the following:
 ```
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L23), § Statement
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L23), § Statement
 
 ```markdown
 a Boolean [[low-complexity-prg#polynomial-stretch-prg-in-nc0|PRG]] in $\mathrm{NC}^0$ with stretch $n^{1+\tau}$ on $n$-bit seeds
 ```
 
-[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md#L14), anywhere on the page
+[`content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md:14`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md?plain=1#L14), anywhere on the page
 
 ```markdown
 requires sub-exponential hardness of all four hypotheses
@@ -472,13 +472,13 @@ CCwiki's note: Statement: 'a Boolean PRG in NC0 with stretch n^{1+tau} on n-bit 
 
 **LWE ⇒ Leveled fully homomorphic encryption (BGV12)** needs *decision LWE with modulus-to-noise ratio exponential in the depth bound L* of its hypothesis LWE. Met by: nothing; the notion must be given.
 
-[`content/Reductions/lwe-to-leveled-fully-homomorphic-encryption-bgv12.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/lwe-to-leveled-fully-homomorphic-encryption-bgv12.md#L23), § Statement
+[`content/Reductions/lwe-to-leveled-fully-homomorphic-encryption-bgv12.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/lwe-to-leveled-fully-homomorphic-encryption-bgv12.md?plain=1#L23), § Statement
 
 ```markdown
 IND-CPA-secure if decision [[learning-with-errors|LWE]] is hard with modulus-to-noise ratio exponential in $L$
 ```
 
-[`content/Reductions/gapsvp-to-lwe-reg05.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/gapsvp-to-lwe-reg05.md#L24), § Statement
+[`content/Reductions/gapsvp-to-lwe-reg05.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/gapsvp-to-lwe-reg05.md?plain=1#L24), § Statement
 
 ```markdown
 for decision LWE the modulus must be prime and $\poly(n)$
@@ -492,13 +492,13 @@ CCwiki's note: Statement: 'IND-CPA-secure if decision LWE is hard with modulus-t
 
 **Low-noise LPN ⇒ TDH (AMR25)** needs *quasi-polynomial hardness of low-noise LPN with noise rate O(log^(1+beta)(k)/k)* of its hypothesis LPN § Low-noise LPN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/noise-level-to-tdh-amr25.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/noise-level-to-tdh-amr25.md#L21), § Statement
+[`content/Reductions/noise-level-to-tdh-amr25.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/noise-level-to-tdh-amr25.md?plain=1#L21), § Statement
 
 ```markdown
 Quasi-polynomial hardness of [[learning-parity-with-noise#low-noise-lpn|low-noise LPN]] in dimension $k$ with noise rate $\varepsilon = O(\log^{1+\beta}(k)/k)$, for a constant $\beta > 0$, implies [[trapdoor-hash-function|trapdoor hash functions]]
 ```
 
-[`content/Assumptions/learning-parity-with-noise.md:76`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md#L76), § Low-noise LPN
+[`content/Assumptions/learning-parity-with-noise.md:76`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md?plain=1#L76), § Low-noise LPN
 
 ```markdown
 The noise rate is $\varepsilon = \log^c(k)/k$ for a constant $c > 1$.
@@ -512,19 +512,19 @@ CCwiki's note: Statement: 'Quasi-polynomial hardness of low-noise LPN in dimensi
 
 **FE ⇒ iO (AJ15, BV15)** needs *public-key FE for P/poly that is single-key, sub-exponentially secure and weakly compact* of its hypothesis FE. Met by: nothing; the notion must be given.
 
-[`content/Reductions/fe-to-io.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/fe-to-io.md#L24), § Statement
+[`content/Reductions/fe-to-io.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/fe-to-io.md?plain=1#L24), § Statement
 
 ```markdown
 A public-key [[functional-encryption|FE]] scheme for $\classPpoly$ that is single-key, sub-exponentially secure and weakly compact (encryption time sublinear in the size of the supported circuits) yields [[indistinguishability-obfuscation|iO]] for all polynomial-size circuits
 ```
 
-[`content/Reductions/fe-to-io.md:15`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/fe-to-io.md#L15), anywhere on the page
+[`content/Reductions/fe-to-io.md:15`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/fe-to-io.md?plain=1#L15), anywhere on the page
 
 ```markdown
 requires sub-exponentially secure FE
 ```
 
-[`content/Reductions/hash-function-and-io-to-fe-sw14.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/hash-function-and-io-to-fe-sw14.md#L24), § Statement
+[`content/Reductions/hash-function-and-io-to-fe-sw14.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/hash-function-and-io-to-fe-sw14.md?plain=1#L24), § Statement
 
 ```markdown
 there is a selectively secure, indistinguishability-based [[functional-encryption|functional encryption]] scheme for all polynomial-size circuits
@@ -538,7 +538,7 @@ CCwiki's note: Statement: 'A public-key FE scheme for P/poly that is single-key,
 
 **ISIS (Inhomogeneous SIS) ⇔ SIS (folklore)** needs *ISIS with the column count and norm bound under which ISIS hardness implies SIS hardness* of its hypothesis SIS § ISIS (Inhomogeneous SIS). Met by: nothing; the notion must be given.
 
-[`content/Reductions/isis-inhomogeneous-sis-to-sis.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/isis-inhomogeneous-sis-to-sis.md#L22), § Statement
+[`content/Reductions/isis-inhomogeneous-sis-to-sis.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/isis-inhomogeneous-sis-to-sis.md?plain=1#L22), § Statement
 
 ```markdown
 The other, ISIS hardness implying SIS hardness (solving ISIS with a SIS oracle), holds only under conditions on the column count and norm bound.
@@ -552,13 +552,13 @@ CCwiki's note: Statement: 'The other, ISIS hardness implying SIS hardness ... ho
 
 **TDP ⇒ NIZK (FLS90)** needs *a doubly enhanced, certified trapdoor permutation family* of its hypothesis TDP. Met by: nothing; the notion must be given.
 
-[`content/Reductions/tdp-to-nizk-bfm88.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/tdp-to-nizk-bfm88.md#L24), § Statement
+[`content/Reductions/tdp-to-nizk-bfm88.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/tdp-to-nizk-bfm88.md?plain=1#L24), § Statement
 
 ```markdown
 A family of doubly enhanced, certified [[trapdoor-permutation|trapdoor permutations]] (indices are recognizably permutations) yields a [[non-interactive-zero-knowledge|NIZK]] proof system
 ```
 
-[`content/Reductions/rsa-to-tdp-rsa78.md:25`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-tdp-rsa78.md#L25), § Notes
+[`content/Reductions/rsa-to-tdp-rsa78.md:25`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/rsa-to-tdp-rsa78.md?plain=1#L25), § Notes
 
 ```markdown
 Applications that sample domain elements from public coins, such as [[oblivious-transfer|OT]] and [[non-interactive-zero-knowledge|NIZK]], need the enhanced or doubly enhanced notions
@@ -572,13 +572,13 @@ CCwiki's note: Statement: 'A family of doubly enhanced, certified trapdoor permu
 
 **Subexponential LPN ⇒ CRHF (YZW+19)** needs *constant-noise LPN that is 2^(k^(1/2+delta))-hard, or 2^(Omega(k/log k))-hard with poly(k) samples* of its hypothesis LPN § Subexponential LPN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/subexponential-lpn-to-crhf-yzw-19.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-crhf-yzw-19.md#L21), § Statement
+[`content/Reductions/subexponential-lpn-to-crhf-yzw-19.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-crhf-yzw-19.md?plain=1#L21), § Statement
 
 ```markdown
 If constant-noise [[learning-parity-with-noise|LPN]] is $2^{k^{1/2+\delta}}$-hard for a constant $\delta > 0$ ([[learning-parity-with-noise#subexponential-lpn|subexponential LPN]] with exponent above $1/2$) or $2^{\Omega(k/\log k)}$-hard given $\poly(k)$ samples, then [[hash-function#collision-resistance|collision-resistant hash functions]] exist
 ```
 
-[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md#L83), § Subexponential LPN
+[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md?plain=1#L83), § Subexponential LPN
 
 ```markdown
 requires running in time $2^{\omega(k^{\varepsilon})}$ for some $\varepsilon > 0$ (often $\varepsilon = 1/2$)
@@ -592,13 +592,13 @@ CCwiki's note: Statement: '2^{k^{1/2+delta}}-hard for a constant delta > 0 (sube
 
 **Subexponential LPN ⇒ OT (YZ16)** needs *constant-noise LPN that is 2^(omega(n^(1/2)))-hard with advantage at most 1/T* of its hypothesis LPN § Subexponential LPN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/subexponential-lpn-to-ot-yz16.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-ot-yz16.md#L21), § Statement
+[`content/Reductions/subexponential-lpn-to-ot-yz16.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-ot-yz16.md?plain=1#L21), § Statement
 
 ```markdown
 Constant-noise [[learning-parity-with-noise#subexponential-lpn|LPN]] that is $2^{\omega(n^{1/2})}$-hard — every adversary of time $T = 2^{\omega(n^{1/2})}$ has advantage at most $1/T$, for secret length $n$ — implies [[oblivious-transfer|OT]]
 ```
 
-[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md#L83), § Subexponential LPN
+[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md?plain=1#L83), § Subexponential LPN
 
 ```markdown
 requires running in time $2^{\omega(k^{\varepsilon})}$ for some $\varepsilon > 0$ (often $\varepsilon = 1/2$)
@@ -612,13 +612,13 @@ CCwiki's note: Statement: 'Constant-noise LPN that is 2^{omega(n^{1/2})}-hard'. 
 
 **Subexponential LPN ⇒ IND-CCA PKE (YZ16)** needs *constant-noise LPN that is 2^(omega(n^(1/2)))-hard with advantage at most 1/T* of its hypothesis LPN § Subexponential LPN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/subexponential-lpn-to-pke-yz16.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-pke-yz16.md#L21), § Statement
+[`content/Reductions/subexponential-lpn-to-pke-yz16.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-pke-yz16.md?plain=1#L21), § Statement
 
 ```markdown
 Constant-noise [[learning-parity-with-noise#subexponential-lpn|LPN]] that is $2^{\omega(n^{1/2})}$-hard — every adversary of time $T = 2^{\omega(n^{1/2})}$ has advantage at most $1/T$, for secret length $n$ — implies [[public-key-encryption#cca-security|IND-CCA-secure PKE]]
 ```
 
-[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md#L83), § Subexponential LPN
+[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md?plain=1#L83), § Subexponential LPN
 
 ```markdown
 requires running in time $2^{\omega(k^{\varepsilon})}$ for some $\varepsilon > 0$ (often $\varepsilon = 1/2$)
@@ -632,13 +632,13 @@ CCwiki's note: Statement: 'Constant-noise LPN that is 2^{omega(n^{1/2})}-hard'. 
 
 **Subexponential LPN ⇒ PRC (CG24)** needs *LPN that is 2^(O(sqrt n))-hard* of its hypothesis LPN § Subexponential LPN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/subexponential-lpn-to-prc-cg24.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-prc-cg24.md#L21), § Statement
+[`content/Reductions/subexponential-lpn-to-prc-cg24.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/subexponential-lpn-to-prc-cg24.md?plain=1#L21), § Statement
 
 ```markdown
 $2^{O(\sqrt{n})}$-hardness of [[learning-parity-with-noise#subexponential-lpn|LPN]] implies [[pseudorandom-error-correcting-code|pseudorandom error-correcting codes]]
 ```
 
-[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md#L83), § Subexponential LPN
+[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md?plain=1#L83), § Subexponential LPN
 
 ```markdown
 requires running in time $2^{\omega(k^{\varepsilon})}$ for some $\varepsilon > 0$ (often $\varepsilon = 1/2$)
@@ -652,13 +652,13 @@ CCwiki's note: Statement: '2^{O(sqrt n)}-hardness of LPN'. The variant fixes onl
 
 **Subexponential LPN ⇒ Zero-bit PRC (CG24)** needs *LPN that is 2^(O(sqrt n))-hard* of its hypothesis LPN § Subexponential LPN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/lwe-to-zero-bit-prc-cg24.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/lwe-to-zero-bit-prc-cg24.md#L21), § Statement
+[`content/Reductions/lwe-to-zero-bit-prc-cg24.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/lwe-to-zero-bit-prc-cg24.md?plain=1#L21), § Statement
 
 ```markdown
 $2^{O(\sqrt{n})}$-hardness of [[learning-parity-with-noise#subexponential-lpn|LPN]] implies a [[pseudorandom-error-correcting-code#zero-bit-prc|zero-bit PRC]]
 ```
 
-[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md#L83), § Subexponential LPN
+[`content/Assumptions/learning-parity-with-noise.md:83`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/learning-parity-with-noise.md?plain=1#L83), § Subexponential LPN
 
 ```markdown
 requires running in time $2^{\omega(k^{\varepsilon})}$ for some $\varepsilon > 0$ (often $\varepsilon = 1/2$)
@@ -672,13 +672,13 @@ CCwiki's note: Statement: '2^{O(sqrt n)}-hardness of LPN'. The variant fixes onl
 
 **DLOG ⇒ PRG (BM84)** needs *DLOG hard in Z\_p^\* (p prime, g a generator)* of its hypothesis DLOG. Met by: nothing; the notion must be given.
 
-[`content/Reductions/dlog-to-prg-bm84.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/dlog-to-prg-bm84.md#L23), § Statement
+[`content/Reductions/dlog-to-prg-bm84.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/dlog-to-prg-bm84.md?plain=1#L23), § Statement
 
 ```markdown
 If [[discrete-logarithm|DLOG]] is hard in $\ZZ_p^*$ ($p$ prime, $g$ a generator)
 ```
 
-[`content/Assumptions/discrete-logarithm.md:13`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/discrete-logarithm.md#L13), § Discrete logarithm
+[`content/Assumptions/discrete-logarithm.md:13`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Assumptions/discrete-logarithm.md?plain=1#L13), § Discrete logarithm
 
 ```markdown
 an adversary which can solve the DLOG problem can also solve [[computational-diffie-hellman|CDH]] in the same group — folklore.
@@ -692,19 +692,19 @@ CCwiki's note: Statement: 'If DLOG is hard in Z\_p^\* (p prime, g a generator), 
 
 **PKE ⇒ COM (folklore)** needs *a perfectly correct CPA-secure PKE with certifiable keys* of its hypothesis PKE. Met by: nothing; the notion must be given.
 
-[`content/Reductions/pke-to-com.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/pke-to-com.md#L22), § Statement
+[`content/Reductions/pke-to-com.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/pke-to-com.md?plain=1#L22), § Statement
 
 ```markdown
 turns any perfectly correct [[public-key-encryption#cpa-security|CPA-secure]] [[public-key-encryption|PKE]] into a non-interactive [[commitment-scheme|commitment]]
 ```
 
-[`content/Reductions/pke-to-com.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/pke-to-com.md#L22), § Statement
+[`content/Reductions/pke-to-com.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/pke-to-com.md?plain=1#L22), § Statement
 
 ```markdown
 A malicious committer may choose a malformed $\pk$ unless keys are certifiable — folklore.
 ```
 
-[`content/Reductions/pke-to-com.md:30`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/pke-to-com.md#L30), § Notes
+[`content/Reductions/pke-to-com.md:30`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/pke-to-com.md?plain=1#L30), § Notes
 
 ```markdown
 Without perfect correctness or certifiable keys, PKE still yields commitments
@@ -718,31 +718,31 @@ CCwiki's note: Statement: 'turns any perfectly correct CPA-secure PKE into a non
 
 **ABE ⇒ BE (folklore)** needs *a CP-IND-CPA-secure ciphertext-policy ABE whose policy class contains disjunctions* of its hypothesis ABE. Met by: \$k\$-Linear assumption ⇒ ABE (KW19), Succinct LWE ⇒ ABE (Wee25).
 
-[`content/Reductions/abe-to-be.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/abe-to-be.md#L22), § Statement
+[`content/Reductions/abe-to-be.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/abe-to-be.md?plain=1#L22), § Statement
 
 ```markdown
 Take a CP-[[attribute-based-encryption|ABE]] scheme over attribute universe $[n]$ whose policy class contains disjunctions.
 ```
 
-[`content/Reductions/abe-to-be.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/abe-to-be.md#L22), § Statement
+[`content/Reductions/abe-to-be.md:22`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/abe-to-be.md?plain=1#L22), § Statement
 
 ```markdown
 If the scheme is [[attribute-based-encryption#cp-abe-ind-cpa-security|CP-IND-CPA-secure]], the resulting [[broadcast-encryption|BE]]
 ```
 
-[`content/Reductions/k-linear-assumption-to-abe-rw13.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/k-linear-assumption-to-abe-rw13.md#L21), § Statement
+[`content/Reductions/k-linear-assumption-to-abe-rw13.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/k-linear-assumption-to-abe-rw13.md?plain=1#L21), § Statement
 
 ```markdown
 there are key-policy and ciphertext-policy [[attribute-based-encryption|ABE]] schemes for $\mathrm{NC}^1$ that are adaptively secure ([[attribute-based-encryption#kp-abe-ind-cpa-security|KP-IND-CPA]] and [[attribute-based-encryption#cp-abe-ind-cpa-security|CP-IND-CPA]])
 ```
 
-[`content/Reductions/succinct-lwe-to-abe-wee25.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/succinct-lwe-to-abe-wee25.md#L21), § Statement
+[`content/Reductions/succinct-lwe-to-abe-wee25.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/succinct-lwe-to-abe-wee25.md?plain=1#L21), § Statement
 
 ```markdown
 [[learning-with-errors#succinct-lwe|Succinct LWE]] implies key-policy and ciphertext-policy [[attribute-based-encryption|ABE]]
 ```
 
-[`content/Reductions/bdh-to-abe-gpsw06.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-abe-gpsw06.md#L23), § Statement
+[`content/Reductions/bdh-to-abe-gpsw06.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-abe-gpsw06.md?plain=1#L23), § Statement
 
 ```markdown
 there is a key-policy [[attribute-based-encryption|ABE]] for monotone access structures
@@ -756,19 +756,19 @@ CCwiki's note: Statement: 'Take a CP-ABE scheme ... If the scheme is CP-IND-CPA-
 
 **OT ⇒ MPC (Kil88, GMW87)** needs *OT secure against malicious parties (it instantiates Kil88's ideal OT)* of its hypothesis OT. Met by: cPIR ⇒ OT (DMO00).
 
-[`content/Reductions/ot-to-mpc-kil88.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ot-to-mpc-kil88.md#L24), § Statement
+[`content/Reductions/ot-to-mpc-kil88.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ot-to-mpc-kil88.md?plain=1#L24), § Statement
 
 ```markdown
 in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties
 ```
 
-[`content/Primitives/oblivious-transfer.md:107`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/oblivious-transfer.md#L107), § Malicious Security
+[`content/Primitives/oblivious-transfer.md:107`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/oblivious-transfer.md?plain=1#L107), § Malicious Security
 
 ```markdown
 The definitions above are **semi-honest**
 ```
 
-[`content/Reductions/cpir-to-ot-dmo00.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpir-to-ot-dmo00.md#L21), § Statement
+[`content/Reductions/cpir-to-ot-dmo00.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpir-to-ot-dmo00.md?plain=1#L21), § Statement
 
 ```markdown
 Non-trivial single-server PIR is therefore complete for secure two-party and multi-party computation
@@ -782,25 +782,25 @@ CCwiki's note: Statement: 'in the OT-hybrid model every two-party functionality 
 
 **OT ⇒ COM (Kil88)** needs *OT secure against malicious parties (it instantiates Kil88's ideal OT)* of its hypothesis OT. Met by: cPIR ⇒ OT (DMO00).
 
-[`content/Reductions/ot-to-com.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ot-to-com.md#L23), § Statement
+[`content/Reductions/ot-to-com.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ot-to-com.md?plain=1#L23), § Statement
 
 ```markdown
 in the OT-hybrid model there is a bit commitment that is statistically hiding and statistically binding
 ```
 
-[`content/Reductions/ot-to-com.md:27`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ot-to-com.md#L27), § Sketch
+[`content/Reductions/ot-to-com.md:27`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/ot-to-com.md?plain=1#L27), § Sketch
 
 ```markdown
 each flipped bit is caught with probability $1/2$ since the committer does not learn which bits arrived
 ```
 
-[`content/Primitives/oblivious-transfer.md:107`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/oblivious-transfer.md#L107), § Malicious Security
+[`content/Primitives/oblivious-transfer.md:107`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/oblivious-transfer.md?plain=1#L107), § Malicious Security
 
 ```markdown
 The definitions above are **semi-honest**
 ```
 
-[`content/Reductions/cpir-to-ot-dmo00.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpir-to-ot-dmo00.md#L21), § Statement
+[`content/Reductions/cpir-to-ot-dmo00.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/cpir-to-ot-dmo00.md?plain=1#L21), § Statement
 
 ```markdown
 Non-trivial single-server PIR is therefore complete for secure two-party and multi-party computation
@@ -814,7 +814,7 @@ CCwiki's note: Statement: 'in the OT-hybrid model there is a bit commitment that
 
 **DBDH + DLIN ⇒ IBE (Wat09)** needs *DBDH in the same symmetric prime-order pairing group as DLIN* of its hypothesis BDH. Met by: nothing; the notion must be given.
 
-[`content/Reductions/bdh-to-ibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-ibe-wat09.md#L23), § Statement
+[`content/Reductions/bdh-to-ibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-ibe-wat09.md?plain=1#L23), § Statement
 
 ```markdown
 If decisional bilinear Diffie–Hellman ([[bilinear-map-assumptions|DBDH]]) and decision linear ([[decisional-diffie-hellman#dlin|DLIN]], the case $k = 2$ of $k$-Lin) hold in a symmetric prime-order pairing group
@@ -828,7 +828,7 @@ CCwiki's note: Statement: 'If DBDH and DLIN hold in a symmetric prime-order pair
 
 **DBDH + DLIN ⇒ IBE (Wat09)** needs *DLIN in the same symmetric prime-order pairing group as DBDH* of its hypothesis DDH § DLIN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/bdh-to-ibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-ibe-wat09.md#L23), § Statement
+[`content/Reductions/bdh-to-ibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-ibe-wat09.md?plain=1#L23), § Statement
 
 ```markdown
 If decisional bilinear Diffie–Hellman ([[bilinear-map-assumptions|DBDH]]) and decision linear ([[decisional-diffie-hellman#dlin|DLIN]], the case $k = 2$ of $k$-Lin) hold in a symmetric prime-order pairing group
@@ -842,7 +842,7 @@ CCwiki's note: Statement: 'If DBDH and DLIN hold in a symmetric prime-order pair
 
 **DBDH + DLIN ⇒ HIBE (Wat09)** needs *DBDH in the same symmetric prime-order pairing group as DLIN* of its hypothesis BDH. Met by: nothing; the notion must be given.
 
-[`content/Reductions/bdh-to-hibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hibe-wat09.md#L23), § Statement
+[`content/Reductions/bdh-to-hibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hibe-wat09.md?plain=1#L23), § Statement
 
 ```markdown
 If decisional bilinear Diffie–Hellman ([[bilinear-map-assumptions|DBDH]]) and decision linear ([[decisional-diffie-hellman#dlin|DLIN]], the case $k = 2$ of $k$-Lin) hold in a symmetric prime-order pairing group
@@ -856,7 +856,7 @@ CCwiki's note: Statement: 'If DBDH and DLIN hold in a symmetric prime-order pair
 
 **DBDH + DLIN ⇒ HIBE (Wat09)** needs *DLIN in the same symmetric prime-order pairing group as DBDH* of its hypothesis DDH § DLIN. Met by: nothing; the notion must be given.
 
-[`content/Reductions/bdh-to-hibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hibe-wat09.md#L23), § Statement
+[`content/Reductions/bdh-to-hibe-wat09.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-hibe-wat09.md?plain=1#L23), § Statement
 
 ```markdown
 If decisional bilinear Diffie–Hellman ([[bilinear-map-assumptions|DBDH]]) and decision linear ([[decisional-diffie-hellman#dlin|DLIN]], the case $k = 2$ of $k$-Lin) hold in a symmetric prime-order pairing group
@@ -870,7 +870,7 @@ CCwiki's note: Statement: 'If DBDH and DLIN hold in a symmetric prime-order pair
 
 The Statement lint does not flag **Evasive circular LWE ⇒ ABE (HLL23)**.
 
-[`content/Reductions/evasive-lwe-to-abe.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/evasive-lwe-to-abe.md#L23), § Statement
+[`content/Reductions/evasive-lwe-to-abe.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/evasive-lwe-to-abe.md?plain=1#L23), § Statement
 
 ```markdown
 Assuming public-coin [[learning-with-errors#circular-evasive-lwe|circular evasive LWE]], a circular variant of [[learning-with-errors#evasive-lwe|evasive LWE]], there is a lattice-based [[attribute-based-encryption|ABE]] scheme
@@ -884,7 +884,7 @@ CCwiki's note: Reviewed: the Statement names evasive LWE as the family circular 
 
 The Statement lint does not flag **Additively homomorphic encryption + Sparse LPN ⇒ SHE (CHKV25)**.
 
-[`content/Reductions/partially-homomorphic-encryption-phe-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/partially-homomorphic-encryption-phe-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25.md#L21), § Statement
+[`content/Reductions/partially-homomorphic-encryption-phe-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25.md:21`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/partially-homomorphic-encryption-phe-and-sparse-learning-parity-with-noise-to-somewhat-homomorphic-encryption-she-chkv25.md?plain=1#L21), § Statement
 
 ```markdown
 any linearly homomorphic PKE ([[homomorphic-encryption#additively-homomorphic-encryption|additively homomorphic encryption]], e.g. from [[decisional-diffie-hellman|DDH]] or [[decisional-composite-residuosity|DCR]]) yields a [[homomorphic-encryption#somewhat-homomorphic-encryption-she|somewhat homomorphic encryption]] scheme
@@ -898,13 +898,13 @@ CCwiki's note: Reviewed: DDH and DCR are named as examples of linearly homomorph
 
 **BDH ⇒ ABE (GPSW06)** concludes *selectively secure key-policy ABE only*. Accepted by: nothing.
 
-[`content/Reductions/bdh-to-abe-gpsw06.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-abe-gpsw06.md#L23), § Statement
+[`content/Reductions/bdh-to-abe-gpsw06.md:23`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/bdh-to-abe-gpsw06.md?plain=1#L23), § Statement
 
 ```markdown
 there is a key-policy [[attribute-based-encryption|ABE]] for monotone access structures (monotone Boolean formulas or LSSS) that is [[attribute-based-encryption#selective-security|selectively]] [[attribute-based-encryption#kp-abe-ind-cpa-security|KP-IND-CPA-secure]]
 ```
 
-[`content/Primitives/attribute-based-encryption.md:112`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/attribute-based-encryption.md#L112), § Selective Security
+[`content/Primitives/attribute-based-encryption.md:112`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Primitives/attribute-based-encryption.md?plain=1#L112), § Selective Security
 
 ```markdown
 Selective security is strictly weaker than adaptive security
@@ -918,19 +918,19 @@ CCwiki's note: Statement: 'a key-policy ABE ... that is selectively KP-IND-CPA-s
 
 **PRP ⇒ iPRF (large domains) (folklore)** concludes *an invertible PRF for the forward-oracle game only, over a super-polynomial domain*. Accepted by: Invertible PRFs ⇒ PRF (folklore).
 
-[`content/Reductions/prp-to-invertible-prf.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/prp-to-invertible-prf.md#L24), § Statement
+[`content/Reductions/prp-to-invertible-prf.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/prp-to-invertible-prf.md?plain=1#L24), § Statement
 
 ```markdown
 A [[pseudorandom-permutation|PRP]] $(\KeyGen, \Eval, \Invert)$ over a domain $\calD$ with $|\calD|$ superpolynomial in $\secpar$ is an [[pseudorandom-function#invertible-prfs|invertible PRF]] for the traditional (forward-oracle) game $\Game^{\mathrm{prf}}$
 ```
 
-[`content/Reductions/prp-to-invertible-prf.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/prp-to-invertible-prf.md#L24), § Statement
+[`content/Reductions/prp-to-invertible-prf.md:24`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/prp-to-invertible-prf.md?plain=1#L24), § Statement
 
 ```markdown
 Strong security under $\Game^{\mathrm{iprf}}$, where $\calA$ also queries the inversion oracle, fails for every permutation
 ```
 
-[`content/Reductions/invertible-prfs-to-prf.md:26`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/invertible-prfs-to-prf.md#L26), § Sketch
+[`content/Reductions/invertible-prfs-to-prf.md:26`](https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/content/Reductions/invertible-prfs-to-prf.md?plain=1#L26), § Sketch
 
 ```markdown
 Plain iPRF security is $\Game^{\mathrm{prf}}$ itself

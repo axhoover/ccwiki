@@ -394,7 +394,16 @@ regimes.
 - **Change.** State the requirement in the Statement, cited. Then either
   re-point the hypothesis at a large-field variant, or let CCwiki add a
   `requires` entry that cites the new sentence.
+- **Pages.**
+  `content/Reductions/additively-homomorphic-encryption-to-mpc-with-preprocessing-bdoz11.md`,
+  and a large-field variant on `homomorphic-encryption.md` if the
+  hypothesis is re-pointed.
 - **Retires** no entry; it would let CCwiki add one, or make one unneeded.
+- **How CCwiki takes it in.** Nothing to decode. If the Statement states
+  the field size, CCwiki adds a `requires` entry that cites the new
+  sentence and regenerates the review. If the hypothesis is re-pointed,
+  QR ⇒ MPC with preprocessing stops being derived, which shows as golden
+  drift.
 
 ## What the asks would buy
 

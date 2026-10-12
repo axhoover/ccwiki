@@ -1808,8 +1808,10 @@ def _content_path(page: str) -> str:
 
 
 def _blob_url(page: str, commit: str, line) -> str:
+    """The page at the commit. With a line, GitHub's source view
+    (`?plain=1`), since a line anchor does nothing on a rendered page."""
     url = f"{WIKI_REPOSITORY}/blob/{commit}/{urllib.parse.quote(page, safe='/')}"
-    return url + (f"#L{line}" if line else "")
+    return url + (f"?plain=1#L{line}" if line else "")
 
 
 def _source_keys(source) -> list:
@@ -2483,9 +2485,9 @@ def selftest_units() -> bool:
     block = "\n".join(_citation_lines({"page": "content/Reductions/x y.md", "section": "Statement",
                                        "quote": quote}, 23, "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157"))
     check("a quote comes out inside a fence unchanged", f"\n```markdown\n{quote}\n```" in block, block)
-    check("its location links the line at the commit, the path percent-encoded",
+    check("its location links the line of the source view at the commit, the path percent-encoded",
           "https://github.com/axhoover/cryptology.city/blob/ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157/"
-          "content/Reductions/x%20y.md#L23" in block, block)
+          "content/Reductions/x%20y.md?plain=1#L23" in block, block)
     fenced = md_fence("uses ``` and ```` inside")
     check("a fence is one backtick longer than the quote's longest run",
           fenced.startswith("`````markdown\n") and fenced.endswith("\n`````"), fenced)
