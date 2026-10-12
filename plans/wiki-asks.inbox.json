@@ -1,0 +1,220 @@
+{
+ "source": "CCwiki derivation curation, 2026-10: what relations.json would need to record for CCwiki to drop its reviewed corrections (axhoover/ccwiki, plans/wiki-asks.md)",
+ "items": [
+  {
+   "id": "ccw:schema-reverse-class",
+   "kind": "schema-convention",
+   "summary": "An equivalence records one class for two directions that can be different theorems; add a required reverse-class (the class of conclusion ⇒ hypothesis) to every equivalence",
+   "pages": [
+    "scripts/generate-relations.mjs",
+    "scripts/lint.mjs",
+    "scripts/lint-edges.mjs",
+    "docs/relations-json.md",
+    "schema/README.md",
+    "content/Reductions/cpa-security-to-cpa-security.md",
+    "content/Reductions/linear-secret-sharing-schemes-lsss-to-msp.md",
+    "content/Reductions/module-lwe-to-lwe-ls15.md",
+    "content/Reductions/module-lwe-to-ring-lwe-ls15.md",
+    "content/Reductions/rabin-ot-to-ot.md",
+    "content/Reductions/qip-to-pspace.md",
+    "content/Reductions/isis-inhomogeneous-sis-to-sis.md",
+    "content/Reductions/rsa-to-fac-dlo24.md",
+    "content/Reductions/fac-to-rsa-dlo24.md (new)"
+   ],
+   "proposed_action": "(1) scripts/generate-relations.mjs, in the reductions.push record after `class`: `...(p.fm.kind === \"equivalence\" ? { reverseClass: p.fm[\"reverse-class\"] ?? \"unstated\" } : {})`. (2) Lint: add \"reverse-class\" to OPTIONAL_KEYS (scripts/lint.mjs) and EDGE_FRONTMATTER (scripts/lint-edges.mjs); error `edge-reverse-class-missing` on a `kind: equivalence` page without it and `edge-reverse-class` on any other kind; its value is a class or `unstated`; set RATIONALE_FIELDS.reduction[\"reverse-class\"] = \"reverseClass\"; the contradiction check reads reverse-class for a barrier on the reverse pair. (3) Docs: docs/relations-json.md § reductions, and schema/README.md § What the hyperedge asserts. (4) Values (class / reverse-class): cpa-security-to-cpa-security fully-black-box / fully-black-box; linear-secret-sharing-schemes-lsss-to-msp free / free; module-lwe-to-lwe-ls15 fully-black-box / fully-black-box; module-lwe-to-ring-lwe-ls15 fully-black-box / fully-black-box; rabin-ot-to-ot fully-black-box / fully-black-box; qip-to-pspace free / free; isis-inhomogeneous-sis-to-sis: class unstated (was fully-black-box), reverse-class fully-black-box, unless ffr:verification-gap-8 splits the page first. (5) rsa-to-fac-dlo24.md: its directions differ in model, which no class field can say (RSA ⇒ FAC is trivial in the standard model; FAC ⇒ RSA is DLO24's generic-ring theorem). The trivial direction is already recorded as red-rsa-to-fac-rsa78 (fac-to-rsa-rsa78.md), so re-record the DLO24 page as the implication `hypotheses: [fac]`, `conclusion: rsa`, `class: free`, `model: other`; it states a reversed theorem, so per the stability contract retire red-rsa-to-fac-dlo24 and take red-fac-to-rsa-dlo24, renaming the page fac-to-rsa-dlo24.md.",
+   "rationale": "The two directions of an equivalence can be different theorems with different classes (ISIS ⇔ SIS: one direction is immediate, the other 'holds only under conditions on the column count and norm bound'). A consumer that chains equivalences cannot tell which direction `class` covers, so CCwiki keeps its own table of all 7 eligible equivalences. The field must be required, not optional: an absent optional field reads the same as a manifest from before the field existed. Retires CCwiki's curation entries `equivalences:red-cpa-security-to-cpa-security`, `equivalences:red-isis-inhomogeneous-sis-to-sis`, `equivalences:red-linear-secret-sharing-schemes-lsss-to-msp`, `equivalences:red-module-lwe-to-lwe-ls15`, `equivalences:red-module-lwe-to-ring-lwe-ls15`, `equivalences:red-rabin-ot-to-ot` and `equivalences:red-rsa-to-fac-dlo24`.",
+   "related": [
+    "ffr:verification-gap-8"
+   ],
+   "needs_paper": false,
+   "confidence": "medium"
+  },
+  {
+   "id": "ccw:schema-refuted-by",
+   "kind": "schema-convention",
+   "summary": "Refuted assumptions (circular evasive LWE, SIDH, SSDDH) carry no machine-readable marker; add an optional refuted-by on objects and variants, per formulation (ffr:schema-convention-10 option B)",
+   "pages": [
+    "scripts/generate-relations.mjs",
+    "scripts/lint.mjs",
+    "docs/relations-json.md",
+    "schema/README.md",
+    "content/Assumptions/learning-with-errors.md",
+    "content/Assumptions/supersingular-isogeny-diffie-hellman.md"
+   ],
+   "proposed_action": "Add an optional `refuted-by`, a list of reference wikilinks. On an object page it marks the page's own object only, never its variants (CSIDH on the SIDH page stays unmarked); in a variant's mapping form it sits beside `anchor` and `formal`. A family in which only some formulations are false gets no marker on its host: private-coin evasive LWE stays unmarked. (1) scripts/generate-relations.mjs: for the page object `...(p.fm[\"refuted-by\"] ? { refutedBy: [].concat(p.fm[\"refuted-by\"]) } : {})`; for a variant `...(typeof v === \"object\" && v?.[\"refuted-by\"] ? { refutedBy: [].concat(v[\"refuted-by\"]) } : {})`; both omitted when empty, as `formal` is. (2) scripts/lint.mjs: add \"refuted-by\" to OPTIONAL_KEYS with an error unless the page is an object page; the variants loop (around line 536, which today checks only `anchor`) also checks a mapping's keys are `anchor`, `formal` and `refuted-by` only (no page uses the mapping form today, so this flags nothing); each refuted-by entry must resolve to a reference page, by the edge-source check without the `folklore` token. (3) Docs: docs/relations-json.md § objects; in schema/README.md § Refutations are attacks, not barriers, add '…and the refuted object or variant carries `refuted-by`, so a consumer deriving consequences can mark implications from it vacuous.' (4) Pages: learning-with-errors.md `circular-evasive-lwe: {anchor: \"#circular-evasive-lwe\", refuted-by: [\"[[AMYY25 - Evasive LWE Attacks, Variants & Obfustopia|AMYY25]]\"]}`; supersingular-isogeny-diffie-hellman.md top-level `refuted-by: [\"[[CD22 - An efficient key recovery attack on SIDH|CD22]]\"]` and `ssddh: {anchor: \"#decisional-variant-ssddh\", refuted-by: [\"[[CD22 - An efficient key recovery attack on SIDH|CD22]]\"]}`.",
+   "rationale": "The wiki states these refutations in prose only (learning-with-errors.md § Evasive LWE counterexamples and § Circular evasive LWE; supersingular-isogeny-diffie-hellman.md's opening paragraph and § Known Results). A consumer deriving consequences needs to know that an implication from a false assumption is vacuous; CCwiki keeps a list of three for it. Option B per formulation, with no inheritance from a page to its variants, never over-claims for a family of which only some formulations are false. Retires CCwiki's curation entries `refuted:circular-evasive-lwe`, `refuted:sidh` and `refuted:ssddh`.",
+   "related": [
+    "ffr:schema-convention-10"
+   ],
+   "needs_paper": false,
+   "confidence": "medium"
+  },
+  {
+   "id": "ccw:schema-barrier-model",
+   "kind": "schema-convention",
+   "summary": "The lint accepts `model` on a barrier page but relations.json drops it; emit it, standard by default, and set it on no-rom-to-ke-hmo-19",
+   "pages": [
+    "scripts/generate-relations.mjs",
+    "scripts/lint-edges.mjs",
+    "schema/README.md",
+    "content/Barriers/no-rom-to-ke-hmo-19.md",
+    "content/Barriers/no-agm-to-ggm-kz22.md"
+   ],
+   "proposed_action": "(1) scripts/generate-relations.mjs, in barriers.push after `class`: `model: p.fm.model ?? \"standard\",` (always emitted, as on reductions). (2) scripts/lint-edges.mjs: RATIONALE_FIELDS.barrier.model = \"model\". (3) schema/README.md § Which model to record: replace 'On a barrier, which has no `model` field, the model's node is the hypothesis' with '`model` on a barrier is the model its theorem is proved in, `standard` by default. A barrier saying X fails in a model also keeps the model's node as its hypothesis.' (4) content/Barriers/no-rom-to-ke-hmo-19.md: `model: rom`. content/Barriers/no-agm-to-ggm-kz22.md: as ffr:schema-convention-9 decides. No other barrier needs one today: the oracle separations are `relativizing`, not idealised-model theorems.",
+   "rationale": "Without a model, a consumer propagating a primitive-to-primitive barrier through side reductions treats it as proved in the standard model; one proved only in an idealised model would be propagated wrongly. CCwiki reads the field the day it appears. Retires no CCwiki curation entry.",
+   "related": [
+    "ffr:schema-convention-9"
+   ],
+   "needs_paper": false,
+   "confidence": "medium"
+  },
+  {
+   "id": "ccw:node-malicious-ot",
+   "kind": "node-granularity",
+   "summary": "Kil88's OT ⇒ MPC and OT ⇒ COM instantiate an ideal OT secure against malicious parties, but their hypothesis is the semi-honest ot node; re-point them at malicious-ot-security",
+   "pages": [
+    "content/Reductions/ot-to-mpc-kil88.md",
+    "content/Reductions/ot-to-com.md",
+    "content/Reductions/cpir-to-ot-dmo00.md",
+    "content/Primitives/oblivious-transfer.md",
+    "content/Reductions/malicious-ot-security-to-ot.md (new)"
+   ],
+   "proposed_action": "(1) ot-to-mpc-kil88.md and ot-to-com.md: `hypotheses: [malicious-ot-security]` (the variant exists on oblivious-transfer.md#malicious-security). (2) cpir-to-ot-dmo00.md: `conclusion: malicious-ot-security`; its Statement already says non-trivial single-server PIR is complete for secure two-party and multi-party computation. (3) A new folklore page content/Reductions/malicious-ot-security-to-ot.md: `hypotheses: [malicious-ot-security]`, `conclusion: ot`, `class: fully-black-box`, `model: standard`, rationale.class 'The identity map: a protocol secure against malicious parties is secure against semi-honest ones.' Confirm this holds for the OT page's definitions. Ids stay: this is node refinement on the same theorem.",
+   "rationale": "ot-to-mpc-kil88.md's Statement computes every functionality 'with unconditional security against malicious parties' in the OT-hybrid model, and ot-to-com.md's binding relies on the committer not learning which bits arrived; both use an ideal OT. The ot node's definitions are semi-honest (oblivious-transfer.md § Malicious Security: 'The definitions above are **semi-honest**'), so chaining EGL's semi-honest OT into them proves more than the papers do. Checked by patching the manifest: every answer survives under the variant's name, and DDH ⇒* MPC still holds through DMO00. Retires CCwiki's curation entries `requires:red-ot-to-mpc-kil88:ot` and `requires:red-ot-to-com:ot`.",
+   "related": [
+    "ffr:content-error-26",
+    "ffr:verification-gap-29"
+   ],
+   "needs_paper": false,
+   "confidence": "high"
+  },
+  {
+   "id": "ccw:node-weakened-conclusions",
+   "kind": "node-granularity",
+   "summary": "GPSW06 concludes selective KP-ABE and PRP ⇒ iPRF only the forward-oracle game, but both record the full node; conclude the variants instead",
+   "pages": [
+    "content/Reductions/bdh-to-abe-gpsw06.md",
+    "content/Primitives/pseudorandom-function.md",
+    "content/Reductions/prp-to-invertible-prf.md",
+    "content/Reductions/invertible-prf-to-invertible-prf-forward.md (new)",
+    "content/Reductions/invertible-prf-forward-to-prf.md (new)"
+   ],
+   "proposed_action": "(1) bdh-to-abe-gpsw06.md: `conclusion: abe-selective-security` (the variant exists). (2) pseudorandom-function.md: under § Invertible PRFs, add a heading for the forward-oracle notion (the game Game^prf, without the inversion oracle) with the variant `invertible-prf-forward`. (3) prp-to-invertible-prf.md: `conclusion: invertible-prf-forward` (node refinement; the id stays). (4) Two new folklore pages, `class: fully-black-box`, `model: standard`: invertible-prf-to-invertible-prf-forward.md, `hypotheses: [invertible-prf]`, `conclusion: invertible-prf-forward` (the strong game implies the forward one), and invertible-prf-forward-to-prf.md, `hypotheses: [invertible-prf-forward]`, `conclusion: prf` (the forward game is the PRF game, as invertible-prfs-to-prf.md's Sketch says).",
+   "rationale": "bdh-to-abe-gpsw06.md's Statement gives a key-policy ABE that is 'selectively KP-IND-CPA-secure', and the ABE page says 'Selective security is strictly weaker than adaptive security'. prp-to-invertible-prf.md's Statement gives an invertible PRF 'for the traditional (forward-oracle) game', and says strong security 'fails for every permutation'. Recording the full nodes lets a consumer chain a selective scheme into an adaptive construction (ABE ⇒ IBE). The patched manifest keeps each pair under the variant's name. Retires CCwiki's curation entries `weakens:red-bdh-to-abe-gpsw06` and `weakens:red-prp-to-invertible-prf`.",
+   "related": [
+    "ffr:missing-edge-4"
+   ],
+   "needs_paper": false,
+   "confidence": "high"
+  },
+  {
+   "id": "ccw:node-hypothesis-regimes",
+   "kind": "node-granularity",
+   "summary": "Fourteen hypotheses need a hardness regime, group or field their node does not define; re-point each at a variant that states it (YZW+19's and AMR25's are already proposed by ffr:node-granularity-3 and -11)",
+   "pages": [
+    "content/Reductions/dlog-to-prg-bm84.md",
+    "content/Assumptions/discrete-logarithm.md",
+    "content/Reductions/tdp-to-nizk-bfm88.md",
+    "content/Primitives/trapdoor-permutation.md",
+    "content/Reductions/pke-to-com.md",
+    "content/Primitives/public-key-encryption.md",
+    "content/Reductions/abe-to-be.md",
+    "content/Reductions/k-linear-assumption-to-abe-rw13.md",
+    "content/Reductions/succinct-lwe-to-abe-wee25.md",
+    "content/Reductions/subexponential-lpn-to-ot-yz16.md",
+    "content/Reductions/subexponential-lpn-to-pke-yz16.md",
+    "content/Reductions/subexponential-lpn-to-prc-cg24.md",
+    "content/Reductions/lwe-to-zero-bit-prc-cg24.md",
+    "content/Assumptions/learning-parity-with-noise.md",
+    "content/Reductions/lwe-to-leveled-fully-homomorphic-encryption-bgv12.md",
+    "content/Assumptions/learning-with-errors.md",
+    "content/Reductions/fe-to-io.md",
+    "content/Primitives/functional-encryption.md",
+    "content/Reductions/ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md",
+    "content/Assumptions/decisional-diffie-hellman.md",
+    "content/Primitives/low-complexity-prg.md"
+   ],
+   "proposed_action": "Re-point each hypothesis at a variant that states the notion its Statement needs; ids stay (node refinement). (1) dlog-to-prg-bm84.md: `dlog` → new `dlog-zp-star`, a heading 'DLOG in $\\ZZ_p^*$' on discrete-logarithm.md. (2) tdp-to-nizk-bfm88.md: `tdp` → new `doubly-enhanced-certified-tdp` on trapdoor-permutation.md, beside enhanced-trapdoor-permutation. (3) pke-to-com.md: `pke` → a new variant for perfectly correct CPA-secure PKE with certifiable keys on public-key-encryption.md. (4) abe-to-be.md: `abe` → the existing `cp-abe-adaptive-security`; set KW19's (k-linear-assumption-to-abe-rw13.md) and Wee25's (succinct-lwe-to-abe-wee25.md) conclusions likewise if their Statements are adaptive CP-ABE (needs the papers). (5) subexponential-lpn-to-ot-yz16.md, subexponential-lpn-to-pke-yz16.md, subexponential-lpn-to-prc-cg24.md and lwe-to-zero-bit-prc-cg24.md: `subexponential-lpn` → one new variant on learning-parity-with-noise.md for constant-noise LPN that is $2^{\\omega(\\sqrt{n})}$-hard, if YZ16's and CG24's regimes agree (needs the papers), plus a folklore edge to it from the above-half variant of ffr:node-granularity-3. (6) lwe-to-leveled-fully-homomorphic-encryption-bgv12.md: `lwe` → a new LWE variant on learning-with-errors.md with modulus-to-noise ratio exponential in the depth, which Pei09 concludes (ccw:missing-edge-lwe-classical). (7) fe-to-io.md: `functional-encryption` → a new variant on functional-encryption.md for single-key, sub-exponentially secure, weakly compact public-key FE. (8) ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21.md: `sxdh`, `lwe`, `lpn`, `prg-in-nc0` → sub-exponential variants of each (on decisional-diffie-hellman.md, learning-with-errors.md, learning-parity-with-noise.md and low-complexity-prg.md), with LPN over $\\ZZ_p$; the shared prime $p$ stays in the Statement. YZW+19 and AMR25 are not repeated here: ffr:node-granularity-3 and ffr:node-granularity-11 already propose their variants. Not asked: Wat09's IBE and HIBE need DBDH and DLIN in one group, which no node can say.",
+   "rationale": "Each of these Statements needs more of its hypothesis than the node defines, so a chain into it from an edge that concludes only the node proves more than the paper does: BM84's 'If DLOG is hard in $\\ZZ_p^*$' is fed DLOG in CDH's or BDH's group (32 derived pairs on wiki ab81f02); FLS90 needs 'doubly enhanced, certified' permutations; BGV12 a modulus-to-noise ratio exponential in $L$, where Reg05 gives a prime $\\poly(n)$ modulus; AJ15/BV15 'single-key, sub-exponentially secure and weakly compact' FE. Variant nodes say this in the record, as ffr:node-granularity-3 and -11 do for LPN. Retires CCwiki's curation entries `requires:red-dlog-to-prg-bm84:dlog`, `requires:red-tdp-to-nizk-bfm88:tdp`, `requires:red-pke-to-com:pke`, `requires:red-abe-to-be:abe`, `requires:red-subexponential-lpn-to-crhf-yzw-19:subexponential-lpn`, `requires:red-subexponential-lpn-to-ot-yz16:subexponential-lpn`, `requires:red-subexponential-lpn-to-pke-yz16:subexponential-lpn`, `requires:red-subexponential-lpn-to-prc-cg24:subexponential-lpn`, `requires:red-lwe-to-zero-bit-prc-cg24:subexponential-lpn`, `requires:red-noise-level-to-tdh-amr25:lpn-low-noise`, `requires:red-lwe-to-leveled-fully-homomorphic-encryption-bgv12:lwe`, `requires:red-fe-to-io:functional-encryption`, `requires:red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:sxdh`, `requires:red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:lpn` and `requires:red-ddh-and-lpn-and-lwe-and-nc1-prg-to-io-jls21:prg-in-nc0`. CCwiki keeps one JLS21 entry, on the new LWE hypothesis, for the shared prime p.",
+   "related": [
+    "ffr:node-granularity-3",
+    "ffr:node-granularity-11",
+    "ffc:verification-gap-1",
+    "ccw:missing-edge-lwe-classical"
+   ],
+   "needs_paper": true,
+   "confidence": "medium"
+  },
+  {
+   "id": "ccw:node-cs03-one-time-dem",
+   "kind": "node-granularity",
+   "summary": "KEM + SKE ⇒ PKE needs only a one-time-secure SKE (the DEM), but its hypothesis is the whole ske node; add a one-time variant and re-point it",
+   "pages": [
+    "content/Reductions/kem-and-ske-to-pke.md",
+    "content/Primitives/symmetric-key-encryption.md",
+    "content/Reductions/ske-to-ske-one-time.md (new)",
+    "content/Reductions/prg-to-ske-one-time.md (new)"
+   ],
+   "proposed_action": "(1) symmetric-key-encryption.md: add the heading 'One-time security' with the variant `ske-one-time`. (2) kem-and-ske-to-pke.md: `hypotheses: [kem, ske-one-time]` (node refinement; the id stays). (3) Two new folklore pages: ske-to-ske-one-time.md, `hypotheses: [ske]`, `conclusion: ske-one-time`; and prg-to-ske-one-time.md, `hypotheses: [prg]`, `conclusion: ske-one-time` (a pseudorandom pad; encrypt-then-MAC with a one-time MAC for the CCA notion).",
+   "rationale": "The Statement says 'a one-time-secure SKE (the DEM)', so the record asks for more than the theorem uses: KEM alone never gives PKE, and the 15 pairs that reach PKE through CS03 all need a second object for SKE. With ccw:missing-edge-owf's KEM ⇒ OWF, KEM would derive PKE. Retires no CCwiki curation entry.",
+   "related": [
+    "ccw:missing-edge-owf"
+   ],
+   "needs_paper": false,
+   "confidence": "high"
+  },
+  {
+   "id": "ccw:missing-edge-owf",
+   "kind": "missing-edge",
+   "summary": "Eleven folklore and textbook X ⇒ OWF results are not recorded (OT, SKE, COM, CRHF, MAC, PRF, SIS, DLOG, LPN, KEM, one-time signatures)",
+   "pages": [
+    "content/Reductions/ot-to-owf.md (new)",
+    "content/Reductions/ske-to-owf.md (new)",
+    "content/Reductions/com-to-owf.md (new)",
+    "content/Reductions/crhf-to-owf.md (new)",
+    "content/Reductions/mac-to-owf.md (new)",
+    "content/Reductions/prf-to-owf.md (new)",
+    "content/Reductions/sis-to-owf.md (new)",
+    "content/Reductions/dlog-to-owf.md (new)",
+    "content/Reductions/lpn-to-owf.md (new)",
+    "content/Reductions/kem-to-owf.md (new)",
+    "content/Reductions/one-time-signature-to-owf.md (new)",
+    "content/References/BFKL93 - Cryptographic Primitives Based on Hard Learning Problems.md (new)"
+   ],
+   "proposed_action": "Add eleven reduction pages, each `conclusion: owf`, `model: standard`, the class as the source states it: {ot} ⇒ owf (IL89; find which theorem); {ske} ⇒ owf (IL89); {com} ⇒ owf (IL89); {crhf} ⇒ owf (folklore, for a compressing family); {mac} ⇒ owf (IL89); {prf} ⇒ owf (folklore); {sis} ⇒ owf (Ajt96); {dlog} ⇒ owf (folklore: $x \\mapsto g^x$); {lpn} ⇒ owf (folklore, or BFKL93, whose reference page is new); {kem} ⇒ owf (IL89 does not treat KEMs: find the source); {one-time-signature} ⇒ owf (Rom90). The reference pages for IL89, Ajt96 and Rom90 exist.",
+   "rationale": "Each is a standard result the record lacks, so consumers of relations.json miss every consequence through OWF. Measured on wiki ab81f02 by adding each alone as a standard-model folklore implication of unstated class: new derived pairs (of 1,022) are OT 170, SKE 104, COM 90, CRHF 63, MAC 59, PRF 44, SIS 32, DLOG 32, LPN 31, KEM 17, one-time signatures 15; all eleven together 432. Retires no CCwiki curation entry.",
+   "needs_paper": true,
+   "confidence": "medium"
+  },
+  {
+   "id": "ccw:missing-edge-lwe-classical",
+   "kind": "missing-edge",
+   "summary": "Pei09's and BLPRS13's classical GapSVP ⇒ LWE reductions are cited in gapsvp-to-lwe-reg05's Notes but recorded as no edge, so every GapSVP chain is quantum",
+   "pages": [
+    "content/Reductions/gapsvp-to-lwe-reg05.md",
+    "content/Assumptions/learning-with-errors.md",
+    "content/Reductions/gapsvp-to-lwe-pei09.md (new)",
+    "content/Reductions/gapsvp-to-lwe-blprs13.md (new)"
+   ],
+   "proposed_action": "Add two reduction pages, both `hypotheses: [gapsvp]`, `model: standard`: gapsvp-to-lwe-pei09.md, concluding the LWE variant for large moduli that ccw:node-hypothesis-regimes proposes for BGV12 (Pei09, classical, $q \\ge 2^{n/2}$); and gapsvp-to-lwe-blprs13.md, `conclusion: lwe` (BLPRS13, classical, with the dimension loss in security-loss). Check each regime in the papers.",
+   "rationale": "gapsvp-to-lwe-reg05.md's Notes cite both (lines 32–33). With them GapSVP ⇒ PKE loses its quantum tag and, through BGV12 re-pointed at the same LWE variant, GapSVP ⇒ leveled FHE holds classically, which today's record cannot say. Retires no CCwiki curation entry.",
+   "related": [
+    "ccw:node-hypothesis-regimes"
+   ],
+   "needs_paper": true,
+   "confidence": "medium"
+  },
+  {
+   "id": "ccw:verification-gap-bdoz11-field",
+   "kind": "verification-gap",
+   "summary": "BDOZ11's MPC with preprocessing needs a large plaintext field, which its Statement does not say, so GM84's Z_2 encryption appears to feed it",
+   "pages": [
+    "content/Reductions/additively-homomorphic-encryption-to-mpc-with-preprocessing-bdoz11.md"
+   ],
+   "proposed_action": "Read BDOZ11 for the plaintext-space requirement of its semi-homomorphic encryption and state it in the Statement, cited. Then either re-point the hypothesis at a large-field variant of additively-homomorphic-encryption, or leave the hypothesis and let consumers read the condition from the Statement.",
+   "rationale": "As recorded, QR ⇒ MPC with preprocessing follows through GM84's additively homomorphic encryption over $\\ZZ_2$, which BDOZ11's protocol does not use. CCwiki adds no condition the wiki does not state, so the chain stands until the Statement says it. Retires no CCwiki curation entry.",
+   "needs_paper": true,
+   "confidence": "medium"
+  }
+ ]
+}

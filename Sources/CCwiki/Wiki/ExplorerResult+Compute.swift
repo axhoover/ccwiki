@@ -148,10 +148,15 @@ extension ExplorerResult {
         var result = ExplorerResult(query: query, state: .answer)
         result.verdict = verdict
 
-        // The proof, expanded, with Copy Proof as Text on every step.
+        // The proof, expanded, with Copy Proof As on every step.
         let copy = ProofCopy(statement: statement, relationCount: answer.proof.relationIDs.count,
                              depth: fact.depth,
-                             lines: ProofOutline.copyLines(answer.proof, writer: writer))
+                             lines: ProofOutline.copyLines(answer.proof, writer: writer),
+                             export: ProofExport(
+                                proof: answer.proof, start: start, target: answer.target,
+                                depth: fact.depth, chainClass: fact.chainClass,
+                                unstatedSteps: writer.unstatedSteps(answer.proof),
+                                refutations: answer.refutedStarts, manifest: writer.manifest))
         let proofRows = ProofOutline.rows(answer.proof, idPrefix: "proof", writer: writer)
         result.sections.append(ExplorerSection(
             id: "proof",
@@ -162,7 +167,7 @@ extension ExplorerResult {
 
         if let stronger = answer.stronger {
             result.stronger = strongerProof(stronger, start: start, target: answer.target,
-                                            writer: writer)
+                                            refutations: answer.refutedStarts, writer: writer)
         }
 
         result.sections += recordedOnPairSections(answer.recordedOnPair, start: start,
@@ -181,6 +186,24 @@ extension ExplorerResult {
                     : "Context: none of these rules out this derivation."
             }
             result.sections += sections
+        }
+
+        // Last: what CCwiki applies that the record does not, for each proof
+        // that can be shown. One closure, the answer's own, tells a step
+        // refused on the way from one the proof does without.
+        let closure = writer.derivation.closure(from: Set(start), options: query.options)
+        let shortest = CurationTrace.derived(
+            answer.proof, other: answer.stronger?.proof, closure: closure, start: start,
+            derivation: writer.derivation)
+        if let section = adjustmentsSection(shortest, idPrefix: adjustmentsID, writer: writer) {
+            result.sections.append(section)
+        }
+        if let stronger = answer.stronger {
+            let trace = CurationTrace.derived(
+                stronger.proof, other: answer.proof, closure: closure, start: start,
+                derivation: writer.derivation)
+            result.stronger?.adjustments = adjustmentsSection(
+                trace, idPrefix: "stronger-" + adjustmentsID, writer: writer)
         }
 
         result.footer = recorded ? DerivationWording.recordedFooter : DerivationWording.derivedFooter
@@ -209,9 +232,11 @@ extension ExplorerResult {
     /// R6's stronger proof, with the verdict it reads under. Its own depth
     /// decides its words, as the shortest proof's does: beside a recorded
     /// result it is usually a chain, which is CCwiki's composition and must
-    /// never pass for the wiki's own result.
+    /// never pass for the wiki's own result. Its copies state its own depth
+    /// and class too.
     private static func strongerProof(_ stronger: Derivation.StrongerChain, start: [String],
-                                      target: String, writer: ExplorerWriter) -> Stronger {
+                                      target: String, refutations: [DerivationCuration.Refutation],
+                                      writer: ExplorerWriter) -> Stronger {
         let proof = stronger.proof
         let recorded = stronger.depth <= 1
         let arrow = recorded ? DerivationWording.recordedArrow : DerivationWording.derivedArrow
@@ -246,7 +271,12 @@ extension ExplorerResult {
 
         let copy = ProofCopy(statement: statement, relationCount: proof.relationIDs.count,
                              depth: stronger.depth,
-                             lines: ProofOutline.copyLines(proof, writer: writer))
+                             lines: ProofOutline.copyLines(proof, writer: writer),
+                             export: ProofExport(
+                                proof: proof, start: start, target: target, depth: stronger.depth,
+                                chainClass: stronger.chainClass,
+                                unstatedSteps: writer.unstatedSteps(proof),
+                                refutations: refutations, manifest: writer.manifest))
         let outline = ProofOutline.attaching(
             copy, to: ProofOutline.rows(proof, idPrefix: "stronger", writer: writer))
         let section = ExplorerSection(
@@ -407,8 +437,7 @@ extension ExplorerResult {
             // hypothesis holds in.
             let closure = writer.derivation.closure(from: Set(start), options: .all)
             result.sections.append(ExplorerSection(
-                id: "refused", title: "Refused steps",
-                help: "Steps the wiki records on the way, which CCwiki does not chain here, and why.",
+                id: "refused", title: "Refused steps", help: DerivationWording.refusedHelp,
                 rows: answer.refused.enumerated().map { index, refused in
                     writer.refusalRow(refused, closure: closure, id: "refused/\(index)")
                 }))
@@ -425,6 +454,13 @@ extension ExplorerResult {
         }
 
         if let section = completionsSection(answer, query: query, writer: writer) {
+            result.sections.append(section)
+        }
+
+        // Last: what CCwiki applies to the starts. A refusal carries its
+        // quotes on its own row above.
+        let trace = CurationTrace.starts(start, derivation: writer.derivation)
+        if let section = adjustmentsSection(trace, idPrefix: adjustmentsID, writer: writer) {
             result.sections.append(section)
         }
 
@@ -572,6 +608,13 @@ extension ExplorerResult {
                               accessibilityLabel: "\(title), \(status)")
         row.detail = (keys.isEmpty ? "" : keys.joined(separator: ", ") + " · ") + status
         if let detail = entry.detail { row.notes = [detail] }
+        if entry.status == .excluded(.quarantined) {
+            // The wiki's own text for the quarantine, as on its refused row.
+            let evidence = writer.curationEvidence(.quarantine(relationID: entry.relationID),
+                                                   rowID: row.id)
+            row.notes += evidence.notes
+            row.links = evidence.links
+        }
         row.isStub = relation?.status == .stub
         if let relation {
             row.primary = .page(relation.path)

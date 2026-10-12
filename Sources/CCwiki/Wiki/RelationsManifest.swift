@@ -173,7 +173,8 @@ struct RelationsManifest: Sendable {
                 of: raw.of,
                 title: raw.title,
                 aliases: raw.aliases,
-                unlisted: raw.unlisted)
+                unlisted: raw.unlisted,
+                refutedBy: raw.refutedBy)
             manifest.objectsByID[object.id] = object
             // Variants share their host's page, so this is a list.
             manifest.objectIDsByPath[object.path, default: []].append(object.id)
@@ -207,6 +208,7 @@ struct RelationsManifest: Sendable {
                 hypotheses: raw.hypotheses,
                 conclusion: raw.conclusion,
                 reductionClass: raw.reductionClass,
+                reverseClass: raw.reverseClass,
                 model: raw.model,
                 source: raw.source,
                 via: raw.via,
@@ -274,6 +276,7 @@ struct RelationsManifest: Sendable {
                 hypotheses: raw.hypotheses,
                 conclusion: raw.conclusion,
                 reductionClass: raw.reductionClass,
+                model: raw.model,
                 consequences: consequences,
                 strength: Barrier.Strength(rawValue: raw.strength) ?? .unconditional,
                 conditionalOn: raw.conditionalOn,
@@ -503,6 +506,12 @@ struct RelationObject: Sendable, Identifiable, Hashable {
     let aliases: [String]
     /// A real node, kept out of browse and navigation only.
     let unlisted: Bool
+    /// The reference wikilinks that refute this object itself, never its
+    /// variants: `[[CD22 - An efficient key recovery attack on SIDH|CD22]]`.
+    /// Empty when the manifest records none, which every manifest does until
+    /// the wiki ships the field (plans/wiki-asks.md ask 2). The derivation
+    /// reads it as R14's refutation, ahead of the curation's.
+    let refutedBy: [String]
 
     var isVariant: Bool { kind == .variant }
 }
@@ -545,6 +554,12 @@ struct Relation: Sendable, Identifiable, Hashable {
     let conclusion: String
     /// A key of `classes`, or a sentinel such as `unstated`.
     let reductionClass: String
+    /// An equivalence's class from conclusion to hypothesis, which can be a
+    /// different theorem from the forward one (R1). `nil` when the manifest
+    /// does not record it, which every manifest does until the wiki ships the
+    /// field (plans/wiki-asks.md ask 1); the curation's `equivalences` table
+    /// then says which direction `reductionClass` covers.
+    let reverseClass: String?
     let model: String
     /// Citations in the wiki's own link form, or the single token `folklore`,
     /// which means the wiki has no attribution — never that none exists.
@@ -617,6 +632,11 @@ struct Barrier: Sendable, Identifiable, Hashable {
     let conclusion: String
     /// The class of reduction the barrier rules out.
     let reductionClass: String
+    /// The model the barrier's theorem is proved in: `standard` unless the
+    /// manifest says otherwise, which no manifest does until the wiki ships
+    /// the field (plans/wiki-asks.md ask 3). Only a standard-model barrier
+    /// composes with side reductions into a derived one (R12).
+    let model: String
     let consequences: [Consequence]
     let strength: Strength
     /// The unproven assumptions a conditional barrier rests on: each an object
@@ -758,9 +778,10 @@ private struct DTO: Decodable {
         var title: String
         var aliases: [String]
         var unlisted: Bool
+        var refutedBy: [String]
 
         enum CodingKeys: String, CodingKey {
-            case id, kind, type, page, slug, anchor, of, title, aliases, unlisted
+            case id, kind, type, page, slug, anchor, of, title, aliases, unlisted, refutedBy
         }
 
         init(from decoder: Decoder) throws {
@@ -775,6 +796,7 @@ private struct DTO: Decodable {
             title = c.value(.title, or: "")
             aliases = c.value(.aliases, or: [])
             unlisted = c.value(.unlisted, or: false)
+            refutedBy = c.value(.refutedBy, or: [])
         }
     }
 
@@ -784,6 +806,7 @@ private struct DTO: Decodable {
         var hypotheses: [String]
         var conclusion: String
         var reductionClass: String
+        var reverseClass: String?
         var model: String
         var source: [String]
         var via: [String]
@@ -797,7 +820,7 @@ private struct DTO: Decodable {
 
         // `class` is a Swift keyword.
         enum CodingKeys: String, CodingKey {
-            case id, kind, hypotheses, conclusion, model, source, via, securityLoss
+            case id, kind, hypotheses, conclusion, reverseClass, model, source, via, securityLoss
             case heuristic, rationale, status, page, slug, title
             case reductionClass = "class"
         }
@@ -809,6 +832,7 @@ private struct DTO: Decodable {
             hypotheses = c.value(.hypotheses, or: [])
             conclusion = c.value(.conclusion, or: "")
             reductionClass = c.value(.reductionClass, or: "")
+            reverseClass = c.optional(.reverseClass)
             model = c.value(.model, or: "")
             source = c.value(.source, or: [])
             via = c.value(.via, or: [])
@@ -827,6 +851,7 @@ private struct DTO: Decodable {
         var hypotheses: [String]
         var conclusion: String
         var reductionClass: String
+        var model: String
         var consequences: [RawConsequence]
         var strength: String
         var conditionalOn: [String]
@@ -839,7 +864,7 @@ private struct DTO: Decodable {
         var title: String
 
         enum CodingKeys: String, CodingKey {
-            case id, hypotheses, conclusion, consequences, strength, conditionalOn
+            case id, hypotheses, conclusion, model, consequences, strength, conditionalOn
             case circumventedBy, rationale, source, status, page, slug, title
             case reductionClass = "class"
         }
@@ -850,6 +875,10 @@ private struct DTO: Decodable {
             hypotheses = c.value(.hypotheses, or: [])
             conclusion = c.value(.conclusion, or: "")
             reductionClass = c.value(.reductionClass, or: "")
+            // No `model` means the standard model: the default the wiki is
+            // asked to emit (plans/wiki-asks.md ask 3), and what R12 has
+            // always assumed of every barrier in a manifest without it.
+            model = c.value(.model, or: "standard")
             consequences = c.value(.consequences, or: [])
             strength = c.value(.strength, or: "")
             conditionalOn = c.value(.conditionalOn, or: [])

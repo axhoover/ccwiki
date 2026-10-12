@@ -148,6 +148,7 @@ struct CCwikiCommands: Commands {
     @FocusedValue(\.searchAction) private var searchAction
     /// Set while a paper window is key: the text-size items zoom the PDF.
     @FocusedValue(\.paperZoom) private var paperZoom
+    @FocusedValue(\.proofCopyAction) private var proofCopyAction
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -242,6 +243,12 @@ struct CCwikiCommands: Commands {
             Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
+        }
+
+        // Copy Proof As ▸ Text, LaTeX (⌥⌘C), Wiki Markdown (⌥⇧⌘C): the
+        // Relations Explorer's proof, so disabled in every other window.
+        CommandGroup(after: .pasteboard) {
+            ProofCopyCommandItems(action: proofCopyAction)
         }
 
         CommandGroup(after: .textEditing) {

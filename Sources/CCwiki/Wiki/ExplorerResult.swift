@@ -115,6 +115,9 @@ struct ExplorerResult: Sendable, Hashable {
         let models: [String]
         let footer: String
         let explainsRules: Bool
+        /// The Adjustments behind this proof, which replace the shortest
+        /// proof's: each proof has its own (relations-followups.md §2.5).
+        var adjustments: ExplorerSection? = nil
     }
 
     /// The verdict lines that say what the proof shown is: its model scope,
@@ -122,10 +125,15 @@ struct ExplorerResult: Sendable, Hashable {
     /// the stronger proof's own.
     static let proofLineIDs: Set<String> = ["scope", "provenance", "class"]
 
-    /// The sections, with the stronger proof swapped in when it is shown.
+    /// The sections, with the stronger proof swapped in when it is shown,
+    /// and its Adjustments, last, in place of the shortest proof's.
     func sections(showingStronger: Bool) -> [ExplorerSection] {
         guard showingStronger, let stronger else { return sections }
-        return sections.map { $0.id == stronger.proof.id ? stronger.proof : $0 }
+        var shown = sections
+            .filter { $0.id != Self.adjustmentsID }
+            .map { $0.id == stronger.proof.id ? stronger.proof : $0 }
+        if let adjustments = stronger.adjustments { shown.append(adjustments) }
+        return shown
     }
 
     /// The verdict's lines, likewise. The shortest proof's own lines come
@@ -219,6 +227,24 @@ struct ExplorerResult: Sendable, Hashable {
 
     /// Every row of the answer as first shown.
     var allRows: [ExplorerRow] { rows(showingStronger: false) }
+
+    // MARK: Copying a proof
+
+    /// What Edit → Copy Proof As copies (plans/relations-followups.md §3.1):
+    /// the selected rows' proof when every selected row with a proof has the
+    /// same one; otherwise the answer's, the stronger proof's while it is
+    /// shown. `nil` for a forward or backward list with no proof row
+    /// selected, which has no proof of its own.
+    func proofCopy(selection: Set<String>, showingStronger: Bool) -> ProofCopy? {
+        let selected = rows(showingStronger: showingStronger)
+            .filter { selection.contains($0.id) }
+            .compactMap { $0.proof }
+        if let first = selected.first, selected.allSatisfy({ $0 == first }) {
+            return first
+        }
+        if showingStronger, let stronger { return stronger.copy }
+        return sections.first { $0.id == "proof" }?.rows.first?.proof
+    }
 }
 
 /// A block of rows under one heading.
@@ -257,6 +283,8 @@ struct ExplorerRow: Identifiable, Sendable, Hashable {
     enum Target: Sendable, Hashable {
         /// A reduction's or barrier's page, by content-relative path.
         case page(String)
+        /// A page at one of its headings: where a quoted passage is.
+        case section(path: String, anchor: String)
         /// An object: its page, or its host's page at its section.
         case object(String)
         /// "Shown above": the first occurrence, by row id.
@@ -345,13 +373,17 @@ struct ExplorerRow: Identifiable, Sendable, Hashable {
     var proof: ProofCopy?
 }
 
-/// Copy Proof as Text: the outline, two spaces per level, each step with
-/// `[source; class; model]`, headed by the statement and where it came from.
+/// Copy Proof As: as text, the outline, two spaces per level, each step with
+/// `[source; class; model]`, headed by the statement and where it came from;
+/// as LaTeX or wiki Markdown, `export` through `ProofLaTeX` and
+/// `ProofMarkdown` (plans/relations-followups.md §3).
 struct ProofCopy: Sendable, Hashable {
     let statement: String
     let relationCount: Int
     let depth: Int
     let lines: [String]
+    /// The same proof in dependency order, for the other forms.
+    let export: ProofExport
 
     /// The commit makes a pasted proof reproducible. One step is the wiki's
     /// own result, and says so rather than "derived".
