@@ -150,14 +150,16 @@ struct FixtureRepository {
     let root: URL
     let git: String
 
-    static func make() async -> FixtureRepository? {
+    /// A new, empty repository on `main`, at `root` or in a fresh temporary
+    /// directory.
+    static func make(at place: URL? = nil) async -> FixtureRepository? {
         guard let git = ToolLocator.locate(.git, override: nil) else { return nil }
-        let root = FileManager.default.temporaryDirectory
+        let directory = place ?? FileManager.default.temporaryDirectory
             .appending(path: "ccwiki-repository-\(UUID().uuidString)")
-        guard (try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true))
-                != nil
+        guard (try? FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)) != nil
         else { return nil }
-        let repository = FixtureRepository(root: root, git: git)
+        let repository = FixtureRepository(root: directory, git: git)
         guard await repository.run(["init", "-q", "-b", "main"]).succeeded else {
             repository.delete()
             return nil
