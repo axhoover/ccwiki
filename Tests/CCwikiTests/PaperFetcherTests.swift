@@ -144,6 +144,15 @@ struct PaperFetcherTests {
         ])
         let searchFailure = search.failureValue
         #expect(searchFailure?.message.hasPrefix("dblp.org sent a web page, not a PDF.") == true)
+
+        // A page that names a link already tried is just a page.
+        let paper = URL(string: "https://example.org/paper")!
+        let loop = PaperFixtures.reference("LOOP", source: paper.absoluteString)
+        let (looped, requests) = await fetch(loop, [
+            paper.absoluteString: Self.html(#"<meta name="citation_pdf_url" content="/paper">"#),
+        ])
+        #expect(looped.failureValue == .notAPDF(landingPage: paper, redirectedFrom: nil))
+        #expect(requests == [paper])
     }
 
     @Test("403 is refused, 404 not found, 429 busy, 500 and PostScript unexpected")

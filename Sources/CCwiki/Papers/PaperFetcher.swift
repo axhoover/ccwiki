@@ -208,8 +208,13 @@ struct PaperFetcher: Sendable {
             switch await attempt(url, progress: progress) {
             case .paper(let paper):
                 return .success(paper)
-            case .follow(let link):
-                // Next, ahead of the reference's other links: the page named it.
+            case .follow(let link, let otherwise):
+                // Next, ahead of the reference's other links: the page named
+                // it. A page that names a link already tried is just a page.
+                guard !tried.contains(link.absoluteString) else {
+                    failures.append(otherwise)
+                    continue
+                }
                 queue.removeAll { $0.absoluteString == link.absoluteString }
                 queue.insert(link, at: 0)
             case .failed(.offline):
@@ -223,7 +228,8 @@ struct PaperFetcher: Sendable {
 
     private enum Attempt {
         case paper(FetchedPaper)
-        case follow(URL)
+        /// A page that names its PDF: try that, or count the page as one.
+        case follow(URL, otherwise: PaperFailure)
         case failed(PaperFailure)
     }
 
@@ -270,9 +276,13 @@ struct PaperFetcher: Sendable {
             return .paper(FetchedPaper(file: file, from: url))
         case .html(let link):
             try? FileManager.default.removeItem(at: file)
-            if let link, let secure = PaperSource.secure(link) { return .follow(secure) }
             let redirected = finalURL.host()?.lowercased() != url.host()?.lowercased()
-            return .failed(.notAPDF(landingPage: finalURL, redirectedFrom: redirected ? url : nil))
+            let page = PaperFailure.notAPDF(
+                landingPage: finalURL, redirectedFrom: redirected ? url : nil)
+            if let link, let secure = PaperSource.secure(link) {
+                return .follow(secure, otherwise: page)
+            }
+            return .failed(page)
         case .other(let contentType):
             try? FileManager.default.removeItem(at: file)
             return .failed(.unexpected(
