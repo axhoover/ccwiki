@@ -38,7 +38,9 @@ struct PaperStore: Sendable {
 
     init(directory: URL, discard: (@Sendable (URL) throws -> Void)? = nil) {
         self.directory = directory
-        self.discard = discard ?? { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+        self.discard = discard ?? { file in
+            try FileManager.default.trashItem(at: file, resultingItemURL: nil)
+        }
     }
 
     var indexURL: URL { directory.appending(path: "papers.json") }
@@ -89,7 +91,8 @@ struct PaperStore: Sendable {
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         var records = self.records()
-        let name = records[source.referencePath]?.fileName ?? uniqueFileName(for: source, among: records)
+        let name = records[source.referencePath]?.fileName
+            ?? uniqueFileName(for: source, among: records)
         let destination = directory.appending(component: name)
 
         // Whole before it is in place: a reader never sees a partial file.

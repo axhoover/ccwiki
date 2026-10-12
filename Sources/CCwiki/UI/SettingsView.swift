@@ -265,8 +265,8 @@ struct SettingsView: View {
             } footer: {
                 Text("The search index is derived and safe to delete at any time; Rebuild "
                     + "reads every page again and rebuilds it. "
-                    + "PDFs are kept outside the clone deliberately — they are job inputs "
-                    + "and never enter the repository.")
+                    + "PDFs, the ones you drop for ingestion and the papers you open, are kept "
+                    + "outside the clone and never enter the repository.")
                 .font(Theme.Fonts.meta)
                 .foregroundStyle(.secondary)
             }

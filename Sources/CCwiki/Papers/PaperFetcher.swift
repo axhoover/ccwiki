@@ -56,7 +56,8 @@ enum PaperFailure: Error, Equatable, Sendable {
         case .notAPDF(let landingPage, let redirectedFrom):
             let host = Self.host(of: landingPage)
             if let redirectedFrom {
-                return "\(Self.host(of: redirectedFrom)) led to a page on \(host), not a PDF. \(browser)"
+                let from = Self.host(of: redirectedFrom)
+                return "\(from) led to a page on \(host), not a PDF. \(browser)"
             }
             return "\(host) sent a web page, not a PDF. \(browser)"
         case .refused(let status, let host, _):
@@ -232,7 +233,8 @@ struct PaperFetcher: Sendable {
     ) async -> Attempt {
         let download: PaperDownload
         do {
-            download = try await transport.download(url, maximumBytes: maximumBytes, progress: progress)
+            download = try await transport.download(
+                url, maximumBytes: maximumBytes, progress: progress)
         } catch let error as URLError {
             return .failed(Self.failure(for: error, url: url))
         } catch {

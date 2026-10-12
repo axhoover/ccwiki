@@ -137,7 +137,9 @@ final class PaperLibrary {
     ) {
         guard fetches[path] == token else {
             // Cancelled or replaced: nothing of it is kept.
-            if case .success(let paper) = result { try? FileManager.default.removeItem(at: paper.file) }
+            if case .success(let paper) = result {
+                try? FileManager.default.removeItem(at: paper.file)
+            }
             return
         }
         fetches[path] = nil
@@ -146,7 +148,8 @@ final class PaperLibrary {
         switch result {
         case .success(let paper):
             do {
-                records[path] = try store.keep(paper.file, for: source, origin: .downloaded(from: paper.from))
+                records[path] = try store.keep(
+                    paper.file, for: source, origin: .downloaded(from: paper.from))
                 transient[path] = nil
                 lastFailures[path] = nil
             } catch {
@@ -206,9 +209,28 @@ final class PaperLibrary {
 
     // MARK: Screenshots
 
-    /// The `paper:<path>` step of `make shots`: the paper window for the
-    /// reference at `referencePath`. Nothing to show until the window (C6).
+    /// The `paper:<path>` step of `make shots`: Show Paper for the reference
+    /// at `referencePath`, through the fixture transport, and its window in
+    /// front once the paper has settled.
     static func applyShot(
         _ referencePath: String, model: AppModel, openWindow: OpenWindowAction
-    ) async {}
+    ) async {
+        guard let page = model.index?.pages[referencePath], page.kind == .reference else {
+            FileHandle.standardError.write(Data("no reference page at \(referencePath)\n".utf8))
+            return
+        }
+        ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
+
+        // The fixture transport answers at once; wait for its answer, not a guess.
+        for _ in 0..<50 {
+            guard case .downloading = model.papers.state(for: referencePath) else { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        NSApp.orderedWindows
+            .first { $0.isVisible && $0.tabbingIdentifier == PaperWindowView.tabbingIdentifier }?
+            .makeKeyAndOrderFront(nil)
+        FileHandle.standardError.write(Data(
+            "paper \(referencePath): \(model.papers.state(for: referencePath))\n".utf8))
+    }
 }
