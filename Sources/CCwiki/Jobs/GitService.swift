@@ -229,31 +229,66 @@ struct GitService: Sendable {
     }
 
     /// Last-modified time per content file, from one `git log` sweep rather
-    /// than one process per file.
+    /// than one process per file: the latest committer date among the
+    /// non-merge commits that touch it under `content/`.
     ///
     /// Quartz's `CreatedModifiedDate` prefers frontmatter, then git, then the
     /// filesystem; almost no page carries a date, so in practice this is the
     /// date the site shows.
     func modifiedDates(in clone: URL) async -> [String: Date] {
-        let result = await run([
-            "-C", clone.path(percentEncoded: false),
-            "log", "--name-only", "--no-merges", "--format=%x00%ct", "--", "content",
-        ])
-        guard result.succeeded else { return [:] }
+        await modifiedDates(in: clone, range: nil) ?? [:]
+    }
 
+    /// The same, over only the commits HEAD has and `base` does not: what a
+    /// pull brought. Merged with the dates at `base`, the later date winning,
+    /// it equals the whole-history sweep at HEAD
+    /// (plans/reader-comforts.md §3.7). Nil when git cannot answer, as when
+    /// `base` is not in this clone.
+    func modifiedDates(in clone: URL, since base: String) async -> [String: Date]? {
+        await modifiedDates(in: clone, range: "\(base)..HEAD")
+    }
+
+    private func modifiedDates(in clone: URL, range: String?) async -> [String: Date]? {
+        // Paths come back as UTF-8 rather than octal-escaped in quotes, so a
+        // page named with an accent is dated too.
+        var arguments = [
+            "-C", clone.path(percentEncoded: false), "-c", "core.quotePath=false",
+            "log", "--name-only", "--no-merges", "--format=%x00%ct",
+        ]
+        if let range { arguments.append(range) }
+        arguments += ["--", "content"]
+        let result = await run(arguments)
+        guard result.succeeded else { return nil }
+        return Self.modifiedDates(fromLog: result.stdout)
+    }
+
+    /// `git log --name-only --format=%x00%ct` output → each `content/` file,
+    /// relative to `content/`, and the latest date among the commits that
+    /// list it. The latest, not the first listed: the two agree in a linear
+    /// history, but only the latest makes merging a pulled range into
+    /// earlier dates exact when a merged branch carries older dates.
+    static func modifiedDates(fromLog output: String) -> [String: Date] {
         var dates: [String: Date] = [:]
         var current: Date?
-        for line in result.stdout.components(separatedBy: "\n") {
+        for line in output.components(separatedBy: "\n") {
             if line.hasPrefix("\u{0}") {
                 current = TimeInterval(line.dropFirst()).map(Date.init(timeIntervalSince1970:))
                 continue
             }
             guard let current, line.hasPrefix("content/") else { continue }
             let relative = String(line.dropFirst("content/".count))
-            // `git log` is newest-first, so the first sighting wins.
-            if dates[relative] == nil { dates[relative] = current }
+            if let known = dates[relative], known >= current { continue }
+            dates[relative] = current
         }
         return dates
+    }
+
+    /// Whether `head` has `base` in its history (or is it): whether dates
+    /// kept at `base` can be brought forward to `head` by a range.
+    func isAncestor(_ base: String, of head: String, in clone: URL) async -> Bool {
+        await run([
+            "-C", clone.path(percentEncoded: false), "merge-base", "--is-ancestor", base, head,
+        ]).succeeded
     }
 
     /// `true` when the working tree has uncommitted changes.

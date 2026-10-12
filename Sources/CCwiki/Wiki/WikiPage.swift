@@ -156,8 +156,16 @@ struct WikiPage: Identifiable, Sendable {
     // MARK: Loading
 
     static func load(path: String, in contentRoot: URL) -> WikiPage? {
-        let url = contentRoot.appending(path: path)
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        guard let data = try? Data(contentsOf: contentRoot.appending(path: path)) else { return nil }
+        return load(path: path, data: data)
+    }
+
+    /// The page in `data`, a file's bytes as read once; nil unless they are
+    /// UTF-8. Every load parses with this, and the fingerprint scan hashes the
+    /// same `Data` it parses, so a page and its digest can never disagree
+    /// about a byte-order mark or a bad byte (plans/reader-comforts.md §3.5).
+    static func load(path: String, data: Data) -> WikiPage? {
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
         return WikiPage(path: path, text: text)
     }
 
