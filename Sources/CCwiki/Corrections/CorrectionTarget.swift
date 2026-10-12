@@ -106,6 +106,21 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
         return target
     }
 
+    /// Where the editor opens for what was shown (§3.3): a passage's lines,
+    /// or the block a right-click pointed at, though a pointer's target is
+    /// the whole page. Nil with nothing selected, or lines that map nowhere;
+    /// the editor then opens at the target's section.
+    static func editorLines(
+        fileText: String, renderedMarkdown: String, selection: ReaderSelection?
+    ) -> LineRange? {
+        guard let selection else { return nil }
+        let map = SourceLineMap(fileText: fileText, renderedMarkdown: renderedMarkdown)
+        switch map.location(ofRendered: selection.renderedLines) {
+        case .body(let lines), .frontmatter(let lines): return lines
+        case nil: return nil
+        }
+    }
+
     /// The target when the file the reader showed cannot be read: a
     /// snapshot whose marker has moved since the render, or a revision git
     /// cannot show. The whole page at `head`, in the section the selection

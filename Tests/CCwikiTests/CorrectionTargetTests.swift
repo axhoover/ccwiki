@@ -104,6 +104,20 @@ struct CorrectionTargetTests {
         #expect(target.summary == "The whole page")
     }
 
+    @Test("the editor opens at a passage, or at the block a pointer named")
+    func editorLines() {
+        let pointer = Self.selection(2..<3, text: nil)
+        #expect(CorrectionTarget.editorLines(
+            fileText: Self.fileText, renderedMarkdown: Self.rendered, selection: pointer)
+            == LineRange(first: 8, last: 8))
+        let passage = Self.selection(6..<10)
+        #expect(CorrectionTarget.editorLines(
+            fileText: Self.fileText, renderedMarkdown: Self.rendered, selection: passage)
+            == Self.make(passage).lines)
+        #expect(CorrectionTarget.editorLines(
+            fileText: Self.fileText, renderedMarkdown: Self.rendered, selection: nil) == nil)
+    }
+
     @Test("without a selection or a pointer, the heading the reader is on")
     func readingHeading() {
         let target = Self.make(nil)
