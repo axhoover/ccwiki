@@ -407,8 +407,7 @@ extension ExplorerResult {
             // hypothesis holds in.
             let closure = writer.derivation.closure(from: Set(start), options: .all)
             result.sections.append(ExplorerSection(
-                id: "refused", title: "Refused steps",
-                help: "Steps the wiki records on the way, which CCwiki does not chain here, and why.",
+                id: "refused", title: "Refused steps", help: DerivationWording.refusedHelp,
                 rows: answer.refused.enumerated().map { index, refused in
                     writer.refusalRow(refused, closure: closure, id: "refused/\(index)")
                 }))

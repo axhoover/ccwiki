@@ -457,4 +457,44 @@ struct ExplorerResultTests {
         #expect(ancestors.first == "proof/0")
         #expect(ancestors.count == 4)
     }
+
+    // MARK: Refused, never caveated (relations-followups.md §1.2)
+
+    @Test("the rules and every help say an unmet precondition is refused, never caveated")
+    func refusalWording() {
+        #expect(DerivationWording.rules[5] == "A step whose Statement needs more of its hypothesis "
+            + "than the wiki's page defines is used only when that hypothesis is one you gave, and "
+            + "the derivation then says “assuming …”, or when the step that gives the hypothesis "
+            + "states the stronger notion. Otherwise CCwiki leaves the step out; it never uses it "
+            + "with a caveat.")
+        #expect(DerivationWording.refusedHelp == "Steps the wiki records on the way that CCwiki "
+            + "does not chain here, and why. A step that needs more of its hypothesis than the "
+            + "step before it states is left out, not used with a caveat.")
+        let leftOut = "A chain is left out when one of its steps needs more of a hypothesis than "
+            + "the step before it states; ask the Relations Explorer about the pair to see the step."
+        #expect(DerivationWording.impliesHelp == "What this implies through two or more recorded "
+            + "reductions chained together. Derived by CCwiki; the wiki does not state these "
+            + "chains. Standard, quantum and CRS models only; the Relations Explorer can include "
+            + "the others. Click a row for its proof. " + leftOut)
+        #expect(DerivationWording.impliedByHelp == "Objects that each imply this through two or "
+            + "more recorded reductions chained together, derived by CCwiki from what the wiki "
+            + "records, which is not everything known. Combinations of several objects are in the "
+            + "Relations Explorer. " + leftOut)
+    }
+
+    @Test("the wording file says caveat only where it says CCwiki never uses one")
+    func caveatOnlyWhereRefused() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appending(path: "Sources/CCwiki/Wiki/DerivationWording.swift"),
+            encoding: .utf8)
+        let caveat = try NSRegularExpression(pattern: #"\bcaveat\b"#, options: .caseInsensitive)
+        func count(_ text: String) -> Int {
+            caveat.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+        }
+        #expect(count(DerivationWording.rules[5]) == 1)
+        #expect(count(DerivationWording.refusedHelp) == 1)
+        #expect(count(source) == 2)
+    }
 }

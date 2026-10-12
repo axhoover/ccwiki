@@ -207,9 +207,18 @@ enum DerivationWording {
             + "does not state its class.",
         "A step that need not carry over is not applied inside an idealised model: only a "
             + "relativizing step composes after one.",
-        "A step whose Statement needs more of its hypothesis than the wiki's page defines fires "
-            + "only when that is given or established, and the derivation says so.",
+        // R13, as the maintainer decided it (derivations.md §0 item 4): an
+        // unmet precondition is refused, never chained with a warning.
+        "A step whose Statement needs more of its hypothesis than the wiki's page defines is "
+            + "used only when that hypothesis is one you gave, and the derivation then says "
+            + "“assuming …”, or when the step that gives the hypothesis states the stronger "
+            + "notion. Otherwise CCwiki leaves the step out; it never uses it with a caveat.",
     ]
+
+    /// The help of a no-derivation answer's Refused steps.
+    static let refusedHelp = "Steps the wiki records on the way that CCwiki does not chain here, "
+        + "and why. A step that needs more of its hypothesis than the step before it states is "
+        + "left out, not used with a caveat."
 
     // MARK: The inspector (relations-explorer.md §3)
 
@@ -219,11 +228,18 @@ enum DerivationWording {
     static let impliesHelp = "What this implies through two or more recorded reductions chained "
         + "together. Derived by CCwiki; the wiki does not state these chains. Standard, quantum "
         + "and CRS models only; the Relations Explorer can include the others. Click a row for "
-        + "its proof."
+        + "its proof. " + leftOutChain
     static let impliedByHelp = "Objects that each imply this through two or more recorded "
         + "reductions chained together, derived by CCwiki from what the wiki records, which is "
-        + "not everything known. Combinations of several objects are in the Relations Explorer."
+        + "not everything known. Combinations of several objects are in the Relations Explorer. "
+        + leftOutChain
     static let combinations = "Combinations of several objects…"
+
+    /// R13 in the inspector, which lists facts and so has no row for a step
+    /// it left out: the explorer has one.
+    private static let leftOutChain = "A chain is left out when one of its steps needs more of a "
+        + "hypothesis than the step before it states; ask the Relations Explorer about the pair "
+        + "to see the step."
 
     // MARK: Lists
 
