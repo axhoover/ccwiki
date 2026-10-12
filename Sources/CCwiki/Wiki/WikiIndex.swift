@@ -117,6 +117,20 @@ struct WikiIndex: Sendable {
             ambiguousAliases: ambiguous)
     }
 
+    /// This index with `added` pages added, or replacing the page at the
+    /// same path: for links to the pages a change adds, in the review and
+    /// the editor's preview (plans/corrections.md §6.3). `assemble` over
+    /// this index's markdown and asset paths plus the added ones, so an
+    /// added page's slug, aliases and folder resolve as they will once the
+    /// change is merged.
+    func overlaying(_ added: [WikiPage]) -> WikiIndex {
+        guard !added.isEmpty else { return self }
+        var merged = pages
+        for page in added { merged[page.path] = page }
+        let files = Set(merged.keys).union(assets.values).sorted()
+        return Self.assemble(contentRoot: contentRoot, files: files, pages: merged)
+    }
+
     /// `glob("**/*.*")` with `ignorePatterns` — note the pattern requires a dot
     /// in the *filename*, so an extensionless file is not part of the site.
     static func contentFiles(root: URL) -> [String] {

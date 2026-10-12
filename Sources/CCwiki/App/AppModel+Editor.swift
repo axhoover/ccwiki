@@ -2,9 +2,7 @@ import SwiftUI
 
 // Editor windows and the review's content, app-wide (plans/corrections.md
 // §6.3, §7): the sessions behind the windows, saving them all before a
-// publish or a quit, and what the preview and the review render.
-//
-// Phase 0 declares these; Track D fills them (§11.5).
+// publish or a quit, and what the preview and the review render (§11.5).
 extension AppModel {
 
     /// The session for an editor window, made the first time it is asked
@@ -58,17 +56,66 @@ extension AppModel {
     }
 
     /// What the editor's preview renders for `text` at `path`
-    /// (repository-relative). Phase 0: the body, unresolved.
+    /// (repository-relative), against the pages added by the job whose
+    /// editor shows that file.
     func previewRequest(path: String, text: String) -> RenderRequest {
-        let page = WikiPage(path: path, text: text)
-        return RenderRequest(
-            path: path, title: page.title, markdown: page.body, html: nil,
-            links: [:], anchor: nil, notices: [])
+        let owner = editorSessions.keys.first { $0.path == path }
+            .flatMap { jobCenter.job(id: $0.jobID) }
+        return previewRequest(path: path, text: text, in: owner)
     }
 
-    /// `CCwiki.renderReview`'s payload for the job's snapshot (§6.3).
-    /// Phase 0: nil.
+    /// The page as the reader would render it (§7.4): the reader's index
+    /// overlaid with the pages `job`'s review adds, so a link to one of them
+    /// resolves, as `new` (§6.3); the macros; the manifest and the labels,
+    /// so the relation-meta line appears; no hover cards, which are noise
+    /// while editing; and the broken-link count, which is not.
+    func previewRequest(path: String, text: String, in job: Job?) -> RenderRequest {
+        let page = WikiPage(path: ReviewPayload.contentPath(path) ?? path, text: text)
+        var request: RenderRequest
+        if let index {
+            let added = job?.review.map(ReviewPayload.addedPages(in:)) ?? []
+            var renderer = PageRenderer(index: index.overlaying(added), hiddenPaths: unlistedPaths)
+            renderer.relations = relations
+            renderer.relationLabels = relationLabels
+            renderer.buildsPreviews = false
+            let rendered = renderer.request(for: page)
+            request = RenderRequest(
+                path: rendered.path, title: rendered.title, markdown: rendered.markdown,
+                html: nil,
+                links: ReviewPayload.markingNew(
+                    rendered.links, newPages: ReviewPayload.newPagePaths(added, in: index)),
+                anchor: nil, notices: rendered.notices)
+        } else {
+            // No library yet: the text, unresolved, rather than nothing.
+            request = RenderRequest(
+                path: page.path, title: page.displayTitle, markdown: page.body, html: nil,
+                links: [:], anchor: nil, notices: [])
+        }
+        request.macros = macros.macros
+        return request
+    }
+
+    /// `CCwiki.renderReview`'s payload for the job's snapshot (§6.3); nil
+    /// while it has none, or an empty one. Links resolve against the
+    /// reader's index overlaid with the pages the snapshot adds.
     func reviewPayload(for job: Job) -> String? {
-        nil
+        guard let snapshot = job.review, !snapshot.isEmpty else { return nil }
+        let added = ReviewPayload.addedPages(in: snapshot)
+        let overlay = index?.overlaying(added)
+        let newPages = ReviewPayload.newPagePaths(added, in: index)
+        let labels = relationLabels
+        return ReviewPayload.json(
+            snapshot: snapshot, findings: job.findings,
+            title: { path in
+                snapshot.files.first { $0.path == path }.flatMap(ReviewPayload.pageTitle(for:))
+            },
+            header: { ReviewPayload.header(for: $0, labels: labels) },
+            links: { file in
+                guard let overlay else { return [:] }
+                return ReviewPayload.links(
+                    for: file, header: ReviewPayload.header(for: file, labels: labels),
+                    index: overlay, newPages: newPages)
+            },
+            macros: macros.macros)
     }
 }
