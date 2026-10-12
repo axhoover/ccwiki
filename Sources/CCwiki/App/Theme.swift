@@ -63,6 +63,24 @@ enum Theme {
 
     static let findBarHeight: CGFloat = 36
 
+    // MARK: Jobs, the editor and the correction sheets (plans/corrections.md)
+
+    /// An editor window: the source and its preview side by side, each pane
+    /// at least `editorPaneMinWidth`.
+    static let editorDefaultWidth: CGFloat = 1200
+    static let editorDefaultHeight: CGFloat = 820
+    static let editorPaneMinWidth: CGFloat = 320
+    /// Tall enough at its minimum that the review's pull request form never
+    /// covers the diff (§6.6).
+    static let jobsDefaultWidth: CGFloat = 1100
+    static let jobsDefaultHeight: CGFloat = 760
+    static let jobsMinWidth: CGFloat = 860
+    static let jobsMinHeight: CGFloat = 640
+    /// The review's pull request form: its title, body and footer.
+    static let reviewFormMinHeight: CGFloat = 150
+    /// IngestSheet's width, which the Describe and Issue sheets share (§8).
+    static let sheetWidth: CGFloat = 560
+
     // MARK: Type scale
 
     enum Fonts {
@@ -83,6 +101,9 @@ enum Theme {
         static let paletteSubtitle = Font.callout
         /// A monospaced log line.
         static let log = Font.system(.caption, design: .monospaced)
+        /// Text that is Markdown source: a pull request's or an issue's body
+        /// as it will be sent, at reading size, in monospace.
+        static let code = Font.system(.body, design: .monospaced)
         /// An empty state's headline.
         static let emptyTitle = Font.title2.weight(.semibold)
     }

@@ -88,6 +88,9 @@ final class ReaderSession: Identifiable {
     /// The sync log sheet. Every failure message ends "see the sync log", so
     /// there has to be somewhere to see it.
     var syncLogPresented = false
+    /// Describe a Correction or Open an Issue, about this window's page
+    /// (plans/corrections.md §8, §17).
+    var correctionSheet: CorrectionSheetRequest?
 
     /// Set for the render a search hit, or a window opened on one, triggers,
     /// then cleared.
@@ -168,6 +171,15 @@ final class ReaderSession: Identifiable {
         }
         webController.onExplore = { [weak self] query in
             self?.model.explore(query)
+        }
+        // The context menu's corrections group (plans/corrections.md §9),
+        // which is AppKit too: whether this page offers it, and the route
+        // chosen, with what was selected at the right-click.
+        webController.correctionAvailable = { [weak self] in
+            self?.canCorrectCurrentPage ?? false
+        }
+        webController.onCorrect = { [weak self] route, selection in
+            self?.beginCorrection(route, selection: selection)
         }
     }
 
@@ -575,6 +587,9 @@ final class ReaderSession: Identifiable {
         request.macros = model.macros.macros
         request.preservesScroll = preservingScroll
         request.restoresScroll = restoringScroll
+        // The commit this render shows. A correction is built at it, never
+        // at whatever HEAD is by the time someone clicks (corrections §3.5).
+        request.revision = model.headRevision
         webController.render(request, thenFind: pendingFind)
         pendingFind = nil
     }

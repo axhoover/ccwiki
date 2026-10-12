@@ -29,19 +29,27 @@ struct PromptComposer: Sendable {
 
     enum ComposeError: LocalizedError {
         case templateMissing
+        /// `compose` writes an ingestion's prompt, and this job is not one.
+        case notAnIngestion
 
         var errorDescription: String? {
-            "prompts/ingest.md is missing from the app bundle. "
-                + "Rebuild with `make` — build.sh copies it in."
+            switch self {
+            case .templateMissing:
+                return "prompts/ingest.md is missing from the app bundle. "
+                    + "Rebuild with `make` — build.sh copies it in."
+            case .notAnIngestion:
+                return "Only an ingestion job has an ingestion prompt."
+            }
         }
     }
 
     @MainActor
     static func compose(
-        job: IngestJob,
+        job: Job,
         baseBranch: String,
         preflight: [PreflightFinding]
     ) throws -> String {
+        guard let submission = job.submission else { throw ComposeError.notAnIngestion }
         guard var text = template() else { throw ComposeError.templateMissing }
 
         let worktreePath = job.worktree.path(percentEncoded: false)
@@ -49,8 +57,8 @@ struct PromptComposer: Sendable {
             "{{WORKTREE}}": worktreePath,
             "{{BRANCH}}": job.branch,
             "{{BASE_BRANCH}}": baseBranch,
-            "{{SUBMISSION}}": job.submission.metadataJSON(),
-            "{{PAPER_LOCATION}}": paperLocation(job.submission),
+            "{{SUBMISSION}}": submission.metadataJSON(),
+            "{{PAPER_LOCATION}}": paperLocation(submission),
             "{{PREFLIGHT}}": Preflight.promptSection(preflight),
             "{{SKILL_NOTE}}": skillNote(worktree: job.worktree),
         ]

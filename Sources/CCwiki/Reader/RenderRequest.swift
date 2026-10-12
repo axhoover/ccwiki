@@ -57,6 +57,11 @@ struct RenderRequest: Sendable {
     /// string `ccwiki.js` reads back from the link it is over. Empty when
     /// previews are off, and then the payload carries no `previews` at all.
     var previews: [String: LinkPreview] = [:]
+    /// The commit the page was read from, `headRevision` at render time. It
+    /// goes into the payload, and `ccwiki.js` returns it with a selection,
+    /// so a correction is built at the revision the reader was shown
+    /// (plans/corrections.md §3.5). Nil for the app's own pages.
+    var revision: String?
 
     struct Notice: Sendable {
         let level: String  // "info" | "warning"
@@ -86,6 +91,7 @@ struct RenderRequest: Sendable {
         ]
         if let html { payload["html"] = html }
         if let anchor { payload["anchor"] = anchor }
+        if let revision { payload["revision"] = revision }
         if !previews.isEmpty { payload["previews"] = previews.mapValues(\.jsonObject) }
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload),

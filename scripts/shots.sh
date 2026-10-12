@@ -23,6 +23,16 @@
 #   bgtab:<content-relative>  the same tab behind the one being read, once
 #                             WindowTabbing.joinsInBackground is on (in
 #                             front until then)
+#   edit:<content-relative>   an edit of that page, begun past the blockers,
+#                             in its editor (plans/corrections.md §12.3)
+#   review:<content-relative> a scripted one-word edit of that page, reviewed
+#                             in Jobs; a later `source` step shows it as Source
+#   describe:<content-relative>, issue:<content-relative>
+#                             the Describe a Correction or Open an Issue
+#                             sheet over that page
+#
+# The jobs edit: and review: begin are discarded when the plan ends, so no
+# run leaves a worktree behind.
 #
 # The app pauses at each step and writes `.ready-N`; this script captures the
 # window with `screencapture -l` and answers with `.go-N`. That handshake is

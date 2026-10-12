@@ -19,8 +19,10 @@ struct SettingsView: View {
                 .tabItem { Label("Reading", systemImage: "book") }
             storageTab
                 .tabItem { Label("Storage", systemImage: "internaldrive") }
+            // Jobs, not Ingestion: corrections run here too
+            // (plans/corrections.md §11.1).
             toolsTab
-                .tabItem { Label("Ingestion", systemImage: "doc.badge.plus") }
+                .tabItem { Label("Jobs", systemImage: "hammer") }
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -40,9 +42,10 @@ struct SettingsView: View {
             } header: {
                 Text("Command-line tools")
             } footer: {
-                Text("Only ingestion jobs need these; reading needs none of them. CCwiki "
-                    + "searches Homebrew's directories and ~/.local/bin, then asks a login "
-                    + "shell. Override one only if it lives somewhere unusual.")
+                Text("Ingestion and corrections need these; opening an issue needs only gh. "
+                    + "Reading needs none of them. CCwiki searches Homebrew's directories and "
+                    + "~/.local/bin, then asks a login shell. Override one only if it lives "
+                    + "somewhere unusual.")
                 .font(Theme.Fonts.meta)
                 .foregroundStyle(.secondary)
             }
@@ -69,8 +72,8 @@ struct SettingsView: View {
                     }
                 }
                 if !model.isDiscoveringTools, !model.isGitHubAuthenticated {
-                    Text("Run `gh auth login` in a terminal, then re-check. Ingestion jobs "
-                        + "need an account that can push a branch to the wiki.")
+                    Text("Run `gh auth login` in a terminal, then re-check. Jobs need an "
+                        + "account that can push a branch to the wiki.")
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
                 }
@@ -82,6 +85,24 @@ struct SettingsView: View {
                         .foregroundStyle(model.canPushToRemote
                             ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
                 }
+            }
+
+            Section {
+                Picker("Model", selection: Binding(
+                    get: { model.correctionModel },
+                    set: { model.correctionModel = $0 })) {
+                    Text("Sonnet").tag("sonnet")
+                    Text("Haiku").tag("haiku")
+                    Text("Opus").tag("opus")
+                    Text("The CLI's default").tag("")
+                }
+            } header: {
+                Text("Corrections")
+            } footer: {
+                Text("The model an agent drafts a described correction with. Ingestion "
+                    + "always uses the claude CLI's default.")
+                .font(Theme.Fonts.meta)
+                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -236,11 +257,11 @@ struct SettingsView: View {
                 }
                 HStack {
                     Spacer()
+                    // A job that is not finished, a review included, keeps
+                    // its worktree in the clone's `.git` (corrections §4.3).
                     Button("Reset Clone…") { confirmResetClone() }
-                        .disabled(model.syncState.isRunning || model.activeJobCount > 0)
-                        .help(model.activeJobCount > 0
-                            ? "Not while a job is running: its worktree belongs to the clone"
-                            : "Delete the clone and download the wiki again")
+                        .disabled(model.syncState.isRunning || model.unfinishedJobCount > 0)
+                        .help(resetCloneHelp)
                     Button("Sync Now") { model.sync() }
                         .disabled(model.syncState.isRunning)
                 }
@@ -272,6 +293,19 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Work still running can only be waited for; a review can be published
+    /// or discarded (corrections §4.3).
+    private var resetCloneHelp: String {
+        if model.jobs.contains(where: { $0.state.isCancellable || $0.state.isActive }) {
+            return "Not while a job is running: its worktree belongs to the clone"
+        }
+        switch model.unfinishedJobCount {
+        case 0: return "Delete the clone and download the wiki again"
+        case 1: return "Publish or discard the job in Jobs first."
+        case let count: return "Publish or discard the \(count) jobs in Jobs first."
+        }
     }
 
     private var storeDescription: String {

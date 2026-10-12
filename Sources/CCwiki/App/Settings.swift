@@ -25,6 +25,16 @@ struct CCwikiSettings: Sendable {
     private static let showsInspectorKey = "ccwiki.showsInspector"
     private static let inspectorTabKey = "ccwiki.inspectorTab"
     private static let ignoredCopiesKey = "ccwiki.ignoredCopies"
+    private static let correctionModelKey = "ccwiki.correctionModel"
+
+    /// The `claude --model` alias a described correction runs with
+    /// (plans/corrections.md §5.4), or "" for the CLI's own default. Sonnet
+    /// unless changed in Settings → Jobs: a mangled macro in a security
+    /// definition costs more than the difference a smaller model saves.
+    static var correctionModel: String {
+        get { UserDefaults.standard.string(forKey: correctionModelKey) ?? "sonnet" }
+        set { UserDefaults.standard.set(newValue, forKey: correctionModelKey) }
+    }
 
     /// Other copies of the app that the launch check is not to offer to
     /// replace or trash again ("Don't ask again"), by path in

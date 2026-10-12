@@ -241,7 +241,7 @@ struct PromptCompositionTests {
         let submission = IngestSubmission(
             kind: .url, source: .eprint(year: "2025", number: "375"),
             localPDF: nil, notes: "Check the LWE page.", submittedAt: Date())
-        let job = IngestJob(submission: submission, paths: paths)
+        let job = Job(kind: .ingestion(submission), paths: paths, createdAt: submission.submittedAt)
 
         let prompt = try PromptComposer.compose(
             job: job, baseBranch: "main",
@@ -268,7 +268,7 @@ struct PromptCompositionTests {
             kind: .pdf, source: nil,
             localPDF: URL(fileURLWithPath: "/tmp/library/paper.pdf"),
             notes: "", submittedAt: Date())
-        let job = IngestJob(submission: submission, paths: paths)
+        let job = Job(kind: .ingestion(submission), paths: paths, createdAt: submission.submittedAt)
 
         let prompt = try PromptComposer.compose(job: job, baseBranch: "main", preflight: [])
         #expect(prompt.contains("/tmp/library/paper.pdf"))

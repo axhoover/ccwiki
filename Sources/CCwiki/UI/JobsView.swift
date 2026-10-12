@@ -10,7 +10,7 @@ struct JobsView: View {
     @Environment(AppModel.self) private var model
     @State private var selection: String?
 
-    private var selectedJob: IngestJob? {
+    private var selectedJob: Job? {
         guard let selection else { return model.jobs.first }
         return model.jobs.first { $0.id == selection }
     }
@@ -27,12 +27,21 @@ struct JobsView: View {
                 } description: {
                     Text("Drop a PDF on the reader, or paste an ePrint, arXiv or DOI link.")
                 } actions: {
-                    Button("New Ingestion Job…") { model.requestIngestSheet(in: nil) }
+                    Button("Ingest a Paper…") { model.requestIngestSheet(in: nil) }
                 }
             }
         }
         .navigationTitle("Jobs")
-        .frame(minWidth: 860, minHeight: 520)
+        .frame(minWidth: Theme.jobsMinWidth, minHeight: Theme.jobsMinHeight)
+        // A job just started, or the review a reader's status bar leads to:
+        // the window opens on it (corrections §6.6). Taken once, so Show
+        // Jobs later opens on the newest job, not on one since cleared.
+        .onChange(of: model.jobsWindowRequests, initial: true) { _, _ in
+            if let requested = model.takeJobsWindowSelection(),
+               model.jobs.contains(where: { $0.id == requested }) {
+                selection = requested
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -46,9 +55,9 @@ struct JobsView: View {
                 Button {
                     model.requestIngestSheet(in: nil)
                 } label: {
-                    Label("New Job", systemImage: "plus")
+                    Label("Ingest a Paper", systemImage: "plus")
                 }
-                .help("Submit a paper (⌘⇧N)")
+                .help("Ingest a paper (⇧⌘N)")
             }
         }
     }
@@ -92,21 +101,21 @@ struct JobsView: View {
             if model.jobs.isEmpty, model.orphanedWorktrees.isEmpty {
                 ContentUnavailableView(
                     "No Jobs", systemImage: "tray",
-                    description: Text("Submitted papers appear here."))
+                    description: Text("Papers you ingest and corrections you start appear here."))
                 .padding(Theme.medium)
             }
         }
     }
 
-    private func row(_ job: IngestJob) -> some View {
+    private func row(_ job: Job) -> some View {
         HStack(spacing: Theme.small) {
             JobStateIcon(state: job.state)
             VStack(alignment: .leading, spacing: 1) {
-                Text(job.submission.displayName)
+                Text(job.title)
                     .font(Theme.Fonts.row)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(job.state.label)
+                Text(job.statusLabel)
                     .font(Theme.Fonts.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -114,9 +123,12 @@ struct JobsView: View {
             Spacer(minLength: 0)
         }
         .contextMenu {
-            if !job.state.isTerminal {
+            // Only work that has not reached review can be cancelled
+            // (corrections §4.1).
+            if job.state.isCancellable {
                 Button("Cancel Job") { job.cancel() }
-            } else {
+            }
+            if job.canRunAgain {
                 Button("Run Again") { model.runAgain(job) }
             }
             Button("Reveal Worktree in Terminal") { model.openInTerminal(job.worktree) }
@@ -135,7 +147,7 @@ struct JobsView: View {
 
 /// The queue's status glyph, spinning while the job is live.
 struct JobStateIcon: View {
-    let state: IngestJob.State
+    let state: JobState
 
     var body: some View {
         Group {
@@ -152,11 +164,12 @@ struct JobStateIcon: View {
     private var tint: Color {
         switch state {
         case .queued: .secondary
-        case .preparing, .running: .accentColor
+        case .preparing, .running, .publishing: .accentColor
+        case .awaitingReview: .accentColor
         case .opened: .green
         case .aborted: .orange
         case .failed: .red
-        case .cancelled: .secondary
+        case .cancelled, .discarded: .secondary
         }
     }
 }
