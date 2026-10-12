@@ -11,6 +11,13 @@ import Foundation
 /// review must show it.
 enum LineDiff {
 
+    /// The most lines, removed and added together, that a difference must
+    /// change before it is no longer computed line by line. At this size
+    /// the stdlib's rows take about 64 MB. The largest regeneration of
+    /// `relations.json` in the wiki's history, at `ab81f02`, must change at
+    /// least 4,884 of its lines, and is one hunk.
+    static let largestDifference = 4_000
+
     /// The changed runs of lines, in order: 0-based and half-open on each
     /// side. Identical texts give none. Changes with no unchanged line
     /// between them are one hunk.
@@ -44,6 +51,27 @@ enum LineDiff {
         let oldMiddle = Array(a[prefix..<(a.count - suffix)])
         let newMiddle = Array(b[prefix..<(b.count - suffix)])
         guard !oldMiddle.isEmpty || !newMiddle.isEmpty else { return [] }
+
+        // The whole middle as one hunk. When one side of it is empty, that
+        // is exactly the difference: a file added or deleted, or a run of
+        // lines inserted or removed.
+        let middle = [LineHunk(old: prefix..<(a.count - suffix), new: prefix..<(b.count - suffix))]
+        if oldMiddle.isEmpty || newMiddle.isEmpty { return middle }
+
+        // The stdlib's Myers keeps one row per step of the difference, so
+        // its memory grows as the square of the lines that change: half a
+        // gigabyte for all of `relations.json`. A line one side holds more
+        // often than the other must change, however the two align; past
+        // `largestDifference` of those, the middle is one hunk. No one reads
+        // such a diff line by line, and the review collapses it anyway.
+        var unmatched = [Int](repeating: 0, count: ids.count)
+        for line in oldMiddle { unmatched[line] += 1 }
+        var common = 0
+        for line in newMiddle where unmatched[line] > 0 {
+            unmatched[line] -= 1
+            common += 1
+        }
+        if oldMiddle.count + newMiddle.count - 2 * common > largestDifference { return middle }
 
         var removed = [Bool](repeating: false, count: oldMiddle.count)
         var inserted = [Bool](repeating: false, count: newMiddle.count)

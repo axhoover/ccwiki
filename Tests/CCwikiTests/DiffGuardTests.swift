@@ -144,6 +144,30 @@ struct DiffGuardTests {
             + inner + String(page[end.lowerBound...])
     }
 
+    /// The fixture page with its region cut out, markers and all: its
+    /// lines 153–176, as a hand that took it for a copy of `# Other
+    /// results` would leave it. The blank line before it stays.
+    static func withoutRegion(_ page: String) throws -> String {
+        let begin = try #require(page.range(of: beginMarker))
+        let end = try #require(page.range(of: endMarker + "\n"))
+        return String(page[..<begin.lowerBound]) + String(page[end.upperBound...])
+    }
+
+    /// A region as `generate-relations.mjs` writes one (its lines 309–315),
+    /// its checksum right.
+    static func region(_ inner: String) -> String {
+        "<!-- BEGIN GENERATED participates-in \(DiffGuard.regionChecksum(inner)) -->\n\n"
+            + inner + "\n\n" + endMarker
+    }
+
+    /// A page as the generator leaves it when a new reduction gives it its
+    /// first region: `src.trimEnd() + "\n\n" + region + "\n"` (its line 329).
+    static func withFirstRegion(_ page: String) -> String {
+        var text = Substring(page)
+        while text.last?.isWhitespace == true { text.removeLast() }
+        return String(text) + "\n\n" + region("## Participates in\n\n**Builds on it**\n\n- [[a-to-b|A ⇒ B]]") + "\n"
+    }
+
     // MARK: outsideContent
 
     @Test("outsideContent is an allow-list: scripts/, CLAUDE.md, a root lint.log, Templates and .claude/ block")
@@ -191,6 +215,18 @@ struct DiffGuardTests {
         #expect(Self.finding(.renamedOrDeleted, in: edit) == nil)
     }
 
+    @Test("renamedOrDeleted: deleting relations.json blocks in every kind, though it is publishable")
+    func relationsDeleted() {
+        let json = Self.deleted(".reductions/relations.json", "{\n  \"version\": 1\n}\n")
+        for kind in [JobKind.Tag.edit, .correction, .ingestion] {
+            let finding = Self.finding(.renamedOrDeleted, in: Self.check([json], kind: kind))
+            #expect(finding?.severity == .blocking, "\(kind)")
+            #expect(finding?.message == "`relations.json` is generated, and the site reads it. Restore the file.")
+        }
+        let changed = Self.modified(".reductions/relations.json", old: "{}\n", new: "{\"edges\": 1}\n")
+        #expect(Self.finding(.renamedOrDeleted, in: Self.ingest([changed])) == nil)
+    }
+
     // MARK: binaryFile
 
     @Test("binaryFile: a binary added or changed, and any PDF; not a binary removed, not a page")
@@ -204,6 +240,16 @@ struct DiffGuardTests {
 
         #expect(Self.finding(.binaryFile, in: Self.ingest([Self.binary("content/figure.png", .deleted)])) == nil)
         #expect(Self.finding(.binaryFile, in: Self.check([Self.withParagraph("A PRF.")])) == nil)
+    }
+
+    @Test("binaryFile: a page the snapshot could not read as text says so")
+    func binaryPage() {
+        for path in [Self.pagePath, ".reductions/relations.json"] {
+            let finding = Self.finding(.binaryFile, in: Self.check([Self.binary(path, .modified)]))
+            #expect(finding?.severity == .blocking, "\(path)")
+            #expect(finding?.message == "CCwiki could not read this file as UTF-8 text, so it checked "
+                + "nothing in it. Revert it, or save it as UTF-8.", "\(path)")
+        }
     }
 
     // MARK: generatedRegionEdited and regionRegenerated (lint.mjs 1075–1109)
@@ -279,6 +325,53 @@ struct DiffGuardTests {
         let new = page.replacingOccurrences(of: "TODO: define these", with: "TODO: define them")
         #expect(new != page)
         #expect(Self.finding(.generatedRegionEdited, in: Self.check([Self.modified(old: page, new: new)])) == nil)
+    }
+
+    @Test("a region removed by hand, markers and all, blocks: the generator would write it back")
+    func regionRemovedByHand() throws {
+        let page = try Self.fixture("pseudorandom-function.md")
+        let file = Self.modified(old: page, new: try Self.withoutRegion(page))
+        let findings = Self.check([file])
+        // The counts are equal, 0 and 0, and no region is left to compare.
+        #expect(findings.map(\.rule) == [.generatedRegionEdited])
+        let finding = try #require(findings.first)
+        #expect(finding.severity == .blocking)
+        // Where it was: the page's last line now.
+        #expect(finding.lines == LineRange(first: 152, last: 152))
+        #expect(finding.message == "The “Participates in” section was removed by hand. It is rebuilt from "
+            + "the reduction pages; restore it, and correct those instead.")
+
+        // Its lines were the hand's, so they count: 18 that are not blank.
+        let ingestion = Self.ingest([file])
+        #expect(Self.finding(.generatedRegionEdited, in: ingestion)?.severity == .blocking)
+        #expect(ingestion.filter { $0.rule == .ingestionScope }.map(\.message) == [
+            "This changes 18 lines of `pseudorandom-function.md` by hand. "
+                + "An ingestion normally changes at most five lines of an existing page.",
+        ])
+    }
+
+    @Test("a region the generator dropped, with relations.json regenerated, is a note")
+    func regionRemovedByTheScript() throws {
+        let page = try Self.fixture("pseudorandom-function.md")
+        let begin = try #require(page.range(of: Self.beginMarker))
+        // The region goes, and the blank lines it leaves collapse
+        // (generate-relations.mjs 330).
+        let dropped = String(page[..<begin.lowerBound].dropLast())
+        let files = [
+            Self.modified(old: page, new: dropped),
+            Self.modified(".reductions/relations.json", old: "{\n  \"edges\": [1]\n}\n", new: "{\n  \"edges\": []\n}\n"),
+        ]
+        for kind in [JobKind.Tag.edit, .ingestion] {
+            let findings = Self.check(files, kind: kind, target: kind == .edit ? Self.target : nil)
+            #expect(findings.map(\.rule) == [.regionRegenerated], "\(kind)")
+            #expect(findings.first?.severity == .note, "\(kind)")
+            #expect(findings.first?.message == "Removed by the script, not by hand: `relations.json` was regenerated too.")
+        }
+
+        // A deleted relations.json is no regeneration.
+        let deleted = Self.deleted(".reductions/relations.json", "{\n  \"edges\": [1]\n}\n")
+        let findings = Self.check([Self.modified(old: page, new: dropped), deleted])
+        #expect(Set(findings.filter { $0.severity == .blocking }.map(\.rule)) == [.generatedRegionEdited, .renamedOrDeleted])
     }
 
     @Test("an edit job with a regenerated relations.json and matching checksums has no blocking finding; a correction's gets relationsJSONByHand")
@@ -508,6 +601,27 @@ struct DiffGuardTests {
         #expect(Self.finding(.ingestionScope, in: regenerated) == nil)
     }
 
+    @Test("ingestionScope: pages given their first region by the script, blank line and all, are not hand changes")
+    func ingestionScopeFirstRegions() {
+        let owf = "---\ntype: primitive\nid: owf\n---\n\n# OWF\n\nA function.\n"
+        let prg = "---\ntype: primitive\nid: prg\n---\n\n# PRG\n\nA generator.\n"
+        // trimEnd() drops trailing blank lines too.
+        let crhf = "---\ntype: primitive\nid: crhf\n---\n\n# CRHF\n\nA hash function.\n\n\n"
+        let findings = Self.ingest([
+            Self.added("content/Reductions/owf-to-prg-hill99.md", Self.reduction),
+            Self.modified("content/Primitives/collision-resistant-hash.md", old: crhf, new: Self.withFirstRegion(crhf)),
+            Self.modified("content/Primitives/one-way-function.md", old: owf, new: Self.withFirstRegion(owf)),
+            Self.modified("content/Primitives/pseudorandom-generator.md", old: prg, new: Self.withFirstRegion(prg)),
+            Self.modified(".reductions/relations.json", old: "{}\n", new: "{\"edges\": 1}\n"),
+        ])
+        #expect(Self.finding(.ingestionScope, in: findings) == nil)
+        #expect(findings.map(\.rule) == [.regionRegenerated, .regionRegenerated, .regionRegenerated])
+
+        // A blank line is not a hand change in a correction either.
+        let spaced = Self.modified(old: Self.page, new: Self.page + (1...20).map { "Line \($0).\n\n" }.joined())
+        #expect(Self.finding(.largeEdit, in: Self.check([spaced])) == nil)
+    }
+
     // MARK: proseRelationBullet
 
     @Test("proseRelationBullet: an added bullet with two wikilinks under # Other results warns")
@@ -572,6 +686,12 @@ struct DiffGuardTests {
         #expect(stale("## Weak PRFs\n", "## Weakly pseudorandom functions\n"))
         #expect(stale("  weak-prf: \"#weak-prfs\"\n", ""))
         #expect(!stale("## Puncturable PRFs\n", "## Puncturable pseudorandom functions\n"))
+
+        // The variant's title is its heading's text: reworded under the same
+        // anchor, or given math, it changes (generate-relations.mjs 107–108).
+        #expect(stale("## Weak PRFs\n", "## Weak prfs\n"))
+        #expect(stale("## Weak PRFs\n", "## Weak $PRFs$\n"))
+        #expect(!stale("A **weak PRF** has the syntax of a PRF", "A **weak PRF** has the same syntax as a PRF"))
     }
 
     // MARK: humanVerified, statusComplete, changedUpstream

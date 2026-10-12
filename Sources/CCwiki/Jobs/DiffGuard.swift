@@ -75,12 +75,18 @@ enum DiffGuard {
     /// unique.
     static func check(_ snapshot: ReviewSnapshot, context: Context) -> [DiffFinding] {
         let files = snapshot.files.map { InspectedFile($0) }
+        // `relations.json` is part of the change, so the generator ran in
+        // this worktree: what it did to a page's region is its doing. (A
+        // correction's agent cannot run it; `relationsJSONByHand` asks.)
+        let relationsRegenerated = files.contains {
+            $0.file.path == relationsJSON && $0.file.status != .deleted
+        }
         var findings: [DiffFinding] = []
         for file in files {
             findings += pathFindings(file.file, context: context)
             findings += privateTextFindings(file, privatePaths: context.privatePaths)
             if file.isPage {
-                findings += regionFindings(file)
+                findings += regionFindings(file, relationsRegenerated: relationsRegenerated)
                 findings += relationFieldFindings(file)
                 findings += wikilinkMathFindings(file)
                 findings += proseBulletFindings(file)
@@ -88,8 +94,8 @@ enum DiffGuard {
                 findings += rawHTMLFindings(file)
             }
         }
-        findings += scopeFindings(files, context: context)
-        findings += derivedFilesFindings(files)
+        findings += scopeFindings(files, context: context, relationsRegenerated: relationsRegenerated)
+        if !relationsRegenerated { findings += derivedFilesFindings(files) }
         return ordered(findings)
     }
 
@@ -138,9 +144,20 @@ enum DiffGuard {
             found.append(finding(.renamedOrDeleted, file.path,
                 "Filenames under `content/` are live URLs. Restore the file."))
         }
+        // isPublishable lets it through, and no other rule reads a deletion
+        // outside content/.
+        if file.status == .deleted, file.path == relationsJSON {
+            found.append(finding(.renamedOrDeleted, file.path,
+                "`relations.json` is generated, and the site reads it. Restore the file."))
+        }
         if file.status != .deleted, file.isBinary || file.path.lowercased().hasSuffix(".pdf") {
-            found.append(finding(.binaryFile, file.path,
-                "PDFs and other binary files never enter the wiki."))
+            // A page or relations.json that git calls binary, or whose text
+            // the snapshot could not read (`ReviewSnapshot.assemble`).
+            let message = isPublishable(file.path)
+                ? "CCwiki could not read this file as UTF-8 text, so it checked nothing in it. "
+                    + "Revert it, or save it as UTF-8."
+                : "PDFs and other binary files never enter the wiki."
+            found.append(finding(.binaryFile, file.path, message))
         }
 
         if file.status == .added, file.isMarkdown,
@@ -203,10 +220,11 @@ enum DiffGuard {
 
     // MARK: - Generated regions (lint.mjs 1075–1109)
 
-    /// Unbalanced markers and hand-edited regions block; a region the script
-    /// rewrote is a note. A region already broken at the base, character for
-    /// character, is not this change's doing.
-    private static func regionFindings(_ file: InspectedFile) -> [DiffFinding] {
+    /// Unbalanced markers, and regions edited or removed by hand, block; a
+    /// region the script rewrote, or removed with `relations.json`
+    /// regenerated, is a note. A region already broken at the base,
+    /// character for character, is not this change's doing.
+    private static func regionFindings(_ file: InspectedFile, relationsRegenerated: Bool) -> [DiffFinding] {
         guard let new = file.new else { return [] }
         let regions = new.regions
         let before = file.old?.regions
@@ -238,6 +256,22 @@ enum DiffGuard {
                     (lint: `generated-region-edited`)
                     """
                 found.append(finding(.generatedRegionEdited, path, lines: lines, message))
+            }
+        }
+
+        // A region gone, markers and all, leaves the counts equal. The
+        // generator writes it back, so the wiki's `generate-relations.mjs
+        // --check` fails (its lines 320–336), unless the generator itself
+        // dropped it, from a page left with no relation.
+        if let removed = file.removedRegions.first {
+            let line = file.newLine(changingOld: removed.lines)
+            if relationsRegenerated {
+                found.append(finding(.regionRegenerated, path, line: line,
+                    "Removed by the script, not by hand: `relations.json` was regenerated too."))
+            } else {
+                found.append(finding(.generatedRegionEdited, path, line: line,
+                    "The “Participates in” section was removed by hand. It is rebuilt from the "
+                        + "reduction pages; restore it, and correct those instead."))
             }
         }
         return found
@@ -544,11 +578,16 @@ enum DiffGuard {
 
     /// A correction is a line or two; an ingestion adds pages and touches at
     /// most one existing page, by at most five lines (ingestion.md §4).
-    /// Lines inside generated regions are the script's, and do not count.
-    private static func scopeFindings(_ files: [InspectedFile], context: Context) -> [DiffFinding] {
+    /// Only the lines a hand changed count (`InspectedFile.isHandLine`).
+    private static func scopeFindings(
+        _ files: [InspectedFile], context: Context, relationsRegenerated: Bool
+    ) -> [DiffFinding] {
+        func handChanged(_ file: InspectedFile) -> Int {
+            handChangedLines(file, relationsRegenerated: relationsRegenerated)
+        }
         switch context.family {
         case .correction:
-            let counted = files.filter { $0.file.isMarkdown }.map { ($0, handChangedLines($0)) }
+            let counted = files.filter { $0.file.isMarkdown }.map { ($0, handChanged($0)) }
             let total = counted.reduce(0) { $0 + $1.1 }
             guard total > 20, let largest = counted.max(by: { $0.1 < $1.1 }) else { return [] }
             return [finding(.largeEdit, largest.0.file.path,
@@ -567,7 +606,7 @@ enum DiffGuard {
             }
             let touched = files
                 .filter { ($0.file.status == .modified || $0.file.status == .renamed) && $0.isPage }
-                .map { ($0, handChangedLines($0)) }
+                .map { ($0, handChanged($0)) }
                 .filter { $0.1 > 0 }
             if touched.count > 1 {
                 found.append(finding(.ingestionScope, touched[0].0.file.path,
@@ -576,7 +615,8 @@ enum DiffGuard {
             }
             for (file, count) in touched where count > 5 {
                 let name = (file.file.path as NSString).lastPathComponent
-                found.append(finding(.ingestionScope, file.file.path, line: firstHandChangedLine(file),
+                let line = firstHandChangedLine(file, relationsRegenerated: relationsRegenerated)
+                found.append(finding(.ingestionScope, file.file.path, line: line,
                     "This changes \(count) lines of `\(name)` by hand. An ingestion normally changes "
                         + "at most five lines of an existing page."))
             }
@@ -584,24 +624,27 @@ enum DiffGuard {
         }
     }
 
-    /// Per hunk, the larger side, less the lines inside generated regions.
-    private static func handChangedLines(_ file: InspectedFile) -> Int {
+    /// Per hunk, the larger side, counting the lines a hand changed.
+    private static func handChangedLines(_ file: InspectedFile, relationsRegenerated: Bool) -> Int {
         file.file.hunks.reduce(0) { (total: Int, hunk: LineHunk) -> Int in
-            let removed = hunk.old.filter { !(file.old?.regions.contains(line: $0) ?? false) }.count
-            let added = hunk.new.filter { !(file.new?.regions.contains(line: $0) ?? false) }.count
+            let removed = hunk.old.filter {
+                file.isHandLine(old: $0, relationsRegenerated: relationsRegenerated)
+            }.count
+            let added = hunk.new.filter { file.isHandLine(new: $0) }.count
             return total + max(removed, added)
         }
     }
 
     /// The new text's line where the first hand change is, for a finding
     /// that would otherwise share its id with the file's other one.
-    private static func firstHandChangedLine(_ file: InspectedFile) -> Int {
-        let lineCount = file.new?.lines.count ?? 0
+    private static func firstHandChangedLine(_ file: InspectedFile, relationsRegenerated: Bool) -> Int {
+        let lastLine = max(0, (file.new?.lines.count ?? 0) - 1)
         for hunk in file.file.hunks {
-            if let line = hunk.new.first(where: { !(file.new?.regions.contains(line: $0) ?? false) }) {
-                return line
+            if let line = hunk.new.first(where: { file.isHandLine(new: $0) }) { return line }
+            let removesHandLines = hunk.old.contains {
+                file.isHandLine(old: $0, relationsRegenerated: relationsRegenerated)
             }
-            if hunk.new.isEmpty { return max(0, min(hunk.new.lowerBound, lineCount - 1)) }
+            if removesHandLines { return min(hunk.new.lowerBound, lastLine) }
         }
         return 0
     }
@@ -617,13 +660,11 @@ enum DiffGuard {
         branch after the pull request is open.
         """
 
-    /// Without a regenerated `relations.json`, the change touches what the
-    /// generator reads: a reduction or barrier page's frontmatter, an object
-    /// page's identity, or a heading a `variants` anchor names.
+    /// Called without a regenerated `relations.json`: the change touches
+    /// what the generator reads, a reduction or barrier page's frontmatter,
+    /// an object page's identity, or a heading a `variants` anchor names.
     private static func derivedFilesFindings(_ files: [InspectedFile]) -> [DiffFinding] {
-        guard !files.contains(where: { $0.file.path == relationsJSON || $0.file.oldPath == relationsJSON })
-        else { return [] }
-        return files
+        files
             .filter { $0.file.isMarkdown && $0.file.path.hasPrefix(contentPrefix) && staleDerivedFiles($0) }
             .map { finding(.derivedFilesStale, $0.file.path, derivedFilesMessage) }
     }
@@ -646,11 +687,16 @@ enum DiffGuard {
         guard isObject else { return false }
         if identityFields.contains(where: { old?.field($0) != new?.field($0) }) { return true }
 
+        // A variant is titled by the heading its anchor names, with its math
+        // kept (generate-relations.mjs 101–108, 137), and other pages'
+        // "(via …)" lines show that title. So a heading reworded under the
+        // same anchor counts, as does one gained or lost. Headings compare
+        // as written, so a change to their math counts too.
         let anchors = Set((old?.variantAnchors ?? []) + (new?.variantAnchors ?? []))
         guard !anchors.isEmpty else { return false }
-        let oldIDs = old?.headingIDs(path: file.file.path) ?? []
-        let newIDs = new?.headingIDs(path: file.file.path) ?? []
-        return anchors.contains { oldIDs.contains($0) != newIDs.contains($0) }
+        let oldHeadings = old?.headingsByAnchor() ?? [:]
+        let newHeadings = new?.headingsByAnchor() ?? [:]
+        return anchors.contains { oldHeadings[$0] != newHeadings[$0] }
     }
 
     // MARK: - Helpers
@@ -725,6 +771,10 @@ private struct InspectedFile {
     let added: [Int]
     /// A Markdown page of the wiki: the rules about pages apply.
     let isPage: Bool
+    /// The old text's generated regions the new one no longer has, when it
+    /// has fewer: each region of the new text accounts for one of the old
+    /// with the same text, so a duplicate dropped counts.
+    let removedRegions: [GeneratedRegions.Region]
 
     init(_ file: ChangedFile) {
         self.file = file
@@ -735,12 +785,50 @@ private struct InspectedFile {
         let lineCount = new?.lines.count ?? 0
         self.added = file.hunks.flatMap { Array($0.new) }.filter { $0 < lineCount }
         self.isPage = file.isMarkdown && file.path.hasPrefix("content/") && !file.isBinary
+
+        var removed: [GeneratedRegions.Region] = []
+        if let before = old?.regions.regions, let after = new?.regions.regions, after.count < before.count {
+            var unmatched = after.map(\.text)
+            for region in before {
+                if let match = unmatched.firstIndex(of: region.text) {
+                    unmatched.remove(at: match)
+                } else {
+                    removed.append(region)
+                }
+            }
+        }
+        self.removedRegions = removed
+    }
+
+    /// A line of the new text that a hand changed: not blank, and not in a
+    /// generated region. The generator writes the blank line before a
+    /// region it adds to a page, and drops it with a region it removes
+    /// (generate-relations.mjs 329–330).
+    func isHandLine(new index: Int) -> Bool {
+        guard let text = new, text.lines.indices.contains(index) else { return true }
+        return !text.lines[index].allSatisfy(\.isWhitespace) && !text.regions.contains(line: index)
+    }
+
+    /// A line of the old text that a hand changed: not blank, and not in a
+    /// generated region, unless that region is gone without the generator.
+    func isHandLine(old index: Int, relationsRegenerated: Bool) -> Bool {
+        guard let text = old, text.lines.indices.contains(index) else { return true }
+        guard !text.lines[index].allSatisfy(\.isWhitespace) else { return false }
+        guard text.regions.contains(line: index) else { return true }
+        return !relationsRegenerated && removedRegions.contains { $0.lines.contains(index) }
+    }
+
+    /// Where the change to these old lines is in the new text: the start of
+    /// the hunk that changed them, or of the first, within the new text.
+    func newLine(changingOld lines: ClosedRange<Int>) -> Int {
+        let hunk = file.hunks.first(where: { $0.old.overlaps(lines) }) ?? file.hunks.first
+        let lastLine = max(0, (new?.lines.count ?? 0) - 1)
+        return min(hunk?.new.lowerBound ?? 0, lastLine)
     }
 }
 
 /// One side of a file.
 private struct InspectedText {
-    let text: String
     /// Without their line endings, numbered as `LineDiff` numbers them.
     let lines: [Substring]
     let frontmatter: Frontmatter
@@ -769,7 +857,6 @@ private struct InspectedText {
         let bodyStartLine = close.map { $0 + 1 } ?? 0
         let body = String(text[frontmatter.bodyStart...])
 
-        self.text = text
         self.lines = lines
         self.frontmatter = frontmatter
         self.frontmatterLines = close.map { 1..<$0 } ?? 0..<0
@@ -811,9 +898,29 @@ private struct InspectedText {
         }
     }
 
-    /// The heading anchors the site gives this text.
-    func headingIDs(path: String) -> Set<String> {
-        Set(WikiPage(path: path, text: text).headings().map(\.id))
+    /// Each heading's text as written, by the anchor the site gives it: the
+    /// headings `WikiPage.headings()` finds, and the first of any repeated
+    /// anchor, as the generator's `headingsByAnchor` keeps it.
+    func headingsByAnchor() -> [String: String] {
+        var slugger = GithubSlugger()
+        var headings: [String: String] = [:]
+        let inert = CodeMask.inertRanges(in: body)
+
+        var lineStart = body.startIndex
+        while lineStart < body.endIndex {
+            let lineEnd = body[lineStart...].firstIndex(of: "\n") ?? body.endIndex
+            defer {
+                lineStart = lineEnd < body.endIndex ? body.index(after: lineEnd) : body.endIndex
+            }
+            guard let heading = WikiPage.atxHeading(body[lineStart..<lineEnd]),
+                  !inert.contains(where: { $0.contains(lineStart) })
+            else { continue }
+            let plain = WikiPage.Heading.plainText(heading.text)
+            guard !plain.isEmpty else { continue }
+            let id = slugger.slug(plain)
+            if headings[id] == nil { headings[id] = heading.text }
+        }
+        return headings
     }
 }
 

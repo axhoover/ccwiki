@@ -107,11 +107,39 @@ struct PullRequestDraft: Codable, Sendable, Equatable {
 
     /// The body as sent: the edited body, then the footer with
     /// "ccwiki-job: <id>". A blank line always separates the two, so the
-    /// rule can never turn the body's last line into a heading.
+    /// rule can never turn the body's last line into a heading, and a block
+    /// the body leaves open is closed first (`closingOpenBlock`), so the
+    /// footer is never shown as code, nor hidden.
     func bodyForGitHub(jobID: String, provenance: Provenance) -> String {
         let footer = Self.footer(provenance, marker: "ccwiki-job: \(jobID)")
-        let text = Self.trimmedBlankLines(body)
+        let text = Self.closingOpenBlock(Self.trimmedBlankLines(body))
         return text.isEmpty ? footer : text + "\n\n" + footer
+    }
+
+    /// `markdown`, with a closing line added when it ends inside a block
+    /// that CommonMark runs to the end of the document: a fenced code block,
+    /// or an HTML block of the kinds that a blank line does not end
+    /// (`<pre>`, `<script>`, `<style>` or `<textarea>`; `<!--`; `<?`;
+    /// `<!` and a letter; `<![CDATA[`). Anything appended would otherwise
+    /// render inside it, as code or not at all. The body is often an
+    /// agent's, and an ingestion's agent reads untrusted papers.
+    ///
+    /// The closing line takes the opening line's indent, so a block opened
+    /// inside a list item closes there.
+    static func closingOpenBlock(_ markdown: String) -> String {
+        var unclosed: OpenBlock?
+        let lines = markdown.split(omittingEmptySubsequences: false) {
+            $0 == "\n" || $0 == "\r\n" || $0 == "\r"
+        }
+        for line in lines {
+            if let block = unclosed {
+                if block.isEnded(by: line) { unclosed = nil }
+            } else {
+                unclosed = OpenBlock(opening: line)
+            }
+        }
+        guard let block = unclosed else { return markdown }
+        return markdown + "\n" + block.closingLine
     }
 
     // MARK: The parts
@@ -204,5 +232,89 @@ struct PullRequestDraft: Codable, Sendable, Equatable {
         guard !lines.isEmpty else { return "" }
         lines[lines.count - 1] = Substring(String(lines[lines.count - 1]).trimmedTrailing)
         return lines.joined(separator: "\n")
+    }
+}
+
+/// A block that runs to the end of a Markdown document unless a line ends
+/// it, as CommonMark reads one at the top level: a fence, or an HTML block
+/// of kinds 1 to 5. Its opening line has at most three spaces of indent;
+/// more makes it indented code.
+private enum OpenBlock {
+    /// The fence's character, the length of its run, and its indent.
+    case fence(marker: Character, length: Int, indent: Int)
+    /// A line containing any of `ends` ends it; the first closes it.
+    case html(ends: [String], indent: Int)
+
+    /// The tags whose HTML block (kind 1) a blank line does not end. Any of
+    /// their closing tags ends any of them.
+    private static let rawTags = ["pre", "script", "style", "textarea"]
+
+    /// The block `line` opens and leaves open, if any.
+    init?(opening line: Substring) {
+        let indent = line.prefix { $0 == " " }.count
+        guard indent <= 3 else { return nil }
+        let rest = line.dropFirst(indent)
+
+        if let marker = rest.first, marker == "`" || marker == "~" {
+            let length = rest.prefix { $0 == marker }.count
+            // A backtick fence's info string holds no backtick: "```a```" is
+            // inline code.
+            guard length >= 3, marker == "~" || !rest.dropFirst(length).contains("`") else { return nil }
+            self = .fence(marker: marker, length: length, indent: indent)
+            return
+        }
+
+        let ends: [String]
+        let lowercased = rest.lowercased()
+        if let tag = Self.rawTags.first(where: { Self.opens(lowercased, tag: $0) }) {
+            ends = ["</\(tag)>"] + Self.rawTags.filter { $0 != tag }.map { "</\($0)>" }
+        } else if rest.hasPrefix("<!--") {
+            ends = ["-->"]
+        } else if rest.hasPrefix("<?") {
+            ends = ["?>"]
+        } else if rest.hasPrefix("<![CDATA[") {
+            ends = ["]]>"]
+        } else if rest.hasPrefix("<!"), let letter = rest.dropFirst(2).first, letter.isASCII, letter.isLetter {
+            ends = [">"]
+        } else {
+            return nil
+        }
+        // The opening line can end its own block: `<!-- a note -->`.
+        guard !ends.contains(where: { lowercased.contains($0) }) else { return nil }
+        self = .html(ends: ends, indent: indent)
+    }
+
+    /// Whether `line` ends the block: a fence of the same character, at
+    /// least as long, with only spaces or tabs after it; or, for HTML, a
+    /// line containing an end.
+    func isEnded(by line: Substring) -> Bool {
+        switch self {
+        case .fence(let marker, let length, _):
+            let indent = line.prefix { $0 == " " }.count
+            let rest = line.dropFirst(indent)
+            let run = rest.prefix { $0 == marker }.count
+            return indent <= 3 && run >= length && rest.dropFirst(run).allSatisfy { $0 == " " || $0 == "\t" }
+        case .html(let ends, _):
+            let lowercased = line.lowercased()
+            return ends.contains { lowercased.contains($0) }
+        }
+    }
+
+    /// The line that ends the block, at its opening line's indent.
+    var closingLine: String {
+        switch self {
+        case .fence(let marker, let length, let indent):
+            String(repeating: " ", count: indent) + String(repeating: marker, count: length)
+        case .html(let ends, let indent):
+            String(repeating: " ", count: indent) + (ends.first ?? "")
+        }
+    }
+
+    /// `<tag` at the start of a lowercased line, then a space, a tab, `>`
+    /// or the end of the line.
+    private static func opens(_ lowercased: String, tag: String) -> Bool {
+        guard lowercased.hasPrefix("<" + tag) else { return false }
+        let next = lowercased.dropFirst(tag.count + 1).first
+        return next == nil || next == " " || next == "\t" || next == ">"
     }
 }

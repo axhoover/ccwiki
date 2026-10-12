@@ -136,6 +136,40 @@ struct GitNameStatusTests {
         }
     }
 
+    @Test("a text the snapshot could not read fails closed: a binary, never a file emptied")
+    func unreadableText() throws {
+        let entries: [GitNameStatus.Entry] = [
+            .init(status: .modified, path: "content/Primitives/a.md", oldPath: nil),
+            .init(status: .added, path: "content/Primitives/b.md", oldPath: nil),
+            .init(status: .renamed, path: "content/Primitives/c.md", oldPath: "content/Primitives/old c.md"),
+            .init(status: .deleted, path: "content/Primitives/d.md", oldPath: nil),
+        ]
+        // a.md's new text is missing (not UTF-8, say), and so is the old
+        // text of c.md, by its path at the base.
+        let snapshot = ReviewSnapshot.assemble(
+            base: "4b825dc", entries: entries, binary: [], patch: Data("diff".utf8),
+            oldTexts: ["content/Primitives/a.md": "line one\n", "content/Primitives/d.md": "gone\n"],
+            newTexts: ["content/Primitives/b.md": "new\n", "content/Primitives/c.md": "moved\n"])
+        let files = Dictionary(uniqueKeysWithValues: snapshot.files.map { ($0.path, $0) })
+
+        for path in ["content/Primitives/a.md", "content/Primitives/c.md"] {
+            let file = try #require(files[path])
+            #expect(file.isBinary && file.oldText == nil && file.newText == nil && file.hunks.isEmpty, "\(path)")
+        }
+        // A side that has no text to read is not missing: an added file's
+        // old side, a deleted file's new one.
+        #expect(files["content/Primitives/b.md"]?.isBinary == false)
+        #expect(files["content/Primitives/d.md"]?.isBinary == false)
+
+        // DiffGuard blocks what no rule could read.
+        let context = DiffGuard.Context(
+            kind: .edit, humanVerifiedPaths: [], changedUpstream: [], target: nil, privatePaths: [])
+        let unread = DiffGuard.check(snapshot, context: context)
+            .filter { $0.rule == .binaryFile }
+        #expect(unread.map(\.path) == ["content/Primitives/a.md", "content/Primitives/c.md"])
+        #expect(unread.allSatisfy { $0.severity == .blocking && $0.message.hasPrefix("CCwiki could not read") })
+    }
+
     @Test("an empty change is an empty snapshot, digested all the same")
     func emptySnapshot() {
         let snapshot = ReviewSnapshot.assemble(

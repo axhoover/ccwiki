@@ -23,16 +23,21 @@ struct ReviewSnapshot: Sendable, Equatable {
     ///   index, by the new path. Both decoded only after they were read as
     ///   bytes.
     ///
-    /// A binary file carries no text and no hunks. A side the map lacks is
-    /// diffed as empty, so a file that could not be read shows all of its
-    /// lines, never none.
+    /// A binary file carries no text and no hunks. So does a file with a
+    /// side that should have text and is missing from its map, because
+    /// `git show` failed or its bytes are not UTF-8: it fails closed, as a
+    /// binary, which DiffGuard blocks. Diffed against nothing, it would show
+    /// as emptied, and no rule would read the bytes the patch carries.
     static func assemble(
         base: String, entries: [GitNameStatus.Entry], binary: Set<String>,
         patch: Data, oldTexts: [String: String], newTexts: [String: String]
     ) -> ReviewSnapshot {
         let files = entries.map { entry -> ChangedFile in
+            let unreadableOld = entry.status != .added && oldTexts[entry.oldPath ?? entry.path] == nil
+            let unreadableNew = entry.status != .deleted && newTexts[entry.path] == nil
             let isBinary = binary.contains(entry.path)
                 || (entry.oldPath.map { binary.contains($0) } ?? false)
+                || unreadableOld || unreadableNew
             let oldText = isBinary || entry.status == .added
                 ? nil : oldTexts[entry.oldPath ?? entry.path]
             let newText = isBinary || entry.status == .deleted

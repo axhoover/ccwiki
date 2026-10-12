@@ -178,4 +178,41 @@ struct PullRequestDraftTests {
         #expect(empty.bodyForGitHub(jobID: "job-1", provenance: Self.release)
             == PullRequestDraft.footer(Self.release, marker: "ccwiki-job: job-1"))
     }
+
+    static func sent(_ body: String) -> String {
+        PullRequestDraft(title: "t", body: body).bodyForGitHub(jobID: "job-1", provenance: Self.release)
+    }
+
+    static var jobFooter: String { PullRequestDraft.footer(Self.release, marker: "ccwiki-job: job-1") }
+
+    @Test("a body that ends inside a comment, a fence or a raw HTML block is closed before the footer")
+    func bodyLeftOpen() {
+        let footer = Self.jobFooter
+        // Hidden: GitHub runs a comment to the end of the document.
+        #expect(Self.sent("Why.\n\n<!-- note") == "Why.\n\n<!-- note\n-->\n\n" + footer)
+        // Shown as code, the marker included.
+        #expect(Self.sent("Why.\n\n```\ncode") == "Why.\n\n```\ncode\n```\n\n" + footer)
+        // A shorter run does not close a fence; the closing line matches it.
+        #expect(Self.sent("~~~~ swift\nlet x = 1\n~~~") == "~~~~ swift\nlet x = 1\n~~~\n~~~~\n\n" + footer)
+        // Inside a list item, at the item's indent.
+        #expect(Self.sent("- A list:\n\n  ```\n  code") == "- A list:\n\n  ```\n  code\n  ```\n\n" + footer)
+        #expect(Self.sent("<pre>\nkept") == "<pre>\nkept\n</pre>\n\n" + footer)
+        #expect(Self.sent("<?php echo 1;") == "<?php echo 1;\n?>\n\n" + footer)
+    }
+
+    @Test("a body whose blocks are all closed is sent as it is")
+    func bodyClosed() {
+        for body in [
+            "Why.\n\n<!-- a note -->",
+            "A `<!--` in code, and an inline <!-- that a blank line ends",
+            "```\ncode\n```",
+            "~~~\n```\n~~~",
+            "```a``` is inline code",
+            "    ```\n    indented code",
+            "<pre>x</pre>",
+            "<!DOCTYPE html>",
+        ] {
+            #expect(Self.sent(body) == body + "\n\n" + Self.jobFooter, "\(body)")
+        }
+    }
 }

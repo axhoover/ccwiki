@@ -69,6 +69,36 @@ struct LineDiffTests {
         #expect(LineDiff.hunks(old: "caf\u{E9}\n", new: "cafe\u{301}\n") == [LineHunk(old: 0..<1, new: 0..<1)])
     }
 
+    /// `relations.json`'s length, one distinct line each.
+    static func long(indent: String = "  ") -> [String] {
+        (1...11_432).map { "\(indent)\"line\": \($0),\n" }
+    }
+
+    @Test("a long file added or deleted whole is one hunk, without a difference computed")
+    func wholeFiles() {
+        let text = Self.long().joined()
+        #expect(LineDiff.hunks(old: text, new: "") == [LineHunk(old: 0..<11_432, new: 0..<0)])
+        #expect(LineDiff.hunks(old: "", new: text) == [LineHunk(old: 0..<0, new: 0..<11_432)])
+        // A run inserted into the middle, too.
+        let inserted = Self.numbered { $0.insert(contentsOf: ["a", "b", "c"], at: 4) }
+        #expect(LineDiff.hunks(old: Self.numbered(), new: inserted) == [LineHunk(old: 4..<4, new: 4..<7)])
+    }
+
+    @Test("a rewrite of every line of a long file is one hunk; two changes far apart in it stay two")
+    func largeDifferences() {
+        let old = Self.long()
+        #expect(LineDiff.hunks(old: old.joined(), new: Self.long(indent: "    ").joined())
+            == [LineHunk(old: 0..<11_432, new: 0..<11_432)])
+
+        var new = old
+        new[10] = "changed\n"
+        new[11_000] = "changed\n"
+        #expect(LineDiff.hunks(old: old.joined(), new: new.joined()) == [
+            LineHunk(old: 10..<11, new: 10..<11),
+            LineHunk(old: 11_000..<11_001, new: 11_000..<11_001),
+        ])
+    }
+
     @Test("a line is split at each line feed, which it keeps; a CRLF line is one line")
     func lines() {
         #expect(LineDiff.lines(of: "").isEmpty)
