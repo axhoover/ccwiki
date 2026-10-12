@@ -60,13 +60,6 @@ struct IncrementalCorpusTests {
         return sorted.isEmpty ? .zero : sorted[sorted.count / 2]
     }
 
-    static func describe(_ report: SyncReport) -> String {
-        report.rebuiltFromScratch
-            ? "rebuilt, \(report.inserted) rows"
-            : "\(report.inserted) inserted, \(report.updated) updated, \(report.deleted) deleted, "
-                + "\(report.unchanged) unchanged"
-    }
-
     // MARK: Edits, to the copy only
 
     /// A body edit to the first primitive page.
@@ -191,6 +184,7 @@ struct IncrementalCorpusTests {
         let searchIndex = SearchIndex(path: clone.appending(path: "search.sqlite3"))
         let clock = ContinuousClock()
         var searchLines: [String] = []
+        var reports: [SyncReport] = []
         for (name, library) in [("in full", original), ("as a no-op", original),
                                 ("after \(edited) changed", afterEdit)] {
             let start = clock.now
@@ -198,9 +192,12 @@ struct IncrementalCorpusTests {
                 pages: library.index.allPages, backlinks: library.backlinks,
                 fingerprints: library.fingerprints, builder: "IncrementalCorpusTests")
             let duration = start.duration(to: clock.now)
-            searchLines.append("\(name) \(LoadTimings.format(duration)) (\(Self.describe(report)))")
+            searchLines.append("\(name) \(LoadTimings.format(duration)) (\(report.summary))")
+            reports.append(report)
         }
         lines.append("search sync: " + searchLines.joined(separator: "; "))
+        #expect(reports.map(\.rebuiltFromScratch) == [true, false, false])
+        #expect(reports.map(\.writes) == [original.index.pages.count, 0, 1])
 
         print("Incremental indexing on the real wiki (plans/reader-comforts.md §3.8):\n"
             + lines.map { "  " + $0 }.joined(separator: "\n"))
