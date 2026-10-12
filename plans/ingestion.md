@@ -35,8 +35,9 @@ cd worktrees/<job-id>
 git submodule update --init --depth 1 --recursive     # cryptobib is a submodule
 claude -p "<composed prompt>"                         # sealed (§7)
 # …agent works, lints, leaves its change and .ccwiki/pull-request.md…
-# → Awaiting review in Jobs. Approve commits, pushes and opens the draft PR,
-#   then removes the worktree (plans/corrections.md §6.5).
+# → the snapshot (§9, "The review"): Awaiting review in Jobs.
+# → Approve: commit on the base, push with a lease, gh pr create --draft,
+#   then the worktree and the local branch go (plans/corrections.md §6.5).
 ```
 
 The base is a SHA, never `origin/main`: a sync during review would otherwise
@@ -77,6 +78,13 @@ prompt so the agent does not repeat the work:
 - Are `git`, `gh`, `claude` and `node` all resolvable? (`ToolLocator`.)
 
 ## 4. Post-flight: the diff ceiling
+
+> **Built 0.3 as `DiffGuard`** ([corrections.md](corrections.md) §6.2): an
+> allow-list of what may leave (`.md` under `content/`, and
+> `.reductions/relations.json`), nineteen rules in three severities, and
+> `ingestionScope` for the ceiling below. The review in Jobs shows its
+> findings above the diff; a blocking one keeps Open Draft PR disabled, and
+> Approve checks again. The list below is the reasoning it was built from.
 
 The observed **number one real failure is picking the wrong host page** — a
 previous run put a secret-key PIR result on `doubly-efficient-pir` and a human
@@ -153,9 +161,32 @@ Conflating these is the most likely metadata error:
 anything. It leaves its change in the worktree and the pull request's text in
 `.ccwiki/pull-request.md` (first line `# <title>`, then the body, from the
 contract's template), prints `READY FOR REVIEW`, and the job waits in Jobs,
-"Awaiting review". Only Approve commits, pushes and opens the pull request:
-`gh pr create --draft`, always. Never ready-for-review, never merged, never
-approved. Nothing in `.ccwiki/` is ever staged.
+"Awaiting review". Only Approve commits, pushes and opens the pull request,
+through `Publisher`: `gh pr create --draft`, always. Never ready-for-review,
+never merged, never set to merge itself, never approved. Nothing in
+`.ccwiki/` is ever staged. Nothing on GitHub is ever deleted: Discard removes
+the worktree and the local branch, and leaves a pushed branch and an open
+pull request where they are.
+
+**Approve sends only what was reviewed.** It saves every editor of the job,
+waits for the job's git queue, and snapshots again: if the staged patch's
+SHA-256 differs from the one on screen, nothing is sent and the new diff is
+shown. Then DiffGuard, the title and body (`PrivateText`), git's identity and
+GitHub (`GitHubAccess`) are checked, in that order, before anything leaves.
+The commit is `git reset --soft <base>` and `git commit --no-verify`, so
+whatever the agent committed collapses into one commit and no hook rewrites a
+reviewed file.
+
+**No pull request twice, no branch overwritten.** The commit being pushed is
+recorded before the push is sent, and the push leases on the last one GitHub
+confirmed, or on absence before the first. A refused lease asks GitHub where
+the branch is: a commit CCwiki pushed (it is in the branch's reflog) is
+adopted and pushed over; a branch someone else made is left alone and the job
+takes the next free name; commits someone else added after CCwiki's are never
+overwritten. Before opening a pull request, CCwiki asks for an open one from
+the branch and updates it instead. A publish a quit interrupts goes back to
+review, and every outcome but an open pull request returns the job to review
+with a notice saying what was, and was not, sent.
 
 `prompts/ingest.md` says so in one sentence that overrides the contract on one
 topic: **the contract decides what the change is; this envelope decides how it
@@ -190,14 +221,23 @@ eprint/arXiv/DOI.
 
 ```
 Sources/CCwiki/Jobs/
-├── IngestSubmission.swift   the input: a recognized URL or a staged PDF
-├── Preflight.swift          what CCwiki checks before the agent starts; GitHubAccess
-├── PromptComposer.swift     fills prompts/ingest.md and prompts/correct.md — and nothing else
-├── AgentInvocation.swift    claude's arguments and the sealed environment; the hand-over file
-├── Tripwire.swift           a push or a PR CCwiki did not make, looked for afterwards
-├── ClaudeStream.swift       stream-json → a readable transcript + the outcome
-├── Job.swift                @Observable state machine, transcript, log file, record
-└── IngestJobRunner.swift    base → worktree → submodules → claude (sealed) → tripwire → review
+├── IngestSubmission.swift     the input: a recognized URL or a staged PDF
+├── Preflight.swift            what CCwiki checks before the agent starts; GitHubAccess
+├── PromptComposer.swift       fills prompts/ingest.md and prompts/correct.md — and nothing else
+├── AgentInvocation.swift      claude's arguments, the sealed environment, the hand-over file,
+│                              and AgentRun: worktree → claude → tripwire → outcome → hand-over
+├── Tripwire.swift             a push or a PR CCwiki did not make, looked for afterwards
+├── ClaudeStream.swift         stream-json → a readable transcript + the outcome
+├── Job.swift                  @Observable state machine, transcript (replayed after a relaunch),
+│                              log file, record
+├── IngestJobRunner.swift      pre-flight → base → worktree → submodules → prompt → AgentRun
+├── CorrectionJobRunner.swift  a described correction: base → worktree → prompt → AgentRun
+├── ReviewSnapshotter.swift    the staged diff as bytes, the patch backup, DiffGuard's context
+├── Publisher.swift            Approve: check → commit → push with a lease → draft PR
+└── GitService.swift           every git command, the review's included
+Sources/CCwiki/App/
+└── JobCenter.swift            every job: one git queue each, the review, Approve, Discard,
+                               Restore, GitHub access, the Dock badge
 ```
 
 ### Driving `claude`
@@ -247,6 +287,38 @@ you cannot debug. On launch, `orphanedWorktrees` reconciles what git knows
 against the jobs the app knows about and offers to prune the residue of a
 crash; a job awaiting review owns its worktree and is never offered.
 
+### The review
+
+A job enters review with a **snapshot** (`ReviewSnapshotter`, corrections.md
+§6.1): everything in the worktree but `.ccwiki/` is staged, and git is asked,
+as bytes, for the name-status, the binary files, the patch and each changed
+file's old and new text (the new from the index, so what is shown is exactly
+what was digested). The patch is written to `logs/<id>.patch`, beside the
+transcript and outside Caches, at every snapshot: a worktree deleted with
+Caches comes back with Restore, which makes it again at the base and applies
+the patch. A snapshot is taken as a job enters review, when it is first
+shown, a second after an editor saves, after Revert File and Restore, and at
+Approve; only for a job awaiting review.
+
+**One git queue per job.** `JobCenter` runs every git command for a job's
+worktree through one serial chain, so two `git add -A` never meet on
+`index.lock`. A refresh asked for while another waits joins it; one asked for
+while another runs waits for a single follow-up. Approve, Revert File,
+Restore and Discard wait their turn, and every editor of the job is saved
+first.
+
+**What survives a relaunch** is the record (state, base, branch, pull request
+as edited, what was pushed or being pushed, the last notice), the worktree,
+the patch and the transcript. CCwiki's own transcript lines are written to
+the log file as JSON of their own type, beside the agent's stream, so the
+first time a restored job is shown its transcript is replayed through
+`ClaudeStreamParser` with every line in its place. A review comes back as a
+review; a publish a crash interrupted comes back as a review too, and asks
+GitHub before it does anything twice.
+
+**The Dock badge** counts the jobs awaiting review, less edits nobody has
+touched, and goes when there are none, as Mail's does.
+
 ### Two dev affordances worth keeping
 
 - `CCWIKI_INGEST_DRY_RUN=1` stops after composing the prompt and writes it
@@ -255,3 +327,7 @@ crash; a job awaiting review owns its worktree and is never offered.
 - `make shots PLAN='ingest:<url>'` submits a real job and blocks until it
   awaits review or reaches a terminal state, reporting progress to stderr. The
   same harness that gates the reader gates this.
+- `CCWIKI_PUBLISH_DRY_RUN=1` makes Approve stop after committing locally,
+  log the push and `gh` commands it would have run, and return the job to
+  review: everything but GitHub, in either channel.
+  `CCWIKI_CORRECTION_MAX_TURNS` overrides a correction's twenty turns.
