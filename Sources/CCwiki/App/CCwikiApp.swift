@@ -126,6 +126,7 @@ struct CCwikiCommands: Commands {
     @FocusedValue(\.appModel) private var model
     @FocusedValue(\.findAction) private var findAction
     @FocusedValue(\.searchAction) private var searchAction
+    @FocusedValue(\.proofCopyAction) private var proofCopyAction
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -187,6 +188,12 @@ struct CCwikiCommands: Commands {
             Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
+        }
+
+        // Copy Proof As ▸ Text, LaTeX (⌥⌘C), Wiki Markdown (⌥⇧⌘C): the
+        // Relations Explorer's proof, so disabled in every other window.
+        CommandGroup(after: .pasteboard) {
+            ProofCopyCommandItems(action: proofCopyAction)
         }
 
         CommandGroup(after: .textEditing) {

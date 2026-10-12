@@ -167,6 +167,14 @@ struct DerivedRelationsSections: View {
             Button("Open “\(row.label)”") { model.openRelationObject(row.link.objectID) }
             Divider()
             Button("Copy Statement") { model.copyToPasteboard(row.statement) }
+            // The proof is computed on click, so nothing knows here whether
+            // it cites an inline BibTeX entry: no BibTeX item, and Show
+            // Proof is one click away.
+            if let target = row.query.to {
+                ProofCopyMenu { format in
+                    model.copyDerivedProof(from: row.query.from, to: target, as: format)
+                }
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accessibilityLabel)

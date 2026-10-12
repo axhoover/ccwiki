@@ -295,14 +295,18 @@ answer is "*PKE* is one of your premises", with no proof and no footer.
   gives double-click and Return, and `.copyable` makes ⌘C copy the selected
   rows' statements.
 - **Context menu:** Open Reduction ("CS03: KEM + SKE ⇒ PKE"), Open *object*,
-  Explore From Here…, Copy Statement, Copy Proof as Text.
+  Explore From Here…, Copy Statement, then the submenu **Copy Proof As ▸
+  Text, LaTeX, Wiki Markdown**, and **Copy BibTeX of Cited Works** only when
+  a cited work has an inline entry (hidden, not dimmed, otherwise). The
+  forms are [relations-followups.md](relations-followups.md) §3; the Edit
+  menu has the same submenu and item, with ⌥⌘C and ⌥⇧⌘C (§2.9).
 - **Tooltip:** the reduction's statement, then its rationale, from
   `RelationFormatting.help(for:)`. That is the inspector's tooltip, lifted
   into `Wiki/` in Phase 0, so the two cannot drift.
 - **Stub steps** (toggle on only, R3) add a footnote row after the tree, in
   `.secondary`: "1 step is a stub: its class and model are not evidence."
 
-**Copy Proof as Text** is the outline, indented two spaces per level, one step
+**Copy Proof As ▸ Text** is the outline, indented two spaces per level, one step
 per line with `[source; class; model]`. It is headed by the statement and
 "Derived by CCwiki from N recorded reductions (relations.json at
 `<headRevision prefix>`)". The commit makes a pasted proof reproducible.
@@ -439,6 +443,8 @@ records. Something missing here is not evidence that it does not follow."
 | ↑ ↓ → ← | results | move; expand and collapse (native outline) |
 | Return, double-click | results | the row's primary action (§2.6) |
 | ⌘C | results | Copy Statement of the selected rows |
+| ⌥⌘C | results | Copy Proof As ▸ LaTeX (Edit menu): the selected rows' proof when they share one, otherwise the answer's ([relations-followups.md](relations-followups.md) §3.1) |
+| ⌥⇧⌘C | results | Copy Proof As ▸ Wiki Markdown (Edit menu), likewise |
 
 The footer of the suggestion area shows the keycaps, as both palettes do
 (`SWIFTUI-RULES` §8.6): "↩ add · ⇥ next field · esc dismiss".
@@ -477,6 +483,7 @@ none, and its toolbar buttons only name them in tooltips):
 | ⌥⌘I | Toggle Inspector | 122 |
 | ⌥⌘1, ⌥⌘2, ⌥⌘3 | Outline, Backlinks, Relations | 126–132 |
 | ⌘[, ⌘] | Back, Forward | 138, 142 |
+| ⌥⌘C, ⌥⇧⌘C | Copy Proof As (Edit menu): LaTeX, Wiki Markdown | 195 (`ProofCopyCommandItems`) |
 | Esc, ⌘Return, Return | sheets: dismiss, submit ingest, Sync Log default | sheet views |
 
 **Owned by the system** and avoided: ⌘, ⌘Q ⌘H ⌥⌘H ⌘W ⌘M ⌘\` ⌃⌘S (Show
