@@ -247,19 +247,24 @@ It also means a wikilink click is a real navigation to a URL we can intercept,
 which is where back/forward come from. Where the page opens is Swift's call.
 `ccwiki.js` posts `navigate` with the keys held (`command`, `shift`,
 `option`) and `middleButton`, and `LinkDisposition.forClick` reads them as
-Safari does: ⌘-click or a middle click opens a tab behind the current one,
-⇧⌘-click a tab in front, ⌥⌘-click a new window, and a plain click, or ⇧ or ⌥
-alone, opens it where you are (reader-comforts §1.4). WebKit may not
-dispatch `auxclick`, so the middle button is read from `mousedown` and
-`mouseup`, and a middle `click` or `auxclick` is only stopped. A link WebKit
-follows itself, the page's listener having missed it, gets the same table
-from `WKNavigationAction`'s `buttonNumber` and `modifierFlags`. The same page
-on cryptology.city, which a ⌘-click used to open, is **Open Link on
-cryptology.city** in the link's context menu, after **Open Link in New Tab**
-and **Open Link in New Window**; `contextTarget` carries the link's `href`
-for them. They follow WebKit's **Open Link**, which for these links is the
-app's own: WebKit's loads the link with no click behind it, a navigation of
-type `.other` that the delegate cancels.
+Safari does: ⌘-click or a middle click opens a tab behind the current one
+(in front until `WindowTabbing.joinsInBackground` is turned on after the
+by-eye check, reader-comforts §1.4), ⇧⌘-click a tab in front, ⌥⌘-click a new
+window, and a plain click, or ⇧ or ⌥ alone, opens it where you are. Tabs and
+windows arrive with reader-comforts' A5. Until then a click that asks for
+one, or the link menu's tab or window item, opens a link to a page on
+cryptology.city, as a ⌘-click always has, and a link to a folder where you
+are. WebKit may not dispatch `auxclick`, so the middle button is read from
+`mousedown` and `mouseup`, and a middle `click` or `auxclick` is only
+stopped. A link WebKit follows itself, the page's listener having missed it,
+gets the same table from `WKNavigationAction`'s `buttonNumber` and
+`modifierFlags`. The page on cryptology.city has an item of its own, **Open
+Link on cryptology.city**, in the link's context menu, after **Open Link in
+New Tab** and **Open Link in New Window**; a link to a folder gets those two
+alone. `contextTarget` carries the link's `href` for them. They
+follow WebKit's **Open Link**, which for these links is the app's own:
+WebKit's loads the link with no click behind it, a navigation of type
+`.other` that the delegate cancels.
 
 ## 5. Three layers that keep reading offline
 

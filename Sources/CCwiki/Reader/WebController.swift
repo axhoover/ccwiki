@@ -396,9 +396,10 @@ final class ReaderWebView: WKWebView {
             menu.insertItem(.separator(), at: copyItems.count)
         }
         // A link to a page opens in a new tab, a new window or on the site,
-        // in place of WebKit's Open Link in New Window. The items follow
-        // WebKit's Open Link, as Safari's do; without it they make a group of
-        // their own after the copy items.
+        // and a link to a folder in the first two, in place of WebKit's Open
+        // Link in New Window. The items follow WebKit's Open Link, as
+        // Safari's do; without it they make a group of their own after the
+        // copy items.
         let linkItems = target?.linkItems ?? []
         if let destination = linkItems.first?.destination {
             let onNavigate = controller?.onNavigate
@@ -551,10 +552,11 @@ struct ReaderContextTarget: Equatable, Sendable {
         return items
     }
 
-    /// For a link to a page or a folder of the wiki, in menu order: a new
-    /// tab, a new window, the site (reader-comforts §1.1). Nothing for a
-    /// file, which opens in an app of its own, or for anything that is not a
-    /// `ccwiki://` link.
+    /// For a link to a page of the wiki, in menu order: a new tab, a new
+    /// window, the site (reader-comforts §1.1). A link to a folder gets the
+    /// tab and the window alone, as a folder label in the sidebar does.
+    /// Nothing for a file, which opens in an app of its own, or for anything
+    /// that is not a `ccwiki://` link.
     var linkItems: [LinkItem] {
         guard let link, let destination = CCwikiURL.destination(of: link) else { return [] }
         switch destination {
@@ -563,14 +565,17 @@ struct ReaderContextTarget: Equatable, Sendable {
         case .asset, .shell:
             return []
         }
-        return [
+        var items = [
             LinkItem(title: "Open Link in New Tab", destination: destination,
                      disposition: .newTab(inBackground: true)),
             LinkItem(title: "Open Link in New Window", destination: destination,
                      disposition: .newWindow),
-            LinkItem(title: "Open Link on cryptology.city", destination: destination,
-                     disposition: .onSite),
         ]
+        if case .page = destination {
+            items.append(LinkItem(title: "Open Link on cryptology.city", destination: destination,
+                                  disposition: .onSite))
+        }
+        return items
     }
 
     /// WebKit's own Open Link, which the link items follow, where Safari

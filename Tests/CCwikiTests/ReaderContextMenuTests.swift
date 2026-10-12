@@ -93,11 +93,13 @@ struct ReaderContextMenuTests {
         #expect(target.copyItems.isEmpty)
     }
 
-    @Test("a link to a folder offers the same three")
+    @Test("a link to a folder offers a new tab and a new window, and not the site")
     func folderLinkItems() {
         let target = ReaderContextTarget(link: CCwikiURL.folder(slug: "Primitives"))
-        #expect(target.linkItems.map(\.title) == Self.linkTitles)
-        #expect(target.linkItems.first?.destination == .folder(slug: "Primitives"))
+        #expect(target.linkItems.map(\.title) == Array(Self.linkTitles.prefix(2)))
+        #expect(target.linkItems.map(\.disposition) == [.newTab(inBackground: true), .newWindow])
+        let folder = CCwikiURL.Destination.folder(slug: "Primitives")
+        #expect(target.linkItems.map(\.destination) == [folder, folder])
     }
 
     @Test("a file of the wiki, the web, a place on the page or the shell offers no link items")
