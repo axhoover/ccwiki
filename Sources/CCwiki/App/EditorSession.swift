@@ -45,9 +45,14 @@ final class EditorSession {
     @ObservationIgnored var isClosing = false
 
     /// The preview's own web view, made on first use with the readers'
-    /// data store and text size (§7.4, §17).
-    @ObservationIgnored private(set) lazy var preview: WebController =
-        WebController(paths: model.paths, webRoot: model.webRoot, pageZoom: model.pageZoom)
+    /// data store and text size (§7.4, §17). A WebContent restart checks
+    /// the staged pipeline first, as a reader's does.
+    @ObservationIgnored private(set) lazy var preview: WebController = {
+        let preview = WebController(
+            paths: self.model.paths, webRoot: self.model.webRoot, pageZoom: self.model.pageZoom)
+        preview.onRendererRestart = { [weak self] in self?.model.checkWebRoot() }
+        return preview
+    }()
 
     /// The model owns the sessions and outlives every one of them.
     private unowned let model: AppModel

@@ -128,7 +128,12 @@ recommendations that need a yes; §8 lists them as questions.
   "↑↓ Move · ↩ Open · ⌘↩ New Tab · esc Cancel". `SearchPalette` keeps its
   count and Done and gains one "⌘↩ New Tab" hint before the `Spacer`, in the
   same keycap style, extracted from QuickSwitcherView's `hint(_:_:)` into a
-  shared `KeyHint` view (`SWIFTUI-RULES` §8.6).
+  shared `KeyHint` view (`SWIFTUI-RULES` §8.6). ⌘S, ⇧⌘R and ⇧⌘F search once
+  typing pauses, so their rows can still be the last query's: a Return, ⌘Return
+  or ⇧⌘Return pressed before the rows are the results for the field's text
+  waits for them (`PaletteReturn`) and then opens the highlighted row, and is
+  dropped if the text changes first. A row opens with the query its results
+  were computed for.
 - **Each tab has** its own page, Back and Forward, scroll position, find bar,
   inspector visibility and tab, sidebar selection and expanded folders, and
   web view.
@@ -521,8 +526,10 @@ cost a few hundred megabytes. Three choices keep that down:
 - **`paths.stagedWebRoot()` runs once**, in `AppModel.init`, and every
   session gets the URL. It copies the pipeline on first use. Reading
   `model.webRoot` checks the copy (`AppPaths.keepStagedWebRoot`, also on
-  activation and hourly): it is marked in use, and staged again at the same
-  path only if Caches lost it while the bundle on disk is still this build.
+  activation, hourly, and before a web view reloads its shell after a
+  WebContent crash, through `WebController.onRendererRestart`): it is marked
+  in use, and staged again at the same path only if Caches lost it while the
+  bundle on disk is still this build.
 - **A closed tab releases its web view.** The session leaves the registry
   when its window posts `willCloseNotification` (§1.3). The `Bridge`,
   `onNavigate` and `onReady` closures capture `[weak self]` already.
@@ -1184,7 +1191,7 @@ policy and moves `pageZoom`, so it gets the same review as a track.
 
 | File | Change |
 |---|---|
-| `App/AppModel.swift` | `Location` and `Document` become `Hashable, Codable` (Codable must be synthesized in this file). `let webRoot` (from `stagedWebRoot()`, once). `var pageZoom` is persisted, clamped to `WebController.zoomRange`, applied in `didSet`, and the text-size methods set it. `let papers = PaperLibrary(paths:)`. `loadLibrary(reason:) async -> LibraryUpdate?` is rebuilt on the seams below and serialized (§3.2): `LoadedLibrary.update`, or `build` when nothing is loaded; then `apply`; then `LibraryRefresh.revisionFacts`, keeping `loadedRevision` only if `currentRevision` did not move; then `searchIndex.sync`; worktree housekeeping when `LibraryRefresh.runsJobHousekeeping(reason)`; then a private `libraryDidLoad(_:)` holding today's re-render tail. Add `@ObservationIgnored private var loaded: LoadedLibrary?`. `sync()` asks `LibraryRefresh.needsReload` and `await LibraryRefresh.summary`, and calls `refreshPushCapability()` after every outcome but `.failed`; the load no longer calls it. `rebuildLibrary()`, replacing `rebuildSearchIndex()`, drops `loaded`, resets the search index, then calls `loadLibrary(reason: .rebuild)`. `webController.onNavigate` takes a `LinkDisposition`, and anything but `.here` opens the site, as a modified click does today |
+| `App/AppModel.swift` | `Location` and `Document` become `Hashable, Codable` (Codable must be synthesized in this file). `webRoot` (staged once from `stagedWebRoot()`; now a computed `var` that calls `checkWebRoot()` first, §1.9). `var pageZoom` is persisted, clamped to `WebController.zoomRange`, applied in `didSet`, and the text-size methods set it. `let papers = PaperLibrary(paths:)`. `loadLibrary(reason:) async -> LibraryUpdate?` is rebuilt on the seams below and serialized (§3.2): `LoadedLibrary.update`, or `build` when nothing is loaded; then `apply`; then `LibraryRefresh.revisionFacts`, keeping `loadedRevision` only if `currentRevision` did not move; then `searchIndex.sync`; worktree housekeeping when `LibraryRefresh.runsJobHousekeeping(reason)`; then a private `libraryDidLoad(_:)` holding today's re-render tail. Add `@ObservationIgnored private var loaded: LoadedLibrary?`. `sync()` asks `LibraryRefresh.needsReload` and `await LibraryRefresh.summary`, and calls `refreshPushCapability()` after every outcome but `.failed`; the load no longer calls it. `rebuildLibrary()`, replacing `rebuildSearchIndex()`, drops `loaded`, resets the search index, then calls `loadLibrary(reason: .rebuild)`. `webController.onNavigate` takes a `LinkDisposition`, and anything but `.here` opens the site, as a modified click does today |
 | `App/LoadedLibrary.swift` (new) | `LoadedLibrary`, moved out of `AppModel.swift` and given `fingerprints`. `build(cloneRoot:)` is today's detached body, with relations-followups' `unverifiedCitations` step if that has merged by then (§10). `update(_:cloneRoot:)` calls `build` and reports `changes: nil`, `isFullBuild: true`. Also `LibraryUpdate` (with `requiresRerender` always true) and `LibraryArtifact` |
 | `Wiki/LibraryChanges.swift` (new) | `ContentFingerprints` (`.empty`; `scan` returns `.empty`) and `LibraryChanges` (`.none`; `between` returns `.none`) |
 | `App/LibraryRefresh.swift` (new) | `LibraryLoadReason`, `RevisionFacts` and `LibraryRefresh` with today's behaviour: reload after every outcome but `.failed`, the summary by `git diff` (hence `summary` is `async` and takes the store, git and clone), the revision facts by today's calls, housekeeping on every load |
@@ -1335,7 +1342,7 @@ enum Location: Hashable, Codable, Sendable {
     case document(Document)
     case empty
 }
-let webRoot: URL
+var webRoot: URL { get }             // checkWebRoot(), then the copy staged once in init (§1.9)
 var pageZoom: Double                 // persisted; applied to every reader's web view
 let papers: PaperLibrary
 @discardableResult
@@ -2170,8 +2177,9 @@ for windows that are not readers (§1.8), `mainWindowCount`, and
 
 **Code both specs touch:**
 
-- `webRoot`: corrections' Phase 0 declares the same `let webRoot: URL`, set
-  once in `init` from `paths.stagedWebRoot()`. Its integrator drops its copy.
+- `webRoot`: corrections' Phase 0 declares the same `webRoot`, staged once
+  in `init` from `paths.stagedWebRoot()`, and now a computed `var` that calls
+  `checkWebRoot()` first (§1.9). Its integrator drops its copy.
 - `WikiIndex.assemble(contentRoot:files:pages:)` (§4.6): one function,
   whichever of D6 and corrections' Track D lands first.
 - `GitService.swift`: D's methods beside `modifiedDates(in:)`; corrections'

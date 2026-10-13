@@ -54,6 +54,11 @@ final class WebController: NSObject {
     /// reader comes back from a WebContent crash; any other reload of the
     /// shell is cancelled (`CCwikiURL.allowsShellNavigation`).
     var onReady: (() -> Void)?
+    /// Called when WebKit's content process has stopped, before the shell
+    /// is loaded again: the owner makes sure the staged pipeline it is
+    /// served from is still there (`AppModel.checkWebRoot`), since Caches
+    /// may have lost it after this view was made.
+    var onRendererRestart: (() -> Void)?
 
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private var pendingRequest: RenderRequest?
@@ -438,6 +443,7 @@ extension WebController: WKNavigationDelegate {
     /// blank: `isReady` would still be true and every render would be
     /// evaluated on a dead page.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        onRendererRestart?()
         isReady = false
         loadedPath = nil
         outline = []

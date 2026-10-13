@@ -721,10 +721,11 @@
   // Before WebKit builds the context menu, tell Swift what is under the
   // pointer: a formula's LaTeX, and an algorithm's, as written and with the
   // macros written out; the link, for the menu's Open Link in New Tab, in
-  // New Window and on cryptology.city; and the selection, for the
-  // corrections group: the passage the right-click was on, or else the
-  // block under the pointer, with no text. The message is sent on the same
-  // connection as, and ahead of, the menu request, so it arrives first.
+  // New Window and on cryptology.city, and a web or mail link's, for its
+  // Open Link; and the selection, for the corrections group: the passage
+  // the right-click was on, or else the block under the pointer, with no
+  // text. The message is sent on the same connection as, and ahead of, the
+  // menu request, so it arrives first.
   document.addEventListener("contextmenu", function (event) {
     var target = event.target;
     var host = mathHost(target);
@@ -741,6 +742,7 @@
       algorithm: source,
       algorithmExpanded: source === null ? null : expandMacros(source, currentMacros || {}),
       link: appLink(linkAt(target)),
+      externalLink: webLink(linkAt(target)),
       selection: selection,
     });
   }, true);
@@ -801,6 +803,15 @@
     var href = anchor.getAttribute("href") || "";
     if (!href || href.charAt(0) === "#" || /^https?:|^mailto:/.test(href)) return null;
     return href;
+  }
+
+  /** The href of a link to the web or to mail, for the menu's Open Link,
+   *  which the app opens itself. Null for no link, a dead one, or any
+   *  other. */
+  function webLink(anchor) {
+    if (!anchor || anchor.classList.contains("broken")) return null;
+    var href = anchor.getAttribute("href") || "";
+    return /^https?:|^mailto:/.test(href) ? href : null;
   }
 
   /** Follows a link off the page: the web in the browser, anything else in

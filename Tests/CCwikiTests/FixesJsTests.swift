@@ -185,4 +185,64 @@ import Testing
             "<div class=\"notice notice-warning\">1 link on this page has &lt;no&gt; target.</div>"))
         #expect(html.contains("Text."))
     }
+
+    // MARK: - The context menu's links
+
+    /// The listeners `ccwiki.js` adds to the document, the messages it
+    /// posts, and a right-click on a link, which reports the two link
+    /// fields of the `contextTarget` message.
+    private static let menuShell = #"""
+        var listeners = {};
+        document.addEventListener = function (type, listener) {
+          (listeners[type] = listeners[type] || []).push(listener);
+        };
+        var posted = [];
+        var webkit = { messageHandlers: { ccwiki: { postMessage: function (m) { posted.push(m); } } } };
+        function anchor(href, broken) {
+          return {
+            nodeType: 1,
+            classList: { contains: function (name) { return name === "broken" && broken; } },
+            getAttribute: function (name) { return name === "href" ? href : null; },
+            closest: function (selector) { return selector === "a" ? this : null; },
+          };
+        }
+        function rightClick(href, broken) {
+          posted = [];
+          listeners.contextmenu[0]({ target: anchor(href, broken) });
+          var message = posted.filter(function (m) { return m.type === "contextTarget"; })[0];
+          return { link: message.link, externalLink: message.externalLink };
+        }
+        """#
+
+    @Test("a right-click on a web or mail link sends it for the app's Open Link")
+    func contextMenuWebLink() throws {
+        let script = try MarkdownScript.load()
+        try script.evaluate(Self.shell, named: "shell.js")
+        try script.evaluate(Self.menuShell, named: "menu.js")
+        let source = try String(
+            contentsOf: MarkdownScript.webRoot.appending(path: "ccwiki.js"), encoding: .utf8)
+        try script.evaluate(source, named: "ccwiki.js")
+
+        func rightClick(_ href: String, broken: Bool = false) throws -> MenuLinks {
+            let raw = try script.json("rightClick(\(MarkdownScript.literal(href)), \(broken))")
+            let fields = try #require(raw as? [String: Any])
+            return MenuLinks(link: fields["link"] as? String, web: fields["externalLink"] as? String)
+        }
+
+        let web = "https://eprint.iacr.org/2015/022"
+        #expect(try rightClick(web) == MenuLinks(link: nil, web: web))
+        let mail = "mailto:someone@example.com"
+        #expect(try rightClick(mail) == MenuLinks(link: nil, web: mail))
+        let page = CCwikiURL.page(path: "Primitives/prf.md")
+        #expect(try rightClick(page) == MenuLinks(link: page, web: nil), "a page is the app's to open")
+        let none = MenuLinks(link: nil, web: nil)
+        #expect(try rightClick(web, broken: true) == none, "a dead link opens nothing")
+        #expect(try rightClick("#syntax") == none, "a place on the page keeps WebKit's")
+    }
+
+    /// The two link fields of a `contextTarget` message.
+    struct MenuLinks: Equatable {
+        let link: String?
+        let web: String?
+    }
 }

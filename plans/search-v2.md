@@ -347,7 +347,11 @@ load; a query is one pass of `range(of:)` over them, off the main actor.
 - **A row is a page**: its title, the count, and its first three matching
   lines, each cut to a window around its first match (markdown paragraphs
   are single lines, often a thousand characters) and set monospaced, since
-  they are source. Opening a row finds the text on the rendered page.
+  they are source. Opening a row finds the text on the rendered page, in
+  smart case too: a needle with a capital is looked for in its own case
+  first, so `OT` lands on OT and not on "not", and in any case only when
+  that finds nothing (`WebController.findFirst`; ⌘S and ⇧⌘R hits open the
+  same way).
 - **⇧⌘F moved.** It was a hidden alias for ⌘S, kept for muscle memory
   after 0.1.1; it is now Find in All Pages…, beside Find in the Edit menu,
   where Xcode keeps Find in Project.

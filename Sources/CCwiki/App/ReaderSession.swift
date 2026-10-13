@@ -162,6 +162,9 @@ final class ReaderSession: Identifiable {
         webController.onReady = { [weak self] in
             self?.renderCurrent()
         }
+        webController.onRendererRestart = { [weak self] in
+            self?.model.checkWebRoot()
+        }
         webController.siteURLProvider = { [weak self] in
             self?.currentSiteURL
         }

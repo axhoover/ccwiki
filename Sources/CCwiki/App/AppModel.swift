@@ -355,7 +355,10 @@ final class AppModel {
         switch destination {
         case .page(let path, let anchor): open(.page(path: path, anchor: anchor))
         case .folder(let slug): open(.folder(slug: slug))
-        case .asset(let path): NSWorkspace.shared.open(paths.content.appending(path: path))
+        case .asset(let path):
+            if let file = CCwikiURL.assetFile(path, in: paths.content) {
+                NSWorkspace.shared.open(file)
+            }
         case .shell: break
         }
     }
@@ -553,7 +556,10 @@ final class AppModel {
     }
 
     /// Each open editor's text and preview, by window (corrections §7.5).
-    @ObservationIgnored var editorSessions: [EditorTarget: EditorSession] = [:]
+    /// Observed, so Open Draft PR's gate, which asks each of a job's
+    /// editors whether it is settled, sees one that opens after it was
+    /// drawn. Changed only from actions and closing tasks, never in a body.
+    var editorSessions: [EditorTarget: EditorSession] = [:]
 
     // MARK: Review
 
@@ -562,9 +568,13 @@ final class AppModel {
 
     /// The review's own web view: the reader's shell, pipeline and macros,
     /// rendering changed blocks (corrections §6.3). Made on first use; it
-    /// shares the readers' data store.
-    @ObservationIgnored private(set) lazy var reviewWeb: WebController =
-        WebController(paths: paths, webRoot: webRoot, pageZoom: pageZoom)
+    /// shares the readers' data store, and a WebContent restart checks the
+    /// staged pipeline first, as a reader's does.
+    @ObservationIgnored private(set) lazy var reviewWeb: WebController = {
+        let web = WebController(paths: self.paths, webRoot: self.webRoot, pageZoom: self.pageZoom)
+        web.onRendererRestart = { [weak self] in self?.checkWebRoot() }
+        return web
+    }()
 
     /// The model a described correction runs with: a `claude --model`
     /// alias, or "" for the CLI's default. Persisted; see `CCwikiSettings`.
