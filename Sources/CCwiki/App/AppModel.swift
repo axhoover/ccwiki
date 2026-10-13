@@ -29,6 +29,12 @@ final class AppModel {
     private var discoveryGeneration = 0
     private(set) var isGitHubAuthenticated = false
     private(set) var canPushToRemote = false
+    /// True while gh is asked whether it is signed in, and the clone whether
+    /// it can push (`askGitHub`). Settings and the ingest sheet say
+    /// "checking" meanwhile, not "not signed in": both answers start false.
+    private(set) var isCheckingGitHub = false
+    /// Which `askGitHub` is the latest; an earlier one's answer is dropped.
+    @ObservationIgnored private var gitHubAsk = 0
     private(set) var vendorManifest: String?
 
     /// Fast-forward the clone at launch. Persisted; see `CCwikiSettings`.
@@ -868,6 +874,8 @@ final class AppModel {
         discoveryGeneration += 1
         let generation = discoveryGeneration
         isDiscoveringTools = true
+        // Until this discovery's own ask has answered (`askGitHub`).
+        isCheckingGitHub = true
         let overrides = toolOverrides
 
         let reading = await Task.detached(priority: .userInitiated) { () -> (ToolLocator, Bool) in
@@ -901,9 +909,39 @@ final class AppModel {
         // GitHub, if it was asked before gh was found, and any review still
         // without a snapshot, asked again now (corrections §7.1).
         Task { await jobCenter.toolsDidChange() }
-        isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: all)
-        guard generation == discoveryGeneration else { return }
+        await askGitHub(generation: generation)
+    }
+
+    /// Ask whether gh is signed in, then whether the clone can push, with
+    /// `isCheckingGitHub` set until both are known: a signed-in user is not
+    /// told "not signed in" while gh answers, for up to its deadline. An
+    /// answer a later ask or discovery has overtaken is dropped; that one
+    /// answers instead.
+    private func askGitHub(generation: Int) async {
+        gitHubAsk += 1
+        let ask = gitHubAsk
+        isCheckingGitHub = true
+        let authenticated = await GitHubAuth.isAuthenticated(tools: tools)
+        guard generation == discoveryGeneration, ask == gitHubAsk else { return }
+        isGitHubAuthenticated = authenticated
         await refreshPushCapability()
+        guard generation == discoveryGeneration, ask == gitHubAsk else { return }
+        isCheckingGitHub = false
+    }
+
+    /// Ask gh again when its "no" was not an answer: a launch offline, or
+    /// one with no answer before the deadline, leaves `isGitHubAuthenticated`
+    /// false with nothing cached (`GitHubAuth.isAuthenticated`). On coming
+    /// back to the app and when the ingest sheet opens, so a network that
+    /// has returned is noticed without Settings ▸ Re-check. A cached "no"
+    /// is kept, and costs nothing: after `gh auth login`, Re-check, as the
+    /// advice says. A cached "yes" a correction's ask found is taken.
+    func refreshGitHubIfUnanswered() {
+        guard !isDiscoveringTools, !isCheckingGitHub, !isGitHubAuthenticated,
+              tools.path(for: .gh) != nil, GitHubAuth.cachedAnswer != false
+        else { return }
+        let generation = discoveryGeneration
+        Task { await askGitHub(generation: generation) }
     }
 
     /// Nothing to warn about any more: reading works without git (the wiki
@@ -937,10 +975,13 @@ final class AppModel {
     /// a `stat` per directory (`toolArrived`) and `xcode-select -p`, never a
     /// login shell. When something has turned up, every tool is looked for
     /// again, which asks GitHub and the clone afresh too. The staged web
-    /// copy is checked as well, in case Caches was cleared meanwhile.
+    /// copy is checked as well, in case Caches was cleared meanwhile, and
+    /// gh is asked again if its last "no" was not an answer.
     private func appDidBecomeActive() {
         checkWebRoot()
-        guard !isDiscoveringTools, isMissingTools else { return }
+        guard !isDiscoveringTools else { return }
+        refreshGitHubIfUnanswered()
+        guard isMissingTools else { return }
         let missing = tools.missingForIngestion
         let stubbedGit = needsDeveloperTools
         Task {
@@ -1757,11 +1798,8 @@ final class AppModel {
             Task { await discoverTools() }
             return
         }
-        let tools = tools
-        Task { @MainActor in
-            isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: tools)
-            await refreshPushCapability()
-        }
+        let generation = discoveryGeneration
+        Task { await askGitHub(generation: generation) }
     }
 
     /// Only a git clone is asked. Run against a snapshot, which has no

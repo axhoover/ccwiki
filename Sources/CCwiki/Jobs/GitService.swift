@@ -141,19 +141,50 @@ struct GitService: Sendable {
     /// Written to the clone's **local** config, never `--global`: this clone is
     /// CCwiki's own artifact, and reaching into the user's global git config
     /// to fix our problem would be rude.
+    ///
+    /// Written again when gh has moved: the helper names gh's absolute
+    /// path, and one left naming a gh that is gone still counts as
+    /// configured (`canAuthenticatePush`), so the push would fail only at
+    /// Approve.
     func configureCredentialHelper(clone: URL, ghPath: String) async {
         let key = "credential.https://github.com.helper"
         let existing = await run([
             "-C", clone.path(percentEncoded: false), "config", "--local", "--get", key,
         ])
-        guard !existing.succeeded
-            || existing.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return }
+        let current = existing.succeeded
+            ? existing.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let helper = Self.credentialHelper(ghPath: ghPath)
+        guard Self.rewritesCredentialHelper(current, with: helper) else { return }
 
+        // `--replace-all`: a plain set refuses a key with several values.
         _ = await run([
             "-C", clone.path(percentEncoded: false),
-            "config", "--local", key, "!\(ghPath) auth git-credential",
+            "config", "--local", "--replace-all", key, helper,
         ])
+    }
+
+    /// The helper that runs `gh auth git-credential`. git runs a helper
+    /// that starts with `!` through the shell, so the path is quoted, as
+    /// `gh auth setup-git` quotes it: unquoted, a space in it splits it.
+    static func credentialHelper(ghPath: String) -> String {
+        "!\(shellQuoted(ghPath)) auth git-credential"
+    }
+
+    /// Whether the clone's helper is to be written: there is none, or it is
+    /// CCwiki's own `gh auth git-credential` naming another gh (one since
+    /// moved, or a path written unquoted). One the user set is theirs.
+    static func rewritesCredentialHelper(_ current: String, with helper: String) -> Bool {
+        if current.isEmpty { return true }
+        let isGitCredential = current.hasPrefix("!") && current.hasSuffix(" auth git-credential")
+        return isGitCredential && current != helper
+    }
+
+    /// `text` as one word to `sh`: unchanged when every character is one
+    /// the shell reads literally, otherwise in single quotes.
+    static func shellQuoted(_ text: String) -> String {
+        let plain = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./+-")
+        if !text.isEmpty, text.allSatisfy({ plain.contains($0) }) { return text }
+        return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// Is the clone able to push? Cheap proxy: a credential helper is

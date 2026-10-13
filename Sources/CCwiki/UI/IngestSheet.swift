@@ -31,7 +31,13 @@ struct IngestSheet: View {
 
     private var canSubmit: Bool {
         (droppedPDF != nil || parsedSource != nil)
-            && !model.isDiscoveringTools && blockers.isEmpty
+            && !model.isDiscoveringTools && !model.isCheckingGitHub && blockers.isEmpty
+    }
+
+    /// The blockers are shown once they are answers: until gh and the clone
+    /// have been asked, "not signed in" is only the starting value.
+    private var showsBlockers: Bool {
+        !model.isDiscoveringTools && !model.isCheckingGitHub && !blockers.isEmpty
     }
 
     var body: some View {
@@ -78,7 +84,11 @@ struct IngestSheet: View {
                 Label("Looking for the tools a job needs…", systemImage: "hourglass")
                     .font(Theme.Fonts.meta)
                     .foregroundStyle(.secondary)
-            } else if !blockers.isEmpty {
+            } else if model.isCheckingGitHub {
+                Label("Checking that gh is signed in…", systemImage: "hourglass")
+                    .font(Theme.Fonts.meta)
+                    .foregroundStyle(.secondary)
+            } else if showsBlockers {
                 blockerList
             }
 
@@ -100,8 +110,10 @@ struct IngestSheet: View {
             }
         }
         .padding(Theme.section)
-        .frame(width: Theme.sheetWidth, height: blockers.isEmpty ? 520 : 600)
+        .frame(width: Theme.sheetWidth, height: showsBlockers ? 600 : 520)
         .onAppear {
+            // gh unanswered at launch (offline, say) may answer now.
+            model.refreshGitHubIfUnanswered()
             // A PDF dropped on the reader opens this sheet already holding it.
             if let pending = model.pendingDroppedPDF {
                 droppedPDF = pending
