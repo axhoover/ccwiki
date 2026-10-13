@@ -273,6 +273,11 @@ final class Job: Identifiable {
     /// Set by the runner so the panel's Cancel button has something to cancel,
     /// and by Approve so a quit can interrupt the publish.
     @ObservationIgnored var task: Task<Void, Never>?
+    /// The branches of every other job the job center knows of, those Clear
+    /// Finished has dropped included: asked as the agent exits, for the
+    /// tripwire to take for CCwiki's own (§5.5). Set by the job center as it
+    /// starts the job.
+    @ObservationIgnored var otherJobBranches: (@MainActor () -> Set<String>)?
 
     /// The raw stream, appended to as it arrives. Kept even after the worktree
     /// is pruned — a transcript you cannot re-read is not a transcript.
@@ -495,6 +500,10 @@ final class Job: Identifiable {
     }
 
     func setState(_ newState: JobState) {
+        // Cancelled stays cancelled, but for Review Anyway. A runner that
+        // was awaiting something when Cancel was pressed must not bring
+        // the job back as it winds down (§4.1).
+        if state == .cancelled, newState != .cancelled, newState != .awaitingReview { return }
         state = newState
         if newState.isActive, startedAt == nil { startedAt = Date() }
         if newState.isTerminal, finishedAt == nil {
