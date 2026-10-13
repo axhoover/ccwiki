@@ -1647,7 +1647,7 @@ struct FetchedPaper: Sendable { let file: URL; let from: URL }
 struct PaperFetcher: Sendable {
     init(transport: PaperTransport, maximumBytes: Int64 = 100 << 20)
     func fetch(_ source: PaperSource,
-               progress: @escaping @Sendable (Int64, Int64?) -> Void)
+               progress: @escaping @Sendable (Int64, Int64?, URL) -> Void)   // the request's URL
         async -> Result<FetchedPaper, PaperFailure>
 }
 

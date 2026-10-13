@@ -17,13 +17,16 @@ struct GrepView: View {
             placeholder: "Find in all pages",
             systemImage: "doc.text.magnifyingglass",
             items: model.grepResults,
+            resultsQuery: model.grepResultsQuery,
             error: nil,
             emptyTitle: "Find in All Pages",
             emptyDescription: "The exact text, on every page, references included. "
                 + "Case matters only if you type a capital.",
             countLabel: { _ in model.grepSummary },
+            // The page finds the text the rows are for, as in SearchView.
             open: { hit, disposition in
-                session.openGrepResult(hit, query: model.grepQuery, disposition: disposition)
+                session.openGrepResult(
+                    hit, query: model.grepResultsQuery, disposition: disposition)
             }
         ) { hit in
             resultRow(hit)
