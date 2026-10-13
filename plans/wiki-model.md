@@ -80,6 +80,9 @@ path from the vault root.
 3. fp is empty                        → same-page anchor, stop
 4. transformInternalLink(fp + anchor) → a RelativeURL rooted at "."
 5. strip the leading "." and split off the anchor again → targetCanonical
+   a relative target (../Primitives/prf) is left as ./Primitives/prf: drop
+   its leading "." and ".." segments, as the site's URL resolution from the
+   root does, and skip step 6 → Primitives/prf
 6. matches = allSlugs where lastSegment == targetCanonical  (exact, CASE-SENSITIVE)
    exactly one → that slug;  otherwise → targetCanonical itself
 7. slug → file, in order:
