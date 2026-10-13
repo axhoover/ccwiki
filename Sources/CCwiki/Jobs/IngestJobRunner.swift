@@ -46,8 +46,8 @@ struct IngestJobRunner {
         // The sheet refuses a snapshot first; a job run again later may find
         // the world changed. Git is not asked anything about a folder that
         // is not a clone: it would walk up to a repository around it.
-        guard paths.wikiStore == .git else {
-            job.setState(.failed(CorrectionJobRunner.snapshotStore))
+        if let refusal = CorrectionJobRunner.storeRefusal(paths.wikiStore) {
+            job.setState(.failed(refusal))
             return
         }
 

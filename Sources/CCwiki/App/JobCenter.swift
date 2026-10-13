@@ -40,6 +40,21 @@ final class JobCenter {
         let privatePaths: [String]
     }
 
+    /// The review as Open Draft PR's click saw it: the digest of the diff
+    /// on screen, nil when none was, and its DiffGuard findings, which the
+    /// question the click asks counted. Approve publishes only that, so a
+    /// refresh that lands while the question is up cannot bring a warning
+    /// nobody was asked about (§6.5 step 1).
+    struct ShownReview: Sendable {
+        let digest: String?
+        let findings: [DiffFinding]
+
+        @MainActor init(of job: Job) {
+            digest = job.review?.digest
+            findings = job.findings
+        }
+    }
+
     let paths: AppPaths
 
     /// Newest first.
@@ -216,8 +231,8 @@ final class JobCenter {
             return .failure(JobError(
                 "git was not found. Install the Command Line Tools, or set its path in Settings."))
         }
-        guard paths.wikiStore == .git else {
-            return .failure(JobError(CorrectionJobRunner.snapshotStore))
+        if let refusal = CorrectionJobRunner.storeRefusal(paths.wikiStore) {
+            return .failure(JobError(refusal))
         }
 
         let job = Job(kind: .edit(target), paths: paths)
@@ -332,6 +347,13 @@ final class JobCenter {
                 Self.refuseReview(job, .failure, Self.worktreeGone)
                 return
             }
+            // Before any git there: a record from before 0.3 asks for its
+            // base through the worktree's `.git`, which the agent could have
+            // pointed at a repository of its choosing (§5.1).
+            guard GitService.isWorktree(job.worktree, of: self.paths.clone) else {
+                Self.refuseReview(job, .failure, GitService.redirectedWorktree)
+                return
+            }
             if job.baseCommit == nil {
                 let branch = await git.defaultBranch(in: self.paths.clone)
                 guard let base = await git.mergeBase("HEAD", "origin/\(branch)", in: job.worktree)
@@ -377,9 +399,12 @@ final class JobCenter {
     }
 
     /// Why Review Anyway did not go ahead: in the transcript, which the
-    /// job's pane shows whatever its state, and as its notice.
+    /// job's pane shows whatever its state, and as its notice, unless the
+    /// notice is the tripwire's. That one says the agent pushed or opened
+    /// something itself, belongs in the review, and stays.
     private static func refuseReview(_ job: Job, _ tone: JobNotice.Tone, _ message: String) {
         job.append(JobLogEntry(tone == .failure ? .error : .system, message))
+        guard job.notice == nil || isReviewRefusal(job.notice) else { return }
         job.setNotice(JobNotice(tone: tone, text: message))
     }
 
@@ -486,22 +511,21 @@ final class JobCenter {
     /// half done. Acts only from review, and a second press while the first
     /// is answered does nothing.
     ///
-    /// What is approved is the diff on screen when it was pressed. A
-    /// snapshot that finishes while the editors save or the queue drains (a
-    /// refresh after a save, or the first one of a job just shown) was
-    /// never seen, so it is compared with, not taken as, the reviewed one.
+    /// What is approved is `shown`, the review as the click saw it. A
+    /// snapshot that finishes while the question is up, the editors save
+    /// or the queue drains (a refresh after a save, a sync's, or the first
+    /// one of a job just shown) was never seen, so it is compared with, not
+    /// taken as, the reviewed one.
     ///
     /// An editor whose text did not reach the disk, whether the review's
     /// button knew it or the save Approve ran found it, stops it: publishing
     /// would send the file without that text, and close the editor (§4.4).
-    func approve(_ job: Job) async -> ApproveResult {
+    func approve(_ job: Job, shown: ShownReview) async -> ApproveResult {
         guard job.state == .awaitingReview, !job.needsRestore, !approving.contains(job.id) else {
             return .refused(job.state.isPublishing || approving.contains(job.id)
                 ? "The pull request is already being opened."
                 : "Only a job awaiting review can be published.")
         }
-        let shown = job.review?.digest
-        let shownFindings = job.findings
         approving.insert(job.id)
         defer { approving.remove(job.id) }
 
@@ -510,8 +534,14 @@ final class JobCenter {
             return settle(job, .refused(unsettled))
         }
         return await serially(job) { @MainActor () -> ApproveResult in
-            await self.publish(job, shown: shown, findings: shownFindings)
+            await self.publish(job, shown: shown.digest, findings: shown.findings)
         }
+    }
+
+    /// Approve of the review on screen now, as a click that asks nothing
+    /// approves it.
+    func approve(_ job: Job) async -> ApproveResult {
+        await approve(job, shown: ShownReview(of: job))
     }
 
     /// `shown` is the digest of the diff on screen when Open Draft PR was

@@ -65,7 +65,7 @@ struct FixesJobsTests {
         #expect(!job.log.contains { $0.text.hasPrefix("claude not found") })
     }
 
-    @Test("an ingestion on a snapshot fails at once, with git asked nothing")
+    @Test("an ingestion on a snapshot, or on no wiki at all, fails at once, with git asked nothing")
     func ingestionOnSnapshot() async throws {
         let paths = try JobRecordTests.temporaryPaths()
         defer { try? FileManager.default.removeItem(at: paths.support) }
@@ -86,6 +86,17 @@ struct FixesJobsTests {
 
         #expect(job.state == .failed(CorrectionJobRunner.snapshotStore), "\(job.state)")
         #expect(job.preflight.isEmpty, "no pre-flight on a folder that is not a clone")
+
+        // Run Again after the clone was reset: nothing is there to sync from.
+        try FileManager.default.removeItem(at: paths.clone)
+        try #require(paths.wikiStore == AppPaths.WikiStore.none)
+        let again = Job(kind: .ingestion(JobRecordTests.submission), paths: paths)
+        await IngestJobRunner(
+            paths: paths, tools: ToolLocator(), git: git, index: nil,
+            target: JobRecordTests.environment().target
+        ).run(again)
+        #expect(again.state == .failed(CorrectionJobRunner.notCloned), "\(again.state)")
+        #expect(again.preflight.isEmpty)
     }
 
     // MARK: The tripwire
@@ -208,6 +219,86 @@ struct FixesJobsTests {
         #expect(JobCenter.isReviewRefusal(JobNotice(tone: .warning, text: JobCenter.nothingToReview)))
         #expect(!JobCenter.isReviewRefusal(JobNotice(
             tone: .failure, text: "The agent pushed a branch while it ran: fix/page.")))
+    }
+
+    @Test("a refusal leaves the tripwire's notice, and the review that follows keeps it")
+    func reviewAnywayKeepsTheTripwire() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        guard let git = ToolLocator.locate(.git, override: nil) else { return }
+        let root = JobScene.newRoot()
+        let origin = root.appending(path: "origin.git").path(percentEncoded: false)
+        // The agent pushes its branch itself, then aborts.
+        let tools = try JobScene.fakeClaude("""
+            printf 'a\\nB\\nc' > content/page.md
+            '\(git)' push -q --no-verify '\(origin)' HEAD:refs/heads/fix/page
+            """ + "\n" + #"""
+            echo '{"type":"result","subtype":"success","is_error":false,"result":"ABORTED: not sure b is wrong.","num_turns":1}'
+            """#, in: directory)
+        guard let scene = try await JobScene.make(root: root, tools: tools) else { return }
+        defer { scene.delete() }
+
+        let job = scene.center.startCorrection(JobCenterTests.request(scene))
+        await job.task?.value
+        guard case .at = await scene.originTip("fix/page") else {
+            Issue.record("the stand-in agent could not push; nothing for the tripwire to find")
+            return
+        }
+        try #require(job.state == .aborted(reason: "ABORTED: not sure b is wrong."), "\(job.state)")
+        let tripwire = JobNotice(
+            tone: .warning, text: "The agent pushed fix/page itself, bypassing review.")
+        try #require(job.notice == tripwire, "\(job.notice?.text ?? "")")
+
+        // Refused while the worktree's .git leads elsewhere: the transcript
+        // says why, and the notice is still the tripwire's.
+        let file = job.worktree.appending(path: ".git")
+        let link = try Data(contentsOf: file)
+        try Data("gitdir: .ccwiki\n".utf8).write(to: file)
+        await scene.center.reviewAnyway(job)
+        #expect(job.log.contains { $0.text == GitService.redirectedWorktree })
+        #expect(job.notice == tripwire, "\(job.notice?.text ?? "")")
+
+        // Put back, it goes ahead, and the review says the agent pushed.
+        try link.write(to: file)
+        await scene.center.reviewAnyway(job)
+        #expect(job.state == .awaitingReview, "\(job.state)")
+        #expect(job.notice == tripwire, "\(job.notice?.text ?? "")")
+    }
+
+    @Test("Review Anyway asks git for no base through a .git that leads elsewhere")
+    func reviewAnywayWithoutABaseRedirected() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let tools = try JobScene.fakeClaude(#"""
+            printf 'a\nB\nc' > content/page.md
+            echo '{"type":"result","subtype":"success","is_error":false,"result":"ABORTED: not sure b is wrong.","num_turns":1}'
+            """#, in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+
+        let started = scene.center.startCorrection(JobCenterTests.request(scene))
+        await started.task?.value
+        let aborted = JobState.aborted(reason: "ABORTED: not sure b is wrong.")
+        try #require(started.state == aborted, "\(started.state)")
+
+        // Its record as one written before 0.3 has it, with no base.
+        let data = try Data(contentsOf: started.recordFile)
+        var record = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        record["baseCommit"] = nil
+        try JSONSerialization.data(withJSONObject: record).write(to: started.recordFile)
+        let center = scene.relaunched()
+        let job = try #require(center.job(id: started.id))
+        try #require(job.baseCommit == nil && job.state == aborted)
+
+        // The agent pointed the worktree's .git at a folder of its own.
+        try Data("gitdir: .ccwiki\n".utf8).write(to: job.worktree.appending(path: ".git"))
+        await center.reviewAnyway(job)
+        #expect(job.notice == JobNotice(tone: .failure, text: GitService.redirectedWorktree),
+                "\(job.notice?.text ?? "")")
+        #expect(job.baseCommit == nil, "no base is taken from a repository the agent chose")
+        #expect(job.state == aborted)
     }
 
     // MARK: The hand-over

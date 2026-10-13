@@ -842,7 +842,7 @@ check 1, which watches every head.
 git add -A -- . ':(exclude).ccwiki'
 git diff --cached -M --name-status -z <base>     → GitNameStatus.parse
 git diff --cached --numstat -z <base>            → binary paths ("-\t-\t")
-git diff --cached --binary <base>                → the digest (SHA-256), and logs/<id>.patch
+git diff --cached --binary --submodule=short <base>  → the digest (SHA-256), and logs/<id>.patch
 git diff --cached --raw -z --no-renames <base>   → links and submodules (new mode 120000, 160000), as binary
 git show <base>:<old path>                       → each changed file's old text
 git show :<path>                                 → each changed file's new text, from the index
@@ -850,7 +850,9 @@ git show :<path>                                 → each changed file's new tex
 
 Every diff passes `--ignore-submodules=none`: `git add -A` stages a
 submodule's new commit whatever `diff.ignoreSubmodules` says, and the commit
-carries it, so the review shows it too.
+carries it, so the review shows it too. The patch also passes
+`--submodule=short`, whatever `diff.submodule` says, so that a submodule's
+change in it applies again on Restore.
 
 - **Bytes, not lines.** `Subprocess.run` goes through `LineSplitter`, which
   splits on `\r` as well as `\n`, decodes lossily and drops the final
@@ -1120,10 +1122,13 @@ identity.
 
 ### 6.5 Approve, Discard, Revert File, Review Anyway
 
-**Approve** is `JobCenter.approve(job)`. It awaits `flushEdits(job)`, then the
-job's git queue, sets `publishing("Checking…")` (which makes every editor of
-the job read-only), clears `notice`, and calls
-`Publisher.publish(job, reviewed:provenance:)`. Each step sets
+**Approve** is `JobCenter.approve(job, shown:)`, `shown` being the review as
+Open Draft PR's click saw it (`ShownReview`): the digest of the diff on
+screen and its DiffGuard findings, which the click's question counted. It is
+read at the click, not when the question is confirmed. Approve awaits
+`flushEdits(job)`, then the job's git queue, sets `publishing("Checking…")`
+(which makes every editor of the job read-only), clears `notice`, and calls
+`Publisher.publish(job, reviewed:findings:provenance:)`. Each step sets
 `publishing(step)` and is also written to the job's log file.
 
 1. **"Checking…"**
@@ -1218,10 +1223,12 @@ same command under the same name.
 **Review Anyway**, on a failed or aborted agent job whose worktree has
 changes, takes a snapshot and moves the job to `awaitingReview`. A record
 from before 0.3 has no base: it is computed once as `git merge-base HEAD
-origin/<default>` and recorded. When it cannot go ahead, it says why in the
-transcript and as the job's notice, which the job's pane draws under its
-banner; one that later goes ahead clears that refusal, but never a
-tripwire's notice, which belongs in the review.
+origin/<default>` and recorded, but only once `GitService.isWorktree` has
+found the worktree's `.git` still leading to the clone (§5.1). When it cannot
+go ahead, it says why in the transcript and as the job's notice, which the
+job's pane draws under its banner; one that later goes ahead clears that
+refusal. A tripwire's notice is never replaced or cleared by either: it
+belongs in the review, and the refusal is then in the transcript only.
 
 ### 6.6 The review in the Jobs window
 
@@ -1985,7 +1992,9 @@ final class JobCenter {
     func revert(_ path: String, in job: Job) async
     func reviewAnyway(_ job: Job) async
     func restoreWorktree(_ job: Job) async -> Bool
-    func approve(_ job: Job) async -> ApproveResult
+    /// `shown`: the digest and findings Open Draft PR's click saw.
+    func approve(_ job: Job, shown: ShownReview) async -> ApproveResult
+    func approve(_ job: Job) async -> ApproveResult   // the review on screen now
     /// The open PR on the job's branch, if any: for Discard's dialog.
     func openPullRequest(for job: Job) async -> URL?
     func discard(_ job: Job) async
@@ -2118,7 +2127,7 @@ struct AgentInvocation: Sendable, Equatable {
     let tools: ToolLocator
     let git: GitService
     let target: PublishTarget
-    func publish(_ job: Job, reviewed digest: String,
+    func publish(_ job: Job, reviewed digest: String, findings: [DiffFinding]? = nil,
                  provenance: PullRequestDraft.Provenance) async -> ApproveResult
     enum LeaseRecovery: Sendable, Equatable { case retry(expecting: String?), rename, refuse }
     nonisolated static func leaseRecovery(remoteTip: String?, pushing: String?, pushed: String?,

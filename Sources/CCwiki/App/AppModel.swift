@@ -997,7 +997,7 @@ final class AppModel {
     ) -> [String] {
         var blockers: [String] = []
         if store == nil {
-            blockers.append("The wiki has not been cloned yet. Sync first (⌘R).")
+            blockers.append(CorrectionJobRunner.notCloned)
         }
         if needsDeveloperTools {
             blockers.append("git needs Apple's Command Line Tools (reading does not; "

@@ -2766,8 +2766,9 @@ def inbox_problems(inbox: dict, asks_markdown: str, entry_ids: set) -> list:
 def selftest_units() -> bool:
     """The checks that need no manifest and no clone, run by `make check`:
     the quote-matching cases Python and Swift share, the review document's
-    escaping and fences, the asks' inbox file, and the curation's citations
-    (plans/relations-followups.md §2.6, §4.1)."""
+    escaping and fences, the asks' inbox file, the curation's citations
+    (plans/relations-followups.md §2.6, §4.1), and a requirement on a
+    hypothesis the record no longer gives, on a manifest of its own."""
     check, state = _checker()
 
     print("quote matching (Tests/CCwikiTests/Fixtures/quote-cases.json)")
@@ -2813,6 +2814,36 @@ def selftest_units() -> bool:
     check("every requirement and weakening has a notionMarkdown", all(notions), notions.count(None))
     check("no notionMarkdown has wikilinks, links or emphasis",
           not [n for n in notions if n and any(k in n for k in ("[[", "](", "**"))])
+
+    print("a requirement on a hypothesis the record no longer gives")
+    # The record dropped syn-x from P ⇒ Z after the curation named it: the
+    # requirement constrains nothing, as Swift's `check` skips it, in the
+    # closure and in what the review says was refused. The corpus test still
+    # reports the entry as unresolved.
+    data = {"version": 1, "classSentinels": ["unstated"], "propositions": {}, "barriers": [],
+            "classes": {"fully-black-box": {"implies": ["relativizing"]},
+                        "relativizing": {"implies": ["free"]}, "free": {"implies": []}},
+            "objects": [_obj("syn-y", "assumption"), _obj("syn-p"), _obj("syn-z")],
+            "reductions": [_red("red-syn-y-to-p", ["syn-y"], "syn-p", "fully-black-box"),
+                           _red("red-syn-p-to-z", ["syn-p"], "syn-z", "fully-black-box")]}
+    stale = Curation({"requires": [{"edge": "red-syn-p-to-z", "hypothesis": "syn-x",
+                                    "notion": "syn-x in its strong regime"}]})
+    dv = Derivation(Manifest(data), stale)
+    try:
+        a = dv.query(["syn-y"], "syn-z")
+    except KeyError as e:
+        a = {"error": f"KeyError {e}"}
+    try:
+        refused = dv.refused_on_path(["syn-y"], "syn-z", False)
+    except KeyError as e:
+        refused = [{"reasons": [{"kind": f"KeyError {e}"}]}]
+    check("the query runs, and the step fires",
+          a.get("derivable") and a.get("edges") == ["red-syn-p-to-z", "red-syn-y-to-p"], a)
+    check("nothing is assumed for it", a.get("derivable") and not a.get("assumes"), a.get("assumes"))
+    check("the refused steps list no requires reason for it",
+          not [r for s in refused for r in s["reasons"]], refused)
+    check("the curation is reported unresolved",
+          "hypothesis red-syn-p-to-z:syn-x" in stale.unresolved(Manifest(data)))
 
     print("the wiki asks (plans/wiki-asks.inbox.json)")
     with open(WIKI_ASKS_INBOX, encoding="utf-8") as f:

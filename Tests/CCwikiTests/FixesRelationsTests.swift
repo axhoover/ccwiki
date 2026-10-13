@@ -235,6 +235,47 @@ import Testing
             == "Gamma ⇒* Kappa (derived by CCwiki from 2 recorded reductions" + assuming)
     }
 
+    @Test("R6's stronger proof states only what its own steps assume")
+    func strongerStatementAssumesLess() throws {
+        // Shortest: g ⇒ m, then m ∧ h ⇒ k, unstated, assuming of both
+        // givens. Stronger: g ⇒ m ⇒ n ⇒ k, fully black-box, assuming of g
+        // only. The reference engine gives the same two.
+        let objects: [[String: Any]] = [
+            E.object("g", title: "Gamma", type: "assumption"),
+            E.object("h", title: "Eta", type: "assumption"),
+            E.object("m", title: "Mu"), E.object("n", title: "Nu"), E.object("k", title: "Kappa"),
+        ]
+        let reductions: [[String: Any]] = [
+            E.reduction("red-g-to-m", ["g"], "m", title: "G ⇒ M", source: "GM01"),
+            E.reduction("red-mh-to-k", ["m", "h"], "k", title: "M + H ⇒ K", source: "MHK02",
+                        reductionClass: "unstated"),
+            E.reduction("red-m-to-n", ["m"], "n", title: "M ⇒ N", source: "MN03"),
+            E.reduction("red-n-to-k", ["n"], "k", title: "N ⇒ K", source: "NK04"),
+        ]
+        let requirements = [
+            DerivationCuration.Requirement(
+                relationID: "red-g-to-m", isReverse: false, hypothesis: "g",
+                notion: "g in its strong regime", metBy: []),
+            DerivationCuration.Requirement(
+                relationID: "red-mh-to-k", isReverse: false, hypothesis: "h",
+                notion: "h in its strong regime", metBy: []),
+        ]
+        let derivation = Derivation(
+            manifest: try E.manifest(objects: objects, reductions: reductions),
+            curation: DerivationCuration(requires: requirements))
+        let result = ExplorerResult.compute(
+            ExplorerQuery(from: ["g", "h"], to: "k"), derivation: derivation,
+            labels: E.labels(derivation.manifest))
+
+        let shortest = try #require(result.sections.first { $0.id == "proof" }?.rows.first)
+        #expect(shortest.statement == "Gamma ∧ Eta ⇒* Kappa (derived by CCwiki from 2 recorded "
+            + "reductions, assuming g in its strong regime; h in its strong regime)")
+        let stronger = try #require(result.sections(showingStronger: true)
+            .first { $0.id == "proof" }?.rows.first)
+        #expect(stronger.statement == "Gamma ∧ Eta ⇒* Kappa (derived by CCwiki from 3 recorded "
+            + "reductions, assuming g in its strong regime)")
+    }
+
     @Test("an inspector row's statement and tooltip say a weakened conclusion is only that")
     func weakenedRow() throws {
         let objects: [[String: Any]] = [

@@ -349,4 +349,40 @@ import Testing
         #expect(await publisher.check(job, reviewed: reviewed, findings: [])
             == .refused(Publisher.newWarning(upstream)))
     }
+
+    @Test("Approve publishes the review its click saw: a warning a refresh showed since refuses")
+    func approveTakesTheClicksReview() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
+        await scene.center.refreshReview(job)
+
+        // The click, whose question counted these findings.
+        let shown = JobCenter.ShownReview(of: job)
+        try #require(shown.digest != nil)
+        #expect(!shown.findings.contains { $0.rule == .changedUpstream })
+
+        // While the question is up, a sync brings a commit that changed the
+        // same page, and a refresh shows the warning on the same diff.
+        try scene.clone.write("content/page.md", "a\nb\nc\nd")
+        try #require(await scene.clone.commit("upstream", date: 1_780_000_300) != nil)
+        for arguments in [["push", "-q", "origin", "main"], ["fetch", "-q", "origin"]] {
+            let result = await scene.clone.run(arguments)
+            try #require(result.succeeded, "git \(arguments[0]): \(result.output)")
+        }
+        await scene.center.refreshReview(job)
+        let upstream = try #require(job.findings.first(where: { $0.rule == .changedUpstream }),
+                                    "the review shows the new warning")
+        #expect(job.review?.digest == shown.digest, "the diff itself did not change")
+
+        // Confirming that question approves what it asked about, which
+        // lacks the warning, so nothing is sent.
+        let result = await scene.center.approve(job, shown: shown)
+        #expect(result == .refused(Publisher.newWarning(upstream)), "\(result)")
+        #expect(job.state == .awaitingReview)
+        #expect(job.notice == JobNotice(tone: .warning, text: Publisher.newWarning(upstream)))
+        #expect(await scene.originTip(job.branch) == .absent, "nothing was pushed")
+    }
 }

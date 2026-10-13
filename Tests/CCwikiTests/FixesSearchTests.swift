@@ -179,8 +179,10 @@ struct FixesSearchTests {
         }
         #expect(first == "doi.org")
 
+        // Up to ten seconds: the suites share the main actor, and a loaded
+        // runner is slow. A pass leaves as soon as the PDF's bytes arrive.
         var state = papers.state(for: page.path)
-        for _ in 0..<200 {
+        for _ in 0..<1_000 {
             if case .downloading(_, let received, _) = state, received == 100 { break }
             try await Task.sleep(for: .milliseconds(10))
             state = papers.state(for: page.path)
