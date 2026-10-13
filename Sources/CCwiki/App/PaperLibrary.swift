@@ -115,9 +115,10 @@ final class PaperLibrary {
         transient[path] = .downloading(host: first.url.host() ?? "", received: 0, expected: nil)
         let fetcher = self.fetcher
         tasks[path] = Task {
-            let result = await fetcher.fetch(source) { received, expected in
+            let result = await fetcher.fetch(source) { received, expected, url in
                 Task { @MainActor in
-                    self.progressed(path, token: token, received: received, expected: expected)
+                    self.progressed(
+                        path, token: token, from: url, received: received, expected: expected)
                 }
             }
             self.finish(path, token: token, source: source, result: result)
@@ -126,12 +127,15 @@ final class PaperLibrary {
 
     /// Each report replaces the last: every request the fetcher makes starts
     /// again from zero, and one fetch's reports reach the main actor in the
-    /// order they were made.
-    private func progressed(_ path: String, token: UUID, received: Int64, expected: Int64?) {
-        guard fetches[path] == token, case .downloading(let host, _, _) = transient[path] else {
-            return
-        }
-        transient[path] = .downloading(host: host, received: received, expected: expected)
+    /// order they were made. The host is the request's own, so a landing
+    /// page's PDF, or the next link after one that failed, is not shown as
+    /// coming from the first link's host (§2.7).
+    private func progressed(
+        _ path: String, token: UUID, from url: URL, received: Int64, expected: Int64?
+    ) {
+        guard fetches[path] == token, case .downloading = transient[path] else { return }
+        transient[path] = .downloading(
+            host: url.host() ?? url.absoluteString, received: received, expected: expected)
     }
 
     private func finish(

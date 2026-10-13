@@ -106,7 +106,7 @@ struct PaperFetcherTests {
     ) async -> (result: Result<FetchedPaper, PaperFailure>, requests: [URL]) {
         let transport = ScriptedTransport(replies: replies)
         let fetcher = PaperFetcher(transport: transport, maximumBytes: maximumBytes)
-        let result = await fetcher.fetch(PaperSource(page: page)) { _, _ in }
+        let result = await fetcher.fetch(PaperSource(page: page)) { _, _, _ in }
         if case .success(let paper) = result { try? FileManager.default.removeItem(at: paper.file) }
         return (result, await transport.log.requests)
     }
@@ -123,7 +123,8 @@ struct PaperFetcherTests {
     @Test("an ePrint reference downloads its full text")
     func eprint() async throws {
         let transport = ScriptedTransport(replies: [eprintPDF: Self.pdfReply()])
-        let result = await PaperFetcher(transport: transport).fetch(PaperSource(page: aabn)) { _, _ in }
+        let result = await PaperFetcher(transport: transport)
+            .fetch(PaperSource(page: aabn)) { _, _, _ in }
         let paper = try result.get()
         defer { try? FileManager.default.removeItem(at: paper.file) }
         #expect(paper.from == URL(string: eprintPDF))
@@ -157,7 +158,7 @@ struct PaperFetcherTests {
         ])
         let log = ProgressLog()
         let result = await PaperFetcher(transport: transport).fetch(PaperSource(page: page)) {
-            log.record($0, $1)
+            received, expected, _ in log.record(received, expected)
         }
         let paper = try result.get()
         defer { try? FileManager.default.removeItem(at: paper.file) }
