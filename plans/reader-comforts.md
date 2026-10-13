@@ -347,7 +347,8 @@ today, so it lands on the match.
 
 `CCwikiCommands` reads `@FocusedValue(\.readerSession)` for everything about
 a page. It keeps `@FocusedValue(\.appModel)` for app-wide items, so those
-stay enabled exactly when they are today: when a reader window is key.
+stay enabled exactly when they are today: when a reader window is key,
+except Ingest a Paper, which takes the app's own model (below).
 
 | Command | Keys | Goes to | Enabled when |
 |---|---|---|---|
@@ -505,7 +506,9 @@ follows the key reader.
 - **Jobs.** New Ingestion Job… calls `model.requestIngestSheet(in: nil)`.
   The sheet appears on the active reader window, which comes forward. With
   no reader open, Jobs opens one, which claims the request and shows the
-  sheet (`IngestCommand`, as the explorer opens one for a page).
+  sheet (`IngestCommand`, as the explorer opens one for a page). As there,
+  `mainWindowCount` counts a window only once it claims its session, so a
+  second click before then opens a second reader, without the sheet.
 - **A paper window's Show Reference Page** is an explicit Show, so it must
   be seen. `model.revealInReader(_:)` prefers a reader tab already showing
   that page, else the active reader, opens the page there and brings that

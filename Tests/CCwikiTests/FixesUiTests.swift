@@ -28,7 +28,10 @@ struct FixesUiTests {
         // started, so before the sheet could appear.
         var target = IngestSheetTarget()
         target.request(in: nil, active: nil)
-        #expect(target.claim(by: window))
+        // Hoisted: #expect calls a method on an immutable copy, and
+        // claim(by:) is mutating.
+        let claimed = target.claim(by: window)
+        #expect(claimed)
         #expect(ReaderSession.stagesOpenedPDF(
             sheet: target.window, window: window, isStarted: false, hasPendingPDF: false))
     }
