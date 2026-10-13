@@ -281,14 +281,16 @@ struct CorrectionTarget: Codable, Sendable, Hashable {
 - **The revision travels with the render.** `RenderRequest` gains `var
   revision: String?`, which is `headRevision` at render time and goes into
   the payload. `ccwiki.js` returns it with the selection. A sync can land
-  between the render and the click. Once reader-comforts is in, a sync also
-  leaves alone every tab whose page it did not touch (reader-comforts §3.6),
-  so a tab's shown revision is often older than HEAD. Neither is an error:
-  the target is built entirely at the shown revision, never compared with
-  HEAD. Only when that revision's file cannot be read, in a snapshot store
-  whose marker has moved since the render, does the target fall back to the
-  whole page at HEAD, with the section, and the sheet or editor says "The
-  page changed since it was shown; the selection was not carried over."
+  between the render and the click. Once reader-comforts is in, a sync of a
+  clone also leaves alone every tab whose page it did not touch
+  (reader-comforts §3.6), so a tab's shown revision is often older than HEAD;
+  a snapshot store's page tabs render again at the new marker. Neither is
+  an error: the target is built entirely at the shown revision, never
+  compared with HEAD. Only when that revision's file cannot be read, in a
+  snapshot store whose marker has moved since the render (a selection made
+  just before the sync), does the target fall back to the whole page at
+  HEAD, with the section, and the sheet or editor says "The page changed
+  since it was shown; the selection was not carried over."
 - **`region = .generated`** when the lines fall between
   `<!-- BEGIN GENERATED participates-in` and `<!-- END GENERATED
   participates-in -->`. Those lines are derived from reduction pages (111
@@ -2700,7 +2702,9 @@ target is built at the shown revision (§3.5), never compared with HEAD.
   cryptology.city. Anything else follows the explorer's rule:
   `model.navigate(to:)`, which renders in the active reader without bringing
   it forward, and with `mainWindowCount == 0` first `openWindow(id:
-  CCwikiApp.mainWindowID, value: ReaderWindow())`.
+  CCwikiApp.mainWindowID, value: ReaderWindow())`. So their link menus
+  offer no new tab or window, only Open Link on cryptology.city
+  (`WebController.opensLinksInTabs` is a reader's alone).
 
 **Jobs:**
 

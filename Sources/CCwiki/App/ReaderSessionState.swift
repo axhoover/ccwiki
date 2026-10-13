@@ -88,18 +88,85 @@ struct SessionStartPlan: Equatable, Sendable {
             plan.opensOnLoad = pending
             return plan
         }
+        // A window opened on a page was asked for it, as a paper window's
+        // Show Reference Page asks with no reader open: it opens over the
+        // launch document, as a pending location does, which leaves the
+        // document one Back away.
+        if restored == nil, let opening = window.opening {
+            plan.opensOnLoad = opening
+            plan.find = window.find
+            return plan
+        }
         // A restored page, or the launch document, is something to read
         // already; neither is opened over.
         guard history.current == .empty, showsAtOnce == nil else { return plan }
 
-        if restored == nil, let opening = window.opening {
-            plan.opensOnLoad = opening
-            plan.find = window.find
-        } else if isColdStart, let lastPage {
+        if isColdStart, let lastPage {
             plan.opensOnLoad = .page(path: lastPage, anchor: nil)
         } else {
             plan.opensHomeOnLoad = true
         }
         return plan
+    }
+}
+
+/// What a load after a session's first does to it (§3.6). Pure.
+///
+/// A pull can take pages away. Back and Forward forget them, as a restored
+/// history does at the first load, and a page on screen that went gives
+/// way to the nearest one left on Back. Without this the chrome moved to a
+/// page the wiki no longer has, or stayed on one, while the web view kept
+/// showing the last page it rendered.
+struct SessionReloadPlan: Equatable, Sendable {
+    typealias Location = AppModel.Location
+
+    enum Render: Equatable, Sendable {
+        /// The page on screen stays as it is.
+        case unchanged
+        /// The page on screen again, keeping the reader's place.
+        case inPlace
+        /// The page on screen went: the one Back now holds, where it was left.
+        case current
+        /// Nothing is left to show.
+        case home
+    }
+
+    var history: NavigationHistory
+    var render: Render
+
+    /// - Parameters:
+    ///   - exists: whether the wiki has a page at a path.
+    ///   - changed: whether the load changed what a location shows,
+    ///     `LibraryUpdate.requiresRerender(of:)`.
+    ///   - revisionGone: whether the page on screen was rendered at a
+    ///     revision the copy can no longer read (`outlivesRevision`).
+    static func plan(
+        history: NavigationHistory, exists: (String) -> Bool,
+        changed: (Location) -> Bool, revisionGone: Bool
+    ) -> SessionReloadPlan {
+        let pruned = history.pruned { $0.path.map(exists) ?? true }
+        let render: Render
+        if pruned.current == .empty {
+            render = .home
+        } else if pruned.current != history.current {
+            render = .current
+        } else if changed(pruned.current) || (revisionGone && pruned.current.path != nil) {
+            render = .inPlace
+        } else {
+            render = .unchanged
+        }
+        return SessionReloadPlan(history: pruned, render: render)
+    }
+
+    /// Whether a page rendered at `rendered` outlives its revision now that
+    /// the copy is at `head`. A snapshot has no history: once a sync moves
+    /// its marker, the file the page was rendered from cannot be read, and
+    /// a correction about a passage of it would fall back to the whole page
+    /// with a notice that the page changed, though it may not have
+    /// (corrections §3.5). A clone keeps every revision.
+    static func outlivesRevision(
+        store: AppPaths.WikiStore, rendered: String?, head: String?
+    ) -> Bool {
+        store == .snapshot && rendered != head
     }
 }
