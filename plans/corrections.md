@@ -1339,7 +1339,7 @@ and the review show its banner when it is not `.ready`:
 
 | `GitHubAccess` | Banner |
 |---|---|
-| `.offline` (a timeout, or a network failure) | "Offline. You can edit now; opening the pull request needs a connection." |
+| `.offline` (a timeout, a network failure, or an error from GitHub other than a refused token, such as a 503) | "Offline. You can edit now; opening the pull request needs a connection." |
 | `.ghMissing` | "gh is not installed, so this cannot become a pull request yet. Install it with Homebrew (brew install gh), then check again." No issue is offered: opening one needs gh too (§8.2) |
 | `.notSignedIn` | "gh is not signed in. Run gh auth login in Terminal, then check again." |
 | `.cannotPush` | "The signed-in account cannot push to axhoover/cryptology.city, so this cannot become a pull request. Open an issue instead." with **Open an Issue…** |
