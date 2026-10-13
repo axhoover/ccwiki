@@ -292,10 +292,11 @@ struct DiffGuardTests {
         #expect(Self.finding(.regionRegenerated, in: findings) == nil)
     }
 
-    @Test("a region the script rewrote, its checksum matching, is a note and blocks nothing")
+    @Test("a region the script rewrote, its checksum matching and relations.json regenerated, is a note and blocks nothing")
     func regionRegenerated() throws {
         let page = try Self.fixture("pseudorandom-function.md")
-        let findings = Self.check([Self.modified(old: page, new: try Self.regenerated(page))])
+        let json = Self.modified(".reductions/relations.json", old: "{}\n", new: "{\"edges\": 1}\n")
+        let findings = Self.check([Self.modified(old: page, new: try Self.regenerated(page)), json])
         #expect(Self.finding(.generatedRegionEdited, in: findings) == nil)
         let note = try #require(Self.finding(.regionRegenerated, in: findings))
         #expect(note.severity == .note)
@@ -304,6 +305,8 @@ struct DiffGuardTests {
         // Its new bullets carry two wikilinks under # Other results, and its
         // marker is a comment: neither is the hand's.
         #expect(findings.map(\.rule) == [.regionRegenerated])
+        // Without relations.json the script did not write it: a warning
+        // (FixesDiffguardTests.regionWithoutRelations).
     }
 
     @Test("unbalanced markers block, citing generated-region")
@@ -350,16 +353,19 @@ struct DiffGuardTests {
         ])
     }
 
-    @Test("a region the generator dropped, with relations.json regenerated, is a note")
+    @Test("a region the generator dropped, with relations.json regenerated and relating nothing to the page, is a note")
     func regionRemovedByTheScript() throws {
         let page = try Self.fixture("pseudorandom-function.md")
         let begin = try #require(page.range(of: Self.beginMarker))
         // The region goes, and the blank lines it leaves collapse
         // (generate-relations.mjs 330).
         let dropped = String(page[..<begin.lowerBound].dropLast())
+        // The page's records, and no edge on `prf` or its variants
+        // (FixesDiffguardTests.regionRemovedThoughRelated has the others).
+        let json = try FixesDiffguardTests.manifest(objects: FixesDiffguardTests.prfRecords())
         let files = [
             Self.modified(old: page, new: dropped),
-            Self.modified(".reductions/relations.json", old: "{\n  \"edges\": [1]\n}\n", new: "{\n  \"edges\": []\n}\n"),
+            Self.modified(".reductions/relations.json", old: try FixesDiffguardTests.manifest(), new: json),
         ]
         for kind in [JobKind.Tag.edit, .ingestion] {
             let findings = Self.check(files, kind: kind, target: kind == .edit ? Self.target : nil)
@@ -602,17 +608,19 @@ struct DiffGuardTests {
     }
 
     @Test("ingestionScope: pages given their first region by the script, blank line and all, are not hand changes")
-    func ingestionScopeFirstRegions() {
+    func ingestionScopeFirstRegions() throws {
         let owf = "---\ntype: primitive\nid: owf\n---\n\n# OWF\n\nA function.\n"
         let prg = "---\ntype: primitive\nid: prg\n---\n\n# PRG\n\nA generator.\n"
         // trimEnd() drops trailing blank lines too.
         let crhf = "---\ntype: primitive\nid: crhf\n---\n\n# CRHF\n\nA hash function.\n\n\n"
+        // The new reduction's record, as the generator wrote it.
+        let json = try FixesDiffguardTests.manifest(reductions: [FixesDiffguardTests.reductionRecord()])
         let findings = Self.ingest([
             Self.added("content/Reductions/owf-to-prg-hill99.md", Self.reduction),
             Self.modified("content/Primitives/collision-resistant-hash.md", old: crhf, new: Self.withFirstRegion(crhf)),
             Self.modified("content/Primitives/one-way-function.md", old: owf, new: Self.withFirstRegion(owf)),
             Self.modified("content/Primitives/pseudorandom-generator.md", old: prg, new: Self.withFirstRegion(prg)),
-            Self.modified(".reductions/relations.json", old: "{}\n", new: "{\"edges\": 1}\n"),
+            Self.modified(".reductions/relations.json", old: "{}\n", new: json),
         ])
         #expect(Self.finding(.ingestionScope, in: findings) == nil)
         #expect(findings.map(\.rule) == [.regionRegenerated, .regionRegenerated, .regionRegenerated])
@@ -655,7 +663,7 @@ struct DiffGuardTests {
     // MARK: derivedFilesStale
 
     @Test("derivedFilesStale: a reduction page's frontmatter, without relations.json, warns")
-    func derivedFilesReduction() {
+    func derivedFilesReduction() throws {
         let path = "content/Reductions/owf-to-prg-hill99.md"
         let changed = Self.reduction.replacingOccurrences(of: "class: fully-black-box", with: "class: semi-black-box")
         let stale = Self.finding(.derivedFilesStale, in: Self.ingest([Self.modified(path, old: Self.reduction, new: changed)]))
@@ -663,7 +671,11 @@ struct DiffGuardTests {
         #expect(stale?.path == path)
         #expect(stale?.message.hasPrefix("The “Participates in” sections and `relations.json` are now out of date") == true)
 
-        let json = Self.modified(".reductions/relations.json", old: "{}\n", new: "{\"edges\": 1}\n")
+        // Regenerated after the change: its record agrees with the page
+        // (FixesDiffguardTests.editedAfterTheGenerator has one that does not).
+        let record = FixesDiffguardTests.reductionRecord(class: "semi-black-box")
+        let json = Self.modified(
+            ".reductions/relations.json", old: "{}\n", new: try FixesDiffguardTests.manifest(reductions: [record]))
         #expect(Self.finding(.derivedFilesStale, in: Self.ingest([Self.modified(path, old: Self.reduction, new: changed), json])) == nil)
 
         let body = Self.reduction.replacingOccurrences(of: "A construction.", with: "A classic construction.")
