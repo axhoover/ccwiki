@@ -515,7 +515,10 @@ cost a few hundred megabytes. Three choices keep that down:
   (`WebController.sharedDataStore`). Today each controller would make its
   own, and with it a separate network process for each.
 - **`paths.stagedWebRoot()` runs once**, in `AppModel.init`, and every
-  session gets the URL. It copies the pipeline on first use.
+  session gets the URL. It copies the pipeline on first use. Reading
+  `model.webRoot` checks the copy (`AppPaths.keepStagedWebRoot`, also on
+  activation and hourly): it is marked in use, and staged again at the same
+  path only if Caches lost it while the bundle on disk is still this build.
 - **A closed tab releases its web view.** The session leaves the registry
   when its window posts `willCloseNotification` (§1.3). The `Bridge`,
   `onNavigate` and `onReady` closures capture `[weak self]` already.
