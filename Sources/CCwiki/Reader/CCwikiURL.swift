@@ -129,10 +129,20 @@ enum CCwikiURL {
         else { return nil }
         let root = content.standardizedFileURL.resolvingSymlinksInPath()
         let file = content.appending(path: path).standardizedFileURL.resolvingSymlinksInPath()
-        // Inside the root, and not the root itself, which a link can name.
-        guard CCwikiSchemeHandler.isContained(file, in: root),
-              !CCwikiSchemeHandler.isContained(root, in: file)
-        else { return nil }
+        guard isStrictlyInside(file, root) else { return nil }
         return file
+    }
+
+    /// Whether `file` sits underneath `root`, and is not the root itself,
+    /// which a link can name. Slash-normalized like the scheme handler's
+    /// `isContained`, and kept here so that this enum does not take on the
+    /// handler's isolation, which its WebKit conformance decides.
+    private static func isStrictlyInside(_ file: URL, _ root: URL) -> Bool {
+        func normalize(_ url: URL) -> String {
+            var path = url.standardizedFileURL.path(percentEncoded: false)
+            while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+            return path
+        }
+        return normalize(file).hasPrefix(normalize(root) + "/")
     }
 }

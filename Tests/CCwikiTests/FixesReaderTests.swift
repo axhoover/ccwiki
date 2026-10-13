@@ -63,6 +63,9 @@ import Testing
         #expect(file?.lastPathComponent == "a.png")
         #expect(CCwikiURL.assetFile("alias.png", in: content)?.lastPathComponent == "a.png",
                 "a link inside the wiki to a file inside it is followed")
+        let slashed = URL(filePath: content.path(percentEncoded: false) + "/")
+        #expect(CCwikiURL.assetFile("Files/a.png", in: slashed)?.lastPathComponent == "a.png",
+                "a root with a trailing slash")
 
         #expect(CCwikiURL.assetFile("../outside.txt", in: content) == nil)
         #expect(CCwikiURL.assetFile("Files/../../outside.txt", in: content) == nil)
