@@ -467,26 +467,47 @@ struct GitService: Sendable {
     ///   `a/` and `b/` prefixes, whatever the user's configuration says, so
     ///   it applies again (Restore) and its digest is stable.
     ///
+    /// All three with `--ignore-submodules=none`: `git add -A` stages a
+    /// submodule's new commit whatever `diff.ignoreSubmodules` or a
+    /// submodule's `ignore` says, and the commit carries it, so the review
+    /// must show it too. The patch writes it `--submodule=short`, as one
+    /// that applies again, whatever `diff.submodule` says.
+    ///
     /// Nil when git fails. `-z`, because reference filenames carry spaces,
     /// `&` and non-ASCII titles, which git otherwise quotes.
     func stagedDiff(in worktree: URL, base: String) async
         -> (nameStatus: Data, numstat: Data, patch: Data)? {
         let path = worktree.path(percentEncoded: false)
         let nameStatus = await data([
-            "-C", path, "diff", "--cached", "--no-color", "-M", "--name-status", "-z", base,
+            "-C", path, "diff", "--cached", "--no-color", "--ignore-submodules=none", "-M",
+            "--name-status", "-z", base,
         ])
         guard nameStatus.status == 0 else { return nil }
         let numstat = await data([
             "-C", path, "diff", "--cached", "--no-color", "--no-textconv", "--no-renames",
-            "--numstat", "-z", base,
+            "--ignore-submodules=none", "--numstat", "-z", base,
         ])
         guard numstat.status == 0 else { return nil }
         let patch = await data([
             "-C", path, "diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv",
+            "--ignore-submodules=none", "--submodule=short",
             "-M", "--binary", "--full-index", "--src-prefix=a/", "--dst-prefix=b/", base,
         ])
         guard patch.status == 0 else { return nil }
         return (nameStatus.stdout, numstat.stdout, patch.stdout)
+    }
+
+    /// `git diff --cached --raw -z --no-renames <base>`: each staged path
+    /// with its old and new modes, for `GitNameStatus.irregularPaths`. A
+    /// symbolic link is staged as a blob holding its target, which the
+    /// other outputs show as one line of text (§6.1). Nil when git fails.
+    func stagedModes(in worktree: URL, base: String) async -> Data? {
+        let result = await data([
+            "-C", worktree.path(percentEncoded: false),
+            "diff", "--cached", "--no-color", "--no-renames", "--ignore-submodules=none",
+            "--raw", "-z", base,
+        ])
+        return result.status == 0 ? result.stdout : nil
     }
 
     /// The blob `spec` names, bytes exact: "<commit>:<path>", or ":<path>"
@@ -505,12 +526,34 @@ struct GitService: Sendable {
     /// Returns one repository-relative path to `base`: `git checkout <base>
     /// -- <path>`, or, for a file `base` does not have, out of the index and
     /// off the disk. True when the path is as it was at `base`.
+    ///
+    /// A submodule's commit (a gitlink) is in the submodule's own objects,
+    /// not here, so it is found with `ls-tree`, which reads only the tree:
+    /// `cat-file -e <base>:<path>` would call it new, and its checkout would
+    /// be deleted. `checkout` restores only its index entry; the submodule's
+    /// checkout goes back to that commit too, from what it already has, or
+    /// the next `git add -A` would stage the moved commit again.
     func revertPath(_ path: String, to base: String, in worktree: URL) async -> Bool {
         let directory = worktree.path(percentEncoded: false)
-        let inBase = await run(["-C", directory, "cat-file", "-e", "\(base):\(path)"]).succeeded
-        if inBase {
-            return await run([
+        let entry = await run(["-C", directory, "ls-tree", base, "--", Self.literal(path)])
+        guard entry.succeeded else { return false }
+        // "<mode> <type> <object>\t<path>", or nothing for a path not in `base`.
+        let mode = entry.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix { $0 != " " }
+        if !mode.isEmpty {
+            guard await run([
                 "-C", directory, "checkout", base, "--", Self.literal(path),
+            ]).succeeded else { return false }
+            guard mode == Self.gitlinkMode else { return true }
+            guard await run([
+                "-C", directory, "submodule", "update", "--checkout", "--no-fetch", "--",
+                Self.literal(path),
+            ]).succeeded else { return false }
+            // What `git add -A` would stage: the submodule's commit, not
+            // whatever else its checkout holds.
+            return await run([
+                "-C", directory, "diff", "--quiet", "--ignore-submodules=dirty", base, "--",
+                Self.literal(path),
             ]).succeeded
         }
         let unstaged = await run([
@@ -707,6 +750,36 @@ struct GitService: Sendable {
     /// may hold `[`, `*` or `?`, which git would otherwise read as a glob.
     static func literal(_ path: String) -> String {
         ":(literal)" + path
+    }
+
+    /// The mode git gives a submodule's commit in a tree or the index.
+    static let gitlinkMode = "160000"
+
+    /// Whether `worktree` is still one of `clone`'s worktrees as git made
+    /// it: its `.git` is a file, not a link or a folder, that names a folder
+    /// in `<clone>/.git/worktrees/` (a relative name is read from the
+    /// worktree, as git reads it). CCwiki's own git runs in a worktree
+    /// unsealed (§5.1) and finds the repository through that file, which an
+    /// agent could rewrite: pointed anywhere else, the snapshot, the commit
+    /// and the push would run on a repository and a configuration it chose.
+    static func isWorktree(_ worktree: URL, of clone: URL) -> Bool {
+        let manager = FileManager.default
+        let file = worktree.appending(path: ".git").path(percentEncoded: false)
+        guard let attributes = try? manager.attributesOfItem(atPath: file),
+              let type = attributes[.type] as? FileAttributeType, type == .typeRegular,
+              let data = manager.contents(atPath: file),
+              let text = String(data: data, encoding: .utf8)
+        else { return false }
+        let prefix = "gitdir: "
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix(prefix), !line.contains("\n") else { return false }
+        let named = String(line.dropFirst(prefix.count))
+        let gitdir = named.hasPrefix("/")
+            ? named : worktree.appending(path: named).path(percentEncoded: false)
+        let admin = realPath(gitdir)
+        let worktrees = realPath(clone.appending(path: ".git/worktrees").path(percentEncoded: false))
+        return manager.fileExists(atPath: admin)
+            && (admin as NSString).deletingLastPathComponent == worktrees
     }
 
     /// `-z` output split at each NUL, without the empty field after the

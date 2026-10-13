@@ -1,14 +1,15 @@
 import Foundation
 
-/// `git diff --cached -M --name-status -z` and `--numstat -z`, parsed
-/// (plans/corrections.md §6.1). `-z`, because reference filenames carry
-/// spaces, `&` and non-ASCII titles, which git otherwise quotes. Pure.
+/// `git diff --cached -M --name-status -z`, `--numstat -z` and `--raw -z`,
+/// parsed (plans/corrections.md §6.1). `-z`, because reference filenames
+/// carry spaces, `&` and non-ASCII titles, which git otherwise quotes. Pure.
 ///
 /// With `-z` every field ends in a NUL and nothing is quoted:
 ///
 /// ```
 /// --name-status   M\0path\0   A\0path\0   D\0path\0   R100\0old\0new\0
 /// --numstat       1\t1\tpath\0   -\t-\tpath\0   0\t0\t\0old\0new\0
+/// --raw           :100644 120000 <old> <new> T\0path\0
 /// ```
 ///
 /// `git diff` detects renames by default (`diff.renames`), so `--numstat`
@@ -72,6 +73,38 @@ enum GitNameStatus {
         }
         return binary
     }
+
+    /// The paths `--raw -z --no-renames` gives a new mode that is not a
+    /// file's: a symbolic link (120000) or a submodule (160000). Neither is
+    /// a page's text, whatever the other outputs make of it. A file is
+    /// 100644, or 100755 when executable; a deletion's new mode is 000000.
+    ///
+    /// ```
+    /// :100644 120000 1f2e3d4 5a6b7c8 T\0content/x.md\0
+    /// ```
+    static func irregularPaths(rawZ: Data) -> Set<String> {
+        let fields = Self.fields(rawZ)
+        var irregular: Set<String> = []
+        var index = 0
+        while index < fields.count {
+            // ":<old mode> <new mode> <old object> <new object> <status>"
+            let header = fields[index].split(separator: " ")
+            guard fields[index].hasPrefix(":"), header.count >= 5 else {
+                index += 1
+                continue
+            }
+            // A rename or a copy, were renames detected, names both paths.
+            let paths = header[4].hasPrefix("R") || header[4].hasPrefix("C") ? 2 : 1
+            guard index + paths < fields.count else { return irregular }
+            if !Self.fileModes.contains(String(header[1])) {
+                irregular.insert(fields[index + paths])
+            }
+            index += 1 + paths
+        }
+        return irregular
+    }
+
+    private static let fileModes: Set<String> = ["100644", "100755", "000000"]
 
     /// A status letter as `ChangedFile` knows it. A type change (`T`) is a
     /// change to the file; anything unexpected is shown as modified rather

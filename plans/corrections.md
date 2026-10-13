@@ -641,7 +641,10 @@ whatever the agent did, nothing it **left in the worktree** reaches GitHub
 without approval. §13 records this.
 
 CCwiki's own commands (the snapshot, the commit, the push, `gh pr create`)
-run with `tools.childEnvironment()` as today, unsealed.
+run with `tools.childEnvironment()` as today, unsealed. git finds the
+repository through the worktree's `.git` file, which an agent could rewrite,
+so every review snapshot, Approve's included, first checks that it still
+names a folder in `<clone>/.git/worktrees/` (`GitService.isWorktree`).
 
 ### 5.2 The handover file
 
@@ -833,9 +836,14 @@ git add -A -- . ':(exclude).ccwiki'
 git diff --cached -M --name-status -z <base>     → GitNameStatus.parse
 git diff --cached --numstat -z <base>            → binary paths ("-\t-\t")
 git diff --cached --binary <base>                → the digest (SHA-256), and logs/<id>.patch
+git diff --cached --raw -z --no-renames <base>   → links and submodules (new mode 120000, 160000), as binary
 git show <base>:<old path>                       → each changed file's old text
 git show :<path>                                 → each changed file's new text, from the index
 ```
+
+Every diff passes `--ignore-submodules=none`: `git add -A` stages a
+submodule's new commit whatever `diff.ignoreSubmodules` says, and the commit
+carries it, so the review shows it too.
 
 - **Bytes, not lines.** `Subprocess.run` goes through `LineSplitter`, which
   splits on `\r` as well as `\n`, decodes lossily and drops the final
@@ -901,7 +909,7 @@ offers Revert File.
 |---|---|---|---|
 | `outsideContent` | all | any path, or a rename's old path, other than a `.md` file under `content/` (excluding `content/Templates/`, in any case) or `.reductions/relations.json`. This is an **allow-list**: `scripts/`, `CLAUDE.md`, `.claude/`, `tsconfig.tsbuildinfo` and a stray `lint.log` at the root are all caught | "CCwiki opens pull requests that change `content/` only. Revert `scripts/lint.mjs`, or make this change outside CCwiki." |
 | `renamedOrDeleted` | all | a rename to or from a path under `content/`, a deletion under `content/`, or the deletion of `.reductions/relations.json` | Rename: "Filenames under `content/` are live URLs. Revert the rename." Deletion: "Filenames under `content/` are live URLs. Restore the file." `relations.json`: "`relations.json` is generated, and the site reads it. Restore the file." |
-| `binaryFile` | all | a binary file, or any `.pdf`, that the change adds, changes or renames. This includes a page or `relations.json` that git calls binary, or whose text could not be read as UTF-8 (`ReviewSnapshot.assemble` treats a side it could not read as binary) | "PDFs and other binary files never enter the wiki." For a page or `relations.json`: "CCwiki could not read this file as UTF-8 text, so it checked nothing in it. Revert it, or save it as UTF-8." |
+| `binaryFile` | all | a binary file, or any `.pdf`, that the change adds, changes or renames. This includes a page or `relations.json` that git calls binary, or whose text could not be read as UTF-8 (`ReviewSnapshot.assemble` treats a side it could not read as binary), and a symbolic link or a submodule, which the snapshot takes as binary | "PDFs and other binary files never enter the wiki." For a page or `relations.json`: "CCwiki could not read this file as UTF-8 text, so it checked nothing in it. Revert it, or save it as UTF-8." |
 | `generatedRegionEdited` | all | on a page, the BEGIN and END marker counts differ, unless the base had the same counts; or a region the change added or altered fails its checksum, `sha256(trimmed contents)[0..<12]`; or a region is gone, markers and all, while `relations.json` was not regenerated in the same diff | Edited: "The “Participates in” section on lines 153–171 was edited by hand. It is rebuilt from the reduction pages; correct those instead. (lint: `generated-region-edited`)" Unbalanced markers: "The “Participates in” markers are unbalanced (2 BEGIN, 1 END). They are written by the script; restore them, and correct the reduction pages instead. (lint: `generated-region`)" A removed region: "The “Participates in” section was removed by hand. It is rebuilt from the reduction pages; restore it, and correct those instead." |
 | `relationFieldOnObjectPage` | all | an object page gains `implies`, `implied-by`, `implied_by`, `reductions`, `barriers`, `separations`, `from`, `to`, `between`, `hypotheses` or `conclusion` in its frontmatter (lint.mjs `FORBIDDEN_ON_OBJECTS`), one finding per key. An object page has `type:` `primitive`, `assumption`, `complexity-class`, `glossary`, `folklore` or `note`; without a `type:`, it is any page not directly under `References/`, `Reductions/` or `Barriers/` | "Relation fields such as `implies` are not allowed on object pages. A relation is a page in `content/Reductions/`. (lint: `object-relation-field`)" |
 | `wikilinkMath` | all | an added line, outside generated regions, backtick code fences and inline code, with an unescaped `$` inside `[[…]]` | "Math in a wikilink breaks the link on the site. Write `[text $x$](slug)` instead. (lint: `wikilink-math`)" |
@@ -1111,7 +1119,9 @@ the job read-only), clears `notice`, and calls
    - Take a snapshot. If its digest differs from the reviewed one, return
      `.changedSinceReview`.
    - Run DiffGuard. A blocking finding returns `.refused`. So does a
-     `PrivateText` hit in the title or body.
+     warning the review on screen at the click did not have, such as a
+     `changedUpstream` a sync brought, so that the next Open Draft PR asks
+     about it (§6.6); and so does a `PrivateText` hit in the title or body.
    - `git config user.name` / `user.email` in the worktree: if either is
      missing, return `.refused("Set your git name and email first: git config
      --global user.name …")`.
@@ -1188,6 +1198,9 @@ for the job close themselves.
 **Revert File…** confirms first ("Revert pseudorandom-function.md to the
 version the job started from?"), then returns one file to the base: `git
 checkout <base> -- <path>`, or `git rm --cached` and a delete for a new file.
+A submodule's checkout goes back to the base's commit too (`git submodule
+update --checkout --no-fetch`), or the next snapshot would stage the moved
+commit again.
 It calls `onFilesChanged`, then takes a snapshot. The editor's toolbar has the
 same command under the same name.
 
@@ -1246,7 +1259,8 @@ right ([design-system.md](design-system.md) §4a).
 - **Open Draft PR** is disabled with a blocking finding, a `PrivateText` hit,
   `GitHubAccess` not `.ready`, or an editor of the job holding text the disk
   does not, a conflict nobody settled or a write that failed ("page.md could
-  not be saved. Settle it in its window first."); its help says why.
+  not be saved. Settle it in its window first."); its help says why, and a
+  press that finds it disabled since it was drawn says why in an alert.
   `JobCenter.approve` asks the last again once it has saved the editors
   (`unsettledEdits`), since that save may be the one that fails, and refuses
   with the same words. With warnings, or in a Dev build, it confirms: "Open

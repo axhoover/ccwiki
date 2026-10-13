@@ -18,6 +18,8 @@ struct JobDetailView: View {
     @State private var discardRequest: DiscardRequest?
     /// What Open Draft PR asks before it runs, while it asks.
     @State private var draftPRQuestion: JobReview.Question?
+    /// Why Open Draft PR, enabled when drawn, could not run when pressed.
+    @State private var draftPRRefusal: String?
     @State private var isApproving = false
     @State private var isRestoring = false
     /// Open an Issue… from the GitHub line: a sheet on this window, not on
@@ -78,6 +80,12 @@ struct JobDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: { question in
             if let message = question.message { Text(message) }
+        }
+        .alert("Can't Open the Draft PR Yet", isPresented: Binding(
+            get: { draftPRRefusal != nil }, set: { if !$0 { draftPRRefusal = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(draftPRRefusal ?? "")
         }
         .sheet(item: $issueRequest) { request in
             IssueSheet(request: request)
@@ -412,11 +420,16 @@ struct JobDetailView: View {
     }
 
     /// Open Draft PR: asks first with warnings or in a Dev build, then
-    /// approves. Read at the click, not when the button was drawn.
+    /// approves. Read at the click, not when the button was drawn: an
+    /// editor opened since may hold text it could not save, which the
+    /// button had no way to see. The click then says why, never nothing.
     private func openDraftPR() {
         guard !isApproving else { return }
         let gate = JobReview.draftPR(for: job, privatePaths: privatePaths, model: model)
-        guard gate.isEnabled else { return }
+        guard gate.isEnabled else {
+            draftPRRefusal = gate.disabledReason
+            return
+        }
         if let question = gate.confirmation {
             draftPRQuestion = question
         } else {
