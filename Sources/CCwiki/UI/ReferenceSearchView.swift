@@ -18,14 +18,16 @@ struct ReferenceSearchView: View {
             placeholder: "Search papers by key, author, title or topic",
             systemImage: "books.vertical",
             items: model.referenceResults,
+            resultsQuery: model.referenceResultsQuery,
             error: model.referenceError,
             emptyTitle: "Search the References",
             emptyDescription: "A citation key such as GGM86, an author, words of a title, "
                 + "or a topic. Add a year to narrow it: regev 2005.",
             countLabel: { "\($0) paper\($0 == 1 ? "" : "s")" },
+            // The page finds the text the rows are for, as in SearchView.
             open: { hit, disposition in
                 session.openReferenceResult(
-                    hit, query: model.referenceQuery, disposition: disposition)
+                    hit, query: model.referenceResultsQuery, disposition: disposition)
             }
         ) { hit in
             resultRow(hit)

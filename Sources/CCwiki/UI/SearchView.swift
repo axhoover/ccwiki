@@ -19,17 +19,20 @@ struct SearchView: View {
             placeholder: "Search the wiki",
             systemImage: "text.magnifyingglass",
             items: model.searchResults,
+            resultsQuery: model.searchResultsQuery,
             error: model.searchError,
             note: model.searchCorrection.map {
-                "Nothing matches “\(model.searchQuery)”. Showing results for “\($0)”."
+                "Nothing matches “\(model.searchResultsQuery)”. Showing results for “\($0)”."
             },
             emptyTitle: "Search the Wiki",
             emptyDescription: "Names and aliases first, then headings, then text. "
                 + "Primitives and assumptions lead. Papers have their own search, ⇧⌘R.",
             countLabel: { "\($0) page\($0 == 1 ? "" : "s")" },
+            // The page finds the text the rows are for: a row clicked while
+            // the next results are on their way was found for the last query.
             open: { hit, disposition in
                 session.openSearchResult(
-                    hit, query: model.searchCorrection ?? model.searchQuery,
+                    hit, query: model.searchCorrection ?? model.searchResultsQuery,
                     disposition: disposition)
             }
         ) { hit in
