@@ -6,7 +6,8 @@ import Foundation
 ///
 /// ```
 /// 1. Checking…            snapshot again: the digest must be the reviewed one;
-///                         DiffGuard; the title and body; git's identity; GitHub
+///                         DiffGuard, with no warning the review did not show;
+///                         the title and body; git's identity; GitHub
 /// 2. Committing…          git reset --soft <base>; git commit --no-verify
 /// 3. Pushing <branch>…    pushingCommit persisted, then
 ///                         git push --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
@@ -46,10 +47,13 @@ struct Publisher {
     /// And one push, which carries the whole change.
     nonisolated static let pushDeadline: Duration = .seconds(180)
 
+    /// `digest` and `findings` are the review on screen when Open Draft PR
+    /// was pressed; nil `findings` takes the job's as this starts.
     func publish(
-        _ job: Job, reviewed digest: String, provenance: PullRequestDraft.Provenance
+        _ job: Job, reviewed digest: String, findings: [DiffFinding]? = nil,
+        provenance: PullRequestDraft.Provenance
     ) async -> ApproveResult {
-        if let stop = await check(job, reviewed: digest) { return stop }
+        if let stop = await check(job, reviewed: digest, findings: findings) { return stop }
 
         guard let committed = await self.commit(job, version: provenance.appVersion) else {
             return .failed("git could not commit the changes. Nothing was sent.")
@@ -89,7 +93,15 @@ struct Publisher {
     /// Why the job cannot be published as it stands, or nil to go on. The
     /// snapshot taken here becomes the job's review either way, so a
     /// changed diff is the one shown when this returns.
-    func check(_ job: Job, reviewed digest: String) async -> ApproveResult? {
+    ///
+    /// A warning that `findings` (the review that was on screen; nil for
+    /// the job's as this starts) did not have refuses too, though the diff
+    /// is the same: `changedUpstream` follows `origin/<default>`, which a
+    /// sync moves. Open Draft PR asks first about warnings (§6.6), and
+    /// it never asked about this one.
+    func check(_ job: Job, reviewed digest: String, findings: [DiffFinding]? = nil) async
+        -> ApproveResult? {
+        let seen = Set((findings ?? job.findings).filter { $0.severity == .warning }.map(\.id))
         step(job, "Checking…")
         let snapshotter = ReviewSnapshotter(git: git)
         guard let review = await snapshotter.review(
@@ -105,6 +117,11 @@ struct Publisher {
         }
         if let blocking = review.findings.first(where: { $0.severity == .blocking }) {
             return .refused("DiffGuard blocks this change: \(blocking.message)")
+        }
+        if let warning = review.findings.first(where: {
+            $0.severity == .warning && !seen.contains($0.id)
+        }) {
+            return .refused(Self.newWarning(warning))
         }
 
         let draft = job.pullRequest
@@ -131,6 +148,14 @@ struct Publisher {
         default:
             return .refused(access.banner ?? "GitHub cannot be reached.")
         }
+    }
+
+    /// A warning the review on screen did not have. The review shows it
+    /// now, so the next Open Draft PR asks about it.
+    nonisolated static func newWarning(_ finding: DiffFinding) -> String {
+        let name = (finding.path as NSString).lastPathComponent
+        return "DiffGuard has a new warning on \(name): \(finding.message) "
+            + "Check it, then open the pull request."
     }
 
     nonisolated static let identityMissing = "Set your git name and email first: "
