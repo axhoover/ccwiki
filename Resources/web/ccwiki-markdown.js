@@ -469,14 +469,21 @@
   // `added`. One unchanged block either side is `context`, and every other
   // run of unchanged blocks one `gap`. A hunk that overlaps no block on
   // either side changed only blank lines, and is a `gap` that says so.
+  //
+  // That holds because every non-blank line is in a block: the lines
+  // markdown-it maps to none, a footnote's definition (moved to the end of
+  // the page) or a link reference definition (drawn as nothing), are blocks
+  // of their own, shown as their source.
 
   var BLANK_LINES_ONLY = "Only blank lines changed here. See Source.";
   var WHITESPACE_ONLY = "Whitespace only";
+  var SHOWN_AS_SOURCE = "Shown as source";
 
   /** The top-level blocks of `source`: their lines, `[start, end)` and
    *  0-based, their source text, and their HTML, rendered from the tokens
    *  of one parse, so a footnote or a reference definition elsewhere in the
-   *  text still resolves. */
+   *  text still resolves. Lines in none of markdown-it's blocks are added
+   *  by `withSourceBlocks`. */
   function topLevelBlocks(md, source, env) {
     var tokens = md.parse(source, env);
     var lines = source.split("\n");
@@ -506,7 +513,36 @@
       }
       i = end;
     }
-    return blocks;
+    return withSourceBlocks(md, lines, blocks);
+  }
+
+  /** `blocks`, in order, with a block for each run of non-blank lines in
+   *  none of them, its HTML the lines as written. Without these, a change
+   *  to a footnote's text or a link's target met no block, and the review
+   *  said only blank lines had changed. */
+  function withSourceBlocks(md, lines, blocks) {
+    var covered = [];
+    blocks.forEach(function (block) {
+      for (var k = block.start; k < block.end; k++) covered[k] = true;
+    });
+    var all = blocks.slice();
+    var start = -1;
+    for (var line = 0; line <= lines.length; line++) {
+      var loose = line < lines.length && !covered[line] && !/^\s*$/.test(lines[line]);
+      if (loose && start < 0) start = line;
+      if (!loose && start >= 0) {
+        var text = lines.slice(start, line).join("\n");
+        all.push({
+          start: start,
+          end: line,
+          text: text,
+          html: "<pre>" + md.utils.escapeHtml(text) + "</pre>",
+          note: SHOWN_AS_SOURCE,
+        });
+        start = -1;
+      }
+    }
+    return all.sort(function (a, b) { return a.start - b.start; });
   }
 
   /** The token that closes `tokens[from]`: the next one at its level with
@@ -545,9 +581,11 @@
    * `kind` is `added`, `removed`, `context` or `gap`. `side` says which text
    * `lines` are in: `old` for removed, `new` for the rest. `text` is a gap's
    * one line; `note` is "Whitespace only" on a pair that differs only in
-   * whitespace. `flags` are the file's flags whose lines meet the entry,
-   * each on the first entry it meets; a flag that meets none, or has no
-   * lines, is on no entry, and `renderReview` shows it with the file.
+   * whitespace, and otherwise "Shown as source" on a block shown as its
+   * lines (`withSourceBlocks`). `flags` are the file's flags whose lines
+   * meet the entry, each on the first entry it meets; a flag that meets
+   * none, or has no lines, is on no entry, and `renderReview` shows it with
+   * the file.
    *
    * A file that is not Markdown has no entries: the review shows it as one
    * line, and its lines in Source.
@@ -571,7 +609,7 @@
           ? [startLine + block.start, startLine + block.end - 1] : null,
         html: block.html || "",
         text: (extra && extra.text) || null,
-        note: (extra && extra.note) || null,
+        note: (extra && extra.note) || block.note || null,
         flags: [],
       };
       entries.push(entry);

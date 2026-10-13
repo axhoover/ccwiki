@@ -951,6 +951,10 @@ owns the blocks**, as it owns all parsing (the `ccwiki.js` header):
   coordinates, the frontmatter lines and the flags (`ReviewPayload`, Track D).
 - `CCwikiMarkdown.reviewEntries(md, file)` (Track C, DOM-free) parses both
   texts with markdown-it and takes the top-level blocks from `token.map`.
+  A run of non-blank lines in none of them (a footnote's definition, which
+  markdown-it moves to the end, or a link reference definition, which it
+  draws as nothing) is a block too, shown as its source with the note
+  "Shown as source", so a change to one is never read as blank lines.
   For each hunk:
   - the old blocks it overlaps become `removed` entries;
   - the new blocks it overlaps become `added` entries;
