@@ -248,6 +248,18 @@ import Testing
             .write(to: file)
         #expect(GitService.isWorktree(scene.worktree, of: clone))
 
+        // Another job's worktree of the same clone: its admin folder is in
+        // the clone, but names that worktree back, not this one.
+        let other = clone.deletingLastPathComponent()
+            .appending(path: clone.lastPathComponent + "-other-worktree")
+        defer { try? manager.removeItem(at: other) }
+        let addedOther = await scene.git.addWorktree(
+            clone: clone, at: other, branch: "fix/other", baseRef: scene.base) { _ in }
+        try #require(addedOther)
+        #expect(GitService.isWorktree(other, of: clone))
+        try Data(contentsOf: other.appending(path: ".git")).write(to: file)
+        #expect(!GitService.isWorktree(scene.worktree, of: clone), "another job's admin folder")
+
         // A repository the agent made, even one shaped like a clone's.
         let fake = scene.worktree.appending(path: ".ccwiki/repo/.git/worktrees/x")
         try manager.createDirectory(at: fake, withIntermediateDirectories: true)
@@ -290,8 +302,11 @@ import Testing
         #expect(!GitService.isWorktree(job.worktree, of: scene.paths.clone))
         let after = await snapshotter.review(of: job, clone: scene.paths.clone, privatePaths: [])
         #expect(after?.snapshot == nil)
+        // Said as the reason, not as git failing.
+        await scene.center.refreshReview(job)
+        #expect(job.log.last?.text == GitService.redirectedWorktree)
         #expect(await PublisherTests.publisher(scene).check(job, reviewed: "")
-            == .failed("CCwiki could not read the changes in the worktree. Nothing was sent."))
+            == .failed(GitService.redirectedWorktree + " Nothing was sent."))
     }
 
     // MARK: A warning that appears at Approve

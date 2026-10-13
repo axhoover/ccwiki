@@ -65,6 +65,29 @@ struct FixesJobsTests {
         #expect(!job.log.contains { $0.text.hasPrefix("claude not found") })
     }
 
+    @Test("an ingestion on a snapshot fails at once, with git asked nothing")
+    func ingestionOnSnapshot() async throws {
+        let paths = try JobRecordTests.temporaryPaths()
+        defer { try? FileManager.default.removeItem(at: paths.support) }
+        try FileManager.default.createDirectory(at: paths.clone, withIntermediateDirectories: true)
+        try SnapshotService.write(
+            SnapshotService.Marker(
+                sha: "75f254251cd77489c40df4e664b9ccf4521b976a", commitDate: nil, fetchedAt: .now),
+            in: paths.clone)
+        try #require(paths.wikiStore == .snapshot)
+
+        let job = Job(kind: .ingestion(JobRecordTests.submission), paths: paths)
+        // A git that fails every command, so a check that ran would block.
+        let git = GitService(executable: "/usr/bin/false", environment: [:])
+        await IngestJobRunner(
+            paths: paths, tools: ToolLocator(), git: git, index: nil,
+            target: JobRecordTests.environment().target
+        ).run(job)
+
+        #expect(job.state == .failed(CorrectionJobRunner.snapshotStore), "\(job.state)")
+        #expect(job.preflight.isEmpty, "no pre-flight on a folder that is not a clone")
+    }
+
     // MARK: The tripwire
 
     @Test("a push CCwiki made for a job Clear Finished has dropped is not the agent's")
@@ -150,6 +173,64 @@ struct FixesJobsTests {
         #expect(errors.map(\.text).contains(gone))
         #expect(job.notice == JobNotice(tone: .failure, text: gone))
         #expect(job.state == aborted)
+    }
+
+    @Test("a Review Anyway that goes ahead clears its own earlier refusal, never another notice")
+    func reviewAnywayClearsItsRefusal() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let tools = try JobScene.fakeClaude(#"""
+            printf 'a\nB\nc' > content/page.md
+            echo '{"type":"result","subtype":"success","is_error":false,"result":"ABORTED: not sure b is wrong.","num_turns":1}'
+            """#, in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+
+        let job = scene.center.startCorrection(JobCenterTests.request(scene))
+        await job.task?.value
+        try #require(job.state == .aborted(reason: "ABORTED: not sure b is wrong."), "\(job.state)")
+
+        // Refused once, while the worktree's .git leads elsewhere.
+        let file = job.worktree.appending(path: ".git")
+        let link = try Data(contentsOf: file)
+        try Data("gitdir: .ccwiki\n".utf8).write(to: file)
+        await scene.center.reviewAnyway(job)
+        #expect(job.notice == JobNotice(tone: .failure, text: GitService.redirectedWorktree))
+
+        // Put back, it goes ahead, and the refusal goes with it.
+        try link.write(to: file)
+        await scene.center.reviewAnyway(job)
+        #expect(job.state == .awaitingReview, "\(job.state)")
+        #expect(job.notice == nil, "\(job.notice?.text ?? "")")
+
+        // A tripwire's notice is not one of them.
+        #expect(JobCenter.isReviewRefusal(JobNotice(tone: .warning, text: JobCenter.nothingToReview)))
+        #expect(!JobCenter.isReviewRefusal(JobNotice(
+            tone: .failure, text: "The agent pushed a branch while it ran: fix/page.")))
+    }
+
+    // MARK: The hand-over
+
+    @Test("an agent that points the worktree's .git elsewhere gets no git add there")
+    func handOverRedirected() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A folder of its own, read from the worktree as git reads it.
+        let tools = try JobScene.fakeClaude(#"""
+            printf 'a\nB\nc' > content/page.md
+            printf 'gitdir: .ccwiki\n' > .git
+            """# + "\n" + JobCenterTests.readyForReview, in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+
+        let job = scene.center.startCorrection(JobCenterTests.request(scene))
+        await job.task?.value
+        #expect(job.state == .failed(AgentRun.redirectedAtHandOver), "\(job.state)")
+        #expect(job.log.contains { $0.text == GitService.redirectedWorktree })
+        #expect(FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false)),
+            "the worktree is kept, for inspection")
     }
 
     private static func offersReviewAnyway(_ job: Job) -> Bool {

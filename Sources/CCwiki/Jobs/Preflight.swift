@@ -196,8 +196,9 @@ enum GitHubAuth {
             ).succeeded
         }
 
-        // A timeout is not an answer, so it is not cached either.
-        if let answer {
+        // A timeout is not an answer, so it is not cached either; nor is a
+        // "no" from a cancelled task, whose `gh` was stopped, not refused.
+        if let answer, !Task.isCancelled {
             lock.withLock { cached = answer }
         }
         return answer ?? false
@@ -267,7 +268,7 @@ extension GitHubAuth {
             }
         }
 
-        if let answer {
+        if let answer, !Task.isCancelled {
             lock.withLock { cached = answer }
         }
         return answer

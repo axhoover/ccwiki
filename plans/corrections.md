@@ -645,8 +645,13 @@ without approval. §13 records this.
 CCwiki's own commands (the snapshot, the commit, the push, `gh pr create`)
 run with `tools.childEnvironment()` as today, unsealed. git finds the
 repository through the worktree's `.git` file, which an agent could rewrite,
-so every review snapshot, Approve's included, first checks that it still
-names a folder in `<clone>/.git/worktrees/` (`GitService.isWorktree`).
+so the hand-over (before its `git add -A`) and every review snapshot,
+Approve's included, first check that it still names a folder in
+`<clone>/.git/worktrees/` whose own `gitdir` names this worktree's `.git`
+back, so another job's folder will not do (`GitService.isWorktree`). When it
+does not, no git runs there: the hand-over fails the job and keeps the
+worktree, and the review and Approve say "The worktree's .git no longer
+leads to CCwiki's clone, so CCwiki ran no git in it."
 
 ### 5.2 The handover file
 
@@ -1213,7 +1218,10 @@ same command under the same name.
 **Review Anyway**, on a failed or aborted agent job whose worktree has
 changes, takes a snapshot and moves the job to `awaitingReview`. A record
 from before 0.3 has no base: it is computed once as `git merge-base HEAD
-origin/<default>` and recorded.
+origin/<default>` and recorded. When it cannot go ahead, it says why in the
+transcript and as the job's notice, which the job's pane draws under its
+banner; one that later goes ahead clears that refusal, but never a
+tripwire's notice, which belongs in the review.
 
 ### 6.6 The review in the Jobs window
 

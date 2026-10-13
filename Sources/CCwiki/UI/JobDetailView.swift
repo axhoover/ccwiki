@@ -181,6 +181,7 @@ struct JobDetailView: View {
                 gitHubLine
             } else {
                 outcomeBanner
+                outcomeNotice
                 metadataRow
                 if !job.preflight.isEmpty { preflightList }
             }
@@ -306,6 +307,22 @@ struct JobDetailView: View {
                 EmptyView()
             }
         case .queued, .preparing, .running, .awaitingReview, .publishing:
+            EmptyView()
+        }
+    }
+
+    /// A finished job's notice, under its banner: why Review Anyway did not
+    /// go ahead, or what the tripwire found before the job ended. Drawn
+    /// whether or not the banner is: a cancelled job whose worktree has
+    /// gone has none. An opened job's banner says its own.
+    @ViewBuilder
+    private var outcomeNotice: some View {
+        switch job.state {
+        case .aborted, .failed, .cancelled:
+            if let notice = job.notice {
+                JobNoticeLine(notice: notice)
+            }
+        case .queued, .preparing, .running, .awaitingReview, .publishing, .opened, .discarded:
             EmptyView()
         }
     }

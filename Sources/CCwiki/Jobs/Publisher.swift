@@ -107,7 +107,9 @@ struct Publisher {
         guard let review = await snapshotter.review(
             of: job, clone: paths.clone, privatePaths: privatePaths)
         else {
-            return .failed("CCwiki could not read the changes in the worktree. Nothing was sent.")
+            return .failed(GitService.isWorktree(job.worktree, of: paths.clone)
+                ? "CCwiki could not read the changes in the worktree. Nothing was sent."
+                : GitService.redirectedWorktree + " Nothing was sent.")
         }
         job.setReview(review.snapshot, findings: review.findings)
 

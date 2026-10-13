@@ -758,10 +758,13 @@ struct GitService: Sendable {
     /// Whether `worktree` is still one of `clone`'s worktrees as git made
     /// it: its `.git` is a file, not a link or a folder, that names a folder
     /// in `<clone>/.git/worktrees/` (a relative name is read from the
-    /// worktree, as git reads it). CCwiki's own git runs in a worktree
-    /// unsealed (§5.1) and finds the repository through that file, which an
-    /// agent could rewrite: pointed anywhere else, the snapshot, the commit
-    /// and the push would run on a repository and a configuration it chose.
+    /// worktree, as git reads it), and that folder's `gitdir` names this
+    /// `.git` back (a relative one is read from the folder). CCwiki's own
+    /// git runs in a worktree unsealed (§5.1) and finds the repository
+    /// through that file, which an agent could rewrite: pointed anywhere
+    /// else, the snapshot, the commit and the push would run on a
+    /// repository and a configuration it chose, or on another job's index
+    /// and branch.
     static func isWorktree(_ worktree: URL, of clone: URL) -> Bool {
         let manager = FileManager.default
         let file = worktree.appending(path: ".git").path(percentEncoded: false)
@@ -778,9 +781,22 @@ struct GitService: Sendable {
             ? named : worktree.appending(path: named).path(percentEncoded: false)
         let admin = realPath(gitdir)
         let worktrees = realPath(clone.appending(path: ".git/worktrees").path(percentEncoded: false))
-        return manager.fileExists(atPath: admin)
-            && (admin as NSString).deletingLastPathComponent == worktrees
+        guard manager.fileExists(atPath: admin),
+              (admin as NSString).deletingLastPathComponent == worktrees,
+              let backData = manager.contents(atPath: (admin as NSString).appendingPathComponent("gitdir")),
+              let backText = String(data: backData, encoding: .utf8)
+        else { return false }
+        // Git keeps this current through a move or a repair.
+        let back = backText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !back.isEmpty, !back.contains("\n") else { return false }
+        let backPath = back.hasPrefix("/") ? back : (admin as NSString).appendingPathComponent(back)
+        return realPath(backPath) == realPath(file)
     }
+
+    /// Why CCwiki took no snapshot of a worktree, or handed none over, when
+    /// `isWorktree` says its `.git` leads elsewhere.
+    static let redirectedWorktree =
+        "The worktree's .git no longer leads to CCwiki's clone, so CCwiki ran no git in it."
 
     /// `-z` output split at each NUL, without the empty field after the
     /// last one.

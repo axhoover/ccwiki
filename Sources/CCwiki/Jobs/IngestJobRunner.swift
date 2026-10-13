@@ -43,6 +43,14 @@ struct IngestJobRunner {
         }
         job.setState(.preparing("Checking…"))
 
+        // The sheet refuses a snapshot first; a job run again later may find
+        // the world changed. Git is not asked anything about a folder that
+        // is not a clone: it would walk up to a repository around it.
+        guard paths.wikiStore == .git else {
+            job.setState(.failed(CorrectionJobRunner.snapshotStore))
+            return
+        }
+
         // Nothing is pushed until Approve, but a credential needed at the
         // end is checked at the beginning: an ingestion takes twenty
         // minutes, and its review is no use if it can never be published.

@@ -430,6 +430,14 @@ struct AgentRun {
             handover: handover.flatMap { PullRequestDraft.parse(handover: $0) },
             siteURL: siteURL)
 
+        // CCwiki's git here is unsealed, and finds the repository through
+        // the worktree's `.git`, which the agent could have rewritten (§5.1).
+        guard GitService.isWorktree(job.worktree, of: paths.clone) else {
+            job.append(JobLogEntry(.error, GitService.redirectedWorktree))
+            await cleanUp(keep: true)
+            job.setState(.failed(Self.redirectedAtHandOver))
+            return
+        }
         var diff: (nameStatus: Data, numstat: Data, patch: Data)?
         if await git.stageAll(in: job.worktree) {
             diff = await git.stagedDiff(in: job.worktree, base: base)
@@ -462,6 +470,8 @@ struct AgentRun {
     }
 
     nonisolated static let nothingChanged = "The agent finished without changing anything."
+    nonisolated static let redirectedAtHandOver =
+        "The agent changed the worktree's .git. CCwiki ran no git in it; the worktree has been kept."
 
     // MARK: Cleaning up
 
