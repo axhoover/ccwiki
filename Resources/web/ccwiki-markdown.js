@@ -130,12 +130,57 @@
         raw: match[0],
         target: (match[1] || "").trim(),
         anchor: (match[2] || "").trim(),
-        alias: match[3] ? match[3].replace(/^\\?\|/, "").trim() : null,
+        // The site reads the alias from text micromark has decoded, so
+        // `IND\$-CPA` shows `IND$-CPA` and `AT&amp;T` shows `AT&T`. `raw`,
+        // as written, stays the key Swift resolved the link by.
+        alias: match[3] ? state.md.utils.unescapeAll(match[3].replace(/^\\?\|/, "")).trim() : null,
         embed: match[0].charAt(0) === "!",
       };
     }
     state.pos += match[0].length;
     return true;
+  }
+
+  /** Each wikilink's text as a `text` token between `wikilink_open` and
+   *  `wikilink_close`. The site makes a wikilink a link with a text child
+   *  (ofm.ts:336) before its arrows and smartypants run, so they reach the
+   *  link's text as they reach the words around it:
+   *  `[[merkle-puzzles|Merkle's puzzles]]` gets its curly apostrophe.
+   *  After `linkify`, which would make a URL in the text a second link,
+   *  and before `smartquotes`. An embed stays one
+   *  `wikilink` token: the site shows an image or a transclusion for it,
+   *  never text.
+   *
+   *  A link in a table cell is marked `inTable`: the site escapes the `#`
+   *  of a wikilink in a table (ofm.ts:196), so there `[[page#Heading]]`
+   *  keeps the page as its text instead of taking the heading's. */
+  function wikilinkText(md) {
+    md.core.ruler.after("linkify", "ccwiki_wikilink_text", function (state) {
+      var cells = 0;
+      state.tokens.forEach(function (block) {
+        if (block.type === "th_open" || block.type === "td_open") cells++;
+        else if (block.type === "th_close" || block.type === "td_close") cells--;
+        if (block.type !== "inline" || !block.children) return;
+
+        var children = [];
+        block.children.forEach(function (token) {
+          if (token.type !== "wikilink") { children.push(token); return; }
+          token.meta.inTable = cells > 0;
+          if (token.meta.embed) { children.push(token); return; }
+
+          var open = new state.Token("wikilink_open", "a", 1);
+          open.meta = token.meta;
+          open.level = token.level;
+          var text = new state.Token("text", "", 0);
+          text.content = displayText(token.meta);
+          text.level = token.level + 1;
+          var close = new state.Token("wikilink_close", "a", -1);
+          close.level = token.level;
+          children.push(open, text, close);
+        });
+        block.children = children;
+      });
+    });
   }
 
   // ============================================================= headings ==
@@ -146,17 +191,23 @@
 
   function headingPlainText(inlineToken) {
     var out = "";
-    (inlineToken.children || []).forEach(function (child) {
+    var children = inlineToken.children || [];
+    for (var i = 0; i < children.length; i++) {
+      var child = children[i];
       if (child.type === "text" || child.type === "code_inline") {
         out += child.content;
       } else if (child.type === "math_inline") {
         // rehype-slug runs before rehype-katex, so the *source* is what feeds
         // the anchor — minus the `$` delimiters, which it strips anyway.
         out += child.content;
-      } else if (child.type === "wikilink") {
+      } else if (child.type === "wikilink" || child.type === "wikilink_open") {
+        // The alias, or the target without its anchor, as Swift's
+        // `Heading.plainText` reads it, not the text the link shows.
         out += child.meta.alias || child.meta.target;
+        while (child.type === "wikilink_open" && i + 1 < children.length &&
+               children[i + 1].type !== "wikilink_close") i++;
       }
-    });
+    }
     return out;
   }
 
@@ -182,33 +233,74 @@
   // (quartz ofm.ts:147). Zero pages use them today, but the plugin is enabled
   // site-side and agent-written pages may well start.
 
-  var CALLOUT = /^\[!([\w-]+)\]([+-]?)\s*(.*)$/;
+  // ofm.ts:147, with `??` for its `?`: the site matches the first text node
+  // of the line, which ends where a link, math or code starts, so the `]`
+  // of a `[[link]]` in the title never closes the marker. Here the line is
+  // still text, and the marker has to close at its own `]`.
+  var CALLOUT = /^\[!([\w-]+)\|?(.+?)??\]([+-]?)/;
 
+  /** Obsidian's other names for a callout (ofm.ts:71). */
+  var CALLOUT_ALIASES = {
+    summary: "abstract", tldr: "abstract", hint: "tip", important: "tip",
+    check: "success", done: "success", help: "question", faq: "question",
+    attention: "warning", caution: "warning", missing: "failure", fail: "failure",
+    error: "danger", cite: "quote",
+  };
+
+  /** Only the callout's first line is its marker and title: the site puts
+   *  the lines after it in a paragraph of their own, so
+   *  `> [!note] Title` and `> Body.` on the next line are a title and a
+   *  body. Before the inline parse, so a title keeps its math, links and
+   *  emphasis. A `-` that folds the callout on the site is not honoured:
+   *  the reader has no control to unfold it. */
   function callouts(md) {
-    md.core.ruler.push("ccwiki_callouts", function (state) {
+    md.core.ruler.after("block", "ccwiki_callouts", function (state) {
       var tokens = state.tokens;
       for (var i = 0; i < tokens.length; i++) {
         if (tokens[i].type !== "blockquote_open") continue;
-        // blockquote_open, paragraph_open, inline, ...
-        var inline = tokens[i + 2];
-        if (!inline || inline.type !== "inline") continue;
-        var match = CALLOUT.exec(inline.content);
+        // blockquote_open, paragraph_open, inline, paragraph_close, ...
+        var para = tokens[i + 1], inline = tokens[i + 2];
+        if (!para || para.type !== "paragraph_open" || !inline || inline.type !== "inline") continue;
+        var newline = inline.content.indexOf("\n");
+        var first = newline < 0 ? inline.content : inline.content.slice(0, newline);
+        var match = CALLOUT.exec(first);
         if (!match) continue;
 
-        var kind = match[1].toLowerCase();
-        var title = match[3] || (kind.charAt(0).toUpperCase() + kind.slice(1));
+        var name = match[1].toLowerCase();
+        var kind = Object.prototype.hasOwnProperty.call(CALLOUT_ALIASES, name)
+          ? CALLOUT_ALIASES[name] : name;
+        var title = first.slice(match[0].length).trim() ||
+          (match[1].charAt(0).toUpperCase() + match[1].slice(1)).replace(/-/g, " ");
 
         tokens[i].tag = "div";
         tokens[i].attrJoin("class", "callout callout-" + kind);
         var close = findMatching(tokens, i, "blockquote_open", "blockquote_close");
         if (close >= 0) tokens[close].tag = "div";
 
-        // Replace the marker paragraph with the styled title.
-        tokens[i + 1].tag = "div";
-        tokens[i + 1].attrJoin("class", "callout-title");
+        // The marker paragraph becomes the styled title, and the lines
+        // after its first, if any, a paragraph of the body.
+        // (ofm.ts:187 makes that paragraph; its visitor, ofm.ts:483, too.)
+        if (newline >= 0 && para.map) {
+          var bodyLines = [para.map[0] + 1, para.map[1]];
+          var bodyOpen = new state.Token("paragraph_open", "p", 1);
+          var bodyInline = new state.Token("inline", "", 0);
+          var bodyClose = new state.Token("paragraph_close", "p", -1);
+          bodyOpen.map = bodyLines;
+          bodyInline.map = bodyLines.slice();
+          bodyInline.content = inline.content.slice(newline + 1);
+          bodyInline.children = [];
+          [bodyOpen, bodyInline, bodyClose].forEach(function (token, k) {
+            token.block = true;
+            token.level = (k === 1 ? inline : para).level;
+          });
+          tokens.splice(i + 4, 0, bodyOpen, bodyInline, bodyClose);
+          para.map = [para.map[0], para.map[0] + 1];
+          inline.map = para.map.slice();
+        }
+        para.tag = "div";
+        para.attrJoin("class", "callout-title");
         tokens[i + 3].tag = "div";
         inline.content = title;
-        inline.children = [Object.assign(new state.Token("text", "", 0), { content: title })];
       }
     });
   }
@@ -218,6 +310,109 @@
     for (var i = from; i < tokens.length; i++) {
       if (tokens[i].type === openType) depth++;
       else if (tokens[i].type === closeType && --depth === 0) return i;
+    }
+    return -1;
+  }
+
+  // ======================================================= text transform ==
+  // The site edits the text before it parses it (ofm.ts:179): it deletes
+  // `%%` comments, and in a table it escapes the pipes of each wikilink,
+  // which would otherwise end the cell. So does this, ahead of the block
+  // parser. Deleting a comment that spans lines moves the lines after it,
+  // so `ccwiki_comment_lines` then puts every token's `map` back on the
+  // lines of the text it was handed, which the stamps, the review and
+  // `SourceLineMap` read.
+
+  var COMMENT = /%%[\s\S]*?%%/g;                                            // ofm.ts:145
+  var TABLE = /^\|([^\n])+\|\n(\|)( ?:?-{3,}:? ?\|)+\n(\|([^\n])+\|\n?)+/gm;  // ofm.ts:135
+  var TABLE_LINK = /(!?\[\[[^\]]*?\]\]|\[\^[^\]]*?\])/g;                    // ofm.ts:140
+
+  function textTransform(md) {
+    md.core.ruler.after("normalize", "ccwiki_text_transform", function (state) {
+      var src = state.src;
+      if (src.indexOf("%%") >= 0) {
+        var kept = withoutComments(src);
+        src = kept.text;
+        state.ccwikiLineOf = kept.lineOf;
+      }
+      state.src = src.replace(TABLE, function (table) {
+        return table.replace(TABLE_LINK, function (link) {
+          // markdown-it's cell split takes one backslash off each `\|`, so
+          // every pipe gets one, escaped or not, and the cell holds the
+          // link as written: the key Swift resolved it by. (The site also
+          // escapes a `#`, which markdown-it would keep, and the link
+          // would no longer parse.)
+          return link.replace(/\|/g, "\\|");
+        }).split("\n").map(mathPipes).join("\n");
+      });
+    });
+
+    md.core.ruler.before("ccwiki_source_lines", "ccwiki_comment_lines", function (state) {
+      var lineOf = state.ccwikiLineOf;
+      if (!lineOf) return;
+      state.tokens.forEach(function (token) {
+        if (token.map) token.map = [lineOf[token.map[0]], lineOf[token.map[1]]];
+      });
+    });
+  }
+
+  /** `src` without its comments, and the line of `src` each line of what is
+   *  left starts on, with one more for the end of the text. */
+  function withoutComments(src) {
+    var text = "", last = 0, line = 0, lineOf = [0];
+    function keep(part) {
+      for (var i = 0; i < part.length; i++) {
+        if (part.charCodeAt(i) === 0x0a /* \n */) lineOf.push(++line);
+      }
+      text += part;
+    }
+    src.replace(COMMENT, function (comment, at) {
+      keep(src.slice(last, at));
+      line += comment.split("\n").length - 1;
+      last = at + comment.length;
+      return comment;
+    });
+    keep(src.slice(last));
+    lineOf.push(line + 1);
+    return { text: text, lineOf: lineOf };
+  }
+
+  /** A table row with a second backslash on each `\|` in its math. The
+   *  site keeps math as written, and unescapes a pipe only in code
+   *  (mdast-util-gfm-table), so `$\|x\|$` is ‖x‖ there; markdown-it's cell
+   *  split would leave `|x|`. Read as the cell is: an escape first, then
+   *  whichever of code and math opens first, neither past the cell's
+   *  unescaped `|`. */
+  function mathPipes(row) {
+    var out = "", i = 0, n = row.length;
+    while (i < n) {
+      var c = row.charCodeAt(i);
+      if (c === 0x5c /* \ */) { out += row.slice(i, i + 2); i += 2; continue; }
+      if (c !== 0x24 /* $ */ && c !== 0x60 /* ` */) { out += row.charAt(i); i++; continue; }
+      var open = i;
+      while (i < n && row.charCodeAt(i) === c) i++;
+      var size = i - open;
+      var close = closingRun(row, i, c, size);
+      if (close < 0) { out += row.slice(open, i); continue; }
+      var inside = row.slice(i, close);
+      out += row.slice(open, i) + (c === 0x24 ? inside.replace(/\\\|/g, "\\\\|") : inside) +
+        row.slice(close, close + size);
+      i = close + size;
+    }
+    return out;
+  }
+
+  /** Where a run of exactly `size` `c`s starts at or after `from` in `row`,
+   *  or -1 if the cell ends first. */
+  function closingRun(row, from, c, size) {
+    var j = from, n = row.length;
+    while (j < n) {
+      var d = row.charCodeAt(j);
+      if (d === 0x7c /* | */ && row.charCodeAt(j - 1) !== 0x5c) return -1;
+      if (d !== c) { j++; continue; }
+      var start = j;
+      while (j < n && row.charCodeAt(j) === c) j++;
+      if (j - start === size) return start;
     }
     return -1;
   }
@@ -260,6 +455,59 @@
     return range ? " " + (name || SOURCE_LINES) + '="' + range + '"' : "";
   }
 
+  // =========================================================== typography ==
+  // What the site does to the words. OFM's arrows first (ofm.ts:101, on by
+  // default): `->`, `-->`, `=>`, `==>`, `<-`, `<--`, `<=` and `<==`. Then
+  // remark-smartypants (gfm.ts:24) with retext-smartypants' defaults: curly
+  // quotes, ``` `` ``` and `''` (only two) as “ and ”, `--` (only two) an em
+  // dash, and three or more dots an ellipsis. Nothing else, so `---`, `(c)`,
+  // `+-` and `..` stay as written and markdown-it's `replacements` is off;
+  // its `smartquotes` stands in for the quotes. Not inside an autolink, a
+  // URL.
+
+  var ARROWS = /(-{1,2}>|={1,2}>|<-{1,2}|<={1,2})/g;   // ofm.ts:121
+  var ARROW = {
+    "->": "→", "-->": "⇒", "=>": "⇒", "==>": "⇒",
+    "<-": "←", "<--": "⇐", "<=": "⇐", "<==": "⇐",
+  };
+
+  function educated(text) {
+    return text
+      .replace(ARROWS, function (arrow) { return ARROW[arrow]; })
+      .replace(/(^|[^-])--(?!-)/g, "$1—")
+      .replace(/\.{3,}/g, "…");
+  }
+
+  /** LaTeX's quotes, ``` ``like this'' ```: before `smartquotes`, which
+   *  would take the `''` for two apostrophes. */
+  function backticks(text) {
+    return text.replace(/(^|[^`])``(?!`)/g, "$1“").replace(/(^|[^'])''(?!')/g, "$1”");
+  }
+
+  function typography(md) {
+    md.disable("replacements");
+    md.core.ruler.before("smartquotes", "ccwiki_backticks", eachText(backticks));
+    // After `text_join`, so an escaped character counts, as it does once
+    // micromark has decoded it.
+    md.core.ruler.after("text_join", "ccwiki_typography", eachText(educated));
+  }
+
+  /** A core rule that edits the text of every inline block, but not of an
+   *  autolink. */
+  function eachText(edit) {
+    return function (state) {
+      state.tokens.forEach(function (block) {
+        if (block.type !== "inline" || !block.children) return;
+        var autolink = 0;
+        block.children.forEach(function (token) {
+          if (token.type === "link_open" && token.info === "auto") autolink++;
+          else if (token.type === "link_close" && token.info === "auto") autolink--;
+          else if (token.type === "text" && !autolink) token.content = edit(token.content);
+        });
+      });
+    };
+  }
+
   // ============================================================== factory ==
 
   function katexOptionsFor(macros) {
@@ -293,7 +541,7 @@
       // matches the site.
       html: true,
       linkify: true,           // remark-gfm autolink literals
-      typographer: true,       // remark-smartypants (quartz gfm.ts:24)
+      typographer: true,       // smartquotes; the rest is `typography`
       breaks: false,           // Plugin.HardLineBreaks() is not configured
     });
 
@@ -307,9 +555,12 @@
     md.block.ruler.before("fence", "math_block", mathBlock,
       { alt: ["paragraph", "reference", "blockquote", "list"] });
 
+    wikilinkText(md);
+    typography(md);
     headingIds(md);
     callouts(md);
     sourceLines(md);
+    textTransform(md);
 
     // Every rendered formula carries its source in `data-tex`, so ⌘C and a
     // right-click can copy its LaTeX. KaTeX's own annotation would do it,
@@ -336,14 +587,10 @@
       }
     };
 
-    md.renderer.rules.wikilink = function (tokens, idx, options, env) {
-      var meta = tokens[idx].meta;
-      var resolved = (env.links || {})[meta.raw];
-      var label = displayText(meta);
-
+    /** A wikilink's opening tag; its text and `</a>` follow. */
+    function wikilinkTag(meta, resolved) {
       if (isNewPage(resolved)) {
-        return '<a class="new" title="' + NEW_PAGE_TITLE + '">' +
-          md.utils.escapeHtml(label) + "</a>";
+        return '<a class="new" title="' + NEW_PAGE_TITLE + '">';
       }
       // Swift resolved every link before the markdown crossed the bridge; a
       // miss here means no page, alias or folder claims that slug. The website
@@ -352,20 +599,31 @@
       // a dead link is information.
       if (!resolved || !resolved.href) {
         return '<a class="broken" title="Nothing resolves to “' +
-          md.utils.escapeHtml(meta.target || meta.anchor) + '”">' +
-          md.utils.escapeHtml(label) + "</a>";
-      }
-      if (meta.embed && resolved.isImage) {
-        return '<img src="' + md.utils.escapeHtml(resolved.href) + '" alt="' +
-          md.utils.escapeHtml(label) + '" loading="lazy">';
+          md.utils.escapeHtml(meta.target || meta.anchor) + '”">';
       }
       if (resolved.external) {
-        return '<a class="external" href="' + md.utils.escapeHtml(resolved.href) +
-          '">' + md.utils.escapeHtml(label) + "</a>";
+        return '<a class="external" href="' + md.utils.escapeHtml(resolved.href) + '">';
       }
       return '<a class="internal' + (resolved.kind === "folder" ? " folder" : "") +
-        '" href="' + md.utils.escapeHtml(resolved.href) + '">' +
-        md.utils.escapeHtml(label) + "</a>";
+        '" href="' + md.utils.escapeHtml(resolved.href) + '">';
+    }
+
+    md.renderer.rules.wikilink_open = function (tokens, idx, options, env) {
+      return wikilinkTag(tokens[idx].meta, (env.links || {})[tokens[idx].meta.raw]);
+    };
+    md.renderer.rules.wikilink_close = function () { return "</a>"; };
+
+    // An embed, which `ccwiki_wikilink_text` leaves as one token: an image,
+    // or a link to what it embeds.
+    md.renderer.rules.wikilink = function (tokens, idx, options, env) {
+      var meta = tokens[idx].meta;
+      var resolved = (env.links || {})[meta.raw];
+      var label = md.utils.escapeHtml(displayText(meta));
+      if (!isNewPage(resolved) && resolved && resolved.href && meta.embed && resolved.isImage) {
+        return '<img src="' + md.utils.escapeHtml(resolved.href) + '" alt="' + label +
+          '" loading="lazy">';
+      }
+      return wikilinkTag(meta, resolved) + label + "</a>";
     };
 
     // Markdown links. The wiki writes `[text](slug#anchor)` wherever the text
@@ -439,6 +697,7 @@
     var katexOptions = katexOptionsFor(macros);
     var pm = global.markdownit({ html: false, linkify: false, typographer: true });
     pm.disable(["link", "image", "autolink"], true);
+    typography(pm);
     pm.inline.ruler.before("escape", "math_inline", mathInline);
     pm.renderer.rules.math_inline = function (tokens, idx) {
       try {
@@ -450,12 +709,14 @@
     return pm;
   }
 
+  /** What a wikilink shows: its alias; else its heading, which ofm.ts:218
+   *  makes the alias of `[[page#Heading]]` (one `#` off), except on a page
+   *  in a table, where the site escapes the `#` first; else the last
+   *  segment of its target, Quartz's prettyLinks default. */
   function displayText(meta) {
     if (meta.alias) return meta.alias;
-    if (!meta.target && meta.anchor) return meta.anchor.replace(/^#+/, "");
-    // Quartz's prettyLinks default shows the last path segment.
-    var base = meta.target.split("/").pop();
-    return meta.anchor ? base + " › " + meta.anchor.replace(/^#+/, "") : base;
+    if (meta.anchor && !(meta.inTable && meta.target)) return meta.anchor.replace(/^#/, "").trim();
+    return meta.target.split("/").pop();
   }
 
   // =============================================================== review ==

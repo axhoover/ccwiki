@@ -115,6 +115,10 @@
       box.setAttribute("data-source", latex);
       var split = /^\s*%\s*oracle-split:\s*(\d+)/m.exec(source);
       if (split) box.setAttribute("data-oracle-split", split[1]);
+      // The first `\algname{…}`, which `groupGames` reads; none at all is
+      // not the same as an empty one.
+      var name = /\\algname\{([^}]*)\}/.exec(source);
+      if (name) box.setAttribute("data-algname", name[1].trim().toLowerCase());
       addCopyRow(box, latex);
     });
     return { count: blocks.length, errors: errors };
@@ -231,17 +235,21 @@
     area.appendChild(row);
   }
 
-  /** Groups a `\algname{Game}` block with the non-Game blocks that immediately
-   *  follow it, so the game and its oracles sit side by side the way they do
-   *  on the site. */
+  /** Groups a `\algname{Game}` block with the named, non-Game blocks that
+   *  immediately follow it, so the game and its oracles sit side by side the
+   *  way they do on the site. Decided as the site decides (quartz
+   *  pseudocode.ts:209), by each block's first `\algname`, trimmed and in
+   *  any case, never by its caption: a block with no `\algname` ends the
+   *  group. */
   function groupGames(root) {
     var boxes = Array.prototype.slice.call(root.querySelectorAll(".pseudocode-container"));
     var i = 0;
     while (i < boxes.length) {
-      if (!isGame(boxes[i])) { i++; continue; }
+      if (algname(boxes[i]) !== "game") { i++; continue; }
       var followers = [];
       var j = i + 1;
-      while (j < boxes.length && !isGame(boxes[j]) && boxes[j].previousElementSibling === boxes[j - 1]) {
+      while (j < boxes.length && boxes[j].previousElementSibling === boxes[j - 1] &&
+             algname(boxes[j]) !== null && algname(boxes[j]) !== "game") {
         followers.push(boxes[j]);
         j++;
       }
@@ -268,9 +276,9 @@
     }
   }
 
-  function isGame(box) {
-    var caption = box.querySelector(".ps-algorithm > .ps-line");
-    return !!caption && /^\s*Game\b/.test(caption.textContent || "");
+  /** A block's `\algname`, as `renderPseudocode` noted it, or null. */
+  function algname(box) {
+    return box.hasAttribute("data-algname") ? box.getAttribute("data-algname") : null;
   }
 
   /** The `**Authors:** … | **Venue:** … | [Source](…)` line under a reference
