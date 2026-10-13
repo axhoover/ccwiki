@@ -14,8 +14,8 @@ import Foundation
 /// letters, which degrades to a readable word rather than to `\classFOO`.
 enum RelationText {
 
-    /// Commands whose plain-text form is a real symbol. Longest key first at
-    /// application time, so no key can shadow a longer one.
+    /// Commands whose plain-text form is a real symbol. A command is looked
+    /// up whole, so `\ge` never matches the start of `\gets`.
     private static let symbols: [String: String] = [
         #"\subseteq"#: "⊆", #"\subsetneq"#: "⊊", #"\subset"#: "⊂",
         #"\supseteq"#: "⊇", #"\supset"#: "⊃",
@@ -31,6 +31,11 @@ enum RelationText {
         #"\alpha"#: "α", #"\beta"#: "β", #"\delta"#: "δ", #"\sigma"#: "σ",
         #"\mu"#: "μ", #"\nu"#: "ν", #"\ell"#: "ℓ", #"\poly"#: "poly", #"\negl"#: "negl",
         #"\secpar"#: "λ", #"\bits"#: "{0,1}",
+        // Assignment, sampling and congruence, which the pages' math uses
+        // often (`$k \gets \KeyGen(1^\secpar)$`, `$x^e \equiv y \pmod{n}$`).
+        // `\getsr` is the site's sampling arrow; `\pmod`'s argument follows.
+        #"\gets"#: "←", #"\leftarrow"#: "←", #"\getsr"#: "←$", #"\equiv"#: "≡",
+        #"\pmod"#: "mod ", #"\ldots"#: "…", #"\cdots"#: "…", #"\dots"#: "…",
         // The site's integers, which the curation's quotes use ($\ZZ_p^*$)
         // and no manifest title does.
         #"\ZZ"#: "ℤ",
@@ -46,11 +51,22 @@ enum RelationText {
     /// no wiki title contains.
     private static let literalDollar = "\u{E000}"
 
+    /// Stand in for braces that are text, not grouping: an escaped `\{` or
+    /// `\}`, and the braces of a symbol such as `\bits`'s `{0,1}`, so the
+    /// pass that deletes grouping braces cannot reach them. Private-use code
+    /// points, like `literalDollar`.
+    private static let literalOpenBrace = "\u{E001}"
+    private static let literalCloseBrace = "\u{E002}"
+
     /// Commands that are pure typesetting: drop the command, keep the argument.
-    private static let typesetting = [
+    private static let typesetting: Set<String> = [
         #"\mathrm"#, #"\mathbf"#, #"\mathcal"#, #"\mathsf"#, #"\mathbb"#,
-        #"\mathit"#, #"\text"#, #"\textbf"#, #"\operatorname"#, #"\left"#, #"\right"#,
+        #"\mathit"#, #"\mathtt"#, #"\text"#, #"\textbf"#, #"\textit"#, #"\textsf"#,
+        #"\textrm"#, #"\texttt"#, #"\operatorname"#, #"\left"#, #"\right"#,
     ]
+
+    /// A control word, matched whole.
+    private static let command = try! NSRegularExpression(pattern: #"\\([A-Za-z]+)"#)
 
     /// Plain text for a title, a proposition, or any other wiki string that has
     /// to appear in the app's own UI.
@@ -108,17 +124,9 @@ enum RelationText {
         text = text.replacingOccurrences(
             of: #"\\cal([A-Za-z])(?![A-Za-z])"#, with: "$1", options: .regularExpression)
 
-        for command in typesetting {
-            text = text.replacingOccurrences(of: command, with: "")
-        }
-        for key in symbols.keys.sorted(by: { $0.count > $1.count }) {
-            text = text.replacingOccurrences(of: key, with: symbols[key]!)
-        }
-
-        // Whatever is left is a command we have no rendering for. Keeping its
-        // letters reads better than keeping its backslash.
-        text = text.replacingOccurrences(
-            of: #"\\([A-Za-z]+)"#, with: "$1", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\{"#, with: literalOpenBrace)
+        text = text.replacingOccurrences(of: #"\}"#, with: literalCloseBrace)
+        text = replacingCommands(in: text)
 
         // Only paired delimiters are left by now.
         text = text.replacingOccurrences(of: "$", with: "")
@@ -128,6 +136,36 @@ enum RelationText {
             of: #"\s+"#, with: " ", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: literalDollar, with: "$")
+            .replacingOccurrences(of: literalOpenBrace, with: "{")
+            .replacingOccurrences(of: literalCloseBrace, with: "}")
+    }
+
+    /// Every control word in `text`, each replaced whole: a typesetting
+    /// command by nothing, a command with a symbol by that symbol, and any
+    /// other by its letters, which read better than its backslash. Matching
+    /// whole words is what keeps `\gets`, `\pmod`, `\cdots` and `\rightarrow`
+    /// from reading as `\ge`, `\pm`, `\cdot` and `\right` with letters after.
+    private static func replacingCommands(in text: String) -> String {
+        let source = text as NSString
+        var out = ""
+        var last = 0
+        for match in command.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+            out += source.substring(with: NSRange(location: last, length: match.range.location - last))
+            let name = source.substring(with: match.range(at: 1))
+            let word = "\\" + name
+            if let symbol = symbols[word] {
+                // A symbol's own braces and dollar are text.
+                out += symbol
+                    .replacingOccurrences(of: "{", with: literalOpenBrace)
+                    .replacingOccurrences(of: "}", with: literalCloseBrace)
+                    .replacingOccurrences(of: "$", with: literalDollar)
+            } else if !typesetting.contains(word) {
+                out += name
+            }
+            last = NSMaxRange(match.range)
+        }
+        out += source.substring(from: last)
+        return out
     }
 
     /// `source` with every `$` that does not delimit math replaced by

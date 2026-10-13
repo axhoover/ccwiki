@@ -162,6 +162,10 @@ struct Derivation: Sendable {
         let weakening: DerivationCuration.Weakening?
         /// The hypotheses this fact's step consumed in their weakened notion.
         let weakInputs: Set<String>
+        /// R13: the hypotheses whose requirement their own fact did not meet
+        /// but a `metBy` producer's fact did, each with that producer
+        /// (`Closure.established`).
+        let establishedInputs: [String: StepKey]
 
         var isGiven: Bool { step == nil }
 
@@ -169,7 +173,8 @@ struct Derivation: Sendable {
             // A given's chain class is fully black-box, the identity of R6's
             // meet: it never weakens the chain it starts.
             Fact(objectID: objectID, depth: 0, step: nil, models: [], isModelScoped: false,
-                 chainClass: .fullyBlackBox, assumes: [], weakening: nil, weakInputs: [])
+                 chainClass: .fullyBlackBox, assumes: [], weakening: nil, weakInputs: [],
+                 establishedInputs: [:])
         }
     }
 
@@ -241,6 +246,11 @@ struct Derivation: Sendable {
             let isGiven: Bool
             /// This row is the fact's weakened notion (R13).
             let isWeakened: Bool
+            /// This row is the fact this `metBy` producer concluded, kept
+            /// apart from the node's own, which met the precondition of the
+            /// step above it (R13). Set on a reference too, so "shown above"
+            /// leads to this fact and not to the node's own.
+            let establishedBy: StepKey?
             /// This row's own step's preconditions that the derivation assumes
             /// of a given: "assuming …" belongs on this row (R13).
             let assumed: [DerivationCuration.Requirement]
@@ -280,6 +290,11 @@ struct Derivation: Sendable {
         /// R13: objects derived only in a weakened notion. Kept apart, so a
         /// weakened fact never blocks a full one.
         let weakFacts: [String: Fact]
+        /// R13: the fact each `metBy` producer concluded, by producer. Kept
+        /// apart, so it never blocks or replaces its node's own fact: a
+        /// requirement is met whenever such a producer fires in the closure,
+        /// not only when it gave the hypothesis's one fact.
+        let established: [StepKey: Fact]
         /// Steps R5 or R13 refused on the way, each with its first reason,
         /// sorted by reduction id.
         let refused: [RefusedStep]
@@ -289,15 +304,23 @@ struct Derivation: Sendable {
 
         /// The proof of `id`: depth-first, hypotheses in the edge's order, a
         /// fact already shown becoming a reference. A row that consumed a
-        /// weakened fact walks to that fact, not to a later full one.
+        /// weakened fact walks to that fact, not to a later full one, and one
+        /// that consumed a `metBy` producer's fact (R13) walks to that fact,
+        /// not to the node's own.
         func proof(of id: String) -> ProofTree? {
             guard facts[id] != nil || weakFacts[id] != nil else { return nil }
             var rows: [ProofTree.Row] = []
             var seen: Set<RowKey> = []
 
-            func walk(_ factID: String, weakened: Bool, level: Int) {
-                guard let fact = weakened ? weakFacts[factID] : facts[factID] else { return }
-                let key = RowKey(objectID: factID, isWeakened: weakened)
+            func walk(_ factID: String, weakened: Bool, establishedBy: StepKey?, level: Int) {
+                let found: Fact?
+                if let establishedBy {
+                    found = established[establishedBy]
+                } else {
+                    found = weakened ? weakFacts[factID] : facts[factID]
+                }
+                guard let fact = found else { return }
+                let key = RowKey(objectID: factID, isWeakened: weakened, establishedBy: establishedBy)
                 let isReference = seen.contains(key)
                 seen.insert(key)
                 let rowStep: Step? = isReference ? nil : fact.step
@@ -305,20 +328,24 @@ struct Derivation: Sendable {
                 rows.append(ProofTree.Row(
                     id: rows.count, objectID: factID, level: level, step: rowStep,
                     isReference: isReference, isGiven: fact.step == nil, isWeakened: weakened,
-                    assumed: assumed, weakening: fact.weakening))
+                    establishedBy: establishedBy, assumed: assumed, weakening: fact.weakening))
                 guard let step = rowStep else { return }
                 for hypothesis in step.hypotheses {
-                    walk(hypothesis, weakened: fact.weakInputs.contains(hypothesis), level: level + 1)
+                    let producer = fact.establishedInputs[hypothesis]
+                    walk(hypothesis,
+                         weakened: producer == nil && fact.weakInputs.contains(hypothesis),
+                         establishedBy: producer, level: level + 1)
                 }
             }
 
-            walk(id, weakened: facts[id] == nil, level: 0)
+            walk(id, weakened: facts[id] == nil, establishedBy: nil, level: 0)
             return ProofTree(rows: rows)
         }
 
         private struct RowKey: Hashable {
             let objectID: String
             let isWeakened: Bool
+            let establishedBy: StepKey?
         }
     }
 
@@ -879,6 +906,13 @@ extension Derivation {
         let appliesRules: Bool
         /// Each chain class's mask, by `ChainClass.rank`.
         private let chainMasks: [UInt8]
+        /// R13: the steps a requirement's `metBy` names for its hypothesis.
+        /// Each also fires into a fact of its own, kept apart
+        /// (`Closure.established`), so a requirement is met whenever such a
+        /// producer fires in the closure, not only when it gave the
+        /// hypothesis's one fact. A step that concludes only a weaker notion
+        /// establishes nothing.
+        private let establishing: Set<StepKey>
 
         init(objects: ObjectTable, steps: [CompiledStep], order: ClassOrder,
              allowsAssuming: Bool, appliesRules: Bool) {
@@ -888,6 +922,17 @@ extension Derivation {
             self.allowsAssuming = allowsAssuming
             self.appliesRules = appliesRules
             self.chainMasks = ChainClass.allCases.map { order.mask($0.rawValue) }
+            let requirements = steps.flatMap { $0.step.requirements }
+            var establishing: Set<StepKey> = []
+            for compiled in steps where compiled.step.weakening == nil {
+                let step = compiled.step
+                if requirements.contains(where: {
+                    $0.hypothesis == step.conclusion && $0.metBy.contains(step.relationID)
+                }) {
+                    establishing.insert(step.key)
+                }
+            }
+            self.establishing = establishing
         }
 
         func closure(from start: Set<String>, options: Options) -> Closure {
@@ -919,7 +964,7 @@ extension Derivation {
             }
             let refused = state.blocked.values.sorted { Derivation.stepPrecedes($0.step, $1.step) }
             return Closure(start: start, options: options, facts: facts, weakFacts: weakFacts,
-                           refused: refused)
+                           established: state.established, refused: refused)
         }
 
         private struct State {
@@ -927,6 +972,8 @@ extension Derivation {
             var depths: [Int]
             var weak: [Fact?]
             var weakDepths: [Int]
+            /// R13: each `metBy` producer's own fact, by producer.
+            var established: [StepKey: Fact] = [:]
             var deepest = 0
             /// The first refusal of each step.
             var blocked: [StepKey: RefusedStep] = [:]
@@ -950,6 +997,11 @@ extension Derivation {
                 deepest = max(deepest, fact.depth)
             }
 
+            mutating func addEstablished(_ fact: Fact, by producer: StepKey) {
+                established[producer] = fact
+                deepest = max(deepest, fact.depth)
+            }
+
             mutating func block(_ step: Step, _ refusal: Refusal) {
                 if blocked[step.key] == nil {
                     blocked[step.key] = RefusedStep(step: step, reasons: [refusal])
@@ -958,7 +1010,10 @@ extension Derivation {
         }
 
         private enum Check {
-            case fires(Set<DerivationCuration.Requirement>)
+            /// What it assumes of a given, and each hypothesis whose
+            /// requirement a `metBy` producer's fact met (R13), with that
+            /// fact, which the step consumes in place of the node's own.
+            case fires(Set<DerivationCuration.Requirement>, met: [String: Fact])
             /// Not yet: a precondition on a given waits for phase 2.
             case waits
             case refused(Refusal)
@@ -967,17 +1022,25 @@ extension Derivation {
         /// A step fires at layer k when every hypothesis is known with depth
         /// < k; each new fact takes the preferred candidate among the steps
         /// firing at its first layer, and never changes after. A weakened
-        /// fact (R13) is kept apart and never blocks a full one.
+        /// fact (R13) is kept apart and never blocks a full one. So is a
+        /// `metBy` producer's own fact (R13): the producer fires into it at
+        /// its first layer even when its conclusion is already known, and
+        /// only a requirement reads it.
         private func run(_ state: inout State, _ steps: [CompiledStep], phase: Int) {
             var layer = 0
             while true {
                 layer += 1
                 var candidates: [Int: Fact] = [:]
                 var weakCandidates: [Int: Fact] = [:]
+                var establishedCandidates: [StepKey: Fact] = [:]
                 for compiled in steps {
                     let makesWeak = appliesRules && compiled.step.weakening != nil
-                    if state.depths[compiled.conclusion] >= 0 { continue }
-                    if makesWeak && state.weakDepths[compiled.conclusion] >= 0 { continue }
+                    let establishes = appliesRules && establishing.contains(compiled.step.key)
+                        && state.established[compiled.step.key] == nil
+                    // Known already: only its own fact is left to find.
+                    let onlyEstablishes = state.depths[compiled.conclusion] >= 0
+                        || (makesWeak && state.weakDepths[compiled.conclusion] >= 0)
+                    if onlyEstablishes && !establishes { continue }
 
                     // Every hypothesis known before this layer: in full, or
                     // weakened for a step the weakening accepts.
@@ -990,10 +1053,13 @@ extension Derivation {
                             if weak.weakening?.acceptedBy.contains(compiled.step.relationID) == true {
                                 continue
                             }
-                            state.block(compiled.step, .weakened(
-                                hypothesis: weak.objectID,
-                                producedBy: weak.step?.relationID ?? "",
-                                notion: weak.weakening?.notion ?? ""))
+                            // A step that could only establish refuses nothing.
+                            if !onlyEstablishes {
+                                state.block(compiled.step, .weakened(
+                                    hypothesis: weak.objectID,
+                                    producedBy: weak.step?.relationID ?? "",
+                                    notion: weak.weakening?.notion ?? ""))
+                            }
                         }
                         ready = false
                         break
@@ -1012,14 +1078,20 @@ extension Derivation {
                         }
                     }
 
-                    switch check(compiled, inputs, phase: phase) {
+                    switch check(compiled, inputs, phase: phase, layer: layer,
+                                 established: state.established) {
                     case .waits:
                         break
                     case .refused(let refusal):
-                        state.block(compiled.step, refusal)
-                    case .fires(let assumes):
+                        if !onlyEstablishes { state.block(compiled.step, refusal) }
+                    case .fires(let assumes, let met):
                         let candidate = fact(compiled, inputs: inputs, weakInputs: weakInputs,
-                                             depth: layer, assumes: assumes, makesWeak: makesWeak)
+                                             depth: layer, assumes: assumes, makesWeak: makesWeak,
+                                             met: met)
+                        if establishes {
+                            establishedCandidates[compiled.step.key] = candidate
+                        }
+                        guard !onlyEstablishes else { break }
                         if makesWeak {
                             Self.keepPreferred(candidate, at: compiled.conclusion, in: &weakCandidates)
                         } else {
@@ -1029,7 +1101,11 @@ extension Derivation {
                 }
                 for (index, fact) in candidates { state.add(fact, at: index) }
                 for (index, fact) in weakCandidates { state.addWeak(fact, at: index) }
-                if candidates.isEmpty && weakCandidates.isEmpty && layer > state.deepest {
+                for (producer, fact) in establishedCandidates {
+                    state.addEstablished(fact, by: producer)
+                }
+                if candidates.isEmpty && weakCandidates.isEmpty && establishedCandidates.isEmpty
+                    && layer > state.deepest {
                     return
                 }
             }
@@ -1044,15 +1120,27 @@ extension Derivation {
         }
 
         /// R13, then R5: may this step fire on these facts?
-        private func check(_ compiled: CompiledStep, _ inputs: [Fact], phase: Int) -> Check {
-            guard appliesRules else { return .fires([]) }
+        private func check(_ compiled: CompiledStep, _ inputs: [Fact], phase: Int, layer: Int,
+                           established: [StepKey: Fact]) -> Check {
+            guard appliesRules else { return .fires([], met: [:]) }
             let step = compiled.step
             var assumes: Set<DerivationCuration.Requirement> = []
+            var met: [String: Fact] = [:]
             for requirement in step.requirements {
                 guard let position = step.hypotheses.firstIndex(of: requirement.hypothesis),
                       position < inputs.count
                 else { continue }
                 let input = inputs[position]
+                if let producer = input.step, requirement.metBy.contains(producer.relationID) {
+                    continue
+                }
+                // A `metBy` producer fired in the closure: met, and nothing is
+                // assumed, even of a given.
+                if let found = Self.establishedFact(meeting: requirement, before: layer,
+                                                    in: established) {
+                    met[requirement.hypothesis] = found
+                    continue
+                }
                 guard let producer = input.step else {
                     // A given: assumable, but only once a derivation that
                     // needs no assumption has had its chance (phase 2).
@@ -1062,31 +1150,60 @@ extension Derivation {
                     }
                     return .waits
                 }
-                if requirement.metBy.contains(producer.relationID) { continue }
                 return .refused(.requires(hypothesis: requirement.hypothesis,
                                           notion: requirement.notion,
                                           producedBy: producer.relationID))
             }
             // R5: only a relativizing step carries a fact into an idealised
             // model's world.
-            if !compiled.relativizes && inputs.contains(where: { $0.isModelScoped }) {
-                let scoped = inputs.filter { $0.isModelScoped }.map { $0.objectID }
+            let consumed = Self.substituting(met, into: inputs, hypotheses: step.hypotheses)
+            if !compiled.relativizes && consumed.contains(where: { $0.isModelScoped }) {
+                let scoped = consumed.filter { $0.isModelScoped }.map { $0.objectID }
                 return .refused(.idealisedComposition(reductionClass: step.reductionClass,
                                                       scopedHypotheses: scoped))
             }
-            return .fires(assumes)
+            return .fires(assumes, met: met)
+        }
+
+        /// R13: the fact a producer in the requirement's `metBy` concluded
+        /// for its hypothesis before `layer`, kept apart from the node's own;
+        /// the first found, then the preferred (R7).
+        private static func establishedFact(meeting requirement: DerivationCuration.Requirement,
+                                            before layer: Int,
+                                            in established: [StepKey: Fact]) -> Fact? {
+            var best: Fact?
+            for (producer, fact) in established
+            where requirement.metBy.contains(producer.relationID)
+                && fact.objectID == requirement.hypothesis && fact.depth < layer {
+                if let current = best {
+                    if fact.depth > current.depth { continue }
+                    if fact.depth == current.depth && !Derivation.isPreferred(fact, over: current) {
+                        continue
+                    }
+                }
+                best = fact
+            }
+            return best
+        }
+
+        /// The facts a step consumes: its inputs, with each hypothesis a
+        /// `metBy` producer's fact met (R13) read as that fact.
+        private static func substituting(_ met: [String: Fact], into inputs: [Fact],
+                                         hypotheses: [String]) -> [Fact] {
+            guard !met.isEmpty else { return inputs }
+            return zip(hypotheses, inputs).map { hypothesis, input in met[hypothesis] ?? input }
         }
 
         private func fact(_ compiled: CompiledStep, inputs: [Fact], weakInputs: Set<String>,
                           depth: Int, assumes: Set<DerivationCuration.Requirement>,
-                          makesWeak: Bool) -> Fact {
+                          makesWeak: Bool, met: [String: Fact]) -> Fact {
             let step = compiled.step
             var models: Set<String> = []
             var allAssumes = assumes
             var mask = compiled.mask
             var isScoped = Derivation.idealisedModels.contains(step.model)
                 || step.model == Derivation.unknownModel
-            for input in inputs {
+            for input in Self.substituting(met, into: inputs, hypotheses: step.hypotheses) {
                 models.formUnion(input.models)
                 allAssumes.formUnion(input.assumes)
                 mask &= chainMasks[input.chainClass.rank]
@@ -1099,7 +1216,8 @@ extension Derivation {
                 objectID: step.conclusion, depth: depth, step: step, models: models,
                 isModelScoped: isScoped, chainClass: ClassOrder.chainClass(mask: mask),
                 assumes: allAssumes, weakening: makesWeak ? step.weakening : nil,
-                weakInputs: weakInputs)
+                weakInputs: weakInputs.subtracting(met.keys),
+                establishedInputs: met.compactMapValues { $0.step?.key })
         }
     }
 }

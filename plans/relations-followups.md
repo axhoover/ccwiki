@@ -341,7 +341,7 @@ rebuilds the engine, and compares, in both model settings:
 - **Backward lists**: for every target, its R11 singles, settings and
   refuted lists, read off the same single-object closures (no pair search,
   so this costs nothing extra).
-- **The 72 golden queries**, through `golden_expect`, which includes each
+- **The 75 golden queries**, through `golden_expect`, which includes each
   no-path query's completions. A query is listed when its expectation
   differs.
 - **For a `statementLint` entry**: the lint hits that appear without it.
@@ -823,7 +823,11 @@ Low-noise LPN ⇒ OT, an assumed precondition, using `notionMarkdown`:
     `% <A ⇒ B>: recorded in the wiki (cryptology.city relations.json at …).`
   - `% Math uses no cryptology.city macros.` Proofs are pasted into papers
     that lack the wiki's preamble, so math is written out, like the
-    reader's "Copy Algorithm as LaTeX (No Macros)".
+    reader's "Copy Algorithm as LaTeX (No Macros)". When the macro table
+    did not load (macros.ts missing, unreadable or unparsed), nothing can be
+    written out, and the line says so instead: `% Math may use
+    cryptology.city macros, which are not written out: CCwiki could not
+    read them from macros.ts.`
   - `% In CryptoBib (crypto.bib): <keys>.` when any `\cite` key is a
     CryptoBib key, in order of first appearance. With 195 of 215 cited
     works in CryptoBib, this line makes the LaTeX copy complete on its own
@@ -940,7 +944,7 @@ that opens no span is literal.
 | `⇒ ⇔ ∧ ⇒*` | `$\Rightarrow$` `$\Leftrightarrow$` `$\wedge$` `$\Rightarrow^*$` |
 | `§ – — …` | `\S{}` `--` `---` `\ldots{}` |
 | Greek letters with a LaTeX command | in math: `Φ` → `$\Phi$`, `λ` → `$\lambda$`, `ε` → `$\epsilon$`, … |
-| the symbols `RelationText` produces | in math: `≤ ≥ ≠ ⊆ ⊂ ⊇ ⊃ ∩ ∪ ∈ ∉ → ↦ ↔ ∀ ∃ × · ± ≈ √ ∞ ℓ ℤ` → `$\le$` … `$\mathbb{Z}$` |
+| the symbols `RelationText` produces | in math: `≤ ≥ ≠ ⊆ ⊂ ⊇ ⊃ ∩ ∪ ∈ ∉ → ↦ ↔ ← ≡ ∀ ∃ × · ± ≈ √ ∞ ℓ ℤ` → `$\le$` … `$\mathbb{Z}$` |
 | Latin-1 letters (Håstad) and ’ “ ” | unchanged: pdfLaTeX reads UTF-8 input by default since 2018 and has these |
 
 pdfLaTeX, which LNCS and IACR papers use, stops on a Greek letter or a math

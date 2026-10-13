@@ -182,7 +182,7 @@
    "groups": {}
   },
   "mpc": {
-   "singleCount": 17,
+   "singleCount": 18,
    "pairCount": 0,
    "settings": [
     "honest-majority-t-lt-n-over-2",
@@ -3216,6 +3216,114 @@
      "startVariantsDerive": [],
      "startHostsDerive": []
     }
+   }
+  },
+  {
+   "id": "spir-mpc",
+   "start": [
+    "single-server-symmetric-pir"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-cpir-to-ot-dmo00",
+     "red-ot-to-mpc-kil88",
+     "red-symmetric-private-information-retrieval-single-server-to-cpir"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "ddh-etdp-mpc",
+   "start": [
+    "ddh",
+    "enhanced-trapdoor-permutation"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [
+    "derivable"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 4,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-cpir-to-ot-dmo00",
+     "red-ddh-to-tdh-dgi-19",
+     "red-ot-to-mpc-kil88",
+     "red-tdh-to-cpir-amr25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   }
+  },
+  {
+   "id": "ddh-ot-mpc",
+   "start": [
+    "ddh",
+    "ot"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "stable": [
+    "derivable",
+    "assumes"
+   ],
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 4,
+    "models": [],
+    "scoped": false,
+    "chainClass": "unstated",
+    "edges": [
+     "red-cpir-to-ot-dmo00",
+     "red-ddh-to-tdh-dgi-19",
+     "red-ot-to-mpc-kil88",
+     "red-tdh-to-cpir-amr25"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
    }
   },
   {
