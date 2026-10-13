@@ -70,6 +70,34 @@ ends with Adjustments, each with the passage of the wiki it rests on and a
 link to that section, and a refused step quotes its reason. If the wiki has
 since changed a quoted passage, CCwiki says so.
 
+**Fixes.**
+
+- A page saved with Windows line endings rendered blank and was missing from
+  search and backlinks.
+- On a page with a notice, such as a broken link with maintenance notices on,
+  pseudocode lost the wiki's macros, and so did Copy LaTeX (no macros) and
+  link previews.
+- A link to an asset can no longer open a file outside the wiki's content.
+- Back and Forward between two places on one page now move, and Open Link in
+  the right-click menu opens web and mail links.
+- Heading anchors match the site for superscripts, fractions, emphasis and
+  math in headings. `[[index]]` links to the front page, a YAML list written
+  flush left under its key is read, and an alias ending in `.md` links as
+  the site links it.
+- ⌘S, ⇧⌘R and ⇧⌘F show results for a query typed while the wiki was
+  loading, and Return opens a result for the text you typed rather than the
+  text before it. Opening an ⇧⌘F hit finds a capitalised term in its own
+  case.
+- Cancelling a paper ingestion while it was checking brought it back.
+- Tools you install while CCwiki is open are found when you come back to it.
+  A copy left open checks for updates every day, not only at launch, and
+  Settings no longer says "Up to date" after a relaunch when an update was
+  found.
+- In the Relations Explorer, a step whose requirement another recorded
+  reduction meets is no longer refused, relation names in plain text keep
+  `\gets`, `\pmod` and the like, and Copy Statement on a derived row says
+  what it assumes.
+
 ## 0.2.0 — unreleased
 
 **Ask whether one thing implies another.** Wiki → Relations Explorer (⇧⌘E)

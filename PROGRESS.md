@@ -5,6 +5,77 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-13 — A bug hunt across the batch, and its fixes
+
+The three PRs went up in merge order: relations follow-ups (#9), reader
+comforts (#10), page corrections (#11). Merging them, as main will be once
+they land, needed two code resolutions. Relations follow-ups' quote check
+moved into `LoadedLibrary.build` with the rest of the load, as both specs
+planned. `CCwikiApp` keeps every branch's focused values. That merge is
+`claude/batch-preview`: 947 tests, all 72 golden queries, and 90 of 90
+curation quotes found. `git rerere` holds the resolutions for when #9 and
+#10 land.
+
+Then a hunt for bugs across the combined code:
+
+- **13 finders:** 10 by subsystem, and 3 by concern (concurrency, safety,
+  persistence and restoration).
+- **Skeptics** tried to refute each finding: two for critical and major
+  ones, one for minor.
+- **The result:** 49 found, 47 after removing duplicates, and 45 survived
+  (44 confirmed, 1 split). By where the code came from, 19 predate the
+  batch, 13 came from corrections, 11 from reader comforts and 1 from
+  relations follow-ups.
+
+The fixes are on `claude/bug-hunt-fixes`, built on the batch preview. Eight
+fixers worked in parallel on groups of findings that shared no files, each
+reviewed for compile safety and behaviour. An integrator then made the
+changes that crossed groups, and three more reviews read the whole diff.
+The fixes add 79 tests. The ones that matter most:
+
+- **Asset links.** `ccwiki://wiki/asset/..` could open any file or app
+  outside `content/`. `CCwikiURL.destination` now refuses `.` and `..`, and
+  every open goes through `CCwikiURL.assetFile`, which resolves symbolic
+  links and requires the file to be inside `content/`.
+- **CRLF pages.** A page with frontmatter and Windows line endings had an
+  empty body. That broke rendering, search and backlinks.
+- **Macros under a notice.** A page with a notice lost its macros in
+  pseudocode, the copy buttons and link previews. The editor preview has a
+  notice on almost every page.
+- **The tripwire after Clear Finished.** It took CCwiki's own pull request
+  for one the agent had opened, while that agent was still running.
+- **A redirected `.git`.** The agent can write to its worktree's `.git`.
+  `GitService.isWorktree` now checks it points to CCwiki's clone, and back,
+  before the hand-over, a snapshot, Review Anyway or Approve runs git there.
+- **R13.** A requirement another recorded reduction meets is no longer
+  refused, which moves the default derived pairs from 1,022 to 1,024. The
+  explorer and the inspector now copy a derived statement with what it
+  assumes.
+- **The review.** It showed a changed footnote or link definition as "Only
+  blank lines changed". Submodules and symbolic links went through without
+  a block. A warning that first appeared at Approve was published without
+  being asked about.
+- **Smaller ones:** Back and Forward within a page, Open Link on web links,
+  palette Return during the debounce, an hourly update check, tools
+  installed while CCwiki runs, heading anchors against github-slugger,
+  `[[index]]`, flush-left YAML lists, and the paper window's host.
+
+**Left on purpose:**
+
+- `GIT_CEILING_DIRECTORIES` hardening;
+- Check Again finding newly installed tools;
+- polling for the Command Line Tools installer;
+- footnote definitions inside a callout in the review;
+- markdown-it's typographer changes in heading ids (no heading in the wiki
+  has one);
+- a separate DiffGuard message for symbolic links, which get the
+  unreadable-page text for now.
+
+**Docs.** CHANGELOG 0.3.0 has a Fixes section for what users of earlier
+versions saw. `scripts/derivations_reference.py` no longer fails with
+KeyError on today's wiki: a curation requirement names a hypothesis that
+Wat09's step no longer has.
+
 ## 2026-10-12 — Page corrections and the review step, built
 
 Built on `claude/page-corrections`, from [corrections.md](plans/corrections.md).
