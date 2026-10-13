@@ -368,8 +368,9 @@ overlapping soup. `script-src` stays strict — no `'unsafe-inline'`, no
 in wiki markdown cannot run.
 
 The corresponding win: a `WKUserScript` at `.atDocumentStart` **does** run under
-`script-src 'self'`, which is how the macro table is injected as
-`window.__CCWIKI__.macros` before any script sees it.
+`script-src 'self'`. The macro table no longer needs one: it comes with every
+render payload, and `ensureMarkdown` called without a table keeps the current
+one.
 
 **Honesty note.** The app is not sandboxed and does make network calls — `git`,
 `gh` and `claude` all need it. The guarantee here is about the *reader*: the web

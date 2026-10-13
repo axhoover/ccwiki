@@ -44,12 +44,12 @@
   var SOURCE_LINES = "data-source-lines";
   var PSEUDOCODE_LINES = "ccwiki-lines";
 
+  /** The notices above a page: Swift's words, as plain text. */
   function noticeHTML(notices) {
     if (!notices || !notices.length) return "";
-    var md = ensureMarkdown();
     return notices.map(function (n) {
       return '<div class="notice notice-' + (n.level === "warning" ? "warning" : "info") +
-        '">' + md.utils.escapeHtml(n.text) + "</div>";
+        '">' + escapeText(n.text) + "</div>";
     }).join("");
   }
 
@@ -325,10 +325,12 @@
    * on a fresh install the clone — and so `macros.ts` — does not exist until
    * after the first sync, and a pull can change it. Rebuilding markdown-it
    * is cheap; rendering a page with a stale table is every `\calA` in red.
+   * With no table, the current one stays: a caller that only wants an
+   * instance must never empty the table pseudocode and copying read.
    */
   function ensureMarkdown(macros) {
     if (macros === undefined || macros === null) {
-      macros = ((global.__CCWIKI__ || {}).macros) || {};
+      macros = currentMacros || {};
     }
     var key = macrosKey(macros);
     if (md && key === currentMacrosKey) return md;
