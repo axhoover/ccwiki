@@ -227,7 +227,7 @@ struct WikiPage: Identifiable, Sendable {
 
         var lineStart = body.startIndex
         while lineStart < body.endIndex {
-            let lineEnd = body[lineStart...].firstIndex(of: "\n") ?? body.endIndex
+            let lineEnd = body[lineStart...].firstIndex(where: \.isMarkdownLineEnding) ?? body.endIndex
             defer {
                 lineStart = lineEnd < body.endIndex ? body.index(after: lineEnd) : body.endIndex
             }
@@ -251,29 +251,128 @@ struct WikiPage: Identifiable, Sendable {
 }
 
 extension WikiPage.Heading {
-    /// Strips the inline markup that `rehype-slug` never sees, so the anchor is
-    /// computed from the same text Quartz uses: `$…$` loses its delimiters but
-    /// keeps its source, wikilinks collapse to their display text, and
-    /// emphasis markers disappear.
+    /// The heading's text as `ccwiki-markdown.js`'s `headingPlainText` reads
+    /// it from markdown-it's tokens, which is the text `rehype-slug` slugs on
+    /// the site: a wikilink is its alias, or its target without the anchor;
+    /// a markdown link is its text; math and code keep their source, losing
+    /// only their delimiters; a backslash escape is the character escaped;
+    /// and emphasis loses its markers.
+    ///
+    /// Underscores need the care, because github-slugger keeps `_`: only a
+    /// pair markdown-it reads as emphasis goes, so `_k_` reads `k` while
+    /// `snake_case` and the `_` in `$\mathsf{Enc}_k$` stay.
     static func plainText(_ markdown: String) -> String {
-        var out = markdown
+        // Text that is already final (a link's display text, a math or code
+        // span, an escaped character) stands in as one private-use scalar
+        // while the emphasis around it is undone, so nothing inside changes.
+        var literals: [String] = []
+        func protect(_ text: String) -> String {
+            guard let marker = Unicode.Scalar(Self.literalBase + UInt32(literals.count))
+            else { return text }
+            literals.append(text)
+            return String(Character(marker))
+        }
 
-        // [[target|display]] → display; [[target]] → target
-        out = out.replacingOccurrences(
-            of: #"\[\[([^\[\]\|]*)\|([^\[\]]*)\]\]"#,
-            with: "$2", options: .regularExpression)
-        out = out.replacingOccurrences(
-            of: #"\[\[([^\[\]]*)\]\]"#, with: "$1", options: .regularExpression)
+        // markdown-it reads a wikilink before anything inside it.
+        var linked = ""
+        var cursor = markdown.startIndex
+        for link in WikilinkParser.links(in: markdown) {
+            linked.append(contentsOf: markdown[cursor..<link.range.lowerBound])
+            let alias = link.alias ?? ""
+            linked.append(protect(alias.isEmpty ? link.target : alias))
+            cursor = link.range.upperBound
+        }
+        linked.append(contentsOf: markdown[cursor...])
         // [text](url) → text
-        out = out.replacingOccurrences(
+        linked = linked.replacingOccurrences(
             of: #"\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
-        // Delimiters only — github-slugger deletes `$` anyway, but leaving them
-        // in would also leave the space they sometimes carry.
-        out = out.replacingOccurrences(of: "$", with: "")
-        out = out.replacingOccurrences(of: "`", with: "")
-        out = out.replacingOccurrences(
-            of: #"\*\*|__|\*|(?<![A-Za-z0-9])_"#, with: "", options: .regularExpression)
 
-        return out.trimmingCharacters(in: .whitespaces)
+        let scalars = Array(linked.unicodeScalars)
+        var masked = String.UnicodeScalarView()
+        var i = 0
+        while i < scalars.count {
+            let c = scalars[i]
+            if c == "\\", i + 1 < scalars.count,
+               MarkdownLinkParser.isASCIIPunctuation(scalars[i + 1].value) {
+                masked.append(contentsOf: protect(String(Character(scalars[i + 1]))).unicodeScalars)
+                i += 2
+                continue
+            }
+            guard c == "$" || c == "`" else {
+                masked.append(c)
+                i += 1
+                continue
+            }
+            // A span closes at the next run of exactly as many `$` or
+            // backticks; a run that closes nothing is literal. As in
+            // `ccwiki.js`'s `mathInline`, a `$` right after an unescaped `$`
+            // opens nothing.
+            var end = i
+            while end < scalars.count, scalars[end] == c { end += 1 }
+            var opens = true
+            if c == "$", i > 0, scalars[i - 1] == "$" {
+                var backslashes = 0
+                var k = i - 2
+                while k >= 0, scalars[k] == "\\" { backslashes += 1; k -= 1 }
+                opens = backslashes % 2 == 1
+            }
+            var closing: Int?
+            var j = end
+            while opens, closing == nil, j < scalars.count {
+                guard scalars[j] == c else { j += 1; continue }
+                var k = j
+                while k < scalars.count, scalars[k] == c { k += 1 }
+                if k - j == end - i { closing = j }
+                j = k
+            }
+            guard let close = closing else {
+                masked.append(contentsOf: scalars[i..<end])
+                i = end
+                continue
+            }
+            // One space comes off each end when both ends have one: for math
+            // unless the span is all spaces, for code as markdown-it's
+            // `^ (.+) $` has it.
+            var content = scalars[end..<close]
+            let isPadding: (Unicode.Scalar) -> Bool = { $0 == " " || (c == "$" && $0 == "\n") }
+            if let first = content.first, let last = content.last,
+               isPadding(first), isPadding(last),
+               c == "$" ? !content.allSatisfy(isPadding) : content.count >= 3 {
+                content = content.dropFirst().dropLast()
+            }
+            masked.append(contentsOf: protect(String(String.UnicodeScalarView(content))).unicodeScalars)
+            i = close + (end - i)
+        }
+
+        var plain = String(masked)
+        for pattern in Self.emphasisPatterns {
+            plain = plain.replacingOccurrences(of: pattern, with: "$1", options: .regularExpression)
+        }
+        // github-slugger deletes `*` anyway; an escaped one is protected.
+        plain = plain.replacingOccurrences(of: "*", with: "")
+
+        var out = String.UnicodeScalarView()
+        for scalar in plain.unicodeScalars {
+            let slot = Int(scalar.value) - Int(Self.literalBase)
+            if literals.indices.contains(slot) {
+                out.append(contentsOf: literals[slot].unicodeScalars)
+            } else {
+                out.append(scalar)
+            }
+        }
+        return String(out).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The first of `plainText`'s placeholders, in plane 15's private use
+    /// area, which no heading holds.
+    private static let literalBase: UInt32 = 0xF0000
+
+    /// `__strong__`, then `_emphasis_`, where markdown-it reads them as such:
+    /// the opening run not after a letter or digit and not before a space,
+    /// the closing run the reverse. A placeholder stands for a span whose
+    /// delimiters are punctuation, so it counts as punctuation here.
+    private static let emphasisPatterns: [String] = ["__", "_"].map { run in
+        let word = #"[^\s\p{P}\p{S}\x{F0000}-\x{FFFFD}]"#
+        return #"(?<!\#(word))(?<!_)\#(run)(?![\s_])(.+?)(?<![\s_])\#(run)(?!_)(?!\#(word))"#
     }
 }
