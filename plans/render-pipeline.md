@@ -103,6 +103,27 @@ before `rehype-katex` in the site's chain.
 renders it. Passing it through is safe here because the CSP forbids inline
 script (§5), so markup coming out of the wiki cannot execute.
 
+**Typography** is the site's, not markdown-it's: its `smartquotes` stays, its
+`replacements` is off, and `ccwiki_backticks` and `ccwiki_typography` do what
+OFM's arrows and retext-smartypants' defaults do: `->` → →, `=>` → ⇒ and the
+rest of ofm.ts's arrows, then `--` (only two) → —, three or more dots → …,
+and LaTeX's ``` ``quotes'' ``` → “quotes”. `---`, `(c)`, `+-` and `..` stay
+as written. A wikilink's text is a `text` token between `wikilink_open` and
+`wikilink_close`, so it is educated as the site educates a link's text; the
+preview cards get the same rules.
+
+**Callouts** take their title from the marker's line only (math and links
+included) and the lines after it as their body, as ofm.ts does, and map
+Obsidian's other names (`caution` is a warning, `summary` an abstract).
+
+**The site's text transform** (ofm.ts:179) runs before the parse here too:
+`%%` comments are deleted, and in a table each wikilink's pipes are escaped,
+so `[[slug|Name]]` stays one cell (and `\|` in a table's math keeps its
+backslash). A wikilink shows its alias decoded (`IND\$-CPA` reads
+`IND$-CPA`); without one, `[[page#Heading]]` shows `Heading` (in a table,
+`page`, as the site's `#` escape there leaves it) and `[[page]]` the last
+segment of the target.
+
 **Not** reproduced, deliberately: the SPA router and the graph view.
 
 **Reproduced differently: popovers.** The site fetches the target page and
@@ -127,14 +148,18 @@ failed one, which leaves no `.ps-root`.) A failed block replaces its box with
 a `pre.pseudocode-error`.
 
 Per-block facts live on the box: `data-source` (the source with
-`\algname{…}` removed, for copying) and `data-oracle-split`. Never put a
-`data-*` attribute on the `<pre>`: `pseudocode.renderElement` copies the
-element's `dataset` into its renderer options.
+`\algname{…}` removed, for copying), `data-oracle-split`, and
+`data-algname` (the first `\algname{…}`, trimmed and lowercased; absent
+without one). Never put a `data-*` attribute on the `<pre>`:
+`pseudocode.renderElement` copies the element's `dataset` into its renderer
+options.
 
-`groupGames` then puts a Game block and the blocks straight after it side by
-side. The game takes the width it needs and the oracle column keeps a 12rem
-minimum; `% oracle-split: N` in the game's source fixes the oracles' share at
-N% (quartz pseudocode.ts:245), through a `split` class and an
+`groupGames` then puts a block whose `\algname` is Game and the blocks
+straight after it that have another `\algname` side by side, as quartz
+pseudocode.ts:209 decides it (a block with none ends the group; the caption
+plays no part). The game takes the width it needs and the oracle column
+keeps a 12rem minimum; `% oracle-split: N` in the game's source fixes the
+oracles' share at N% (quartz pseudocode.ts:245), through a `split` class and an
 `--oracle-share` property so the narrow-window rules can still override it.
 Anything else added inside a box must not widen it, or it moves the split;
 the copy buttons (see "Copying LaTeX") are the case in point.
@@ -251,6 +276,9 @@ page, the relation-meta line spliced under the H1. A core rule,
   `renderPseudocode` moves it onto the `.pseudocode-container` (or the
   `pre.pseudocode-error`) as `data-source-lines`.
 - An `html_block` carries its map, but raw HTML has nowhere to show it.
+- `%%` comments are deleted before the parse, so a comment over several
+  lines moves the lines after it; `ccwiki_comment_lines`, just before
+  `ccwiki_source_lines`, maps every token back to the lines it was handed.
 
 `SourceLineMap` (Swift) maps a rendered range to the file: past the
 frontmatter, and around the spliced lines, which map to the frontmatter they
