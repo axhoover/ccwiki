@@ -122,11 +122,13 @@ struct CurationTraceTests {
     func refusedOnTheStrongerProof() throws {
         // H ⇒ C needs H in full, which R ⇒ H gives and the unstated P ⇒ H
         // does not. The main closure has H from P ⇒ H at layer 2, refuses
-        // H ⇒ C at layer 3 and reaches C through E at layer 4. Without P ⇒ H
-        // the fully black-box engine has H from R ⇒ H, and H ⇒ C fires: the
-        // stronger proof uses the step the shortest one's closure refused.
+        // H ⇒ C at layer 3 and reaches C through E at layer 4, a layer
+        // before R ⇒ H's own H lets H ⇒ C fire. Without P ⇒ H the fully
+        // black-box engine has H from R ⇒ H, and H ⇒ C fires: the stronger
+        // proof uses the step the shortest one's closure refused.
         let objects: [[String: Any]] = [
             ExplorerFixture.object("s", title: "Sigma"), ExplorerFixture.object("p", title: "Pi"),
+            ExplorerFixture.object("o", title: "Omicron"),
             ExplorerFixture.object("q", title: "Kappa"), ExplorerFixture.object("r", title: "Rho"),
             ExplorerFixture.object("h", title: "Eta"), ExplorerFixture.object("e", title: "Epsilon"),
             ExplorerFixture.object("c", title: "Chi"),
@@ -135,7 +137,8 @@ struct CurationTraceTests {
             ExplorerFixture.reduction("red-s-to-p", ["s"], "p", title: "S ⇒ P", source: "SP01"),
             ExplorerFixture.reduction("red-p-to-h", ["p"], "h", title: "P ⇒ H", source: "PH02",
                                       reductionClass: "unstated"),
-            ExplorerFixture.reduction("red-s-to-q", ["s"], "q", title: "S ⇒ Q", source: "SQ03"),
+            ExplorerFixture.reduction("red-s-to-o", ["s"], "o", title: "S ⇒ O", source: "SO09"),
+            ExplorerFixture.reduction("red-o-to-q", ["o"], "q", title: "O ⇒ Q", source: "OQ03"),
             ExplorerFixture.reduction("red-q-to-r", ["q"], "r", title: "Q ⇒ R", source: "QR04"),
             ExplorerFixture.reduction("red-r-to-h", ["r"], "h", title: "R ⇒ H", source: "RH05"),
             ExplorerFixture.reduction("red-h-to-c", ["h"], "c", title: "H ⇒ C", source: "HC06"),
@@ -155,7 +158,8 @@ struct CurationTraceTests {
         let derived = try #require(answer.derivedAnswer)
         let stronger = try #require(derived.stronger)
         #expect(derived.proof.relationIDs == ["red-e-to-c", "red-h-to-e", "red-p-to-h", "red-s-to-p"])
-        #expect(stronger.proof.relationIDs == ["red-h-to-c", "red-q-to-r", "red-r-to-h", "red-s-to-q"])
+        #expect(stronger.proof.relationIDs == ["red-h-to-c", "red-o-to-q", "red-q-to-r", "red-r-to-h",
+                                               "red-s-to-o"])
 
         let shortest = CurationTrace.derived(derived.proof, other: stronger.proof, closure: closure,
                                              start: ["s"], derivation: derivation)

@@ -211,11 +211,20 @@ struct ProofWriterContext: Sendable {
 /// comment.
 enum ProofLaTeX {
 
+    /// The header's macro line when the macro table did not load, so the
+    /// copy cannot claim its math is free of the wiki's macros.
+    static let macrosUnavailable = "Math may use cryptology.city macros, which are not "
+        + "written out: CCwiki could not read them from macros.ts."
+
     static func write(_ proof: ProofExport, context: ProofWriterContext) -> String {
         var lines = context.provenance(proof).map { comment($0) }
         // Proofs are pasted into papers without the wiki's preamble, as the
-        // reader's "Copy Algorithm as LaTeX (No Macros)" is.
-        lines.append(comment("Math uses no cryptology.city macros."))
+        // reader's "Copy Algorithm as LaTeX (No Macros)" is. That holds only
+        // when the macros were read: every way macros.ts can fail to load
+        // leaves the table empty, and the math is then copied as written.
+        lines.append(comment(context.macros.isEmpty
+            ? ProofLaTeX.macrosUnavailable
+            : "Math uses no cryptology.city macros."))
         let works = context.citedWorks(proof)
         let inCryptoBib = works.filter { $0.cryptobibKey != nil }.compactMap(\.texKey)
         if !inCryptoBib.isEmpty {
@@ -564,7 +573,7 @@ enum TeXText {
         "⊆": #"\subseteq"#, "⊊": #"\subsetneq"#, "⊂": #"\subset"#,
         "⊇": #"\supseteq"#, "⊃": #"\supset"#,
         "∩": #"\cap"#, "∪": #"\cup"#, "∈": #"\in"#, "∉": #"\notin"#,
-        "→": #"\to"#, "↦": #"\mapsto"#, "↔": #"\leftrightarrow"#,
+        "→": #"\to"#, "↦": #"\mapsto"#, "↔": #"\leftrightarrow"#, "←": #"\gets"#, "≡": #"\equiv"#,
         "∀": #"\forall"#, "∃": #"\exists"#,
         "×": #"\times"#, "·": #"\cdot"#, "±": #"\pm"#, "≈": #"\approx"#,
         "√": #"\surd"#, "∞": #"\infty"#, "ℓ": #"\ell"#, "ℤ": #"\mathbb{Z}"#,

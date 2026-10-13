@@ -111,15 +111,17 @@ struct ProofExport: Sendable, Hashable {
     }
 
     /// The fact a proof row stands for. A weakened fact is a different fact
-    /// from the full one (R13), so the key keeps them apart, as
-    /// `ProofOutline` does.
+    /// from the full one (R13), and so is a `metBy` producer's fact kept
+    /// apart from its node's own, so the key keeps all three apart.
     private struct Occurrence: Hashable {
         let objectID: String
         let isWeakened: Bool
+        let establishedBy: Derivation.StepKey?
 
         init(_ row: Derivation.ProofTree.Row) {
             objectID = row.objectID
             isWeakened = row.isWeakened
+            establishedBy = row.establishedBy
         }
     }
 
