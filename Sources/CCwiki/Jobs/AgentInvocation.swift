@@ -350,10 +350,13 @@ struct AgentRun {
         }
 
         // What the agent says is prose; what GitHub says is fact. Asked
-        // after every exit but a cancel, whatever the agent reports.
+        // after every exit but a cancel, whatever the agent reports. Other
+        // jobs' branches come from their records and from the job center,
+        // which also knows the jobs Clear Finished has dropped meanwhile.
+        let otherBranches = Tripwire.otherJobBranches(logs: paths.logs, excluding: job.id)
+            .union(job.otherJobBranches?() ?? [])
         let caught = await tripwire.check(
-            job, headsBefore: headsBefore,
-            otherBranches: Tripwire.otherJobBranches(logs: paths.logs, excluding: job.id))
+            job, headsBefore: headsBefore, otherBranches: otherBranches)
         if Task.isCancelled {
             await cleanUpDespiteCancellation(keep: true)
             return

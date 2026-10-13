@@ -207,9 +207,11 @@ struct Tripwire {
         }
     }
 
-    /// The branches of every other job CCwiki knows of, from the records
-    /// beside the transcripts. A push one of them makes while this agent
-    /// runs is CCwiki's own (an Approve), not the agent's.
+    /// The branches of every other job with a record beside the
+    /// transcripts. A push one of them makes while this agent runs is
+    /// CCwiki's own (an Approve), not the agent's. Clear Finished deletes
+    /// records, so the runner adds the branches the job center still knows
+    /// of (`Job.otherJobBranches`).
     nonisolated static func otherJobBranches(logs: URL, excluding jobID: String) -> Set<String> {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: logs, includingPropertiesForKeys: nil)) ?? []

@@ -51,6 +51,10 @@ struct IngestJobRunner {
         let pushRights = authenticated
             ? await GitHubAuth.canPush(tools: tools, repository: target.repository)
             : nil
+        // Cancelled meanwhile: `job.cancel()` has set the state, and the
+        // answers above failed because their processes were stopped, not
+        // because of anything they asked. They are not findings.
+        if Task.isCancelled { return }
         let findings = Preflight.run(
             submission: submission, index: index, paths: paths, tools: tools,
             isGitHubAuthenticated: authenticated, canPush: canPush, hasPushRights: pushRights,
@@ -74,6 +78,7 @@ struct IngestJobRunner {
         // MARK: Worktree
 
         let baseBranch = await git.defaultBranch(in: paths.clone)
+        if Task.isCancelled { return }
         job.setState(.preparing("Creating worktree…"))
 
         // The base is a commit, not a ref. Left as `origin/main`, a sync

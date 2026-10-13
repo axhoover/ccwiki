@@ -80,6 +80,11 @@ final class JobCenter {
     @ObservationIgnored private var badgeCount = 0
     /// Snapshots taken, by job id. For the tests of the queue.
     @ObservationIgnored private(set) var snapshotCounts: [String: Int] = [:]
+    /// The branches of the jobs Clear Finished has dropped this launch.
+    /// Their records are gone, and an agent still running must not take a
+    /// push or a pull request CCwiki made for one of them for its own
+    /// (§5.5). A launch is long enough: no agent outlives one.
+    @ObservationIgnored private var clearedBranches: Set<String> = []
 
     /// Loads the job history synchronously.
     init(paths: AppPaths, environment: @escaping @MainActor () -> Environment) {
@@ -108,6 +113,13 @@ final class JobCenter {
 
     func job(id: String) -> Job? {
         jobs.first { $0.id == id }
+    }
+
+    /// The branch of every job but `jobID` that this launch knows of: those
+    /// in Jobs, and those Clear Finished has dropped. With the records on
+    /// disk, what the tripwire takes for CCwiki's own (§5.5).
+    func otherJobBranches(excluding jobID: String) -> Set<String> {
+        Set(jobs.filter { $0.id != jobID }.map(\.branch)).union(clearedBranches)
     }
 
     /// Jobs that are not finished whose target is this page, or whose last
@@ -317,16 +329,16 @@ final class JobCenter {
             guard let git = environment.git else { return }
             guard FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false))
             else {
-                job.setNotice(JobNotice(
-                    tone: .failure, text: "The worktree is gone, so there is nothing to review."))
+                Self.refuseReview(job, .failure,
+                    "The worktree is gone, so there is nothing to review.")
                 return
             }
             if job.baseCommit == nil {
                 let branch = await git.defaultBranch(in: self.paths.clone)
                 guard let base = await git.mergeBase("HEAD", "origin/\(branch)", in: job.worktree)
                 else {
-                    job.setNotice(JobNotice(tone: .failure, text:
-                        "CCwiki could not tell which commit this job started from."))
+                    Self.refuseReview(job, .failure,
+                        "CCwiki could not tell which commit this job started from.")
                     return
                 }
                 job.setBaseCommit(base)
@@ -337,14 +349,15 @@ final class JobCenter {
             guard let review = await ReviewSnapshotter(git: git).review(
                 of: job, clone: self.paths.clone, privatePaths: environment.privatePaths)
             else {
-                job.setNotice(JobNotice(tone: .failure, text:
-                    "git could not compare the worktree with the commit it started from."))
+                Self.refuseReview(job, .failure,
+                    "git could not compare the worktree with the commit it started from.")
                 return
             }
             self.snapshotCounts[job.id, default: 0] += 1
             guard !review.snapshot.isEmpty else {
-                job.setNotice(JobNotice(
-                    tone: .warning, text: "The worktree holds no changes to review."))
+                // Kept, empty, so Review Anyway is no longer offered for it.
+                job.setReview(review.snapshot, findings: review.findings)
+                Self.refuseReview(job, .warning, "The worktree holds no changes to review.")
                 return
             }
             if job.pullRequest.title.isEmpty {
@@ -361,6 +374,13 @@ final class JobCenter {
         }
         // Whatever Left Behind showed of this worktree goes with the state.
         await refreshOrphanedWorktrees()
+    }
+
+    /// Why Review Anyway did not go ahead: in the transcript, which the
+    /// job's pane shows whatever its state, and as its notice.
+    private static func refuseReview(_ job: Job, _ tone: JobNotice.Tone, _ message: String) {
+        job.append(JobLogEntry(tone == .failure ? .error : .system, message))
+        job.setNotice(JobNotice(tone: tone, text: message))
     }
 
     /// The states an agent job can be brought to review from, when its
@@ -773,6 +793,8 @@ final class JobCenter {
     /// A worktree one of them kept for Review Anyway is a stray from now on.
     func clearFinishedJobs() {
         for job in jobs where job.state.isTerminal {
+            // Its branch may be on GitHub, pushed while an agent runs.
+            clearedBranches.insert(job.branch)
             try? FileManager.default.removeItem(at: job.recordFile)
             try? FileManager.default.removeItem(at: job.patchFile)
             queues[job.id] = nil
@@ -819,6 +841,8 @@ final class JobCenter {
             return
         }
         let paths = self.paths
+        let id = job.id
+        job.otherJobBranches = { [weak self] in self?.otherJobBranches(excluding: id) ?? [] }
         job.task = Task { @MainActor in
             switch job.kind {
             case .ingestion:

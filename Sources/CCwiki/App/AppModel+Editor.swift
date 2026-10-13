@@ -54,15 +54,32 @@ extension AppModel {
     }
 
     /// CCwiki changed these repository-relative paths in `job`'s worktree:
-    /// its editors of those files reload (§4.4).
+    /// its editors of those files reload (§4.4), and so does every editor
+    /// of the job that could not read or save its file.
     func filesChanged(in job: Job, paths changed: [String]) {
         let sessions = editorSessions
-            .filter { $0.key.jobID == job.id && changed.contains($0.key.path) }
+            .filter {
+                Self.reloadsEditor(
+                    $0.key, of: job.id, changed: changed,
+                    isLoaded: $0.value.isLoaded, saveFailed: $0.value.saveError != nil)
+            }
             .map { $0.value }
         guard !sessions.isEmpty else { return }
         Task { @MainActor in
             for session in sessions { await session.reloadFromDisk() }
         }
+    }
+
+    /// Whether `filesChanged` reloads the editor of `target`: its file is
+    /// one CCwiki changed in job `jobID`, or the editor is that job's and
+    /// could not read or save its file, as while the worktree was gone. A
+    /// Restore brings back every file, not only those its diff holds, and
+    /// such an editor loads again, or saves what it was refused (§4.4, §7.5).
+    nonisolated static func reloadsEditor(
+        _ target: EditorTarget, of jobID: String, changed: [String],
+        isLoaded: Bool, saveFailed: Bool
+    ) -> Bool {
+        target.jobID == jobID && (changed.contains(target.path) || !isLoaded || saveFailed)
     }
 
     /// What the editor's preview renders for `text` at `path`
