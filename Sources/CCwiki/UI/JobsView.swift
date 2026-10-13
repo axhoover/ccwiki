@@ -55,7 +55,7 @@ struct JobsView: View {
                         .disabled(!model.hasFinishedJobs)
 
                         Button {
-                            model.requestIngestSheet(in: nil)
+                            IngestCommand.perform(in: nil, model: model, openWindow: openWindow)
                         } label: {
                             Label("Ingest a Paper", systemImage: "plus")
                         }
@@ -74,7 +74,9 @@ struct JobsView: View {
                 } description: {
                     Text("Drop a PDF on the reader, or paste an ePrint, arXiv or DOI link.")
                 } actions: {
-                    Button("Ingest a Paper…") { model.requestIngestSheet(in: nil) }
+                    Button("Ingest a Paper…") {
+                        IngestCommand.perform(in: nil, model: model, openWindow: openWindow)
+                    }
                 }
             }
         }
