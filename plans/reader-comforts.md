@@ -272,7 +272,9 @@ another window. A request from outside a reader (the Jobs window's New
 Ingestion Job…, which corrections renames Ingest a Paper) brings the target
 window forward with
 `makeKeyAndOrderFront`. While the sheet is up, a second request only brings
-its window forward, and the other windows' drop targets refuse PDFs. The
+its window forward, and the other windows' drop targets refuse PDFs, as does
+`onOpenURL` for a PDF from Finder: the sheet up reads none, so one staged for
+it would wait and join the next ingestion. The
 bookkeeping is the pure `IngestSheetTarget` (§4.6).
 
 ### 1.4 Opening a page elsewhere
@@ -437,9 +439,11 @@ again for the first after every reader window has closed) and
 3. **Once the wiki is loaded** (`libraryDidLoad`, or at once if it is
    already loaded), a restored history drops pages the wiki no longer has
    (`NavigationHistory.pruned(keeping:)`) and renders at its saved reading
-   anchor. A pending location then opens in any session. A session with
-   neither a restored page nor the launch document opens its opening, else
-   the last page if this is the cold start, else Home.
+   anchor. A pending location then opens in any session. A session with no
+   restored state opens its opening, over the launch document if it shows
+   one, as a paper window's Show Reference Page asks with no reader open.
+   One with neither a restored page nor the launch document opens the last
+   page if this is the cold start, else Home.
 
 So a cold launch opens the last page, and while a reader is open, ⌘N, ⌘T
 and the tab bar's + button open Home. A last page the wiki no longer has
@@ -1097,6 +1101,12 @@ decides per tab, purely:
 | `.folder(slug)` | a full build, `resolutionChanged`, the manifest changed (the listing leaves out its `unlistedPaths`), or any changed page under `slug` |
 | `.document` | always: it is one synthetic page, and the first load must bring Welcome's links alive and drop its "The wiki is downloading" notice |
 | `.empty` | never |
+
+In a snapshot store a page also renders again when the load moved the
+revision it was rendered at: a snapshot has no history, so a correction could
+not read that revision's file (corrections §3.5). Every load also prunes each
+tab's history as the first does (§1.7), and a tab whose page went shows the
+nearest one left on Back, or Home (`SessionReloadPlan`).
 
 The page tree, the counts and the quick switcher are rebuilt after every
 load, as today. They are cheap.

@@ -73,6 +73,10 @@ enum CCwikiURL {
         return scheme + String(string.dropFirst(external.count))
     }
 
+    /// Nil for anything that is not a `ccwiki://` link, and for one with a
+    /// `.` or `..` segment once decoded: no link the app makes has one, and
+    /// `..%2F..%2F` would otherwise climb out of the wiki, from a page, an
+    /// agent's change under review or another app.
     static func destination(of string: String) -> Destination? {
         guard let url = URL(string: string), url.scheme == scheme else { return nil }
 
@@ -80,6 +84,7 @@ enum CCwikiURL {
         var components = url.path(percentEncoded: false)
             .components(separatedBy: "/")
             .filter { !$0.isEmpty }
+        guard !components.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
         guard let kind = components.first else { return nil }
         components.removeFirst()
         let rest = components.joined(separator: "/")
@@ -91,5 +96,43 @@ enum CCwikiURL {
         case "_": return .shell
         default: return nil
         }
+    }
+
+    /// Whether the web view's frame may go to `url`: the shell, while the
+    /// controller loads it itself (`isReady` false: at the start, and after
+    /// a WebContent crash), and, once it is up, a place on it, which
+    /// WebKit's Open Link on a link to a heading asks for and which only
+    /// scrolls. Nothing else, a page's raw HTML being able to ask: a
+    /// refresh to a stylesheet or an unknown path would replace the shell
+    /// and leave the window blank, and one to the shell, or to a place on
+    /// it, reloads it (`isReload`), which renders the same page and so the
+    /// same refresh, for ever.
+    static func allowsShellNavigation(to url: URL, isReady: Bool, isReload: Bool) -> Bool {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        let fragment = parts.fragment
+        parts.fragment = nil
+        guard parts.string == shell.absoluteString else { return false }
+        guard isReady else { return fragment == nil }
+        return !isReload && fragment?.isEmpty == false
+    }
+
+    /// The file an asset link names, for opening in its own app: nil unless
+    /// it is in `content`, with `..` and symbolic links resolved, as the
+    /// scheme handler refuses a load that climbs out of its root. A link
+    /// can come from anywhere, and a symbolic link in the clone can point
+    /// anywhere.
+    static func assetFile(_ path: String, in content: URL) -> URL? {
+        let segments = path.split(separator: "/")
+        guard !segments.isEmpty, !segments.contains(where: { $0 == "." || $0 == ".." })
+        else { return nil }
+        let root = content.standardizedFileURL.resolvingSymlinksInPath()
+        let file = content.appending(path: path).standardizedFileURL.resolvingSymlinksInPath()
+        // Inside the root, and not the root itself, which a link can name.
+        guard CCwikiSchemeHandler.isContained(file, in: root),
+              !CCwikiSchemeHandler.isContained(root, in: file)
+        else { return nil }
+        return file
     }
 }

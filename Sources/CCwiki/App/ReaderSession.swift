@@ -158,6 +158,7 @@ final class ReaderSession: Identifiable {
         webController.onNavigate = { [weak self] destination, disposition in
             self?.navigate(to: destination, disposition: disposition)
         }
+        webController.opensLinksInTabs = true
         webController.onReady = { [weak self] in
             self?.renderCurrent()
         }
@@ -292,9 +293,16 @@ final class ReaderSession: Identifiable {
     /// as one that launches the app does, opens once it is.
     func handleOpenURL(_ url: URL) {
         if url.isFileURL {
-            guard url.pathExtension.lowercased() == "pdf",
-                  let staged = try? model.stagePDF(from: url)
-            else { return }
+            guard url.pathExtension.lowercased() == "pdf" else { return }
+            // While a sheet is up it is not handed another PDF, as a drop
+            // on any window is refused (§1.3): its window comes forward. The
+            // sheet up now reads no PDF, so one left for it would wait and
+            // join the next, unrelated, ingestion.
+            guard model.ingestSheetTarget == nil else {
+                model.requestIngestSheet(in: id)
+                return
+            }
+            guard let staged = try? model.stagePDF(from: url) else { return }
             model.pendingDroppedPDF = staged
             model.requestIngestSheet(in: id)
             model.requestJobsWindow()
@@ -308,16 +316,37 @@ final class ReaderSession: Identifiable {
 
     /// What a load means for this window: its page renders again, keeping
     /// the reader's place, only if the load changed something that page
-    /// shows (`LibraryUpdate.requiresRerender`, §3.6). The first load also
+    /// shows (`LibraryUpdate.requiresRerender`, §3.6), or, in a snapshot,
+    /// moved the revision it was rendered at. Its history forgets the pages
+    /// the load took away, and a page on screen that went gives way to the
+    /// nearest one left on Back (`SessionReloadPlan`). The first load also
     /// does what the session's start left for the wiki; a session that has
     /// not started waits for its start, which does the same.
     func libraryDidLoad(_ update: LibraryUpdate) {
         guard isStarted else { return }
         if awaitsLibrary {
             openWhatWaited()
-        } else if case .empty = location {
+            return
+        }
+        let index = model.index
+        let plan = SessionReloadPlan.plan(
+            history: history,
+            exists: { path in index.map { $0.pages[path] != nil } ?? true },
+            changed: { update.requiresRerender(of: $0) },
+            revisionGone: SessionReloadPlan.outlivesRevision(
+                store: model.paths.wikiStore,
+                rendered: webController.lastRenderedRevision, head: model.headRevision))
+        if plan.history != history { history = plan.history }
+        switch plan.render {
+        case .unchanged:
+            break
+        case .home:
             openHome()
-        } else if update.requiresRerender(of: location) {
+        case .current:
+            reveal(location)
+            webController.invalidate()
+            renderCurrent(restoringScroll: true)
+        case .inPlace:
             webController.invalidate()
             renderCurrent(preservingScroll: true)
         }
@@ -453,13 +482,15 @@ final class ReaderSession: Identifiable {
     /// Follow a link: one in the page, whose click or context menu said
     /// where (`WebController.onNavigate`), or a ccwiki:// link from outside,
     /// which opens here. An asset opens in its own app wherever it was asked
-    /// for.
+    /// for, if it is a file of the wiki (`CCwikiURL.assetFile`).
     func navigate(to destination: CCwikiURL.Destination, disposition: LinkDisposition = .here) {
         switch destination {
         case .page(let path, let anchor): open(.page(path: path, anchor: anchor), disposition)
         case .folder(let slug): open(.folder(slug: slug), disposition)
         case .asset(let path):
-            NSWorkspace.shared.open(model.paths.content.appending(path: path))
+            if let file = CCwikiURL.assetFile(path, in: model.paths.content) {
+                NSWorkspace.shared.open(file)
+            }
         case .shell:
             break
         }

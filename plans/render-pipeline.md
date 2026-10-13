@@ -344,9 +344,13 @@ gets the same table from `WKNavigationAction`'s `buttonNumber` and
 Link on cryptology.city**, in the link's context menu, after **Open Link in
 New Tab** and **Open Link in New Window**; a link to a folder gets those two
 alone. `contextTarget` carries the link's `href` for them. They
-follow WebKit's **Open Link**, which for these links is the app's own:
-WebKit's loads the link with no click behind it, a navigation of type
-`.other` that the delegate cancels.
+follow WebKit's **Open Link**, which is the app's own for every link the app
+opens, a page, a folder or a file of the wiki, and a web or mail link
+(`externalLink`): WebKit's loads the link with no click behind it, a
+navigation of type `.other` that the delegate cancels. A place on the page
+keeps WebKit's, which scrolls there. The review and an editor's preview
+offer Open Link on cryptology.city but no tab or window, since their links
+open in the active reader (corrections §17).
 
 ## 5. Three layers that keep reading offline
 
@@ -354,7 +358,10 @@ WebKit's loads the link with no click behind it, a navigation of type
    `default-src 'none'; script-src 'self'; connect-src 'none'; img-src 'self' data:; …`
 2. **The navigation delegate** cancels every navigation that is not the shell,
    and hands `http`/`https`/`mailto` to `NSWorkspace` so external links open in
-   the default browser.
+   the default browser. The shell itself loads only when the controller loads
+   it, before the page says `ready`; after that only a place on it may load
+   (`CCwikiURL.allowsShellNavigation`), so a refresh in a page's raw HTML can
+   neither replace the shell nor reload it for ever.
 3. **`WKUIDelegate` returns `nil`** for `createWebViewWith`, so `target="_blank"`
    can never spawn a window.
 

@@ -215,7 +215,12 @@ struct RootView: View {
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url, url.pathExtension.lowercased() == "pdf" else { return }
             Task { @MainActor in
-                guard let staged = try? model.stagePDF(from: url) else { return }
+                // Another window may have put a sheet up while the drop
+                // loaded. The sheet up reads no PDF, so one left for it
+                // would join the next ingestion instead.
+                guard model.ingestSheetTarget == nil,
+                      let staged = try? model.stagePDF(from: url)
+                else { return }
                 model.pendingDroppedPDF = staged
                 model.requestIngestSheet(in: session.id)
                 openWindow(id: CCwikiApp.jobsWindowID)
