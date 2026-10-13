@@ -8,7 +8,8 @@ import Foundation
 ///
 /// - `key: scalar`, splitting on the **first** colon (345 lines carry a colon
 ///   inside the value — every `source:` URL and every `cryptobib_key`)
-/// - block sequences (`aliases:` then `  - item`) and the inline empty `[]`
+/// - block sequences (`aliases:` then `  - item`, or `- item` flush left) and
+///   the inline empty `[]`
 /// - literal block scalars (`bibtex: |`), preserving interior newlines
 /// - double- and single-quoted scalars, unquoted only when both ends match
 /// - full-line `#` comments (taught to agents by `Templates/Reference.md`)
@@ -126,12 +127,15 @@ struct Frontmatter: Equatable, Sendable {
         guard found else { return Frontmatter(bodyStart: text.startIndex) }
 
         // Map the line index back into the *original* text. Counting from the
-        // normalized copy would drift on CRLF input, so walk the original.
+        // normalized copy would drift on CRLF input, so walk the original —
+        // by UTF-8 byte, because "\r\n" is one Character and never equals
+        // "\n". The index after a line feed is always a Character boundary.
+        let utf8 = text.utf8
         var idx = text.startIndex
         var remaining = i
         while remaining > 0, idx < text.endIndex {
-            if let nl = text[idx...].firstIndex(of: "\n") {
-                idx = text.index(after: nl)
+            if let nl = utf8[idx...].firstIndex(of: UInt8(ascii: "\n")) {
+                idx = utf8.index(after: nl)
                 remaining -= 1
             } else {
                 idx = text.endIndex
@@ -171,15 +175,21 @@ struct Frontmatter: Equatable, Sendable {
         return (folded ? dedented.joined(separator: " ") : dedented.joined(separator: "\n"), i)
     }
 
-    /// A block sequence: consecutive `  - item` lines.
+    /// A block sequence: consecutive `  - item` lines, or consecutive
+    /// `- item` lines flush left, which YAML also allows under a key (and
+    /// js-yaml, so the site, reads). The first item decides which; a flush
+    /// item has to be `- ` or a bare `-`, so the closing `---` never is one.
     private static func blockSequence(_ lines: [String], from start: Int) -> ([String], Int) {
+        let isFlushItem: (String) -> Bool = { $0.hasPrefix("- ") || $0.trimmedTrailing == "-" }
+        let flush = start < lines.count && isFlushItem(lines[start])
         var items: [String] = []
         var i = start
         while i < lines.count {
             let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-            guard lines[i].hasPrefix(" ") || lines[i].hasPrefix("\t"), trimmed.hasPrefix("-") else {
-                break
-            }
+            let isItem = flush
+                ? isFlushItem(lines[i])
+                : (lines[i].hasPrefix(" ") || lines[i].hasPrefix("\t")) && trimmed.hasPrefix("-")
+            guard isItem else { break }
             let item = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
             items.append(unquote(item))
             i += 1

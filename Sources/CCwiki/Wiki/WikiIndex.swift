@@ -81,13 +81,15 @@ struct WikiIndex: Sendable {
         }
 
         // Aliases enter `allSlugs` during the markdown parse, which runs over
-        // `markdownPaths.sort()` (build.ts:80).
+        // `markdownPaths.sort()` (build.ts:80). Always `alias + ".md"`:
+        // `getAliasSlugs` (frontmatter.ts) means to keep an alias already
+        // ending in `.md`, but compares `getFileExtension(alias)`, which keeps
+        // its dot, with "md", so it never does — `Notes.md` is slug `Notes.md`.
         var aliasOwners: [String: [String]] = [:]
         for path in files.filter({ $0.hasSuffix(".md") }).sorted() {
             guard let page = pages[path] else { continue }
             for alias in page.aliases where !alias.isEmpty {
-                let slug = QuartzSlug.slugifyFilePath(
-                    QuartzSlug.fileExtension(alias) == ".md" ? alias : alias + ".md")
+                let slug = QuartzSlug.slugifyFilePath(alias + ".md")
                 appendSlug(slug)
                 aliasOwners[slug, default: []].append(path)
             }
@@ -234,6 +236,11 @@ struct WikiIndex: Sendable {
         let slug = matches.count == 1 ? matches[0] : targetCanonical
         let anchorText = targetAnchor.isEmpty ? nil : String(targetAnchor.dropFirst())
 
+        // `[[index]]`, `[[/]]` and `[[./]]` canonicalize to the empty slug,
+        // which `transformLink`'s fallback joins to `./`: the home page.
+        if slug.isEmpty, let path = slugToPath["index"], path.hasSuffix(".md") {
+            return .page(path: path, anchor: anchorText)
+        }
         if let path = slugToPath[slug] {
             return path.hasSuffix(".md")
                 ? .page(path: path, anchor: anchorText)
@@ -305,10 +312,10 @@ struct WikiIndex: Sendable {
         var start = link.range.lowerBound
         while start > body.startIndex {
             let previous = body.index(before: start)
-            if body[previous] == "\n" { break }
+            if body[previous].isMarkdownLineEnding { break }
             start = previous
         }
-        let end = body[link.range.upperBound...].firstIndex(of: "\n") ?? body.endIndex
+        let end = body[link.range.upperBound...].firstIndex(where: \.isMarkdownLineEnding) ?? body.endIndex
         return plainText(String(body[start..<end]))
     }
 

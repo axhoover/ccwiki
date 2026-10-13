@@ -23,7 +23,7 @@ different slug algorithms and they disagree about almost everything.
 | `%` | → `-percent` | deleted |
 | `?` `#` | deleted | deleted |
 | `.` `,` `!` `(` `)` `'` `+` `=` | **survive** | deleted |
-| Everything else | survives | deleted unless a letter, mark or digit |
+| Everything else | survives | deleted unless alphabetic, a mark, a decimal digit or connector punctuation (`_`), so `²` and `½` go |
 
 So `AMYY25 - Evasive LWE Attacks, Variants & Obfustopia.md` becomes the slug
 `References/AMYY25---Evasive-LWE-Attacks,-Variants--and--Obfustopia`, while the
@@ -83,6 +83,7 @@ path from the vault root.
 6. matches = allSlugs where lastSegment == targetCanonical  (exact, CASE-SENSITIVE)
    exactly one → that slug;  otherwise → targetCanonical itself
 7. slug → file, in order:
+     ·  the empty slug ([[index]])       → index.md, the home page
      a. a file with that slug            → page
      b. an alias owner                   → that page (first in sorted order)
      c. a file with slug + "/index"      → that page
@@ -136,7 +137,8 @@ not try to be. Measured against all 297 files, it must handle:
 - `key: scalar`, splitting on the **first** colon — 345 lines carry a colon
   inside the value (every `source:` URL, every `cryptobib_key`). Splitting on
   the last, or refusing colons, breaks all of them.
-- block sequences (`aliases:` then `  - item`) and the inline empty `[]`.
+- block sequences (`aliases:` then `  - item`, or `- item` flush left, as
+  js-yaml also reads it) and the inline empty `[]`.
 - literal block scalars (`bibtex: |`) on 43 pages, newlines preserved.
 - double- and single-quoted scalars, unquoted only when both ends match — so
   `title: "#P"`, `title: P/poly` and `title: Impagliazzo's Five Worlds` all
