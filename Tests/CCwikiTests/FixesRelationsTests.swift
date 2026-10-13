@@ -96,6 +96,58 @@ import Testing
         #expect(consumer.assumed.isEmpty)
     }
 
+    /// `established()` with a second consumer of B ⇒ H's fact: `h ⇒ v`,
+    /// which needs it too, and `u ∧ t ∧ v ⇒ w`.
+    private static func establishedTwice() throws -> Derivation {
+        let objects = ["a", "b", "h", "z", "t", "u", "v", "w"].map { E.object($0, title: $0.uppercased()) }
+        let reductions: [[String: Any]] = [
+            E.reduction("red-a-to-b", ["a"], "b", title: "A ⇒ B", source: "AB01"),
+            E.reduction("red-b-to-h", ["b"], "h", title: "B ⇒ H", source: "BH02"),
+            E.reduction("red-z-to-h", ["z"], "h", title: "Z ⇒ H", source: "ZH03"),
+            E.reduction("red-h-to-t", ["h"], "t", title: "H ⇒ T", source: "HT04"),
+            E.reduction("red-h-to-u", ["h"], "u", title: "H ⇒ U", source: "HU05"),
+            E.reduction("red-h-to-v", ["h"], "v", title: "H ⇒ V", source: "HV06"),
+            E.reduction("red-u-t-and-v-to-w", ["u", "t", "v"], "w", title: "U + T + V ⇒ W",
+                        source: "UTVW07"),
+        ]
+        let requirements = ["red-h-to-t", "red-h-to-v"].map {
+            DerivationCuration.Requirement(
+                relationID: $0, isReverse: false, hypothesis: "h", notion: "h in full",
+                metBy: ["red-b-to-h"])
+        }
+        return Derivation(manifest: try E.manifest(objects: objects, reductions: reductions),
+                          curation: DerivationCuration(requires: requirements))
+    }
+
+    @Test("a second use of a producer's established fact leads to that fact, not the node's own")
+    func establishedFactShownAbove() throws {
+        let derivation = try Self.establishedTwice()
+        let closure = derivation.closure(from: ["a", "z"], options: .standard)
+        let proof = try #require(closure.proof(of: "w"))
+        // The reference engine's tree: H ⇒ V's H is "shown above", at B ⇒ H's.
+        #expect(proof.rows.map { $0.objectID } == ["w", "u", "h", "z", "t", "h", "b", "a", "v", "h"])
+        #expect(proof.rows.map { $0.isReference }
+            == [false, false, false, false, false, false, false, false, false, true])
+        #expect(proof.rows.map { $0.establishedBy }
+            == [nil, nil, nil, nil, nil, Self.producer, nil, nil, nil, Self.producer])
+
+        let writer = ExplorerWriter(derivation: derivation, labels: E.labels(derivation.manifest))
+        let outline = ProofOutline.rows(proof, idPrefix: "p", writer: writer)
+        let v = try #require(outline.first?.children.last)
+        #expect(v.children.first?.primary == .reveal("p/5"), "B ⇒ H's H, not Z ⇒ H's at p/2")
+
+        let trace = CurationTrace.derived(
+            proof, other: nil, closure: closure, start: ["a", "z"], derivation: derivation)
+        let effects = trace.items.flatMap { $0.effects }
+        #expect(effects.contains(.establishedBy(
+            relationID: "red-h-to-v", isReverse: false, hypothesis: "h", producer: "red-b-to-h")))
+        let producers = effects.compactMap { effect -> String? in
+            if case .establishedBy(_, _, _, let producer) = effect { return producer }
+            return nil
+        }
+        #expect(Set(producers) == ["red-b-to-h"], "never Z ⇒ H, which met no precondition")
+    }
+
     // MARK: Plain text: whole-word commands
 
     @Test("a command is reduced whole, never as a shorter command and some letters")
@@ -124,8 +176,9 @@ import Testing
 
     // MARK: The inspector's Copy Statement
 
-    @Test("an inspector row's statement, tooltip and label keep its assumption")
-    func assumedRow() throws {
+    /// `g ⇒ h ⇒ k`, where G ⇒ H needs g in its strong regime, which only
+    /// assuming it of the given meets.
+    private static func assumedDerivation() throws -> Derivation {
         let objects: [[String: Any]] = [
             E.object("g", title: "Gamma", type: "assumption"),
             E.object("h", title: "Eta"), E.object("k", title: "Kappa"),
@@ -137,9 +190,14 @@ import Testing
         let requirement = DerivationCuration.Requirement(
             relationID: "red-g-to-h", isReverse: false, hypothesis: "g",
             notion: "g in its strong regime", metBy: [])
-        let manifest = try E.manifest(objects: objects, reductions: reductions)
-        let derivation = Derivation(manifest: manifest,
-                                    curation: DerivationCuration(requires: [requirement]))
+        return Derivation(manifest: try E.manifest(objects: objects, reductions: reductions),
+                          curation: DerivationCuration(requires: [requirement]))
+    }
+
+    @Test("an inspector row's statement, tooltip and label keep its assumption")
+    func assumedRow() throws {
+        let derivation = try Self.assumedDerivation()
+        let manifest = derivation.manifest
         let page = PageDerivations(path: "Assumptions/g.md", manifest: manifest,
                                    derivation: derivation, labels: E.labels(manifest))
         let block = try #require(page.blocks(.implies).first)
@@ -155,6 +213,26 @@ import Testing
             "Click to see the proof.",
         ])
         #expect(row.accessibilityLabel == "Kappa, derived in 2 steps, assuming g in its strong regime")
+    }
+
+    @Test("the explorer's Copy Statement keeps the assumption, on list rows and on the proof")
+    func explorerStatementAssumed() throws {
+        let derivation = try Self.assumedDerivation()
+        let labels = E.labels(derivation.manifest)
+        let assuming = ", assuming g in its strong regime)"
+
+        let forward = ExplorerResult.compute(
+            ExplorerQuery(from: ["g"]), derivation: derivation, labels: labels)
+        let statements = forward.allRows.compactMap { $0.statement }
+        #expect(statements.contains("Gamma ⇒ Eta (recorded in the wiki: GH01" + assuming))
+        #expect(statements.contains(
+            "Gamma ⇒* Kappa (derived by CCwiki from 2 recorded reductions" + assuming))
+
+        let answer = ExplorerResult.compute(
+            ExplorerQuery(from: ["g"], to: "k"), derivation: derivation, labels: labels)
+        let root = try #require(answer.sections.first { $0.id == "proof" }?.rows.first)
+        #expect(root.statement
+            == "Gamma ⇒* Kappa (derived by CCwiki from 2 recorded reductions" + assuming)
     }
 
     @Test("an inspector row's statement and tooltip say a weakened conclusion is only that")

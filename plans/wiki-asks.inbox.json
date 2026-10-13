@@ -182,7 +182,7 @@
     "content/References/BFKL93 - Cryptographic Primitives Based on Hard Learning Problems.md (new)"
    ],
    "proposed_action": "Add eleven reduction pages, each `conclusion: owf`, `model: standard`, the class as the source states it: {ot} ⇒ owf (IL89; find which theorem); {ske} ⇒ owf (IL89); {com} ⇒ owf (IL89); {crhf} ⇒ owf (folklore, for a compressing family); {mac} ⇒ owf (IL89); {prf} ⇒ owf (folklore); {sis} ⇒ owf (Ajt96); {dlog} ⇒ owf (folklore: $x \\mapsto g^x$); {lpn} ⇒ owf (folklore, or BFKL93, whose reference page is new); {kem} ⇒ owf (IL89 does not treat KEMs: find the source); {one-time-signature} ⇒ owf (Rom90). The reference pages for IL89, Ajt96 and Rom90 exist.",
-   "rationale": "Each is a standard result the record lacks, so consumers of relations.json miss every consequence through OWF. Measured on wiki ab81f02 by adding each alone as a standard-model folklore implication of unstated class: new derived pairs (of 1,022) are OT 170, SKE 104, COM 90, CRHF 63, MAC 59, PRF 44, SIS 32, DLOG 32, LPN 31, KEM 17, one-time signatures 15; all eleven together 432. Retires no CCwiki curation entry.",
+   "rationale": "Each is a standard result the record lacks, so consumers of relations.json miss every consequence through OWF. Measured on wiki ab81f02 by adding each alone as a standard-model folklore implication of unstated class: new derived pairs (of 1,022, measured before CCwiki's R13 metBy change moved the default to 1,024; not re-measured) are OT 170, SKE 104, COM 90, CRHF 63, MAC 59, PRF 44, SIS 32, DLOG 32, LPN 31, KEM 17, one-time signatures 15; all eleven together 432. Retires no CCwiki curation entry.",
    "needs_paper": true,
    "confidence": "medium"
   },

@@ -299,7 +299,9 @@ answer is "*PKE* is one of your premises", with no proof and no footer.
   gives double-click and Return, and `.copyable` makes ⌘C copy the selected
   rows' statements.
 - **Context menu:** Open Reduction ("CS03: KEM + SKE ⇒ PKE"), Open *object*,
-  Explore From Here…, Copy Statement, then the submenu **Copy Proof As ▸
+  Explore From Here…, Copy Statement (a fact's carries ", assuming …" and
+  ", only …" inside its parentheses when the fact has them, as the
+  inspector's does, §3.3), then the submenu **Copy Proof As ▸
   Text, LaTeX, Wiki Markdown**, and **Copy BibTeX of Cited Works** only when
   a cited work has an inline entry (hidden, not dimmed, otherwise). The
   forms are [relations-followups.md](relations-followups.md) §3; the Edit

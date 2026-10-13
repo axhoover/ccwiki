@@ -61,6 +61,21 @@ struct FixesWikiparseTests {
         #expect(index.backlinkMap()["Primitives/bar.md"]?.map(\.context) == ["Text bar here."])
     }
 
+    @Test("DiffGuard reads a CRLF page's headings line by line, for its variants")
+    func crlfVariantHeading() throws {
+        let page = try DiffGuardTests.fixture("pseudorandom-function.md")
+            .replacingOccurrences(of: "\n", with: "\r\n")
+        func stale(_ old: String, _ new: String) -> Bool {
+            let changed = page.replacingOccurrences(of: old, with: new)
+            let findings = DiffGuardTests.check([DiffGuardTests.modified(old: page, new: changed)])
+            return DiffGuardTests.finding(.derivedFilesStale, in: findings) != nil
+        }
+        // `variants` names `#weak-prfs`; its heading reworded under the same
+        // anchor changes the variant's title. Another heading does not.
+        #expect(stale("## Weak PRFs\r\n", "## Weak prfs\r\n"))
+        #expect(!stale("## Puncturable PRFs\r\n", "## Puncturable pseudorandom functions\r\n"))
+    }
+
     // MARK: github-slugger's kept set
 
     @Test("slug keeps what github-slugger 2.0.0 keeps, and lowercases as JavaScript does")
@@ -135,6 +150,7 @@ struct FixesWikiparseTests {
             "$ x $ padded", #"\_escaped\_ underscores"#, #"\$5 and \$6"#, "_a $x$ b_", "$a$_b_",
             "_x_y_", "(_x_)", "_ spaced _", "Fiat_Shamir_ transform", "*_mixed_*",
             "Nested _a __b__ c_", "Link [a](b) and [[c]]", "ΑΣ final", #"$\ZZ_p$ and $\FF_2$"#,
+            "Bound on $[[a]]$", "The $[[prf]]$ game", "Bound on $[[a|b]]$",
         ]
         let markdown = headings.map { "## " + $0 }.joined(separator: "\n\n") + "\n"
         let script = try MarkdownScript.load()
@@ -145,6 +161,13 @@ struct FixesWikiparseTests {
         let page = WikiPage(path: "Primitives/x.md", text: markdown)
         #expect(page.headings().map(\.id) == rendered)
         #expect(rendered.count == headings.count)
+    }
+
+    @Test("a wikilink inside math is the math's source, never a placeholder")
+    func wikilinkInsideMath() {
+        #expect(WikiPage.Heading.plainText("Bound on $[[a]]$") == "Bound on [[a]]")
+        #expect(WikiPage.Heading.plainText("The $[[prf]]$ game") == "The [[prf]] game")
+        #expect(WikiPage.Heading.plainText("[[a]] and $[[b|c]]$") == "a and [[b|c]]")
     }
 
     // MARK: The site root

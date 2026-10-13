@@ -306,7 +306,8 @@ extension ExplorerResult {
         row.ask = ask
         row.exploreFrom = conjunction.hypotheses
         row.statement = writer.factStatement(from: conjunction.hypotheses, to: target,
-                                             depth: fact.depth, relationIDs: relationIDs)
+                                             depth: fact.depth, relationIDs: relationIDs,
+                                             qualifiers: writer.qualifiers(of: fact))
         return row
     }
 
@@ -344,7 +345,7 @@ extension ExplorerResult {
             row.exploreFrom = pair.objectIDs
             row.statement = writer.factStatement(
                 from: pair.objectIDs, to: target, depth: pair.fact.depth,
-                relationIDs: proof?.relationIDs ?? [])
+                relationIDs: proof?.relationIDs ?? [], qualifiers: writer.qualifiers(of: pair.fact))
             return row
         }
         let more = group.pairCount - group.pairRows.count
@@ -406,7 +407,8 @@ extension ExplorerResult {
         row.ask = ExplorerQuery(from: start, to: target,
                                 includesIdealisedModels: query.includesIdealisedModels)
         row.statement = writer.factStatement(from: start, to: target, depth: fact.depth,
-                                             relationIDs: proof.relationIDs)
+                                             relationIDs: proof.relationIDs,
+                                             qualifiers: writer.qualifiers(of: fact))
         row.proof = copy
         let how: String = recorded
             ? "recorded in the wiki"

@@ -614,7 +614,11 @@ class Derivation:
             return True, assumes, caveats, None, met
         byid = dict(zip(s.hyps, hf))
         for req in s.requires:  # R13
-            f = byid[req.hypothesis]
+            f = byid.get(req.hypothesis)
+            if f is None:
+                # A requirement on a hypothesis the record no longer gives
+                # this step constrains nothing, as Swift's `check` skips it.
+                continue
             if f.step is not None and f.step.edge in req.met_by:
                 continue
             # A metBy producer fired in the closure: met, and nothing is
@@ -1159,8 +1163,8 @@ class Derivation:
                     reasons.append({"kind": "weakened", "hypothesis": h, "producedBy": f.step.edge,
                                     "notion": w.notion})
             for q in s.requires:
-                f = hf[q.hypothesis]
-                if f.step is not None and f.step.edge not in q.met_by:
+                f = hf.get(q.hypothesis)  # None: skipped, as in `_check`
+                if f is not None and f.step is not None and f.step.edge not in q.met_by:
                     reasons.append({"kind": "requires", "hypothesis": q.hypothesis, "notion": q.notion,
                                     "producedBy": f.step.edge})
             if any(f.scoped for f in hf.values()) and not self.m.implies(s.cls, RELATIVIZING) \

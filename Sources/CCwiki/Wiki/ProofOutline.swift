@@ -18,8 +18,9 @@ enum ProofOutline {
         guard !flat.isEmpty else { return [] }
 
         // "Shown above" leads to the fact's first occurrence, the one with
-        // its subtree. A weakened fact is a different fact from the full one
-        // (R13), so the key keeps them apart.
+        // its subtree. A weakened fact is a different fact from the full one,
+        // and so is the fact a `metBy` producer concluded (R13), so the key
+        // keeps them apart, as the engine's own does.
         var first: [String: String] = [:]
         for row in flat where !row.isReference && !row.isGiven {
             let key = occurrenceKey(row)
@@ -71,6 +72,10 @@ enum ProofOutline {
     }
 
     private static func occurrenceKey(_ row: Derivation.ProofTree.Row) -> String {
-        row.objectID + (row.isWeakened ? "#weak" : "")
+        var key = row.objectID + (row.isWeakened ? "#weak" : "")
+        if let producer = row.establishedBy {
+            key += "#by:" + producer.relationID + (producer.isReverse ? "~reverse" : "")
+        }
+        return key
     }
 }

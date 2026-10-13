@@ -337,9 +337,10 @@ the rows marked so.
 - **Need.** derivations.md §1 lists folklore and textbook X ⇒ OWF results
   the wiki does not record. Each is measured by adding it alone, as an
   unstated, standard-model, folklore implication, and counting the new
-  default derived pairs (1,022 today). All 11 together add **432**; the
-  counts overlap (SIS also reaches OWF through Ajt96's CRHF once CRHF ⇒ OWF
-  exists).
+  default derived pairs (of 1,022: measured before R13's `metBy` change moved
+  the default to 1,024, and not measured again). All 11 together add
+  **432**; the counts overlap (SIS also reaches OWF through Ajt96's CRHF once
+  CRHF ⇒ OWF exists).
 
   | Edge | Proposed source | New pairs |
   |---|---|---|

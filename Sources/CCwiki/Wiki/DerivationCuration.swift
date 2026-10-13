@@ -19,9 +19,12 @@ import Foundation
 struct DerivationCuration: Sendable {
 
     /// R13. A step's hypothesis must be a stronger notion than its node
-    /// defines. The step fires only when the hypothesis is given (and the
-    /// derivation then carries "assuming `notion`") or was concluded by a
-    /// reduction in `metBy`, whose own Statement establishes the notion.
+    /// defines. The step fires only when a reduction in `metBy`, whose own
+    /// Statement establishes the notion, concludes the hypothesis anywhere
+    /// in the closure: not necessarily the step that gave it its fact, since
+    /// each such producer keeps a fact of its own (`Closure.established`).
+    /// Failing that, a given hypothesis is assumed, in phase 2, and the
+    /// derivation carries "assuming `notion`". Anything else is refused.
     struct Requirement: Hashable, Sendable {
         let relationID: String
         /// The backward direction of an equivalence.

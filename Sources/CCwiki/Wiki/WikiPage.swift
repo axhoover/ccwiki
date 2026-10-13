@@ -266,6 +266,10 @@ extension WikiPage.Heading {
         // span, an escaped character) stands in as one private-use scalar
         // while the emphasis around it is undone, so nothing inside changes.
         var literals: [String] = []
+        // The markdown each wikilink's placeholder stands for. markdown-it
+        // reads whichever starts first, so a link inside math is that
+        // span's source, `$[[a]]$` reading `[[a]]`, as the renderer has it.
+        var linkSources: [Int: String] = [:]
         func protect(_ text: String) -> String {
             guard let marker = Unicode.Scalar(Self.literalBase + UInt32(literals.count))
             else { return text }
@@ -279,6 +283,7 @@ extension WikiPage.Heading {
         for link in WikilinkParser.links(in: markdown) {
             linked.append(contentsOf: markdown[cursor..<link.range.lowerBound])
             let alias = link.alias ?? ""
+            linkSources[literals.count] = String(markdown[link.range])
             linked.append(protect(alias.isEmpty ? link.target : alias))
             cursor = link.range.upperBound
         }
@@ -340,7 +345,15 @@ extension WikiPage.Heading {
                c == "$" ? !content.allSatisfy(isPadding) : content.count >= 3 {
                 content = content.dropFirst().dropLast()
             }
-            masked.append(contentsOf: protect(String(String.UnicodeScalarView(content))).unicodeScalars)
+            var source = String.UnicodeScalarView()
+            for scalar in content {
+                if let link = linkSources[Int(scalar.value) - Int(Self.literalBase)] {
+                    source.append(contentsOf: link.unicodeScalars)
+                } else {
+                    source.append(scalar)
+                }
+            }
+            masked.append(contentsOf: protect(String(source)).unicodeScalars)
             i = close + (end - i)
         }
 

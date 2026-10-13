@@ -908,7 +908,9 @@ private struct InspectedText {
 
         var lineStart = body.startIndex
         while lineStart < body.endIndex {
-            let lineEnd = body[lineStart...].firstIndex(of: "\n") ?? body.endIndex
+            // CRLF too: `"\r\n"` is one Character, never `"\n"`.
+            let lineEnd = body[lineStart...].firstIndex(where: \.isMarkdownLineEnding)
+                ?? body.endIndex
             defer {
                 lineStart = lineEnd < body.endIndex ? body.index(after: lineEnd) : body.endIndex
             }

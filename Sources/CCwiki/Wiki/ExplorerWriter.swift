@@ -98,17 +98,37 @@ struct ExplorerWriter: Sendable {
 
     /// What Copy Statement puts on the pasteboard for a derived or recorded
     /// fact: the claim with its provenance, so a pasted line never passes
-    /// for the wiki's own when it is not.
+    /// for the wiki's own when it is not, and with its `qualifiers`
+    /// (`qualifiers(of:)`), so it never passes for an unconditional claim.
     func factStatement(from start: [String], to target: String, depth: Int,
-                       relationIDs: [String]) -> String {
+                       relationIDs: [String], qualifiers: [String]) -> String {
+        let conditions = qualifiers.map { ", " + $0 }.joined()
         if depth <= 1 {
             let keys = relationIDs.flatMap { citations(of: $0) }
             let source = keys.isEmpty ? "" : ": " + keys.joined(separator: ", ")
             return "\(conjunction(start)) \(DerivationWording.recordedArrow) \(label(target)) "
-                + "(recorded in the wiki\(source))"
+                + "(recorded in the wiki\(source)\(conditions))"
         }
         return "\(conjunction(start)) \(DerivationWording.derivedArrow) \(label(target)) "
-            + "(\(DerivationWording.derivedBy(relationIDs.count).lowercasedFirst))"
+            + "(\(DerivationWording.derivedBy(relationIDs.count).lowercasedFirst)\(conditions))"
+    }
+
+    /// A fact's conditions (R13), as its row's notes show them and a copied
+    /// statement carries them, a copy leaving the row behind: "assuming …"
+    /// for the preconditions assumed of a given, then "only …" for a
+    /// weakened fact.
+    func qualifiers(of fact: Derivation.Fact) -> [String] {
+        [assuming(fact.assumes.map { $0.notion }), fact.weakening.map { "only " + $0.notion }]
+            .compactMap { $0 }
+    }
+
+    /// The same, read off a proof: what its steps assume, and its root's
+    /// weakening. For R6's stronger proof, which may assume less than the
+    /// fact shown.
+    func qualifiers(of proof: Derivation.ProofTree) -> [String] {
+        let assumed = proof.rows.flatMap { row in row.assumed.map { $0.notion } }
+        return [assuming(assumed), proof.rows.first?.weakening.map { "only " + $0.notion }]
+            .compactMap { $0 }
     }
 
     // MARK: Proof steps

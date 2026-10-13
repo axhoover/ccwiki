@@ -1235,7 +1235,8 @@ node can say that, so CCwiki keeps its four entries.
   Each is a folklore or textbook result that the wiki does not record.
 - **Effect.** Each is measured by adding it alone, as an unstated,
   standard-model, folklore implication, and counting new default derived
-  pairs (1,022 today). All 11 together add **432**.
+  pairs (of 1,022: measured before R13's `metBy` change moved the default to
+  1,024, and not measured again). All 11 together add **432**.
 
   | Edge | Proposed source | New pairs |
   |---|---|---|
