@@ -414,6 +414,10 @@ final class AppModel {
         didSet { scheduleSearch() }
     }
     private(set) var searchResults: [SearchHit] = []
+    /// The query `searchResults` are for. The search runs once typing
+    /// pauses, so until it lands this is the last query, and the palette's
+    /// Return waits for it to be `searchQuery` (`PaletteReturn`).
+    private(set) var searchResultsQuery = ""
     /// Set when nothing matched as typed and the results are for this
     /// corrected query instead.
     private(set) var searchCorrection: String?
@@ -426,6 +430,8 @@ final class AppModel {
         didSet { scheduleReferenceSearch() }
     }
     private(set) var referenceResults: [ReferenceHit] = []
+    /// The query `referenceResults` are for, as `searchResultsQuery`.
+    private(set) var referenceResultsQuery = ""
     private(set) var referenceError: String?
     private var referenceTask: Task<Void, Never>?
 
@@ -435,6 +441,8 @@ final class AppModel {
         didSet { scheduleGrep() }
     }
     private(set) var grepResults: [TextGrep.Hit] = []
+    /// The query `grepResults` are for, as `searchResultsQuery`.
+    private(set) var grepResultsQuery = ""
     private var grepTask: Task<Void, Never>?
     @ObservationIgnored private var textGrep = TextGrep.empty
     /// Setting the query recomputes the results, so the two can never drift —
@@ -1555,6 +1563,7 @@ final class AppModel {
         let query = searchQuery
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             searchResults = []
+            searchResultsQuery = query
             searchCorrection = nil
             searchError = nil
             return
@@ -1568,10 +1577,12 @@ final class AppModel {
                 let results = try await searchIndex.conceptSearch(query)
                 guard !Task.isCancelled else { return }
                 searchResults = results.hits
+                searchResultsQuery = query
                 searchCorrection = results.correction
                 searchError = nil
             } catch {
                 searchResults = []
+                searchResultsQuery = query
                 searchCorrection = nil
                 searchError = error.localizedDescription
             }
@@ -1583,6 +1594,7 @@ final class AppModel {
         let query = referenceQuery
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             referenceResults = []
+            referenceResultsQuery = query
             referenceError = nil
             return
         }
@@ -1593,9 +1605,11 @@ final class AppModel {
                 let hits = try await searchIndex.referenceSearch(query)
                 guard !Task.isCancelled else { return }
                 referenceResults = hits
+                referenceResultsQuery = query
                 referenceError = nil
             } catch {
                 referenceResults = []
+                referenceResultsQuery = query
                 referenceError = error.localizedDescription
             }
         }
@@ -1607,6 +1621,7 @@ final class AppModel {
         let grep = textGrep
         guard query.trimmingCharacters(in: .whitespaces).count >= TextGrep.minimumLength else {
             grepResults = []
+            grepResultsQuery = query
             return
         }
         grepTask = Task { [weak self] in
@@ -1617,6 +1632,7 @@ final class AppModel {
             }.value
             guard !Task.isCancelled, let self else { return }
             grepResults = hits
+            grepResultsQuery = query
         }
     }
 

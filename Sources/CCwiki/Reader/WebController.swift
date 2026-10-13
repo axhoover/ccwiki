@@ -207,11 +207,11 @@ final class WebController: NSObject {
 
     /// `.findNavigator` is macOS 26, so the reader ships its own find bar over
     /// `WKWebView.find`, which has been available since macOS 11.
-    func find(_ needle: String, backwards: Bool) async -> Bool {
+    func find(_ needle: String, backwards: Bool, caseSensitive: Bool = false) async -> Bool {
         guard !needle.isEmpty else { return false }
         let configuration = WKFindConfiguration()
         configuration.backwards = backwards
-        configuration.caseSensitive = false
+        configuration.caseSensitive = caseSensitive
         configuration.wraps = true
         guard let result = try? await webView.find(needle, configuration: configuration)
         else { return false }
@@ -219,10 +219,17 @@ final class WebController: NSObject {
     }
 
     /// The first of `candidates` that occurs on the page, found and shown
-    /// with the system's find highlight.
+    /// with the system's find highlight. A candidate with a capital is
+    /// looked for in its own case first, as ⇧⌘F matched it (smart case,
+    /// search-v2 §6.6), so `OT` lands on OT and not on "not"; then in any
+    /// case, for text the rendering changed.
     func findFirst(of candidates: [String]) async -> Bool {
-        for candidate in candidates where await find(candidate, backwards: false) {
-            return true
+        for candidate in candidates {
+            if TextGrep.options(for: candidate).isEmpty,
+               await find(candidate, backwards: false, caseSensitive: true) {
+                return true
+            }
+            if await find(candidate, backwards: false) { return true }
         }
         return false
     }
