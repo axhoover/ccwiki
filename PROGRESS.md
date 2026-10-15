@@ -5,6 +5,49 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-15 — The curation, after the maintainer's audit
+
+The maintainer audited 19 of the 42 curation entries for their theorem and
+graph encoding, not just their quotations, on PR #9. Their decision was
+that new reductions and nodes are upstream wiki asks: CCwiki adds no edge
+of its own. Everything else is in the curation:
+
+- **GPSW06** requires decisional BDH in its symmetric prime-order group
+  family. It keeps the selective KP-ABE restriction, and still accepts no
+  adaptive IBE or BE consumer.
+- **BM84's guard** is kept, and its text gives the real reason: the
+  recurrence uses the integer order of residues in Z_p^*.
+- **Kilian's OT-to-MPC step** concludes static malicious MPC with abort.
+  Neither OT guard was loosened. OT-to-COM no longer claims statistical
+  hiding and binding outside the OT-hybrid model.
+- **DLO24's reverse direction** requires its generic-RSA experiment, with
+  preprocessing fixed before the modulus is sampled. RSA ⇒ factoring
+  (RSA78) is unchanged.
+- **Both PRP-to-PRF conversions** require a superpolynomial domain, which
+  LR88 meets. The strong-iPRF refusal stays.
+- **BW07's quarantine** now names composite-order cBDH and C3DH on one
+  group family.
+- **ISIS ⇒ SIS** is quarantined, using a new `direction` on quarantine
+  entries in both engines. SIS ⇒ ISIS stays.
+- **Entries 1, 24 and 32** state their premises and constructions as the
+  audit asked. The only partial item is AMYY25's exact base-hardness
+  premise, which needs the paper (wiki ask 20).
+
+Wiki asks 11–21 cover:
+
+- the `dbdh` node;
+- selective KP-ABE ⇒ PKE (+41 pairs with ask 5);
+- DLOG ⇒ OWF (+32, which brings back CDH ⇒ PRG);
+- Haitner's semi-honest ⇒ malicious OT compiler (+33 with ask 4);
+- the KP-ABE ⇒ BE construction;
+- the wiki-text corrections (BM84, DLO24, BW07, TDP ⇒ NIZK, circular
+  evasive LWE, ISIS/SIS).
+
+Each new edge has a mutation case in the reference engine's self-test,
+showing the answer it restores. The golden file now has 81 queries and the
+curation 47 entries. Both, and plans/curation-review.md (114 of 114
+quotes), regenerate byte-for-byte against the wiki at ab81f02.
+
 ## 2026-10-12 — Page corrections and the review step, built
 
 Built on `claude/page-corrections`, from [corrections.md](plans/corrections.md).
@@ -114,6 +157,44 @@ on a Mac.
 **Background tabs wait for a Mac.** `WindowTabbing.joinsInBackground` stays
 false, so a "background" tab opens in front until §5's tab checks pass by
 eye.
+
+## 2026-10-12 — The next batch, specified; relations follow-ups, built
+
+The maintainer chose three features: correcting a page, reader comforts, and
+relations follow-ups. They also settled four forks: all three correction
+routes (edit it yourself, describe it to an agent, open an issue); a review
+step before anything reaches GitHub, for every job; unmet preconditions stay
+refused; a paper's PDF only on request.
+
+**Specs.** Each feature was drafted, reviewed from three sides
+(architecture, macOS UX, safety and honesty), revised, and then reconciled
+with the other two, which settled the shared files, menus, shortcuts and the
+merge order (relations follow-ups, reader comforts, corrections):
+[relations-followups.md](plans/relations-followups.md),
+[reader-comforts.md](plans/reader-comforts.md),
+[corrections.md](plans/corrections.md). The open questions in each took the
+recommended answers. The explorer section the relations spec first called
+"Corrections CCwiki applied" is "Adjustments", so the word "correction"
+means one thing in the app.
+
+**Relations follow-ups, built** on `claude/relations-followups`: a Phase 0
+seam, then four tracks in worktrees, each reviewed for compile errors and
+behaviour, then fixed.
+
+- **A1:** citations for all 42 curation entries, the generated
+  [curation-review.md](plans/curation-review.md), and
+  [wiki-asks.md](plans/wiki-asks.md).
+- **A2:** decoding for the three fields the asks propose (`reverseClass`,
+  `refutedBy`, a barrier `model`), the quote and curated-edge checks, and
+  the final golden file.
+- **B:** Copy Proof As LaTeX, wiki Markdown and BibTeX.
+- **C:** the Adjustments section and the refusal wording.
+
+Integration found two things the per-track reviews could not. A2 and C had
+each declared `Derivation.unverifiedCitations`, which broke the build. And
+the LaTeX writer never wrote `\item`, which its own tests caught on CI. The
+Adjustments trace was also made to defer to a recorded `reverseClass`, a
+field A2 added after C was written.
 
 ## 2026-10-11 — Why CCwiki came back as 0.1.0, and CCwiki Dev
 

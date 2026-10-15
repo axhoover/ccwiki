@@ -614,6 +614,7 @@ struct RelationsView: View {
         if barrier.status != .stub, let classLabel = classLabel(barrier.reductionClass) {
             parts.append("against " + classLabel.lowercased())
         }
+        if barrier.status != .stub, let modelLabel = modelLabel(barrier.model) { parts.append(modelLabel) }
         if barrier.strength == .conditional { parts.append("conditional") }
         // The manifest's contract: a barrier is never to be read as the last
         // word on its conclusion without this.

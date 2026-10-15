@@ -190,6 +190,7 @@ struct CCwikiCommands: Commands {
     /// Jobs window (plans/corrections.md §9). Nil elsewhere.
     @FocusedValue(\.reviewChangesAction) private var reviewChangesAction
     @FocusedValue(\.openDraftPRAction) private var openDraftPRAction
+    @FocusedValue(\.proofCopyAction) private var proofCopyAction
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -284,6 +285,12 @@ struct CCwikiCommands: Commands {
             Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
+        }
+
+        // Copy Proof As ▸ Text, LaTeX (⌥⌘C), Wiki Markdown (⌥⇧⌘C): the
+        // Relations Explorer's proof, so disabled in every other window.
+        CommandGroup(after: .pasteboard) {
+            ProofCopyCommandItems(action: proofCopyAction)
         }
 
         CommandGroup(after: .textEditing) {

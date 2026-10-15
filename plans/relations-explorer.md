@@ -248,6 +248,10 @@ The engine returns `.derived(DerivedAnswer)`. The wording below follows
   swaps the outline to that proof, and **Show Shortest** to swap back. DDH ⇒
   invertible PRF is the case on today's data: 2 unstated steps through
   HPPY25, or 3 fully black-box steps through NR97 and LR88.
+- **Adjustments**, last: one section per proof, listing each curation entry
+  that bore on it with the wiki's text it cites
+  ([relations-followups.md](relations-followups.md) §2.5). **Show It** swaps
+  it with the outline.
 - **Tags:** one `ModelTag` per model in `fact.models`.
 - **Recorded barriers** on the pair (R8), as context, with one sentence
   relating them to the answer: "A recorded barrier rules out fully-black-box
@@ -295,14 +299,18 @@ answer is "*PKE* is one of your premises", with no proof and no footer.
   gives double-click and Return, and `.copyable` makes ⌘C copy the selected
   rows' statements.
 - **Context menu:** Open Reduction ("CS03: KEM + SKE ⇒ PKE"), Open *object*,
-  Explore From Here…, Copy Statement, Copy Proof as Text.
+  Explore From Here…, Copy Statement, then the submenu **Copy Proof As ▸
+  Text, LaTeX, Wiki Markdown**, and **Copy BibTeX of Cited Works** only when
+  a cited work has an inline entry (hidden, not dimmed, otherwise). The
+  forms are [relations-followups.md](relations-followups.md) §3; the Edit
+  menu has the same submenu and item, with ⌥⌘C and ⌥⇧⌘C (§2.9).
 - **Tooltip:** the reduction's statement, then its rationale, from
   `RelationFormatting.help(for:)`. That is the inspector's tooltip, lifted
   into `Wiki/` in Phase 0, so the two cannot drift.
 - **Stub steps** (toggle on only, R3) add a footnote row after the tree, in
   `.secondary`: "1 step is a stub: its class and model are not evidence."
 
-**Copy Proof as Text** is the outline, indented two spaces per level, one step
+**Copy Proof As ▸ Text** is the outline, indented two spaces per level, one step
 per line with `[source; class; model]`. It is headed by the statement and
 "Derived by CCwiki from N recorded reductions (relations.json at
 `<headRevision prefix>`)". The commit makes a pasted proof reproducible.
@@ -366,7 +374,9 @@ The engine returns `.notDerived(NoPathAnswer)`.
    "Derivable with idealised models included: 1 step, algebraic group model"
    (DLOG ⇒ CDH, FKL18). Its **Include Idealised Models** button sets the
    toggle.
-4. **Refused steps** (`refused`, toggle on), in §7's words:
+4. **Refused steps** (`refused`, toggle on), in §7's words. A refused row
+   also carries its curation entry's quotes and links to the quoted sections
+   ([relations-followups.md](relations-followups.md) §2.5):
    - "Not derived: OIHF holds here only in the random oracle model, and OIHF ⇒
      OT (BH26) is a free (non-black-box) step, which need not carry over into
      that model."
@@ -383,6 +393,9 @@ The engine returns `.notDerived(NoPathAnswer)`.
    N more"). Each row reads "iO", then "1 step · SW14 · free". Its **Add**
    button appends the object to From. For `owf ⇒ pke` the rows are iO
    (1 step) and KEM (4 steps). Never "a missing assumption".
+7. **Adjustments** (last; for vacuous and setting starts only), as
+   [relations-followups.md](relations-followups.md) §2.5 has them: each
+   curation entry that bore on the answer, with the wiki's text it cites.
 
 **The footer**, fixed and never collapsible, in R10's words: "CCwiki found no
 derivation from the reductions the wiki records. This is not a separation:
@@ -439,6 +452,8 @@ records. Something missing here is not evidence that it does not follow."
 | ↑ ↓ → ← | results | move; expand and collapse (native outline) |
 | Return, double-click | results | the row's primary action (§2.6) |
 | ⌘C | results | Copy Statement of the selected rows |
+| ⌥⌘C | results | Copy Proof As ▸ LaTeX (Edit menu): the selected rows' proof when they share one, otherwise the answer's ([relations-followups.md](relations-followups.md) §3.1) |
+| ⌥⇧⌘C | results | Copy Proof As ▸ Wiki Markdown (Edit menu), likewise |
 
 The footer of the suggestion area shows the keycaps, as both palettes do
 (`SWIFTUI-RULES` §8.6): "↩ add · ⇥ next field · esc dismiss".
@@ -477,6 +492,7 @@ none, and its toolbar buttons only name them in tooltips):
 | ⌥⌘I | Toggle Inspector | 122 |
 | ⌥⌘1, ⌥⌘2, ⌥⌘3 | Outline, Backlinks, Relations | 126–132 |
 | ⌘[, ⌘] | Back, Forward | 138, 142 |
+| ⌥⌘C, ⌥⇧⌘C | Copy Proof As (Edit menu): LaTeX, Wiki Markdown | 195 (`ProofCopyCommandItems`) |
 | Esc, ⌘Return, Return | sheets: dismiss, submit ingest, Sync Log default | sheet views |
 
 **Owned by the system** and avoided: ⌘, ⌘Q ⌘H ⌥⌘H ⌘W ⌘M ⌘\` ⌃⌘S (Show
@@ -698,8 +714,11 @@ section at all.
   explorer keeps its models toggle; under R4's two-phase closure a fact
   derivable in the default models keeps its default-model proof either way.
 - **Context menu:** Show Proof, Explore From Here… (From = the row's object),
-  Open *label*, and Copy Statement ("DDH ⇒* Oblivious transfer (derived by
-  CCwiki from 3 recorded reductions)").
+  Open *label*, Copy Statement ("DDH ⇒* Oblivious transfer (derived by
+  CCwiki from 3 recorded reductions)"), and last the submenu **Copy Proof
+  As ▸ Text, LaTeX, Wiki Markdown**, whose proof is computed on click with
+  the default models ([relations-followups.md](relations-followups.md) §3.1;
+  no BibTeX item here).
 - **Collapsed by default.** `Section(isExpanded:content:header:)` is
   macOS 14. `make shots` must confirm that the inset list style draws its
   disclosure. If it does not, the header becomes a `Button` with a rotating

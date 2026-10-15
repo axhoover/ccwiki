@@ -245,7 +245,9 @@ struct ExplorerWriter: Sendable {
     // MARK: Barriers (R8)
 
     /// "against relativizing reductions · unconditional · IR89 · circumvented
-    /// by BH26". A stub's class is not evidence, so it has none.
+    /// by BH26", with the model after the class when the barrier is proved
+    /// outside the standard model. A stub's class and model are not
+    /// evidence, so it has neither.
     func barrierMeta(_ barrier: Barrier) -> String {
         var parts: [String] = []
         if barrier.status != .stub {
@@ -253,6 +255,9 @@ struct ExplorerWriter: Sendable {
             parts.append(name == Derivation.unstatedClass
                 ? "against reductions of a class the wiki does not state"
                 : "against \(name) reductions")
+            if barrier.model != Derivation.standardModel {
+                parts.append(RelationVocabulary.modelName(barrier.model))
+            }
         }
         parts.append(barrier.strength.rawValue)
         // A believed-true consequence is a major result, never "rules out".
@@ -333,6 +338,13 @@ struct ExplorerWriter: Sendable {
         row.glyph = .barrier
         row.qualifier = Derivation.qualifier(of: barrier, in: manifest)?.explanation
         row.detail = barrierMeta(barrier)
+        // The wiki writes every title as an unqualified "No reduction from A
+        // to B", so a barrier proved outside the standard model says so in a
+        // sentence, as well as in its meta line (wiki-asks.md ask 3).
+        if barrier.status != .stub, barrier.model != Derivation.standardModel {
+            let model = RelationVocabulary.modelName(barrier.model)
+            row.notes.append("This barrier is proved in the \(model).")
+        }
         row.isStub = barrier.status == .stub
         row.help = barrierHelp(barrier)
         row.primary = .page(barrier.path)
@@ -427,16 +439,31 @@ struct ExplorerWriter: Sendable {
     /// OIHF ⇒ OT (BH26) is a free (non-black-box) step, which need not carry
     /// over into that model." One sentence per reason, with the recorded
     /// barriers on the step's pair, which often say more.
+    ///
+    /// A reason the curation gives (R13, not R5) carries the wiki's own text
+    /// for it: the entry's quotes as notes, and links to where they are
+    /// (relations-followups.md §2.5).
     func refusalRow(_ refused: Derivation.RefusedStep, closure: Derivation.Closure,
                     id: String) -> ExplorerRow {
         let step = refused.step
         let text = stepText(step)
         var sentences: [String] = []
+        var entries: [DerivationCuration.Entry.Key] = []
         for reason in refused.reasons {
+            if let key = curationKey(of: reason, on: step), !entries.contains(key) {
+                entries.append(key)
+            }
             switch reason {
             case .quarantined(let why):
-                sentences.append("Not used: the wiki's record of \(text) does not match its "
-                    + "Statement. \(why)")
+                if derivation.curation.quarantineDirections[step.relationID] != nil {
+                    // One direction of an equivalence: its hypotheses match,
+                    // and its Statement does not establish this direction.
+                    sentences.append("Not used: the wiki records \(text) as one direction of an "
+                        + "equivalence, and its Statement does not establish that direction. \(why)")
+                } else {
+                    sentences.append("Not used: the wiki's record of \(text) does not match its "
+                        + "Statement. \(why)")
+                }
             case .weakened(let hypothesis, let producedBy, let notion):
                 sentences.append("Not derived: \(text) needs \(label(hypothesis)) as the wiki "
                     + "defines it, and \(producer(producedBy)) gives only \(notion).")
@@ -471,9 +498,19 @@ struct ExplorerWriter: Sendable {
                 target: .page(barrier.path)))
         }
 
+        // The entries on one step often quote the same sentence of its page,
+        // as JLS21's four hypotheses do: each line once.
+        var notes: [String] = []
+        for key in entries {
+            let evidence = curationEvidence(key, rowID: id + "/" + key.id)
+            for note in evidence.notes where !notes.contains(note) { notes.append(note) }
+            links = Self.merging(evidence.links, into: links)
+        }
+
         let sentence = sentences.joined(separator: " ")
         var row = ExplorerRow(id: id, title: sentence, accessibilityLabel: sentence)
         row.wraps = true
+        row.notes = notes
         row.help = stepHelp(step)
         row.links = links
         if let relation = manifest.reduction(step.relationID) {
@@ -485,8 +522,27 @@ struct ExplorerWriter: Sendable {
         return row
     }
 
+    /// The curation entry behind a refusal: the step's own precondition or
+    /// quarantine, or the weakening of the step that produced its input. R5
+    /// is CCwiki's own rule, not a curation entry, and has none.
+    private func curationKey(of reason: Derivation.Refusal,
+                             on step: Derivation.Step) -> DerivationCuration.Entry.Key? {
+        switch reason {
+        case .quarantined:
+            return .quarantine(relationID: step.relationID)
+        case .weakened(_, let producedBy, _):
+            return .weakening(relationID: producedBy)
+        case .requires(let hypothesis, _, _):
+            return .requirement(relationID: step.relationID, isReverse: step.isReverse,
+                                hypothesis: hypothesis)
+        case .idealisedComposition:
+            return nil
+        }
+    }
+
     /// The producer of a hypothesis, named as a step: `GapSVP ⇒ LWE (Reg05)`.
-    private func producer(_ relationID: String) -> String {
+    /// An equivalence reads `⇔`, whichever way it was used.
+    func producer(_ relationID: String) -> String {
         guard let relation = manifest.reduction(relationID) else { return relationID }
         let keys = citations(relation.source)
         let statement = labels.statement(relation)

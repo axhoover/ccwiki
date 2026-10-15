@@ -17,7 +17,14 @@ checks this. `DerivationTests` covers each rule on fixtures whose expected
 values were computed with the reference script. Read [relations.md](relations.md) first; this assumes its
 hyperedge rule (§1 there) and its class order (§5 there). The UI half is
 [relations-explorer.md](relations-explorer.md); §11 lists what it must pick
-up from this revision.
+up from this revision. Revised 2026-10-12: the maintainer decided that R13
+refuses unmet preconditions (§0 item 4);
+[relations-followups.md](relations-followups.md) adds citations to every
+curation entry and three drift checks (§2a, §8). Revised 2026-10-15 after the
+maintainer's mathematical audit of the curation on PR #9
+([relations-followups.md](relations-followups.md) §13): five more rows in
+§0's table, a quarantine of one direction of an equivalence (R13), and the
+numbers below.
 
 ---
 
@@ -38,6 +45,14 @@ up from this revision.
    sections in the Relations inspector, visibly marked as derived; and link
    previews on hover. The previews show recorded data only and never a
    derived claim.
+4. **Unmet preconditions are refused, never caveated** (R13). A step whose
+   Statement needs more of a hypothesis than the manifest records fires only
+   when that hypothesis is given (it is one of the question's starts), and
+   the claim then says "assuming …", or when a `metBy` producer establishes
+   it. Otherwise the step is refused and named. This holds in the explorer
+   and the inspector alike. CCwiki shows no derived claim with a
+   "precondition not established" caveat. (Decided 2026-10-12; this was open
+   question 4.)
 
 The wiki's own `--derive` mode is plain Horn closure, and it **ignores
 `model`** (`docs/relations-json.md` § Closure). CCwiki is deliberately
@@ -54,8 +69,17 @@ claims, and each one led to a rule below:
 | GapSVP ⇒ LWE ⇒ leveled FHE | BGV12 needs a modulus-to-noise ratio exponential in the depth; Reg05 gives a prime poly(n) modulus | R13 |
 | ETDP ⇒ OT ⇒ MPC | EGL's OT is semi-honest (as is the OT page's definition); Kil88 needs OT secure against malicious parties | R13 |
 | BDH ⇒ ABE ⇒ IBE | GPSW06 gives selectively secure KP-ABE; ABE ⇒ IBE turns adaptive ABE into adaptive IBE | R13 |
-| BDH ⇒ HVE | BW07's Statement needs composite-order groups and three assumptions; the record has one prime-order hypothesis | R13 |
-| Circular evasive LWE ⇒ PKE | The hypothesis is false (AMYY25), so the implication is vacuous | R14 |
+| BDH ⇒ HVE | BW07 needs two assumptions on one composite-order group family (cBDH and C3DH); the record has one prime-order hypothesis | R13 |
+| BDH ⇒ ABE, unqualified | GPSW06 assumes **decisional** BDH; the `bdh` node also covers computational BDH, which DBDH implies; no converse is known (GPSW06 supplies none) | R13 |
+| DDH ⇒ OT ⇒ MPC, as full MPC | Kil88 with GMW87 gives static malicious MPC with abort: no fairness, guaranteed output delivery, adaptive or UC security | R13 |
+| sPRP ⇒ PRP ⇒ PRF | Both PRP conversions need a domain with \|D\| = λ^ω(1); a two-point PRP is perfect and is not a PRF | R13 |
+| ISIS ⇒ SIS ⇒ CRHF | The Statement gives no parameters for ISIS ⇒ SIS, and read at fixed parameters it is false | R13 |
+| DCR ⇒ FAC ⇒ RSA (generic ring) | DLO24 needs factoring hardness against preprocessing fixed before the modulus is sampled | R13 |
+| Circular evasive LWE ⇒ PKE | The hypothesis, as HLL23 state it (AMYY25's Assumption 4.1), is false under the base hardness AMYY25's Theorem 4.6 assumes, so the implication is vacuous | R14 |
+
+The rows from "BDH ⇒ ABE, unqualified" to "DCR ⇒ FAC ⇒ RSA" came from the
+maintainer's audit on PR #9 (relations-followups.md §13), as did BW07's
+corrected reason.
 
 ---
 
@@ -111,15 +135,21 @@ case in the default filter: its own Statement says SIS ⇒ ISIS is immediate
 and ISIS ⇒ SIS "holds only under conditions on the column count and norm
 bound". So a direction takes the record's class only where the curation's
 `equivalences` table (§2a) says `record`. A direction marked `unstated`, and
-both directions of an equivalence the table does not list, are `unstated`.
-The record's `model` applies to both directions. That can only under-claim:
-DLO24's trivial RSA ⇒ FAC carries `other` and is off by default. Today all 7
-eligible equivalences are reviewed, and one direction is scoped: ISIS ⇒ SIS,
-which is also given an R13 precondition.
+both directions of an equivalence the table does not list, are `unstated`. A
+record that states `reverseClass`
+([relations-followups.md](relations-followups.md) §4.4) takes `class`
+forward and `reverseClass` backward, and the table is not read for it; R3
+still makes a stub unstated both ways. The record's `model` applies to both
+directions. That can only under-claim: DLO24's trivial RSA ⇒ FAC carries
+`other` and is off by default (RSA78 records it fully black-box in the
+standard model). Today all 7 eligible equivalences are reviewed, and one
+direction is scoped: ISIS ⇒ SIS, which R13 also quarantines, one direction
+only. DLO24's reverse direction, FAC ⇒ RSA, takes the record's class with
+an R13 precondition.
 
 Of the 8 equivalences, 7 are eligible; R2 removes `qip ⇔ pspace`. After
-R1–R3 and R13's quarantine there are **236 directed steps** (7 reverse), and
-the default filter (R4) leaves 201.
+R1–R3 and R13's quarantine there are **235 directed steps** (7 reverse), and
+the default filter (R4) leaves 200.
 
 ### R2. Complexity classes take no part
 
@@ -218,9 +248,9 @@ OT from a random oracle exists (IR89), and the wiki's Statement says so
 (`content/Reductions/oihf-to-ot-bh26.md:23`).
 
 *Why `unstated` is refused, not caveated.* An unstated step may or may not
-relativize. Firing it with a caveat would add **50 facts from 10 single
-starts** (GGM ⇒ OT through DGI+19, AMR25 and DMO00; FAC ⇒ PKE through RSA78;
-DCR ⇒ TDP). Some are true, but a caveated fact composes further, caveats pile
+relativize. Firing it with a caveat would add **39 facts from 8 single
+starts** (GGM ⇒ OT through DGI+19, AMR25 and DMO00; FAC ⇒ PKE through
+RSA78). Some are true, but a caveated fact composes further, caveats pile
 up, and *derived by CCwiki* would rest on a footnote. The refusal loses true
 facts and never adds a false one; the answer names the blocking step.
 Classing a handful of unstated edges upstream would recover most of these
@@ -236,8 +266,9 @@ Classing a handful of unstated edges upstream would recover most of these
 - GGM ⇒ PKE is derived (Sho97's DDH, then ElGamal, fully black-box) and
   tagged *generic group model*. GGM ⇒ OT is refused at
   `red-ddh-to-tdh-dgi-19` (`unstated`).
-- FAC ⇒ RSA is derived with the toggle, tagged *non-standard model*. FAC ⇒
-  PKE is refused at `red-rsa-to-pke-rsa78` (`unstated`).
+- FAC ⇒ RSA is derived with the toggle, tagged *non-standard model*, and
+  only assuming DLO24's preprocessing experiment (R13). FAC ⇒ PKE is
+  refused at `red-rsa-to-pke-rsa78` (`unstated`).
 
 *An approximation, stated.* For an oracle model (ROM), "relativizes" is
 exactly the property needed. GGM, AGM and the generic ring model **restrict
@@ -350,9 +381,12 @@ step, assumes a precondition, or concludes a weakened notion is never a
 conflict: a barrier is a statement about standard-model reductions from the
 node as the wiki defines it. When such a chain stands beside a barrier, the
 answer carries a scope note ("This barrier concerns standard-model
-reductions; this derivation uses the quantum setting."). OIHF ⇒ OT is
-derived (`free`, BH26) beside `bar-oihf-to-ot-bh26` (`fully-black-box`),
-which the barrier itself lists as circumvented.
+reductions; this derivation uses the quantum setting."). A barrier proved in
+another model does not call for the note, since it is not about
+standard-model reductions and its own row names its model; a stub's model is
+not evidence, so a stub still does. OIHF ⇒ OT is derived (`free`, BH26)
+beside `bar-oihf-to-ot-bh26` (`fully-black-box`), which the barrier itself
+lists as circumvented.
 
 ### R9. Hosts and variants
 
@@ -455,12 +489,14 @@ compose into a class-C reduction `X ⇒ Y`, so `Q` follows:
 This is sound only when every condition below holds, and CCwiki emits a
 derived barrier only then:
 
-- **The barrier** has one hypothesis, both endpoints are primitives, and it
-  is not a stub. Each **consequence that rules out** (R8: a contradiction, or
-  a complexity proposition with `believed: false`) is propagated at its own
-  class C ∈ {fully-black-box, relativizing, free}. A consequence that would
-  only be a major result, or of kind `object` or `reduction`, is never
-  propagated, and nor is any class outside the three.
+- **The barrier** has one hypothesis, both endpoints are primitives, it is
+  not a stub, and its `model` is `standard` (a barrier proved in another
+  model is shown as recorded, checked by R8, and never composed). Each
+  **consequence that rules out** (R8: a contradiction, or a complexity
+  proposition with `believed: false`) is propagated at its own class C ∈
+  {fully-black-box, relativizing, free}. A consequence that would only be a
+  major result, or of kind `object` or `reduction`, is never propagated, and
+  nor is any class outside the three.
 - **Side edges** are single-hypothesis, non-heuristic, not stubs, not
   quarantined, **standard-model only**, have **no R13 precondition and no
   weakened conclusion**, and have a class that implies\* C. For C = `free`,
@@ -497,6 +533,9 @@ The manifest has **no `model` field on barriers**. R12 relies on today's
 only model-scoped barrier, `bar-rom-to-ke-hmo-19`, having a model-node
 hypothesis, which the primitive rule excludes. A primitive-to-primitive
 barrier proved only in an idealised model would be propagated wrongly (§10).
+CCwiki reads a barrier `model` when the manifest records one
+([wiki-asks.md](wiki-asks.md) ask 3), and R12 then composes only
+standard-model barriers.
 
 On this manifest: **406 derived records, 272 primitive pairs, 270 of them not
 recorded, from 9 barriers**: IR89 153, GKM+00 OWF ⇏ PKE 103, GKM+00 PKE ⇏
@@ -527,29 +566,44 @@ These come from the curation (§2a), never from the engine's own judgement.
   forward-game iPRF is a PRF). Every other step is refused on it.
 - **Quarantine**: a reduction whose recorded hypotheses do not match its own
   Statement is never used. It appears in R10 item 0 and in refused steps,
-  with the reason.
+  with the reason. An entry with a `direction` (`forward` or `reverse`)
+  holds back that **one direction of an equivalence** and leaves the other
+  a step with its own class (R1): the Statement proves one direction and
+  only gestures at the other. The reduction is then not in `excluded`,
+  since one direction of it is eligible; R10 item 0 still lists the held
+  direction's row as `quarantined`, with the reason, and the refusal names
+  it, saying that the Statement does not establish that direction. A
+  `direction` on an implication does not resolve (`curationResolves`), and
+  nor does any value but `forward` or `reverse`, which would otherwise read
+  as forward silently.
 - **No parameter tracking.** A regime is never carried along a chain, even a
   parameter-preserving one. LS15's degree-1 identity keeps the modulus, so
   rank-n module LWE ⇒ LWE ⇒ BGV12 is true, but it is refused. That is
   conservative.
-- **Refuse, not caveat**, for the reason R5 gives. Firing unmet preconditions
-  with a caveat would add back 58 facts from 15 starts (`--report`).
+- **Refuse, never caveat** (decided, §0 item 4). R5 gives the reason: a
+  caveated fact composes further, and caveats pile up. The caveat policy
+  stays in the reference script (`--precondition-policy caveat`) for
+  comparison only. `--report` prints what it would add: 56 facts from 16
+  starts. Nothing in the app reads it.
 
-On this manifest the curation removes 62 default derived pairs and adds none
-(1,084 → 1,022, of which 45 now carry an assumption). The biggest losses are
-BDH (26: selective ABE, BM84 on BDH's group) and CDH (16: BM84 needs
-Z_p^\*, and the record has no DLOG ⇒ OWF). Everything lost is listed by
-`--report`.
+On this manifest the curation takes 86 default derived pairs out of the
+full ones and adds none (1,084 → 998, of which 44 carry an assumption): 68
+are removed, and 18 are kept apart as weakened only (BDH ⇒ ABE, and the 17
+starts that reach MPC only as Kil88's static MPC with abort). The biggest
+losses are BDH (26: selective ABE, BM84 on BDH's group) and CDH (16: BM84
+needs Z_p^\*, and the record has no DLOG ⇒ OWF, wiki ask 13). Everything
+removed is listed by `--report`.
 
 ### R14. Refuted assumptions and settings
 
-- **Refuted** objects (curation): circular evasive LWE (AMYY25), SIDH and
-  SSDDH (CD22). A query from one is still answered, since the implication
-  holds, but marked **vacuous**: "The hypothesis is known to be false
-  (AMYY25), so this implication is vacuous." A refuted object is never an R11
-  source and never a completion. Nothing derives one today; if something
-  did, the derivation would be shown as usual, and it would mean the start is
-  false too.
+- **Refuted** objects (curation, or the object's own `refutedBy` in the
+  manifest, which wins and whose sentence is "Its page records the
+  attack."): circular evasive LWE (AMYY25), SIDH and SSDDH (CD22). A query
+  from one is still answered, since the implication holds, but marked
+  **vacuous**: "The hypothesis is known to be false (AMYY25), so this
+  implication is vacuous." A refuted object is never an R11 source and never
+  a completion. Nothing derives one today; if something did, the derivation
+  would be shown as usual, and it would mean the start is false too.
 - **Settings** (curation): the honest-majority variants of MPC, t < n/2 and
   t < n/3. They are corruption settings in which MPC exists unconditionally,
   not assumptions. Queries from them work; R11 lists them apart; they are
@@ -568,16 +622,30 @@ reference script reads it by default (`--curation` overrides).
 Statement or `securityLoss`, or an assumption page. CCwiki never adds a
 condition the wiki does not state. A condition known only from the
 literature is an upstream ask, not an entry (BDOZ11's field size, §11).
+One exception, decided with the maintainer's audit on PR #9
+([relations-followups.md](relations-followups.md) §13): where the audit
+corrects a Statement from the cited paper, an entry may **narrow** what the
+wiki's text allows (refuse, condition or weaken; never widen), quoting the
+text it narrows and naming the paper's theorem in its prose, and a wiki ask
+carries the correction upstream (DLO24's preprocessing, BW07's assumptions,
+FLS90's certification, the scope of AMYY25's refutation). CCwiki still adds
+no reduction or node of its own: those are asks too.
+
+Each entry's `cites` quotes the wiki verbatim, with page and section, and
+`scripts/derivations_reference.py --check-quotes` checks that every quote is
+still there ([relations-followups.md](relations-followups.md) §2.2).
+[curation-review.md](curation-review.md) puts each entry beside its quotes
+and its effect on the answers.
 
 | Key | Entry | Today |
 |---|---|---|
-| `refuted` | object, source, text, evidence | `circular-evasive-lwe`, `sidh`, `ssddh` |
-| `settings` | object, text, evidence | the two honest-majority variants |
-| `quarantine` | edge, reason, evidence | BW07 (composite order, three assumptions); Wee22 BE and Wee22 ABE (drop LWE) |
-| `equivalences` | edge → `forward`/`reverse`: `record` or `unstated` | all 7 eligible; ISIS ⇒ SIS `unstated` |
-| `requires` | edge, direction, hypothesis, notion, `metBy`, evidence | 23 entries on 18 edges, below |
-| `weakens` | edge, notion, `acceptedBy`, evidence | GPSW06 (selective KP-ABE; none), PRP ⇒ iPRF (forward game; iPRF ⇒ PRF) |
-| `statementLint` | edge → why a lint hit is not a dropped conjunct | HLL23, CHKV25 |
+| `refuted` | object, source, text, evidence, cites | `circular-evasive-lwe`, `sidh`, `ssddh` |
+| `settings` | object, text, evidence, cites | the two honest-majority variants |
+| `quarantine` | edge, `direction` (optional: one direction of an equivalence), reason, cites; one entry per edge, id `quarantine:<edge>` | BW07 (composite order, two typed assumptions on one family); Wee22 BE and Wee22 ABE (drop LWE); ISIS ⇒ SIS (left to right only) |
+| `equivalences` | edge → `forward`/`reverse` (`record` or `unstated`), note, cites | all 7 eligible; ISIS ⇒ SIS `unstated` (and quarantined) |
+| `requires` | edge, direction, hypothesis, notion, `notionMarkdown`, `metBy`, evidence, cites | 26 entries on 21 edges, below |
+| `weakens` | edge, notion, `notionMarkdown`, `acceptedBy`, evidence, cites | GPSW06 (selective KP-ABE; none), PRP ⇒ iPRF (forward game; iPRF ⇒ PRF), Kil88 (static malicious MPC with abort; none) |
+| `statementLint` | edge → note, cites: why a lint hit is not a dropped conjunct | HLL23, CHKV25 |
 
 `requires`, today:
 
@@ -587,14 +655,16 @@ literature is an upstream ask, not an entry (BDOZ11's field size, §11).
 | BGV12 | LWE with modulus-to-noise ratio exponential in L | — |
 | AMR25 low-noise LPN ⇒ TDH | quasi-polynomial hardness of low-noise LPN | — |
 | FE ⇒ iO | public-key, single-key, sub-exponentially secure, weakly compact FE | — |
-| ISIS ⇒ SIS (forward) | ISIS in the column-count and norm regime where it implies SIS | — |
-| FLS90 (`red-tdp-to-nizk-bfm88`) | doubly enhanced, certified TDP | — |
+| DLO24, reverse (FAC ⇒ RSA) | factoring hard against preprocessing fixed before the modulus is sampled | — |
+| FLS90 (`red-tdp-to-nizk-bfm88`) | doubly enhanced TDP, certified for adversarially chosen indices | — |
 | YZW19, YZ16 ×2, CG24 ×2 | subexponential LPN with exponent ≥ ½ (YZW19: > ½) | — |
-| BM84 | DLOG in Z_p^\* | — |
+| BM84 | DLOG in Z_p^\*, residues read as integers | — |
 | PKE ⇒ COM | perfectly correct PKE with certifiable keys | — |
 | ABE ⇒ BE | CP-ABE with disjunctive policies | RW13 (KW19), Wee25 |
 | Kil88 OT ⇒ MPC, OT ⇒ COM | OT secure against malicious parties | DMO00 |
 | Wat09 IBE, Wat09 HIBE | DBDH and DLIN in one symmetric prime-order group | — |
+| GPSW06 | DBDH in its symmetric prime-order group | — |
+| PRP ⇒ PRF, PRP ⇒ iPRF | a PRP over a domain with \|D\| = λ^ω(1) | LR88 |
 
 **Sentinels** (golden `sentinels`, recomputed on any manifest):
 
@@ -603,24 +673,24 @@ literature is an upstream ask, not an entry (BDOZ11's field size, §11).
   sub-exponential or quasi-polynomial has a `requires` entry (fails the test).
 - `equivalencesReviewed`: every eligible equivalence is in the table (prints a
   warning; unreviewed ones are already unstated both ways).
+- `curationSuperseded`: no entry is one the manifest now records itself
+  (`reverseClass`, `refutedBy`, or a setting that is no longer the sole
+  hypothesis of any step) (prints a warning).
 - **Statement lint** (`--lint WIKI_ROOT`; the corpus test runs the same check
   on the clone): an assumption the Statement links before its citation that
   is neither an endpoint nor an endpoint's host page is a possible dropped
   conjunct, unless quarantined or listed under `statementLint`. Today it
   finds exactly the reviewed cases.
+- **Quotes** (`curationQuotesFound`): every cited quote is still on its page
+  (fails the test).
+- **Curated edges** (`curationEdgesUnchanged`): every reduction the curation
+  names keeps the kind, hypotheses and conclusion recorded in the golden
+  file's `curatedEdges`, and an `equivalences` edge also its class and model
+  (fails the test; any other class or model change prints a warning).
 
-**Upstream asks**, which would let most of the file go:
-
-1. A machine-readable regime or notion per hypothesis, or hanging such edges
-   on variant nodes, several of which exist already
-   (`abe-selective-security`, `malicious-ot-security`).
-2. A class per direction on equivalences.
-3. A `refuted` status on objects.
-4. A `model` field on barriers.
-5. Fix BW07's and Wee22's hypotheses; give CS03 a one-time DEM hypothesis,
-   or record KEM ⇒ PKE.
-6. Record the textbook X ⇒ OWF edges (CRHF, OTS, KEM, SIS, LPN, DLOG),
-   Peikert09/BLPRS13 for LWE with large moduli, and BDOZ11's field size.
+**Upstream asks**, which would let most of the file go, are in
+[wiki-asks.md](wiki-asks.md), each with its `ccw:` id, the exact change, the
+pages it touches and the entries it retires.
 
 ---
 
@@ -656,6 +726,8 @@ struct DerivationCuration: Sendable, Decodable {   // Resources/derivation-curat
     let refuted: [String: Refutation]                  // R14
     let settings: Set<String>                          // R14
     let quarantine: [String: String]                   // R13: id -> reason
+    let quarantineDirections: [String: Bool]           // R13: id -> isReverse, for one direction only
+    func quarantineReason(_ id: String, isReverse: Bool) -> String?  // what a step asks
     struct Directions: Sendable, Decodable { let forward: String; let reverse: String } // "record" | "unstated"
     let equivalences: [String: Directions]
     let requires: [Requirement]
@@ -746,7 +818,7 @@ struct Derivation: Sendable {
 
 ## 4. Complexity and timing
 
-Let E = 236 directed steps, H = 263 hypothesis occurrences, V = 234 non-class
+Let E = 235 directed steps, H = 262 hypothesis occurrences, V = 234 non-class
 objects, and L ≤ 10 layers per phase (the maximum default depth is 9).
 
 | Operation | Cost | Python reference, this manifest |
@@ -759,7 +831,7 @@ objects, and L ≤ 10 layers per phase (the maximum default depth is 9).
 | Derived barriers, all | O(barriers · E) | 2 ms |
 | Implied-by PKE | candidate pairs × closure | 122 ms cold, 1 ms warm |
 | Invariants (every barrier, every derived barrier) | restricted closures | 90 ms |
-| Whole golden file (72 queries, 7 patched manifests) | — | 4.7 s |
+| Whole golden file (81 queries, 16 patched manifests) | — | 7.8 s |
 
 These are CPython timings on the Linux container; nothing was compiled here.
 A Swift port of the same loops should be at least an order of magnitude
@@ -774,45 +846,51 @@ milliseconds.
 Wiki `ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157`, `relations.json` SHA-256
 `b0c3fb65…c0e3ee`; the curation's SHA-256 is in the golden file.
 
-**Eligibility.** 283 reductions → 236 directed steps (7 reverse). Excluded:
-45 inclusions, 2 heuristic, 4 with a complexity-class endpoint, 3
-quarantined. By model: standard 189, ROM 22, CRS 7, generic group 7, quantum
+**Eligibility.** 283 reductions → 235 directed steps (7 reverse), and 4
+steps held back (BW07, both Wee22 edges, and ISIS ⇒ SIS left to right).
+Excluded: 45 inclusions, 2 heuristic, 4 with a complexity-class endpoint, 3
+quarantined. By model: standard 188, ROM 22, CRS 7, generic group 7, quantum
 5, algebraic group 3, other 2 (both directions of DLO24), unknown 1 (the
-stub). Default: 201.
+stub). Default: 200.
 
-**Closures.** 234 objects can start a query, and 119 derive something. Over
-all single starts there are **1,022** derived (start, target) pairs: chain
-class fully black-box 543, unstated 464, free 15; **45 carry an assumed
-precondition**; 1 more is weakened only (BDH ⇒ ABE). Model tags: none 925,
-quantum 89, CRS 6, both 2. Depth: 1→175, 2→193, 3→191, 4→177, 5→145, 6→91,
-7→34, 8→10, 9→6. With the toggle there are 1,222 pairs, 200 of them
-model-scoped. 36 objects gain facts with the toggle.
+**Closures.** 234 objects can start a query, and 118 derive something. Over
+all single starts there are **998** derived (start, target) pairs: chain
+class fully black-box 539, unstated 444, free 15; **44 carry an assumed
+precondition**; 18 more are weakened only (BDH ⇒ ABE, and 17 X ⇒ MPC as
+Kil88's static MPC with abort). Model tags: none 904, quantum 86, CRS 6,
+both 2. Depth: 1→173, 2→190, 3→184, 4→171, 5→139, 6→91, 7→34, 8→10, 9→6.
+With the toggle there are 1,181 pairs, 183 of them model-scoped. 35 objects
+gain facts with the toggle.
 
 | Object | Default | With toggle | Max depth (default) | Note |
 |---|---|---|---|---|
-| GapSVP / SIVP | 33 | 36 | 6 | quantum (Reg05); no longer leveled FHE |
-| DDH | 33 | 37 | 5 | MPC through DMO00's OT |
-| LWE | 29 | 29 | 5 | leveled FHE assuming BGV12's modulus |
-| DCR | 29 | 31 | 5 | |
-| RSA | 22 | 28 | 5 | no longer NIZK (FLS90 needs a certified TDP) |
-| TDP | 21 | 21 | 4 | NIZK assuming doubly enhanced, certified |
+| GapSVP / SIVP | 32 (+1 weakened) | 35 | 6 | quantum (Reg05); no longer leveled FHE |
+| DDH | 32 (+1 weakened) | 36 | 5 | MPC through DMO00's OT, as static MPC with abort only |
+| LWE | 28 (+1 weakened) | 28 | 5 | leveled FHE assuming BGV12's modulus |
+| DCR | 28 (+1 weakened) | 29 | 5 | no RSA with the toggle (DLO24 needs its preprocessing notion) |
+| RSA | 22 | 28 | 5 | no longer NIZK (FLS90 needs a TDP certified for adversarial indices) |
+| TDP | 21 | 21 | 4 | NIZK assuming doubly enhanced, certified for adversarial indices |
 | DLOG | 19 | 24 | 4 | 16 of them assuming DLOG in Z_p^\* (BM84) |
 | PKE | 19 | 19 | 4 | includes OWF (IL89) |
 | OWP | 16 | 16 | 4 | |
-| FAC | 16 | 17 | 5 | +RSA only (R5 stops the rest) |
+| FAC | 16 | 17 | 5 | +RSA only, assuming DLO24's preprocessing experiment (R5 stops the rest) |
 | OWF | 15 | 15 | 3 | no PKE, KE, OT, CRHF |
 | SIS | 3 | 19 | 2 | +16, all through the ROM signature edge |
-| OT | 4 | 4 | 1 | MPC and COM assuming malicious OT; not OWF (record gap) |
-| BDH | 5 (+1 weakened) | 27 | 3 | ABE only selective KP-ABE; no IBE, PRG |
+| ISIS | 0 | 0 | — | ISIS ⇒ SIS is quarantined; SIS ⇒ ISIS is used |
+| PRP | 4 | 4 | 2 | all assuming a superpolynomial domain |
+| sPRP | 1 | 1 | 1 | PRP only: no PRF, since its domain may be small |
+| OT | 3 (+1 weakened) | 3 (+1) | 1 | MPC (weakened) and COM assuming malicious OT; not OWF (record gap) |
+| BDH | 5 (+1 weakened) | 27 | 3 | ABE only selective KP-ABE, assuming DBDH; no IBE, BE, PKE, PRG |
 | CDH | 4 | 8 | 2 | no OWF: the record has no DLOG ⇒ OWF |
-| Low-noise LPN | 31 | 35 | 6 | 6 assuming quasi-polynomial hardness (AMR25) |
+| Low-noise LPN | 30 (+1 weakened) | 34 | 6 | 5 assuming quasi-polynomial hardness (AMR25) |
 | ROM | 0 | 2 | — | OIHF, Merkle puzzles (depth 1) |
 | GGM | 0 | 28 | — | Sho97's DDH, CDH, DLOG, KEA and their fully black-box consequences |
 | AGM | 0 | 1 | — | KEA (depth 1) |
 
-**Backward.** PKE: 27 single sources, 39 pairs (above). OT: 22 single
-sources (2 with an assumption), no pairs. MPC: 17 single sources, two
-settings apart.
+**Backward.** PKE: 27 single sources, 38 pairs (above). OT: 22 single
+sources (2 with an assumption), no pairs. MPC: 17 single sources, each only
+as Kil88's static MPC with abort (2 with an assumption), two settings
+apart.
 
 **Invariants**, all true: no ineligible edge is ever used; default results
 carry no idealised model; no derivation of any class contradicts a recorded
@@ -827,7 +905,8 @@ golden file.
 
 - **DDH ⇒ OT: derived, 3 steps, unstated.** OT ⇐ cPIR (DMO00) ⇐ TDH (AMR25)
   ⇐ DDH (DGI+19). **DDH ⇒ MPC**: one more step, Kil88, whose malicious-OT
-  precondition DMO00's Statement meets.
+  precondition DMO00's Statement meets, and which concludes only static
+  malicious MPC with abort.
 - **{OWF, KEM} ⇒ PKE: derived, 4 steps, fully black-box.** PKE ⇐ KEM ∧ SKE
   (CS03), SKE ⇐ PRF ⇐ PRG (GGM86) ⇐ OWF (HILL99).
 - **{OWF, iO} ⇒ PKE: derived, 1 step, free** (SW14).
@@ -839,7 +918,11 @@ golden file.
   `bar-ot-to-pke-gkm-00`; no completions.
 - **FAC ⇒ PKE.** Default: no derivation; completion iO (3 steps); the
   question becomes FAC ⇒ KEM. Toggle on: FAC ⇒ RSA is derived (DLO24,
-  non-standard model), but RSA78's RSA ⇒ PKE (unstated) is refused after it.
+  non-standard model) assuming DLO24's preprocessing experiment, but
+  RSA78's RSA ⇒ PKE (unstated) is refused after it. DCR ⇒ RSA, toggle on:
+  no derivation, DLO24's reverse direction refused (DCR ⇒ FAC gives the
+  `fac` node, not factoring hardness with preprocessing). RSA ⇒ FAC: 1
+  step, fully black-box (RSA78).
 - **ROM ⇒ OT.** Default: the model-start message. Toggle on: refused at
   `red-oihf-to-ot-bh26`, citing `bar-oihf-to-ot-bh26`. ROM ⇒ MPC is refused
   there and at Kil88.
@@ -854,12 +937,20 @@ golden file.
   LWE ⇒ leveled FHE: 1 step, assuming the exponential modulus-to-noise ratio.
 - **Low-noise LPN ⇒ OT: 3 steps, unstated, assuming quasi-polynomial
   hardness.**
-- **ETDP ⇒ MPC: no derivation**, Kil88 refused (EGL's OT is semi-honest).
-- **BDH ⇒ ABE: derived, only selectively secure KP-ABE.** BDH ⇒ IBE: no
-  derivation (ABE ⇒ IBE refused on the weakened ABE); completion DLIN (Wat09,
-  assuming one group); with the toggle, BF01 in the ROM.
-- **ISIS ⇒ CRHF: 2 steps, unstated, assuming ISIS's regime.** SIS ⇒ ISIS
-  stays fully black-box.
+- **ETDP ⇒ MPC: no derivation**, Kil88 refused (EGL's OT is semi-honest;
+  Haitner's semi-honest-to-malicious compiler is wiki ask 14). **OT ⇒ MPC:
+  1 step, assuming malicious OT, static MPC with abort only.**
+- **BDH ⇒ ABE: derived, assuming DBDH, only selectively secure KP-ABE.**
+  BDH ⇒ IBE: no derivation (ABE ⇒ IBE refused on the weakened ABE);
+  completion DLIN (Wat09, assuming one group); with the toggle, BF01 in the
+  ROM. BDH ⇒ BE and BDH ⇒ PKE: no derivation (selective KP-ABE ⇒ PKE is
+  wiki ask 12).
+- **CDH ⇒ PRG: no derivation**, BM84 refused (DLOG ⇒ OWF on the same group,
+  wiki ask 13, would give it through HILL99).
+- **PRP ⇒ PRF: 1 step, assuming a superpolynomial domain.** sPRP ⇒ PRF: no
+  derivation, PRP ⇒ PRF refused (an sPRP's domain may be small).
+- **ISIS ⇒ SIS and ISIS ⇒ CRHF: no derivation**, ISIS ⇒ SIS quarantined.
+  SIS ⇒ ISIS stays fully black-box.
 - **Circular evasive LWE ⇒ PKE: derived, 3 steps, vacuous (AMYY25).**
 - **KEM ⇒ PKE: no derivation, no completions; the question becomes KEM ⇒
   SKE.** CRHF ⇒ DS: the question becomes CRHF ⇒ one-time signature.
@@ -927,8 +1018,8 @@ anywhere else a derived claim appears.
 - **Barrier titles are the wiki's and must be qualified.** Print R8's
   qualifier beside an unclassified, fixed-construction or stub barrier's
   title, every time the title appears, previews included. A `believed: true`
-  consequence reads "would imply P ≠ NP", never "rules out". A barrier beside
-  a non-standard chain carries R8's scope note.
+  consequence reads "would imply P ≠ NP", never "rules out". A standard-model
+  barrier beside a non-standard chain carries R8's scope note.
 - **Derived barriers show their argument and their consequence.** For
   example: "A relativizing reduction from OWF to CRHF would compose with OWP ⇒
   OWF (fully black-box) into one from OWP to CRHF, which Sim98 rules out.
@@ -939,6 +1030,11 @@ anywhere else a derived claim appears.
   step, which need not carry over into that model." For R13: "Not derived:
   BGV12 needs LWE with a modulus-to-noise ratio exponential in the depth;
   the LWE here comes from GapSVP by Reg05, which gives a polynomial modulus."
+- **Refused, never caveated.** No derived claim carries "precondition not
+  established" or any other caveat of that kind. A step whose precondition
+  is not established is listed under *Refused steps*, with the wiki's text,
+  in a no-path answer, and under *Adjustments* when it shapes a derivable
+  answer ([relations-followups.md](relations-followups.md) §2.5).
 - **Recorded on this pair** (R10 item 0) uses the status words of R10 and
   says why an unused one was not used.
 - **Hints (R9)** say "related by the page, not by a recorded reduction".
@@ -965,8 +1061,8 @@ anywhere else a derived claim appears.
 ## 8. Testing
 
 **The self-test.** `scripts/derivations_reference.py RELATIONS_JSON
---selftest` runs one check per review finding (45 today): 38 on the real
-manifest and 7 on patched copies of it. It exits non-zero on any failure.
+--selftest` runs one check per review finding, most on the real manifest
+and the rest on patched copies of it. It exits non-zero on any failure.
 
 **The golden file.** `Tests/CCwikiTests/Fixtures/derivations-golden.json` is
 written by
@@ -974,8 +1070,9 @@ written by
 and regenerates byte-identically. It records the wiki commit, the manifest's
 and the curation's SHA-256, counts, policy constants, closure sizes (15
 objects, with weakened counts), backward summaries for PKE, OT and MPC with
-group tags, the invariants and sentinels by name, **72 query records** and
-**7 mutation records**. A query record holds the start, target and toggle and
+group tags, the invariants and sentinels by name, `curatedEdges`, a snapshot
+of every reduction the curation names, **81 query records** and
+**16 mutation records**. A query record holds the start, target and toggle and
 the expected answer: *supported*, *derivable*, vacuous, model start, recorded
 barriers with qualifiers, reverse barriers, **derived barriers in full**
 (class, consequence, up and down paths, circumventions, redundancy),
@@ -986,14 +1083,26 @@ completions and total, question-becomes, refused steps with reason kinds,
 hints and the toggle hint.
 
 **A mutation record** is one of the review's counterexamples as a patch: it
-adds objects, reductions and barriers, or sets fields and appends
-consequences on existing barriers. The Swift test applies the patch to the
-decoded manifest and asserts the query, the derived-barrier count and the
-invariants. The seven: a stronger chain behind an unstated shortcut
-conflicts; a chain contradicting a derived barrier fails its invariant; a
-quantum and a ROM chain beside a barrier are context, not conflicts; a
-believed-true consequence is not propagated; an unstated chain conflicts
-with a `free` barrier; a stub barrier is not propagated.
+adds objects, reductions and barriers, sets fields on existing barriers and
+reductions, or appends consequences to barriers; its `dropCuration` leaves
+out the `quarantine`, `requires` or `weakens` entries, by id, that a wiki
+ask's re-review would retire. The Swift test applies the patch to the
+decoded manifest and the curation and asserts the invariants and, when both
+hashes match, the query, the derived-barrier count and the entries
+`curationSuperseded` lists. The seven: a stronger chain behind an unstated
+shortcut conflicts; a chain contradicting a derived barrier fails its
+invariant; a quantum and a ROM chain beside a barrier are context, not
+conflicts; a believed-true consequence is not propagated; an unstated chain
+conflicts with a `free` barrier; a stub barrier is not propagated. Three
+more test the upstream fields of
+[relations-followups.md](relations-followups.md) §4.4: a barrier `model`
+that stops R12, a `reverseClass` that overrides the curation, and a
+`refutedBy` that makes an answer vacuous. Six replay the PR #9 audit's
+positive cases on the manifests its asks would give
+([relations-followups.md](relations-followups.md) §13): with asks 5 and 12,
+BDH ⇒ PKE assuming DBDH, and still no IBE or BE; with ask 13, CDH ⇒ PRG
+fully black-box without BM84; with asks 4 and 14, ETDP ⇒ MPC only as
+Kil88's static MPC with abort, and ETDP ⇒ COM.
 
 **The corpus test** (`DerivationTests`, gated on `CCWIKI_WIKI` like
 `RelationsTests`) reads the golden file and the curation through
@@ -1013,9 +1122,10 @@ test has three outcomes:
    scripts/derivations_reference.py". Use `.enabled(if:)` so the skip is
    visible.
 
-A failing `curationResolves`, `regimeLossCurated` or Statement lint means the
-wiki moved under the curation: review the named edges, update the file, and
-regenerate the golden file.
+A failing `curationResolves`, `regimeLossCurated`, `curationQuotesFound`,
+`curationEdgesUnchanged` or Statement lint means the wiki moved under the
+curation: review the named edges, update the file, and regenerate the golden
+file. Then run `make curation-review` against the same clone.
 
 A unit test without a clone covers each rule on a small fixture manifest,
 mirroring `RelationsTests`: a conjunction that must not fire on one
@@ -1023,7 +1133,10 @@ hypothesis; an equivalence with one direction unstated; an inclusion and a
 heuristic edge that never fire; a `{rom} ⇒ X` edge mis-typed `standard`; a
 free step after a ROM step; a requirement met by a given (tagged), by a
 `metBy` producer, and refused; a weakened fact that blocks no full fact; a
-quarantined edge; a barrier with a quantum side edge that R12 must not
+quarantined edge; a quarantine of one direction of an equivalence, which
+leaves the other direction a step (`quarantineOneDirection`, with the
+reference engine's `selftest_direction_quarantine` on a patched copy of the
+real manifest); a barrier with a quantum side edge that R12 must not
 propagate.
 
 ---
@@ -1040,10 +1153,8 @@ propagate.
 3. **Who owns the curation?** It is CCwiki's for now (§2a). Every entry is
    an upstream ask; should the wiki take them as fields, so CCwiki can drop
    the file?
-4. **Refuse or caveat unmet preconditions?** R13 refuses, like R5. The
-   caveat policy would show 58 more facts from 15 starts, each with a
-   "precondition not established" line. Refusal is the safer default; is it
-   the right one for the inspector, where readers browse rather than ask?
+4. **Decided 2026-10-12: refuse** (§0 item 4). The inspector refuses as
+   the explorer does.
 5. **Kil88's `metBy`.** Only DMO00's Statement claims completeness for MPC.
    BH26's, YZ16's, Cre87's and the SPIR edge's OT are not stated to be
    malicious-secure, so OIHF, subexponential LPN, Rabin OT, random OT and
@@ -1072,7 +1183,9 @@ It did not show that no others exist, and these remain:
   without using any of those words. Any derived claim through an edge whose
   hypothesis is a broad host node (`lwe`, `lpn`, `bdh`, `ot`, `abe`,
   `pke`) is only as good as that edge's fit to the node. The proof tree links
-  every step's Statement so a reader can check.
+  every step's Statement so a reader can check. Refusal applies only to
+  preconditions the curation records. A precondition no one has reviewed is
+  still chained, so this risk is unchanged by §0 item 4.
 - **Shared parameters across conjuncts.** CCwiki treats a conjunction's
   hypotheses as independent. The curation covers Wat09 (one group) and JLS21
   (one prime p) by requiring them as givens. CHKV25 (the LHE plaintext field
@@ -1082,12 +1195,19 @@ It did not show that no others exist, and these remain:
   field, so GM's Z₂ encryption does not feed it, but the wiki's Statement
   does not say so, and by §2a's rule CCwiki does not add it. QR ⇒ MPC with
   preprocessing is still derived.
-- **Producers not stated to be weaker.** R13's weakenings cover the two
-  Statements that say they prove less than their node (GPSW06, PRP ⇒ iPRF).
+- **Producers not stated to be weaker.** R13's weakenings cover the three
+  Statements that say they prove less than their node (GPSW06, PRP ⇒ iPRF,
+  Kil88's MPC with abort).
   An edge whose Statement is silent about selective security, semi-honest
   security or parameters is taken at its node's notion.
+- **Entries no audit has certified.** The maintainer's audit on PR #9
+  (relations-followups.md §13) examined 19 of the then 42 entries against
+  the papers; the other 23 rest on the quotes and this review only, and a
+  matching quotation does not validate a theorem or its encoding.
 - **Barriers have no model field** (R12). A primitive-to-primitive barrier
   proved only in an idealised model would be propagated as if standard.
+  CCwiki now reads a barrier `model` when the wiki records one
+  ([wiki-asks.md](wiki-asks.md) ask 3).
 - **The class labels themselves.** R6, R8 and R12 trust each edge's
   `class`. A mislabelled fully black-box edge makes a wrong chain class and,
   as a side edge, a wrong derived barrier. The invariants catch a mislabel
@@ -1095,8 +1215,9 @@ It did not show that no others exist, and these remain:
   BH26 is the only edge where it would today).
 - **Curation drift.** The file was reviewed against one wiki commit. The
   sentinels and the Statement lint catch removed ids, new regime-loss edges,
-  new equivalences and new dropped conjuncts; they do not catch an edited
-  Statement that changes a notion.
+  new equivalences and new dropped conjuncts. Every entry now quotes the
+  wiki, and `curationQuotesFound` fails when a quoted passage changes; an
+  edit to a Statement outside every quote still goes unnoticed.
 
 ## 11. Red-team review, 2026-10-10: dispositions
 

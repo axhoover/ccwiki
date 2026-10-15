@@ -212,10 +212,17 @@ extension Derivation {
         /// Node → the side steps from Y back to it, nearest Y first.
         let downs: [String: [Step]]
 
-        /// Only a barrier with one hypothesis, primitives at both ends and not
-        /// a stub propagates, and only through a consequence that rules out at
-        /// a composable class. A consequence that would only be a major result,
-        /// or of kind `object` or `reduction`, never does.
+        /// Only a barrier with one hypothesis, primitives at both ends, proved
+        /// in the standard model and not a stub propagates, and only through
+        /// a consequence that rules out at a composable class. A consequence
+        /// that would only be a major result, or of kind `object` or
+        /// `reduction`, never does.
+        ///
+        /// The side reductions are standard-model, and R12's argument is
+        /// sound only when the barrier is a standard-model statement too. A
+        /// barrier proved in another model (wiki-asks.md ask 3) is shown as
+        /// recorded and never composed (relations-followups.md §4.4). R8 and
+        /// the invariants still check every barrier.
         static func rules(manifest: RelationsManifest, steps: [Step], order: ClassOrder) -> [BarrierRule] {
             let primitive = Derivation.primitiveType
             func nodeType(_ id: String) -> String { manifest.object(id)?.type ?? "" }
@@ -224,6 +231,7 @@ extension Derivation {
             var rules: [BarrierRule] = []
             for barrier in manifest.barriers.sorted(by: { Derivation.precedes($0.id, $1.id) }) {
                 guard barrier.status != .stub, barrier.hypotheses.count == 1,
+                      barrier.model == Derivation.standardModel,
                       let origin = barrier.hypotheses.first
                 else { continue }
                 let end = barrier.conclusion
