@@ -106,7 +106,7 @@ RELEASE_NOTES      := $(DIST_DIR)/RELEASE_NOTES.md
 PROVISION_PROFILE ?=
 NOTES_FILE       ?=
 
-.PHONY: all deps build check build-only test test-corpus release run clean install uninstall register help \
+.PHONY: all deps build check build-only test test-corpus curation-review release run clean install uninstall register help \
         icon check-version notary-setup sign zip-notary notarize staple zip-release \
         checksum verify-release dist github-release print-version \
         release-keys package zip-package sign-package verify-package release-notes
@@ -120,6 +120,7 @@ help:
 	@echo "  build-only        Compile only, no tests"
 	@echo "  test              Run the SwiftPM test suite"
 	@echo "  test-corpus       …and validate against the real cloned wiki"
+	@echo "  curation-review   Regenerate plans/curation-review.md (WIKI=<clone at the golden file's commit>)"
 	@echo "  shots             Drive the app and capture screenshots (visual gate)"
 	@echo "  release           Build release into ./$(APP)"
 	@echo "  run               Build and launch $(APP_NAME)"
@@ -195,11 +196,14 @@ release: deps $(APP_ICON)
 
 # The gate to run after every change: compile, then run the unit tests. No
 # .app, no signing. `make shots` is the visual half of the gate — a passing
-# build is not a passing app (SWIFTUI-RULES.md §9.3).
+# build is not a passing app (SWIFTUI-RULES.md §9.3). The reference engine's
+# --selftest-units needs no manifest: the quote matching it shares with the
+# Swift tests, the curation review's escaping, and the wiki asks' inbox file.
 check: deps
 	swift build -c $(CONFIG)
 	@echo "✓ compiles ($(CONFIG))"
 	swift test
+	python3 -I scripts/derivations_reference.py --selftest-units
 	@echo "✓ tests pass"
 
 # Compile only, for when you just want to know it builds.
@@ -231,6 +235,16 @@ test-corpus: deps
 	fi
 	CCWIKI_WIKI="$(WIKI)" swift test
 	@echo "✓ tests pass against the real corpus"
+
+# Regenerate plans/curation-review.md (plans/relations-followups.md §2.3).
+# WIKI= is required: a clone whose relations.json is the golden file's.
+curation-review:
+	@[ "$(origin WIKI)" != "file" ] || { echo "✗ give WIKI=<a clone at the golden file's wikiCommit>"; exit 1; }
+	@[ -d "$(WIKI)/content" ] || { echo "✗ no wiki clone at $(WIKI)"; exit 1; }
+	@commit=$$(git -C "$(WIKI)" rev-parse HEAD) || { echo "✗ $(WIKI) is not a git clone"; exit 1; }; \
+	python3 -I scripts/derivations_reference.py "$(WIKI)/.reductions/relations.json" --selftest && \
+	python3 -I scripts/derivations_reference.py "$(WIKI)/.reductions/relations.json" \
+	  --curation-report plans/curation-review.md --wiki-root "$(WIKI)" --wiki-commit "$$commit"
 
 print-version:
 	@echo "VERSION=$(VERSION)"

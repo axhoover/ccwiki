@@ -141,6 +141,28 @@ redesign, not a refactor.
 - [plans/distribution.md](plans/distribution.md) — signing and notarization,
   a release workflow, and three tiers of update mechanism (an in-app check,
   a Homebrew cask, Sparkle) with what each costs in this codebase.
+- [plans/relations-followups.md](plans/relations-followups.md) — **built on
+  `claude/relations-followups`, first of the batch**: unmet preconditions stay refused, a
+  generated review of the curation file with the wiki text each entry cites,
+  the wiki's text beside each adjustment in the explorer, Copy Proof As LaTeX,
+  wiki Markdown and BibTeX, and the asks for the wiki as a ready-to-apply
+  document.
+- [plans/curation-review.md](plans/curation-review.md) — **generated**
+  (`make curation-review WIKI=…`): each of the 42 curation entries beside the
+  wiki text it quotes and its effect on the golden answers. **For the
+  maintainer to review.**
+- [plans/wiki-asks.md](plans/wiki-asks.md) — ten things the wiki could record
+  so the curation can go, page by page, with
+  [wiki-asks.inbox.json](plans/wiki-asks.inbox.json) for the wiki's review
+  pipeline. The maintainer files them; CCwiki never writes to the wiki.
+- [plans/reader-comforts.md](plans/reader-comforts.md) — **specified
+  2026-10-12, second**: native tabs and windows, each with its own
+  `ReaderSession`; a reference's paper on request, in a window of its own; and
+  a library load that rebuilds only what changed.
+- [plans/corrections.md](plans/corrections.md) — **specified 2026-10-12,
+  third**: correct a page yourself, have an agent draft it, or open an issue;
+  and a review step before anything reaches GitHub, for every job, with
+  DiffGuard and a rendered diff.
 - [plans/update-integrity.md](plans/update-integrity.md) — why CCwiki came
   back as 0.1.0 after updates (a second copy with the same bundle id, most
   likely), and the fix: the dev and release channels (`CHANNEL`, CCwiki Dev),

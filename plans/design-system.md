@@ -99,6 +99,7 @@ discoverable rather than folklore.
 | ⌘P | Print, or Save as PDF from the print panel |
 | ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
 | ⇧⌘H | Go home |
+| ⌥⌘C / ⌥⇧⌘C | Copy proof as LaTeX / as wiki Markdown (Relations Explorer) |
 | Esc | Dismiss any sheet or the find bar |
 
 Both palettes are keyboard-shaped: type, arrow, Return, with the shortcut hints
