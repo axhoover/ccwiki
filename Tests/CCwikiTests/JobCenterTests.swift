@@ -893,22 +893,21 @@ struct JobCenterTests {
     }
 
     /// A correction whose agent changes b to B, run while GitHub lists one
-    /// open pull request by the signed-in account, from `head`, opened
-    /// twenty seconds before the job: inside the tripwire's minute of
-    /// look-back. The `gh` answers nothing else. Returns when the job has
-    /// settled, with when the pull request was opened.
+    /// open pull request by the signed-in account, from `head`, opened as
+    /// the tripwire asks: after the job started, whatever the load on the
+    /// machine running the tests. (A pull request from the minute before
+    /// the job is `TripwireTests.lookBackPullRequest`'s.) The `gh` answers
+    /// nothing else. Returns when the job has settled.
     static func correction(
         whileListing head: String, isCrossRepository: Bool = false, number: Int
-    ) async throws -> (JobScene, Job, Date)? {
+    ) async throws -> (JobScene, Job)? {
         let root = JobScene.newRoot()
-        let opened = Date().addingTimeInterval(-20)
-        let created = ISO8601DateFormatter().string(from: opened)
         let tools = try JobScene.fakeTools([
             .claude: #"printf 'a\nB\nc' > content/page.md"# + "\n" + readyForReview,
             .gh: """
                 case "$1 $2" in
                 "pr list")
-                    echo '\(created) \(isCrossRepository) \(head) \(TripwireTests.url(number).absoluteString)' ;;
+                    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) \(isCrossRepository) \(head) \(TripwireTests.url(number).absoluteString)" ;;
                 *) echo 'error connecting to api.github.com' >&2; exit 1 ;;
                 esac
                 """,
@@ -919,18 +918,15 @@ struct JobCenterTests {
         }
         let job = scene.center.startCorrection(request(scene))
         await job.task?.value
-        return (scene, job, opened)
+        return (scene, job)
     }
 
-    @Test("a pull request from another branch, opened just before the job, leaves it in review with its own diff")
+    @Test("a pull request from another branch, opened while the job ran, leaves it in review with its own diff")
     func tripwireWithAnotherBranchesPullRequest() async throws {
-        guard let (scene, job, opened) = try await Self.correction(
+        guard let (scene, job) = try await Self.correction(
             whileListing: "manual/B", number: 53)
         else { return }
         defer { scene.delete() }
-        let started = try #require(job.startedAt)
-        #expect(opened < started && opened >= started.addingTimeInterval(-60),
-                "the premise: opened in the minute before the job started")
 
         #expect(job.state == .awaitingReview, "\(job.state)")
         #expect(job.notice?.tone == .warning)
@@ -950,7 +946,7 @@ struct JobCenterTests {
 
     @Test("a pull request from the job's branch name in another repository leaves it in review")
     func tripwireWithAForksPullRequest() async throws {
-        guard let (scene, job, _) = try await Self.correction(
+        guard let (scene, job) = try await Self.correction(
             whileListing: "fix/page", isCrossRepository: true, number: 54)
         else { return }
         defer { scene.delete() }
@@ -963,7 +959,7 @@ struct JobCenterTests {
 
     @Test("a pull request from the job's own branch opens the job, and its worktree is kept")
     func tripwireWithTheJobsOwnPullRequest() async throws {
-        guard let (scene, job, _) = try await Self.correction(whileListing: "fix/page", number: 52)
+        guard let (scene, job) = try await Self.correction(whileListing: "fix/page", number: 52)
         else { return }
         defer { scene.delete() }
         #expect(job.branch == "fix/page")
