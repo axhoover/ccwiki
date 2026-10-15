@@ -137,6 +137,7 @@ discoverable rather than folklore.
 | ⌥⌘P | Show Paper, on a reference page |
 | ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size, in every tab; in a paper window, Zoom In / Zoom Out / Zoom to Fit |
 | ⇧⌘H | Go home |
+| ⌥⌘C / ⌥⇧⌘C | Copy proof as LaTeX / as wiki Markdown (Relations Explorer) |
 | Esc | Dismiss any sheet or the find bar |
 
 **Clicks say where a page opens**, as in Safari

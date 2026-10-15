@@ -371,9 +371,16 @@ extension ExplorerResult {
         let statement = "\(writer.conjunction(start)) "
             + (recorded ? DerivationWording.recordedArrow : DerivationWording.derivedArrow)
             + " \(writer.label(target))"
-        // Copy Proof as Text on the row and on every step of its proof.
+        // Copy Proof As on the row and on every step of its proof. A refuted
+        // start makes the implication vacuous, and the copies say so.
+        let refutations = start.compactMap { writer.derivation.curation.refuted[$0] }
         let copy = ProofCopy(statement: statement, relationCount: proof.relationIDs.count,
-                             depth: fact.depth, lines: ProofOutline.copyLines(proof, writer: writer))
+                             depth: fact.depth, lines: ProofOutline.copyLines(proof, writer: writer),
+                             export: ProofExport(
+                                proof: proof, start: start, target: target, depth: fact.depth,
+                                chainClass: fact.chainClass,
+                                unstatedSteps: writer.unstatedSteps(proof),
+                                refutations: refutations, manifest: writer.manifest))
         let outline = ProofOutline.attaching(
             copy, to: ProofOutline.rows(proof, idPrefix: id + "/proof", writer: writer))
         guard let root = outline.first else { return nil }

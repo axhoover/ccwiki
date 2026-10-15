@@ -32,6 +32,26 @@ you already have.
 changed, and an open tab renders again only if its page did. A sync that
 changes nothing reloads nothing.
 
+**Copy a proof into a paper or a page.** In the Relations Explorer, Edit →
+Copy Proof As gives the proof on screen as LaTeX (⌥⌘C) or as wiki Markdown
+(⌥⇧⌘C). The LaTeX is an `enumerate`, one cited step per item, with
+CryptoBib keys where the reference has one; the Markdown links each step to
+its reduction's page. Copy BibTeX of Cited Works gives entries for the
+references CryptoBib doesn't have. The inspector's derived rows have the
+same submenu.
+
+**The explorer quotes the wiki for its adjustments.** relations.json leaves
+out some things the wiki's pages say: that a step needs sub-exponential
+hardness, that an assumption is broken, which direction of an equivalence a
+class covers. Where CCwiki takes one of these into account, the answer now
+ends with Adjustments, each with the passage of the wiki it rests on and a
+link to that section, and a refused step quotes its reason. If the wiki has
+since changed a quoted passage, CCwiki says so. Some steps now need more
+than before, and the answer says so. GPSW06 needs decisional BDH, and the
+PRP-to-PRF conversions need a superpolynomial domain. Kilian's OT-to-MPC
+step gives static malicious MPC with abort. The direction of ISIS/SIS
+whose parameters the wiki does not state is held back.
+
 ## 0.2.0 — unreleased
 
 **Ask whether one thing implies another.** Wiki → Relations Explorer (⇧⌘E)

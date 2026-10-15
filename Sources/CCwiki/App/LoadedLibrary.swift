@@ -53,7 +53,19 @@ struct LoadedLibrary: Sendable {
         // Every single-object closure in both model settings, the derived
         // barriers and the inspector's lookups: a few milliseconds, and it
         // must match this manifest exactly.
-        let derivation = timings.measure(.derivation) { Derivation(manifest: manifest) }
+        let derivation = timings.measure(.derivation) { () -> Derivation in
+            var built = Derivation(manifest: manifest)
+            // The bundled curation stays as reviewed while the wiki syncs
+            // daily, so each quote it cites is checked against this clone's
+            // page (about 30 small files), and one that has left its page is
+            // never shown as the page's text (relations-followups.md §2.5).
+            let contentRoot = cloneRoot.appending(path: "content")
+            let missing = built.missingQuotes { path in
+                try? String(contentsOf: contentRoot.appending(path: path), encoding: .utf8)
+            }
+            built.unverifiedCitations = Set(missing.map(\.citation))
+            return built
+        }
         let linkPreviews = timings.measure(.previews) {
             LinkPreviews(index: index, manifest: manifest, labels: labels)
         }

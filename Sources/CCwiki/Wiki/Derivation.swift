@@ -63,6 +63,11 @@ struct Derivation: Sendable {
     /// §2a's sentinel: a reduction whose `securityLoss` names one of these
     /// needs a `requires` entry in the curation.
     static let regimeWords = ["sub-exponential", "subexponential", "quasi-polynomial", "quasipolynomial"]
+    /// R14 from the record itself (relations-followups.md §4.4): the sentence
+    /// a refutation the manifest records with `refutedBy` reads. The engine
+    /// has the manifest but no labels, so it says where the attack is rather
+    /// than naming the object.
+    static let recordedRefutationText = "Its page records the attack."
 
     /// The order every id is sorted in: Python's `sorted` on `str`, which
     /// compares code points, which is UTF-8 byte order. `String`'s own `<`
@@ -391,6 +396,19 @@ struct Derivation: Sendable {
     private(set) var derivedBarriers: [DerivedBarrier] = []
     private var linkTables: [Options: LinkTable] = [:]
 
+    /// The curation's citations whose quote is no longer on its page in this
+    /// clone (relations-followups.md §2.5). The bundled curation stays as
+    /// reviewed while the wiki syncs daily, so the explorer says so beside
+    /// the quote instead of showing it as the page's text.
+    ///
+    /// Set on every library load from `missingQuotes(pageText:)`: by
+    /// `AppModel.loadLibrary` today, and by `LoadedLibrary.build` and
+    /// `.update` after reader-comforts, also when `update` reuses the
+    /// derivation. It depends on page text, not on the manifest, so nothing
+    /// in `init` can know it; empty means every quote was found, or the
+    /// check has not run.
+    var unverifiedCitations: Set<DerivationCuration.Citation> = []
+
     private struct LinkTable: Sendable {
         var implications: [String: [Link]] = [:]
         var sources: [String: [Link]] = [:]
@@ -412,7 +430,12 @@ struct Derivation: Sendable {
     }
 
     init(manifest: RelationsManifest, curation: DerivationCuration) {
-        let table = StepTable(manifest: manifest, curation: curation)
+        // R14 from the record: a manifest's `refutedBy` joins the working
+        // curation before anything reads it, and wins over the file's entry
+        // for the same object, so every rule that reads `refuted` applies it
+        // with no edit of its own (relations-followups.md §4.4).
+        let working = curation.adding(refutations: Self.recordedRefutations(in: manifest))
+        let table = StepTable(manifest: manifest, curation: working)
         let objects = ObjectTable(manifest: manifest)
         let order = ClassOrder(manifest: manifest)
 
@@ -461,7 +484,7 @@ struct Derivation: Sendable {
         for step in table.steps + table.quarantined { byKey[step.key] = step }
 
         self.manifest = manifest
-        self.curation = curation
+        self.curation = working
         self.steps = table.steps
         self.defaultSteps = table.defaultSteps
         self.quarantinedSteps = table.quarantined
@@ -527,6 +550,23 @@ struct Derivation: Sendable {
             return modelNodes[host]
         }
         return nil
+    }
+
+    /// R14 from the record (relations-followups.md §4.4, wiki-asks.md ask 2):
+    /// each object whose manifest record carries `refutedBy`, as a
+    /// refutation. Its source is the entries' citation keys, so the verdict
+    /// names the key once; its evidence, the entries as recorded. Sorted by
+    /// object id.
+    static func recordedRefutations(in manifest: RelationsManifest) -> [DerivationCuration.Refutation] {
+        let ids = manifest.objectsByID.keys.sorted(by: Derivation.precedes)
+        return ids.compactMap { id -> DerivationCuration.Refutation? in
+            guard let object = manifest.object(id), !object.refutedBy.isEmpty else { return nil }
+            let keys = object.refutedBy.compactMap { RelationText.citationKey($0) }
+            return DerivationCuration.Refutation(
+                objectID: id, source: keys.joined(separator: ", "),
+                text: Derivation.recordedRefutationText,
+                evidence: object.refutedBy.joined(separator: ", "))
+        }
     }
 
     /// The node's `type`, or "" when the manifest does not know it.
@@ -672,12 +712,18 @@ extension Derivation {
                     isReverse: false, hypotheses: relation.hypotheses,
                     conclusion: relation.conclusion, reductionClass: reductionClass)]
                 // R1: both directions of an equivalence, each with its own
-                // class. A direction takes the record's class only where the
-                // curation says `record`.
+                // class. A record that states its reverse class says which is
+                // which itself (wiki-asks.md ask 1), and the curation's table
+                // is not read for it; R3 still makes a stub unstated both
+                // ways. Otherwise a direction takes the record's class only
+                // where the curation says `record`.
                 if relation.kind == .equivalence, let first = relation.hypotheses.first {
                     let forwardClass: String
                     let reverseClass: String
-                    if let reviewed = curation.equivalences[id] {
+                    if let recorded = relation.reverseClass {
+                        forwardClass = reductionClass
+                        reverseClass = isStub ? Derivation.unstatedClass : recorded
+                    } else if let reviewed = curation.equivalences[id] {
                         forwardClass = reviewed.isForwardRecorded ? reductionClass : Derivation.unstatedClass
                         reverseClass = reviewed.isReverseRecorded ? reductionClass : Derivation.unstatedClass
                     } else {
@@ -693,8 +739,9 @@ extension Derivation {
                     ]
                 }
 
-                // R13: hypotheses that do not match the Statement.
-                let isQuarantined = curation.quarantine[id] != nil
+                // R13: a record that does not match the Statement, for the
+                // whole reduction or for one direction of an equivalence.
+                var heldDirections = 0
                 for direction in directions {
                     let step = Step(
                         relationID: id,
@@ -706,13 +753,15 @@ extension Derivation {
                         isStub: isStub,
                         requirements: curation.requirements(on: id, isReverse: direction.isReverse),
                         weakening: direction.isReverse ? nil : curation.weakens[id])
-                    if isQuarantined {
+                    if curation.quarantineReason(id, isReverse: direction.isReverse) != nil {
                         quarantined.append(step)
+                        heldDirections += 1
                     } else {
                         steps.append(step)
                     }
                 }
-                if isQuarantined {
+                // Excluded only when no direction of it is a step.
+                if heldDirections == directions.count {
                     excluded[.quarantined, default: []].append(id)
                 }
             }
