@@ -267,7 +267,7 @@ struct Frontmatter: Equatable, Sendable {
     /// more than a comment follows them. Known edge, as in `quotedScalar`:
     /// an escaped space or tab at the end of a double-quoted line (`\ `) is
     /// trimmed with the line, so it reads as an escaped line break, where
-    /// YAML keeps the space and folds the break to a second one.
+    /// YAML keeps the escaped space or tab and folds the break as usual.
     private static func flowSequence(
         _ first: String, _ lines: [String], from start: Int, indent: Int
     ) -> (items: [String], next: Int)? {
