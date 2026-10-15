@@ -432,11 +432,12 @@ struct GitReviewIntegrationTests {
 
     // MARK: Hooks
 
-    @Test("no hook runs from staging to the push, and the push sends the reviewed tree on the base")
-    func hooksNeverRun() async throws {
+    @Test("no hook runs from staging to the push, and the push sends the reviewed tree on the base",
+          arguments: HookTrap.Place.allCases)
+    func hooksNeverRun(_ place: HookTrap.Place) async throws {
         guard let scene = try await Scene.make() else { return }
         defer { scene.delete() }
-        let trap = try await HookTrap.install(beside: scene.clone)
+        let trap = try await HookTrap.install(beside: scene.clone, at: place)
         defer { trap.delete() }
         // The user's environment names the hooks too: the command line's
         // -c is read after it, as after every configuration file.
@@ -666,27 +667,38 @@ struct ReviewSnapshotIntegrationTests {
     }
 }
 
-/// Executable hooks in the directory a clone's `core.hooksPath` names, each
-/// leaving a marker when git runs it: what a maintainer's own hooks, or ones
-/// an agent planted, could do between a review and its push (§6.5). The
+/// Executable hooks where a clone's git finds them, each leaving a marker
+/// when git runs it: what a maintainer's own hooks, or ones an agent
+/// planted, could do between a review and its push (§6.5). The
 /// `post-commit` one also amends HEAD to add `extra.md`, which nobody
 /// reviewed, as in the PR #11 review.
 struct HookTrap {
     let hooks: URL
     let markers: URL
 
+    /// Where the hooks go.
+    enum Place: String, Sendable, CaseIterable {
+        /// The clone's own `.git/hooks`, git's default.
+        case gitDirectory
+        /// A directory beside the clone, which the clone's configuration
+        /// names as `core.hooksPath`.
+        case configuredPath
+    }
+
     static let names = [
         "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "post-rewrite",
         "post-index-change", "post-checkout", "reference-transaction", "pre-push",
     ]
 
-    /// Every hook in a directory beside `repository`, which its own
-    /// configuration then names as `core.hooksPath`.
-    static func install(beside repository: FixtureRepository) async throws -> HookTrap {
+    /// Every hook, for `repository` and so for its worktrees too, at `place`.
+    static func install(beside repository: FixtureRepository, at place: Place = .configuredPath)
+        async throws -> HookTrap {
         let parent = repository.root.deletingLastPathComponent()
         let name = repository.root.lastPathComponent
         let trap = HookTrap(
-            hooks: parent.appending(path: name + "-hooks"),
+            hooks: place == .gitDirectory
+                ? repository.root.appending(path: ".git/hooks")
+                : parent.appending(path: name + "-hooks"),
             markers: parent.appending(path: name + "-hook-markers"))
         let manager = FileManager.default
         try manager.createDirectory(at: trap.hooks, withIntermediateDirectories: true)
@@ -704,9 +716,11 @@ struct HookTrap {
             try manager.setAttributes(
                 [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
         }
-        let configured = await repository.run(
-            ["config", "core.hooksPath", trap.hooks.path(percentEncoded: false)])
-        try #require(configured.succeeded, "git config: \(configured.output)")
+        if place == .configuredPath {
+            let configured = await repository.run(
+                ["config", "core.hooksPath", trap.hooks.path(percentEncoded: false)])
+            try #require(configured.succeeded, "git config: \(configured.output)")
+        }
         return trap
     }
 

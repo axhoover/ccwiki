@@ -2513,10 +2513,12 @@ sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
 8. `commitReviewed` collapses an agent commit: the commit's tree is the
    reviewed tree, its only parent the base, and the branch and its reflog
    name it. A tree staged after the review is `notReviewed`, and the branch
-   stays. With the hooks of `PublisherTests` configured, and named again by
-   `GIT_CONFIG_COUNT`, staging, `commitReviewed` and `push` run none of
-   them; then git's own `reset --soft` and `commit --no-verify`, as Approve
-   used to run them, do run them, and `post-commit` amends HEAD.
+   stays. With the hooks of `PublisherTests` in the clone's own
+   `.git/hooks`, and again in a directory its `core.hooksPath` names, each
+   time also named by `GIT_CONFIG_COUNT`, staging, `commitReviewed` and
+   `push` run none of them; then git's own `reset --soft` and `commit
+   --no-verify`, as Approve used to run them, do run them, and
+   `post-commit` amends HEAD.
 9. The first push with the absence lease succeeds, a second push after an
    edit with `expecting:` succeeds, and a push with a stale lease is refused.
    With `pushedCommit` dropped and `pushingCommit` set, Approve recovers and
