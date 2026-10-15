@@ -613,8 +613,14 @@ struct DiffGuardTests {
         let prg = "---\ntype: primitive\nid: prg\n---\n\n# PRG\n\nA generator.\n"
         // trimEnd() drops trailing blank lines too.
         let crhf = "---\ntype: primitive\nid: crhf\n---\n\n# CRHF\n\nA hash function.\n\n\n"
-        // The new reduction's record, as the generator wrote it.
-        let json = try FixesDiffguardTests.manifest(reductions: [FixesDiffguardTests.reductionRecord()])
+        // The new reduction's record, as the generator wrote it, and the
+        // records of the pages it gave regions to, which every page in the
+        // diff is compared with.
+        let objects = [
+            ("owf", "one-way-function"), ("prg", "pseudorandom-generator"), ("crhf", "collision-resistant-hash"),
+        ].map { FixesDiffguardTests.objectRecord($0.0, page: "content/Primitives/\($0.1).md") }
+        let json = try FixesDiffguardTests.manifest(
+            objects: objects, reductions: [FixesDiffguardTests.reductionRecord()])
         let findings = Self.ingest([
             Self.added("content/Reductions/owf-to-prg-hill99.md", Self.reduction),
             Self.modified("content/Primitives/collision-resistant-hash.md", old: crhf, new: Self.withFirstRegion(crhf)),
