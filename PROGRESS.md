@@ -5,6 +5,48 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-15 — Publishing only what was reviewed, after the maintainer's review
+
+The maintainer reviewed PRs #10, #11 and #12 and reproduced two git
+mechanisms with real git. Both are fixed here, with an adversarial git
+review of each fix:
+
+- **Hooks could change what was published.** `--no-verify` does not turn
+  off every hook: a `post-commit` hook could amend HEAD, and the push sent
+  HEAD. Every git command Publisher runs now has `-c core.hooksPath=/dev/null`
+  and `-c core.fsmonitor=false`. Command-line `-c` beats every config file.
+- **The commit is built from the reviewed tree.** The review snapshot now
+  records the tree it was taken from (`ReviewSnapshot.tree`).
+  `commitReviewed` checks that `write-tree` gives that tree, and that the
+  digest of the base-to-tree diff matches. It builds the commit with
+  `commit-tree -p <base>`, checks its tree and parent, and moves the branch
+  with `update-ref`. The push names that SHA (`<sha>:refs/heads/<branch>`),
+  never HEAD.
+- **What git reads as the review now matches what it sends.** Git reads the
+  review through `--no-replace-objects` and `core.useReplaceRefs=false`, so
+  a `refs/replace` object cannot hide a file that push would still send.
+  `--ignore-submodules=none` stops a gitlink change from disappearing under
+  `diff.ignoreSubmodules`. `--no-follow-tags` keeps a tag out of the push.
+  If anything differs, nothing is pushed: the job returns to review with a
+  notice.
+- **An unrelated pull request no longer completes a job.** The tripwire's
+  `opened.first` fallback is gone. Only a PR from the job's own branch, in
+  the target repository and not from a fork, counts as this job's. Any
+  other new PR is named in a warning, and the job still reaches Awaiting
+  Review with its own diff.
+
+On the other PRs:
+
+- **#10:** a replaced PDF has a fresh `PaperRecord.revision`, which keys the
+  paper view.
+- **#12:** `isWorktree` also requires the admin folder's `commondir` to lead
+  to the clone's own `.git`.
+
+The tests use real git with every hook installed, each writing a marker.
+They check that none runs, that the committed tree and parent are the
+reviewed ones, and that a HEAD moved after the check does not change the
+SHA that is pushed.
+
 ## 2026-10-15 — The curation, after the maintainer's audit
 
 The maintainer audited 19 of the 42 curation entries for their theorem and

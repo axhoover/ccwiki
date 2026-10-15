@@ -899,8 +899,8 @@ struct GitService: Sendable {
     // MARK: Plumbing
 
     /// What git is given for `arguments`: `realObjects`, then `hooksOff`
-    /// when hooks are disabled, then `arguments`. What a transcript shows
-    /// of a command, so it shows what ran.
+    /// when hooks are disabled, then `arguments`. A transcript shows a
+    /// command this way: what ran, less any `-C <directory>`.
     func invocation(_ arguments: [String]) -> [String] {
         Self.realObjects + (hooksDisabled ? Self.hooksOff : []) + arguments
     }
