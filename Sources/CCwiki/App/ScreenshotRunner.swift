@@ -58,6 +58,14 @@ enum ScreenshotRunner {
         /// The app's own pages.
         case welcome
         case whatsNew
+        /// The paper window for the reference page at this path.
+        case paper(String)
+        /// A second reader window, opened on this page.
+        case window(String)
+        /// A new tab of the key reader window on this page: `tab:` in
+        /// front, `bgtab:` behind, once background tabs are on
+        /// (`WindowTabbing.joinsInBackground`); in front until then.
+        case tab(String, inBackground: Bool)
 
         static func parse(_ raw: String) -> Step? {
             let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
@@ -77,6 +85,10 @@ enum ScreenshotRunner {
             case "whatsnew": return .whatsNew
             case "settings": return .settings
             case "jobs": return .jobs
+            case "paper": return parts.count > 1 ? .paper(parts[1]) : nil
+            case "window": return parts.count > 1 ? .window(parts[1]) : nil
+            case "tab": return parts.count > 1 ? .tab(parts[1], inBackground: false) : nil
+            case "bgtab": return parts.count > 1 ? .tab(parts[1], inBackground: true) : nil
             default: return nil
             }
         }
@@ -84,10 +96,7 @@ enum ScreenshotRunner {
         var slug: String {
             switch self {
             case .home: "home"
-            case .page(let path):
-                (path as NSString).lastPathComponent
-                    .replacingOccurrences(of: ".md", with: "")
-                    .replacingOccurrences(of: " ", with: "-")
+            case .page(let path): Self.slug(ofPage: path)
             case .folder(let slug): "folder-\(slug)"
             case .switcher(let query): "switcher-\(query.isEmpty ? "empty" : query)"
             case .search(let query): "search-\(query.replacingOccurrences(of: " ", with: "-"))"
@@ -98,13 +107,27 @@ enum ScreenshotRunner {
             case .jobs: "jobs"
             case .welcome: "welcome"
             case .whatsNew: "whats-new"
+            case .paper(let path): "paper-" + Self.slug(ofPage: path)
+            case .window(let path): "window-" + Self.slug(ofPage: path)
+            case .tab(let path, let inBackground):
+                (inBackground ? "bgtab-" : "tab-") + Self.slug(ofPage: path)
             }
+        }
+
+        /// A page's file name, as a capture's file name can carry it.
+        private static func slug(ofPage path: String) -> String {
+            (path as NSString).lastPathComponent
+                .replacingOccurrences(of: ".md", with: "")
+                .replacingOccurrences(of: " ", with: "-")
         }
 
         /// Rendering a page needs longer to settle than flipping a picker.
         var settleMilliseconds: Int {
             switch self {
-            case .page, .folder, .home, .welcome, .whatsNew: 1500
+            case .page, .folder, .home, .welcome, .whatsNew, .paper: 1500
+            // A new window or tab loads its web view's shell before it can
+            // render.
+            case .window, .tab: 2500
             case .search: 900
             // An ingestion job is minutes, not milliseconds; `apply` waits for
             // a terminal state rather than guessing a duration.
@@ -115,8 +138,19 @@ enum ScreenshotRunner {
         }
     }
 
-    static func run(model: AppModel) {
-        guard let directory else { return }
+    /// Whether a reader window has started the plan. Every reader window
+    /// asks once its session has started; the plan runs once per process.
+    private static var hasStarted = false
+
+    /// `session` is the reader window that started the plan; `openWindow` is
+    /// that window's, for the steps that open a window of their own. Each
+    /// step drives the reader window that is key when it runs, which is
+    /// `session` until a `window:` or `tab:` step opens another. A `bgtab:`
+    /// tab is behind, so the steps after it drive the tab it joined, once
+    /// background tabs are on.
+    static func run(model: AppModel, session: ReaderSession, openWindow: OpenWindowAction) {
+        guard let directory, !hasStarted else { return }
+        hasStarted = true
         let plan = (ProcessInfo.processInfo.environment["CCWIKI_SHOT_PLAN"] ?? "home")
             .components(separatedBy: ",")
             .compactMap { Step.parse($0.trimmingCharacters(in: .whitespaces)) }
@@ -133,7 +167,8 @@ enum ScreenshotRunner {
             try? await Task.sleep(for: .milliseconds(900))
 
             for (offset, step) in plan.enumerated() {
-                await apply(step, model: model)
+                let reader = model.activeSession ?? session
+                await apply(step, model: model, session: reader, openWindow: openWindow)
                 try? await Task.sleep(for: .milliseconds(step.settleMilliseconds))
 
                 let name = String(format: "%02d-%@", offset + 1, step.slug)
@@ -142,7 +177,7 @@ enum ScreenshotRunner {
                 } else {
                     await capture(to: directory.appending(path: name + ".png"))
                 }
-                await teardown(step, model: model)
+                await teardown(step, model: model, session: reader)
                 try? await Task.sleep(for: .milliseconds(250))
             }
 
@@ -168,30 +203,32 @@ enum ScreenshotRunner {
         }
     }
 
-    private static func apply(_ step: Step, model: AppModel) async {
+    private static func apply(
+        _ step: Step, model: AppModel, session: ReaderSession, openWindow: OpenWindowAction
+    ) async {
         switch step {
         case .home:
-            model.openHome()
+            session.openHome()
         case .welcome:
-            model.showWelcome()
+            session.showWelcome()
         case .whatsNew:
-            model.showWhatsNew()
+            session.showWhatsNew()
         case .page(let path):
-            model.openPage(path)
+            session.openPage(path)
         case .folder(let slug):
-            model.open(.folder(slug: slug))
+            session.open(.folder(slug: slug))
         case .switcher(let query):
-            model.presentQuickSwitcher()
+            session.presentQuickSwitcher()
             try? await Task.sleep(for: .milliseconds(250))
             model.quickSwitcherQuery = query
             model.refreshQuickSwitcher()
         case .search(let query):
-            model.searchPresented = true
+            session.searchPresented = true
             try? await Task.sleep(for: .milliseconds(250))
             model.searchQuery = query
         case .inspector(let tab):
-            model.inspectorTab = tab
-            model.showInspector = true
+            session.inspectorTab = tab
+            session.showInspector = true
         case .appearance(let name, _):
             // The web view follows `NSAppearance`, so this exercises the
             // reader's dark palette as well as the chrome's.
@@ -224,6 +261,19 @@ enum ScreenshotRunner {
             }
             model.submitIngestion(source: source, pdf: nil, notes: "")
             await waitForJob(model: model)
+
+        case .paper(let path):
+            await PaperLibrary.applyShot(path, model: model, openWindow: openWindow)
+
+        case .window(let path):
+            openWindow(
+                id: CCwikiApp.mainWindowID,
+                value: ReaderWindow(opening: .page(path: path, anchor: nil)))
+
+        case .tab(let path, let inBackground):
+            // As a ⌘-click or ⇧⌘-click would: through the session, which
+            // asks its window's view to open the tab.
+            session.open(.page(path: path, anchor: nil), .newTab(inBackground: inBackground))
         }
     }
 
@@ -244,12 +294,12 @@ enum ScreenshotRunner {
         }
     }
 
-    private static func teardown(_ step: Step, model: AppModel) async {
+    private static func teardown(_ step: Step, model: AppModel, session: ReaderSession) async {
         switch step {
         case .switcher:
-            model.quickSwitcherPresented = false
+            session.quickSwitcherPresented = false
         case .search:
-            model.searchPresented = false
+            session.searchPresented = false
             model.searchQuery = ""
         case .settings:
             NSApp.windows.first { $0.title == "Settings" || $0.title == "Preferences" }?.close()

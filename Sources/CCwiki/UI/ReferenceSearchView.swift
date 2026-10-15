@@ -8,6 +8,7 @@ import SwiftUI
 /// it: the page that cites it, or the passage of its abstract.
 struct ReferenceSearchView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
 
     var body: some View {
         @Bindable var model = model
@@ -22,7 +23,10 @@ struct ReferenceSearchView: View {
             emptyDescription: "A citation key such as GGM86, an author, words of a title, "
                 + "or a topic. Add a year to narrow it: regev 2005.",
             countLabel: { "\($0) paper\($0 == 1 ? "" : "s")" },
-            open: { model.openReferenceResult($0, query: model.referenceQuery) }
+            open: { hit, disposition in
+                session.openReferenceResult(
+                    hit, query: model.referenceQuery, disposition: disposition)
+            }
         ) { hit in
             resultRow(hit)
         }

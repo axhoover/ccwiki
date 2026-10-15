@@ -1,7 +1,10 @@
 # Reader comforts: tabs and windows, reference PDFs, incremental indexing
 
-**Spec, 2026-10-12, revised after review the same day (§9). Nothing here is
-built.** Three features that change no
+**Spec, 2026-10-12, revised after review the same day (§9). Built the same
+day on `claude/reader-comforts`: Phase 0, A1–A6, B1–B3, C1–C6 and D1–D5.
+Not built: D6, which waits for a release-build measurement on a Mac (§3.2).
+Background tabs ship off (`WindowTabbing.joinsInBackground = false`) until
+§5's checks on a Mac.** Three features that change no
 fact the app shows, only how comfortable it is to read: more than one page
 open at once, the paper behind a reference page, and a sync that does only
 the work its pull calls for.
@@ -10,8 +13,9 @@ Everything below was read from the code at `640842b` and from the wiki at
 `ab81f02`: 877 pages, 1.40 MB of markdown, 3,664 wikilinks, 430 references,
 and a 343 KB `relations.json`. The corpus numbers were counted with throwaway
 scripts. Nothing was compiled or run: this machine has no Swift, and CI on
-macOS 15 is the only compiler. The timings in §3.1 are estimates and say so.
-Track D's first step replaces them with numbers from the CI runner.
+macOS 15 is the only compiler. The timings in §3.1 were estimates; D1's
+numbers from CI now stand beside them, measured on a debug build, so they
+cannot decide D6 (§3.2).
 
 > `CLAUDE.md` asks for the **swiftui-pro**, **typography-designer** and
 > **macos-design** skills before and after deciding on code. None is
@@ -45,7 +49,8 @@ recommendations that need a yes; §8 lists them as questions.
    page on cryptology.city; the link's context menu gains **Open Link on
    cryptology.city** for that. **(maintainer)**
 4. **⌘N is New Window and ⌘T is New Tab; both open Home.** Only the first
-   window of a launch opens the page read last (§1.7).
+   window of a launch, or the first after every reader window has closed,
+   opens the page read last (§1.7).
 5. **Search queries are app-wide; the sheets are per window.** ⌘S in any
    tab reopens on the last search. In a palette, Return opens the highlighted
    hit where you are; ⌘Return opens it in a background tab and leaves the
@@ -114,7 +119,9 @@ recommendations that need a yes; §8 lists them as questions.
   Folder Page in New Tab, Open Folder Page in New Window.
 - **The palettes** (⌘O, ⌘S, ⇧⌘R, ⇧⌘F): Return opens in place, ⌘Return in a
   background tab with the palette left open and its highlight kept, ⇧⌘Return
-  in a front tab, closing the palette. Both are key equivalents on
+  in a front tab, closing the palette. Until background tabs are on (§1.4),
+  ⌘Return opens a front tab and closes the palette too. Both are key
+  equivalents on
   zero-size, `opacity(0)` buttons (`.keyboardShortcut(.return, modifiers:
   .command)` and `[.command, .shift]`), as IngestSheet's Start Job is, so the
   field's `onSubmit` never fires as well. The Quick Switcher footer reads
@@ -313,9 +320,10 @@ If the source window is gone (closed in between), the new window stays a
 window of its own. Background placement is behind
 `WindowTabbing.joinsInBackground`, which ships `false`: every new tab opens in
 front until the maintainer has checked §5's tab items on a Mac and flipped
-it. If a live run shows flicker or a misplaced tab that cannot be fixed, the
-next fallback is a plain window. Either keeps every feature but the
-placement.
+it. Until then ⌘Return closes the palette, as ⇧⌘Return does
+(`LinkDisposition.keepsPaletteOpen`). If a live run shows flicker or a
+misplaced tab that cannot be fixed, the next fallback is a plain window.
+Either keeps every feature but the placement.
 
 **A palette stays open over a background tab.** If AppKit refuses to add a
 tab to a window with a sheet attached (a §5 check), ⌘Return closes the
@@ -343,7 +351,7 @@ stay enabled exactly when they are today: when a reader window is key.
 | Search References… | ⇧⌘R | `session.referenceSearchPresented` | a reader is key |
 | Print… | ⌘P | `session.printCurrentPage()` | `session.location != .empty` |
 | Bigger, Smaller, Actual Size | ⌘+ ⌘− ⌘0 | `model.pageZoom`, every tab | a reader is key; Actual Size when `pageZoom != 1` |
-| Zoom In, Zoom Out, Actual Size (the same items, retitled as in Preview) | ⌘+ ⌘− ⌘0 | `\.paperZoom`, the key paper window's `PDFView`; Actual Size turns `autoScales` back on | a paper window is key |
+| Zoom In, Zoom Out, Zoom to Fit (the same items, retitled for a PDF; Actual Size would mean 100%, as in Preview) | ⌘+ ⌘− ⌘0 | `\.paperZoom`, the key paper window's `PDFView`; Zoom to Fit turns `autoScales` back on | a paper window is key |
 | Toggle Inspector; Outline, Backlinks, Relations | ⌥⌘I; ⌥⌘1–3 | session | a reader is key |
 | Back, Forward | ⌘[ ⌘] | session | `canGoBack`, `canGoForward` |
 | Check for Updates…, Relaunch to Update | | model | as today |
@@ -416,7 +424,8 @@ review restored without a reader still needs git (§10).
 (§4.6), so the riskiest rule of Part 1 is tested without a window. Its
 inputs: the restored state, the window value's `opening`,
 `model.takePendingReaderLocation()`, `model.takeLaunchDocument()`,
-`model.takeColdStart()` (true for the first session of the process only) and
+`model.takeColdStart()` (true for the first session of the process, and
+again for the first after every reader window has closed) and
 `CCwikiSettings.lastPage` (nil under the screenshot harness). The rules:
 
 1. **A restored state wins.** It seeds the history, and the window value's
@@ -432,8 +441,11 @@ inputs: the restored state, the window value's `opening`,
    neither a restored page nor the launch document opens its opening, else
    the last page if this is the cold start, else Home.
 
-So a cold launch opens the last page, and ⌘N, ⌘T and the tab bar's + button
-open Home. A last page the wiki no longer has falls back to Home.
+So a cold launch opens the last page, and while a reader is open, ⌘N, ⌘T
+and the tab bar's + button open Home. A last page the wiki no longer has
+falls back to Home. Closing every reader window hands out the cold start
+again, so the next reader to open, from the Dock icon, ⌘N or ⌘T, is on the
+page read last, as after a relaunch.
 
 **A link that arrives before the wiki loads is kept.** While the wiki is not
 loaded, `session.open(.page…)` replaces the session's pending location
@@ -449,6 +461,7 @@ app then lands.
 | Quit and Keep Windows (⌥⌘Q, or Option held on the app menu's Quit) | The same, as when the setting is off |
 | A plain Quit with that setting on, which is the macOS default | One window: the launch document, else the last page, else Home. This is today's behaviour |
 | A relaunch CCwiki starts itself (Relaunch to Update, Replace and Relaunch, "Open CCwiki x.y") | As a plain Quit. Keeping tabs across it is in §7 |
+| Every reader window closed, then the Dock icon, ⌘N or ⌘T | As a plain Quit: one window at the last page, else Home. A page the explorer asked for meanwhile wins, and a paper window's Show Reference Page opens its own page |
 | A ccwiki:// link or a PDF from Finder | The reader window SwiftUI hands it to, which it brings forward; a reader window first if none is open |
 
 **Tab groups** are restored by AppKit's window restoration. That is expected
@@ -755,7 +768,8 @@ comes back online. One fetch runs per reference at a time, and
   For one you added it asks first, with **Remove** (destructive) and
   **Cancel**: "Remove the PDF you added?", then "CCwiki keeps no other
   copy.", plus "It can't download this paper." when there is no candidate or
-  the last fetch failed.
+  the last fetch failed. If the Trash refuses the file, the paper stays, and
+  an alert, "Couldn't Remove the PDF", gives the error's own words.
 - **Nothing is evicted automatically.** Settings ▸ Storage's existing "PDF
   library" row reveals the folder. Track C changes the "Working files"
   footer, which today calls every PDF a job input, to: "PDFs, the ones you
@@ -798,7 +812,7 @@ comes back online. One fetch runs per reference at a time, and
   as in Preview. It becomes first responder when the window appears, so
   Space and Page Down scroll at once. The view sets
   `.focusedSceneValue(\.paperZoom, …)`, so View ▸ Zoom In, Zoom Out and
-  Actual Size act on it (§1.5).
+  Zoom to Fit act on it (§1.5).
 - **Bottom strip.** 26 pt on `.bar`, matching the reader's status bar.
   Provenance on the left, in `Theme.Fonts.meta`, `.secondary`, so a wrong
   paper is noticed: "Downloaded from eprint.iacr.org · 12 Oct 2026" or "Added
@@ -863,7 +877,7 @@ it for every outcome but `.failed`, including `.alreadyCurrent`. So **every
 launch does all of this twice**: once from disk, and again when the launch
 sync finds nothing new. The estimates are order-of-magnitude guesses for an
 Apple-silicon Mac, made by reading the code against the corpus sizes. D1
-measures them (§3.8).
+measured the in-memory phases on CI, in a debug build (below, and §3.8).
 
 | Phase | Work | Estimate | After this spec |
 |---|---|---|---|
@@ -878,9 +892,28 @@ measures them (§3.8).
 | FTS rebuild | delete and insert 877 rows (1.40 MB), `optimize`, WAL checkpoint, both rankers | 200–500 ms, a few MB written | rows whose digest changed; nothing at all at launch |
 | re-render | the page on screen | 50–200 ms | each open tab whose page the pull affected (§3.6) |
 
-The first seven rows change only if D6 is built, which waits for D1's
-numbers (§3.2, item 3). Until then `LoadedLibrary.update` is `build`, and
-only the hashing is new.
+The first seven rows change only if D6 is built, which waits for a release
+build's numbers (§3.2, item 3). Until then `LoadedLibrary.update` is `build`,
+and only the hashing is new.
+
+**Measured by D1 on CI.** `IncrementalCorpusTests` in CI's `make test-corpus`,
+on the 877 pages, the fastest of 5 builds, per `LoadTimings` phase. CI
+measures a debug build (-Onone), run alongside the other suites, where pure
+Swift can be several times slower than in the app. These are debug numbers,
+**not comparable with §3.2's 300 ms threshold**, and they decide nothing:
+D6 waits for a release-build measurement on a Mac (§3.2, item 3).
+
+| Phase | What it covers | CI, debug |
+|---|---|---|
+| `read` | list the files, read and hash each once, parse the pages | 251.1 ms |
+| `index` | `WikiIndex.assemble`: the resolution tables | 18.7 ms |
+| `manifest` | decode `relations.json` | 7.7 ms |
+| `labels` | `RelationLabels` | 53.8 ms |
+| `backlinks` | `backlinkMap()` | 680.3 ms |
+| `grep` | `TextGrep` | 32.0 ms |
+| `derivation` | `Derivation` | 471.0 ms |
+| `previews` | `LinkPreviews` | 1,042.8 ms |
+| **total** | | **2,557.4 ms** |
 
 **The git processes per sync today** (git store, no worktrees):
 
@@ -912,8 +945,12 @@ rebuilt.
 2. **Sync the search index by digest** (§3.4, last rows). A launch whose
    index matches writes nothing, and a small pull rewrites a few rows.
 3. **Reuse the in-memory artifacts a change does not touch** (§3.4), but only
-   if D1's numbers show the full build's in-memory phases (`WikiIndex.build`
-   to `LinkPreviews` in §3.1) above 300 ms in total on the CI runner. The
+   if D1's suite shows the full build's in-memory phases (`WikiIndex.build`
+   to `LinkPreviews` in §3.1) above 300 ms in total in a release build:
+   `CCWIKI_WIKI=… swift test -c release -Xswiftc -enable-testing
+   --no-parallel --filter IncrementalCorpusTests`, which the maintainer runs
+   on a Mac. No CI job runs it. CI's `make test-corpus` report is a debug
+   build run beside the other suites, so it is only indicative (§3.1). The
    estimate is 100–300 ms saved off the main actor, once per pull that
    changed something, and the launch build stays full anyway. Below the
    threshold, `SWIFTUI-RULES` §3.2's warning against self-patching caches
@@ -1111,10 +1148,11 @@ D1 lands before any incremental code:
   afterwards that `ContentFingerprints.scan` of `CCWIKI_WIKI` is unchanged.
   Its search sync uses a temporary SQLite file, never `paths.searchDatabase`.
 
-The output lands in the CI log beside the relevance report. These numbers
-replace the estimates in §3.1 in the integration PR, and decide whether D6
-is built (§3.2). No test fails on time, because shared runners are too noisy
-for that.
+The output lands in the CI log beside the relevance report, and its head
+says which build it measured. CI's run is a debug build, so its numbers
+stand beside §3.1's estimates as debug numbers and decide nothing. Only the
+release-build run of §3.2, item 3, on a Mac, decides whether D6 is built. No
+test fails on time, because shared runners are too noisy for that.
 
 ---
 
@@ -1148,7 +1186,7 @@ policy and moves `pageZoom`, so it gets the same review as a track.
 | `UI/ReaderView.swift` | `ShowPaperButton(page: page)` in `referenceBar`, after the Source link |
 | `UI/RootView.swift` | `.task` calls `loadLibrary(reason: .launch)` and `ScreenshotRunner.run(model: model, openWindow: openWindow)` |
 | `UI/SettingsView.swift` | Rebuild calls `model.rebuildLibrary()`. The "Working files" footer's first sentence becomes "The search index is derived and safe to delete at any time; Rebuild reads every page again and rebuilds it." |
-| `App/CCwikiApp.swift` | The Paper `WindowGroup`, declared after the reader's, which stays the first scene because SwiftUI opens the first `WindowGroup` when nothing is restored (corrections' editor scene follows the same rule). Its content with `.environment(model)`, `.onAppear { appDelegate.model = model }` and `.handlesExternalEvents(matching: [])`, and `paperWindowID`. A `WindowReader` on the Jobs and explorer scenes' content sets `tabbingMode = .disallowed`. Wiki ▸ Show Paper (⌥⌘P), last in the page group after Copy Wikilink (corrections' group follows it behind a divider, §10), inside `if ShowPaperCommand.isAvailable`, so no dead item ships (`SWIFTUI-RULES` §7.4); Track C flips the constant. The three zoom items read `@FocusedValue(\.paperZoom)` first: when it is present they are titled Zoom In, Zoom Out and Actual Size and act on it. Actual Size reads `model.pageZoom` |
+| `App/CCwikiApp.swift` | The Paper `WindowGroup`, declared after the reader's, which stays the first scene because SwiftUI opens the first `WindowGroup` when nothing is restored (corrections' editor scene follows the same rule). Its content with `.environment(model)`, `.onAppear { appDelegate.model = model }` and `.handlesExternalEvents(matching: [])`, and `paperWindowID`. A `WindowReader` on the Jobs and explorer scenes' content sets `tabbingMode = .disallowed`. Wiki ▸ Show Paper (⌥⌘P), last in the page group after Copy Wikilink (corrections' group follows it behind a divider, §10), inside `if ShowPaperCommand.isAvailable`, so no dead item ships (`SWIFTUI-RULES` §7.4); Track C flips the constant, and the integration removed the gate once it was always true. The three zoom items read `@FocusedValue(\.paperZoom)` first: when it is present they are titled Zoom In, Zoom Out and Zoom to Fit and act on it. Actual Size reads `model.pageZoom` |
 | `App/ScreenshotRunner.swift` | `run(model:openWindow:)`. The step `paper:<path>` calls `PaperLibrary.applyShot` |
 | `scripts/shots.sh` | Launches the app with `-ApplePersistenceIgnoreState YES`, so the maintainer's own windows never enter a capture, and sets `CCWIKI_PAPER_FIXTURES` to `Tests/CCwikiTests/Fixtures/papers` unless it is set |
 
@@ -1217,7 +1255,8 @@ policy and moves `pageZoom`, so it gets the same review as a track.
   - C4 `PaperFetcher` and the streaming transport, with a fake transport;
   - C5 the `PaperLibrary` state machine, with `cancel`;
   - C6 the window (with its launch task and zoom), the button, the command
-    (`ShowPaperCommand.isAvailable = true`), the fixture and the `paper:`
+    (`ShowPaperCommand.isAvailable = true`, a gate the integration then
+    removed), the fixture and the `paper:`
     shots.
 - **Shots never touch the network or the real library.** Under
   `CCWIKI_SHOTS`, `PaperLibrary.init(paths:)` keeps papers in a fresh
@@ -1326,11 +1365,10 @@ struct WindowReader: NSViewRepresentable {
 struct PaperZoomAction: Sendable {
     let zoomIn: @MainActor @Sendable () -> Void
     let zoomOut: @MainActor @Sendable () -> Void
-    let actualSize: @MainActor @Sendable () -> Void   // autoScales back on
+    let zoomToFit: @MainActor @Sendable () -> Void    // autoScales back on
 }
 extension FocusedValues { var paperZoom: PaperZoomAction? { get set } }
 enum ShowPaperCommand {
-    static let isAvailable: Bool         // false until C6
     @MainActor static func isEnabled(for page: WikiPage?) -> Bool
     @MainActor static func perform(_ page: WikiPage, model: AppModel,
                                    openWindow: OpenWindowAction)
@@ -1496,7 +1534,7 @@ func expectReaderWindow(_ request: ReaderWindowRequest)
 func takeTabbing(for windowID: UUID) -> ReaderWindowRequest?
 func launchIfNeeded() async
 func takeLaunchDocument() -> Document?
-func takeColdStart() -> Bool                         // true once per process
+func takeColdStart() -> Bool                         // once per process, and after the last reader closes
 func takePendingReaderLocation() -> Location?
 func noteVisited(_ path: String)                     // recents and lastPage
 func documentRequest(_ document: Document) -> RenderRequest
@@ -1608,6 +1646,10 @@ struct PaperRecord: Codable, Equatable, Sendable {
     let origin: Origin
     let addedAt: Date
     let bytes: Int64
+    /// New on every keep; the paper window's view identity, since a
+    /// replacement can match the old paper's name, size and second. A record
+    /// from before it existed gets one made from its other fields.
+    let revision: String
 }
 struct PaperStore: Sendable {
     let directory: URL                   // AppPaths.papers, or a temporary one for shots
@@ -1636,7 +1678,7 @@ final class PaperLibrary {
     func retry(_ page: WikiPage)
     func cancel(_ referencePath: String) // back to .notDownloaded
     func adopt(_ pdf: URL, for page: WikiPage) throws
-    func remove(_ referencePath: String)
+    func remove(_ referencePath: String) throws      // the window shows why it failed
     static func applyShot(_ referencePath: String, model: AppModel,
                           openWindow: OpenWindowAction) async
 }
@@ -1867,13 +1909,21 @@ fixture transport, and keep it in a temporary library.
 
 - **Tabs.**
   - ⌘T and ⌘-click never flash a separate window before the tab appears.
-  - A background tab leaves the current tab selected and key; then flip
-    `joinsInBackground`.
   - The tab bar's + button, if macOS shows one, opens Home.
   - Switching tabs, minimising, and Move Tab to New Window keep each tab's
     history and do not re-render its page.
-  - ⌘Return in a palette adds a tab while the palette's sheet stays up (if
-    not, close the palette first, §1.4).
+  - **Background tabs, in a local build.** While `joinsInBackground` is
+    false, every tab opens in front and ⌘Return closes the palette, so
+    neither check below can be seen. Set
+    `WindowTabbing.joinsInBackground = true` (UI/WindowTabbing.swift). That
+    turns on background placement for ⌘-click, middle-click, Open in New
+    Tab and ⌘Return, keeps a palette open after ⌘Return (`keepsPaletteOpen`),
+    and makes `bgtab:` differ from `tab:`. Then check that:
+    - a background tab leaves the current tab selected and key;
+    - ⌘Return in a palette adds a tab while the palette's sheet stays up (if
+      not, make `keepsPaletteOpen` false, §1.4).
+
+    Commit the flip only if both pass.
 - **Sidebar.** ⌘-click on a Cited by, backlink or relation row opens a
   background tab; the tree's rows offer Open in New Tab and Open in New
   Window from their context menu.
@@ -2015,8 +2065,8 @@ Each has a recommended answer; the spec is written as if it were yes.
 8. **Merge order with the other features in flight.** Should this feature
    merge to `main` after relations-followups and before corrections?
    *Recommended: yes (§10).*
-9. **In-memory reuse only if measured.** Should D6 be built only when D1
-   shows the in-memory phases above 300 ms on the CI runner?
+9. **In-memory reuse only if measured.** Should D6 be built only when D1's
+   suite shows the in-memory phases above 300 ms in a release build (§3.2)?
    *Recommended: yes (§3.2); otherwise the self-patching costs more than it
    saves.*
 
@@ -2147,7 +2197,7 @@ feature adds its own rows to it. None collides:
 |---|---|---|---|
 | ⌘N, ⌘T | New Window, New Tab | always | this |
 | ⌥⌘P | Wiki ▸ Show Paper | a reference page in the key reader | this |
-| ⌘+ ⌘− ⌘0 | the same items, titled Zoom In, Zoom Out, Actual Size | a paper window | this |
+| ⌘+ ⌘− ⌘0 | the same items, titled Zoom In, Zoom Out, Zoom to Fit | a paper window | this |
 | ⌘↩, ⇧⌘↩ | open the highlighted hit in a background or a front tab | inside a palette | this |
 | ⌥⌘E | Wiki ▸ Edit Page… | a wiki page in the key reader | corrections |
 | ⌘↩ | Jobs ▸ Review Changes | an editor window | corrections |

@@ -82,6 +82,39 @@ navigation for free.
 - **Status bar**: sync state, the current revision, and a warnings menu. Quiet,
   26 pt, and it never interrupts reading.
 
+### Windows and tabs
+
+Every reader window, and every tab of one, is that whole shape again, with a
+page of its own ([reader-comforts.md](reader-comforts.md) §1.6). Tabs are
+macOS's own window tabs, so the tab bar, Show All Tabs, Merge All Windows,
+Move Tab to New Window, ⌃Tab and ⌘W all come from the system and look as they
+do in Finder and Safari.
+
+- **What is the window's own:** its page, Back and Forward, scroll position
+  and find bar; the inspector's visibility and tab, and the outline,
+  backlinks and relations of its own page; the sidebar's selection and open
+  folders, so opening a page reveals it in its own window's sidebar only; its
+  palettes and sheets; and a render error in its status bar. Its title is
+  its page's display title, which is what its tab and the Window menu show.
+- **What every window shares:** the wiki, the tree and its counts, Hide
+  stubs, the search index, jobs, sync state, warnings, settings, text size,
+  recent pages, and the palettes' queries, so ⌘S in any tab reopens on the
+  last search.
+- **A new window starts as the last one was left.** Its inspector and open
+  folders are those of the window changed most recently, and it opens Home.
+  Only the first window of a launch, or the first after every reader window
+  has closed (the Dock icon, ⌘N), opens the page read last.
+- **The ingest sheet stays on its window.** It is pinned to the window that
+  asked for it, and a click on another reader window never moves it or its
+  link, notes and PDF.
+- **Readers tab only with readers.** Papers tab with papers when the system
+  prefers tabs; Jobs and the explorer never tab.
+- **Restoration is the system's.** When macOS restores windows, each reader
+  window and tab comes back with its page, reading position, history,
+  inspector and folders. After a plain Quit, with "Close windows when
+  quitting an application" on, as macOS ships, one window opens on the page
+  read last.
+
 ## 4. Keyboard
 
 Every primary action has a shortcut and every shortcut is in a menu, so it is
@@ -89,22 +122,59 @@ discoverable rather than folklore.
 
 | | |
 |---|---|
+| ⌘N | New window, at Home |
+| ⌘T | New tab of the reader window in front, at Home; a window when no reader is in front |
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page, next, previous |
-| ⌘S (or ⌘S) | Search all pages |
+| ⌘S | Search the wiki |
+| ⇧⌘R | Search references |
+| ⇧⌘F | Find in all pages |
 | ⌘R | Sync with GitHub |
 | ⌘[ / ⌘] | Back / forward |
 | ⌥⌘I | Toggle inspector |
 | ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
 | ⌘P | Print, or Save as PDF from the print panel |
-| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size |
+| ⌥⌘P | Show Paper, on a reference page |
+| ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size, in every tab; in a paper window, Zoom In / Zoom Out / Zoom to Fit |
 | ⇧⌘H | Go home |
 | ⌥⌘C / ⌥⇧⌘C | Copy proof as LaTeX / as wiki Markdown (Relations Explorer) |
 | Esc | Dismiss any sheet or the find bar |
 
-Both palettes are keyboard-shaped: type, arrow, Return, with the shortcut hints
-rendered in the footer. A palette you have to reach for the mouse in is slower
-than the sidebar it replaces.
+**Clicks say where a page opens**, as in Safari
+([reader-comforts.md](reader-comforts.md) §1.4). One table serves a link in
+the page and every row that is a button (Cited by, the Reductions and
+References rows, Backlinks, Relations, palette rows), though a row, which
+SwiftUI draws, answers only the primary button:
+
+| | |
+|---|---|
+| Click; ⇧- or ⌥-click | Here |
+| ⌘-click; middle-click | A new tab, behind the one being read |
+| ⇧⌘-click | A new tab, in front |
+| ⌥⌘-click, with or without ⇧ | A new window |
+
+The same choices are in the context menus: **Open in New Tab** and **Open in
+New Window** come first in a row's menu, and a link in the page also offers
+**Open Link on cryptology.city**, which is what ⌘-click used to do. Two kinds
+of row keep their own ⌘-click: the sidebar tree's pages, which are `List`
+selection, as in Finder's and Mail's sidebars, and the inspector's derived
+rows, whose click shows a proof in the explorer rather than a page. Both
+still offer the menu items, a derived row straight after its Open “…”. A
+folder label's menu is Open Folder Page, then the same in a new tab and in a
+new window.
+
+The palettes (⌘O, ⌘S, ⇧⌘R, ⇧⌘F) are keyboard-shaped: type, arrow, Return,
+with the shortcut hints rendered in the footer as keycaps (`KeyHint`). A
+palette you have to reach for the mouse in is slower than the sidebar it
+replaces. Return opens the highlighted hit where you are. **⌘Return** opens
+it in a tab behind, and leaves the palette open with its highlight, so you
+can open hit after hit; **⇧⌘Return** opens it in a tab in front and closes
+the palette. The two are key equivalents on invisible buttons, so the field's
+own Return never fires as well. The footer names ⌘↩ alone: ⇧ means "in
+front" exactly as it does with ⌘-click, and another keycap would crowd the
+hints the palette is for. Until background tabs are switched on
+(`WindowTabbing.joinsInBackground`, after the by-eye check on a Mac), every
+new tab opens in front and ⌘Return closes the palette too.
 
 `.findNavigator` is macOS 26, so the find bar is hand-built over
 `WKWebView.find` (macOS 11+). `WKFindResult` only reports whether anything
@@ -279,7 +349,12 @@ make shots PLAN='page:Primitives/pseudorandom-function.md,dark'
 each step, waits for it to settle, writes a `.ready-N` marker and blocks;
 `scripts/shots.sh` captures the window with `screencapture -l` and answers with
 `.go-N`. Plan steps: `home`, `page:<path>`, `folder:<slug>`, `switcher:<query>`,
-`search:<query>`, `outline`, `backlinks`, `light`, `dark`.
+`search:<query>`, `outline`, `backlinks`, `light`, `dark`, and for windows and
+tabs `window:<path>` (a second reader window), `tab:<path>` (a new tab in
+front) and `bgtab:<path>` (a new tab behind, once background tabs are on),
+and `paper:<path>` (a reference's paper window, served from
+`CCWIKI_PAPER_FIXTURES`; Offline for a paper without a fixture). Each step
+drives the reader window or tab that was key most recently.
 
 The capture needs the **Screen Recording** permission (System Settings → Privacy
 & Security). Without it the script falls back to an in-app composite —

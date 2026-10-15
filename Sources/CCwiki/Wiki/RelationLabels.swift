@@ -444,3 +444,8 @@ struct RelationLabels: Sendable {
         }
     }
 }
+
+/// Whether the names a load hands the chrome changed: a page whose relation
+/// line or hover cards name an object renders again when they did
+/// (plans/reader-comforts.md §3.6).
+extension RelationLabels: Equatable {}

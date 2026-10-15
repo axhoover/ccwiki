@@ -32,9 +32,11 @@ import SwiftUI
 /// tooltip.
 struct RelationsView: View {
     @Environment(AppModel.self) private var model
+    /// The page this window is reading, and where its rows open.
+    @Environment(ReaderSession.self) private var session
 
     var body: some View {
-        let page = model.currentRelations
+        let page = session.currentRelations
 
         Group {
             if let diagnostic = model.relations.diagnostic {
@@ -88,7 +90,7 @@ struct RelationsView: View {
             }
             // What CCwiki derives by chaining the groups above. Object pages
             // only; on any other page this is empty and draws nothing.
-            DerivedRelationsSections(derivations: model.currentDerivations)
+            DerivedRelationsSections(derivations: session.currentDerivations)
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
@@ -275,7 +277,7 @@ struct RelationsView: View {
 
     private func relationRow(_ relation: Relation, edge: Edge, exploring: ExplorerQuery?) -> some View {
         Button {
-            model.openPage(relation.path)
+            session.open(.page(path: relation.path, anchor: nil), LinkDisposition.current)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: Theme.small) {
                 StatusBadge(status: relation.status, compact: true)
@@ -310,7 +312,7 @@ struct RelationsView: View {
         exploring: ExplorerQuery?
     ) -> some View {
         Button {
-            model.openPage(barrier.path)
+            session.open(.page(path: barrier.path, anchor: nil), LinkDisposition.current)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: Theme.small) {
                 Image(systemName: "nosign")
@@ -361,7 +363,7 @@ struct RelationsView: View {
         let object = model.relations.object(id)
         let label = model.relationLabels.label(id)
         return Button {
-            model.openRelationObject(id)
+            session.openRelationObject(id, disposition: LinkDisposition.current)
         } label: {
             HStack(spacing: Theme.small) {
                 Text(label)
@@ -504,27 +506,34 @@ struct RelationsView: View {
               let wikilink = WikilinkParser.links(in: link).first,
               let index = model.index,
               case .page(let path, let anchor) = index.resolve(
-                wikilink, from: model.location.path ?? "")
+                wikilink, from: session.location.path ?? "")
         else { return nil }
         return .page(path: path, anchor: anchor)
     }
 
+    /// A value is a link, so ⌘-click opens it in a tab behind this one, as
+    /// a link in the page does (reader-comforts §1.4).
     private func follow(_ target: FactTarget) {
+        let disposition = LinkDisposition.current
         switch target {
-        case .object(let id): model.openRelationObject(id)
-        case .page(let path, let anchor): model.openPage(path, anchor: anchor)
+        case .object(let id): session.openRelationObject(id, disposition: disposition)
+        case .page(let path, let anchor): session.open(.page(path: path, anchor: anchor), disposition)
         }
     }
 
     // MARK: Context menus
 
     /// The actions the sidebar and Backlinks offer for a page, plus the row's
-    /// own text, which is what you want when quoting a result.
+    /// own text, which is what you want when quoting a result. A new tab and
+    /// a new window come first, as on every row that is a button; Open, the
+    /// row's own click, follows them (reader-comforts §1.1).
     @ViewBuilder
     private func pageMenu(
         _ path: String, anchor: String? = nil, copyTitle: String, copyText: String
     ) -> some View {
-        Button("Open") { model.openPage(path, anchor: anchor) }
+        OpenElsewhereItems { session.open(.page(path: path, anchor: anchor), $0) }
+        Divider()
+        Button("Open") { session.openPage(path, anchor: anchor) }
         if let page = model.index?.pages[path] {
             if let url = AppModel.siteURL(slug: page.slug, anchor: anchor) {
                 Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }

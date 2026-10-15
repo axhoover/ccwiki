@@ -18,12 +18,9 @@ final class WebController: NSObject {
     private(set) var activeHeadingID: String?
     private(set) var lastRenderError: String?
     private(set) var isReady = false
-    /// The reader's text size. Mirrors `WKWebView.pageZoom`, which is not
-    /// observable, and is persisted.
-    private(set) var pageZoom: Double = CCwikiSettings.pageZoom
 
-    /// Set by the owner to act on a link click.
-    var onNavigate: ((CCwikiURL.Destination, _ modified: Bool) -> Void)?
+    /// Set by the owner to act on a link click, and on what the click meant.
+    var onNavigate: ((CCwikiURL.Destination, LinkDisposition) -> Void)?
     /// The page's own address on the site, for the page context menu.
     var siteURLProvider: (() -> URL?)?
     /// What "Explore From This Page…" would ask, for the page context menu;
@@ -45,14 +42,20 @@ final class WebController: NSObject {
     /// Searched for once the next render reports back.
     @ObservationIgnored private var pendingFind: [String]?
 
-    init(paths: AppPaths, webRoot: URL? = nil) {
+    /// An offline reader has nothing worth persisting, and a non-persistent
+    /// store means nothing about the wiki lands in a WebKit cache directory.
+    /// One for every reader: each store brings a network process of its own
+    /// (plans/reader-comforts.md §1.9).
+    @MainActor static let sharedDataStore: WKWebsiteDataStore = .nonPersistent()
+
+    /// `webRoot` is the pipeline to serve, staged once per launch
+    /// (`AppPaths.stagedWebRoot()`); `pageZoom` the text size to start at.
+    init(paths: AppPaths, webRoot: URL, pageZoom: Double) {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(
-            CCwikiSchemeHandler(bundleRoot: webRoot ?? paths.webRoot, contentRoot: paths.content),
+            CCwikiSchemeHandler(bundleRoot: webRoot, contentRoot: paths.content),
             forURLScheme: CCwikiURL.scheme)
-        // An offline reader has nothing worth persisting, and a non-persistent
-        // store means nothing about the wiki lands in a WebKit cache directory.
-        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore = WebController.sharedDataStore
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         // The macro table used to be injected here as a documentStart user
@@ -149,11 +152,10 @@ final class WebController: NSObject {
     static let zoomRange = 0.6...2.4
     static let zoomStep = 1.1
 
+    /// Applies a text size. The size is one preference for every reader, so
+    /// `AppModel.pageZoom` clamps it, persists it and hands it here.
     func setPageZoom(_ zoom: Double) {
-        let clamped = min(max(zoom, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
-        pageZoom = clamped
-        webView.pageZoom = clamped
-        CCwikiSettings.pageZoom = clamped
+        webView.pageZoom = zoom
     }
 
     func scrollTo(anchor: String) {
@@ -249,7 +251,8 @@ final class WebController: NSObject {
             guard let href = message["href"] as? String,
                   let destination = CCwikiURL.destination(of: href)
             else { return }
-            onNavigate?(destination, message["modified"] as? Bool ?? false)
+            // The keys held and the button, read as every click is read.
+            onNavigate?(destination, LinkDisposition.forClick(message: message))
 
         case "contextTarget":
             contextTarget = ReaderContextTarget(message: message)
@@ -316,28 +319,40 @@ extension WebController: WKNavigationDelegate {
 
         // A click that reached here rather than the JS handler — belt and
         // braces, and the layer that keeps a rogue link from loading anything.
+        // WebKit's own record of the button and keys stands in for the
+        // page's.
         if navigationAction.navigationType == .linkActivated {
             if let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) {
                 NSWorkspace.shared.open(url)
             } else if let destination = CCwikiURL.destination(of: url.absoluteString) {
-                onNavigate?(destination, false)
+                onNavigate?(destination, Self.disposition(of: navigationAction))
             }
         }
         decisionHandler(.cancel)
     }
+
+    /// What WebKit says clicked a link it followed itself.
+    fileprivate static func disposition(of action: WKNavigationAction) -> LinkDisposition {
+        LinkDisposition.forNavigation(
+            buttonNumber: action.buttonNumber, modifierFlags: action.modifierFlags)
+    }
 }
 
 extension WebController: WKUIDelegate {
-    /// `target="_blank"` must never spawn a window.
+    /// `target="_blank"` must never spawn a window: the web goes to the
+    /// browser, and the wiki's own pages to the app, as a click would.
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if let url = navigationAction.request.url,
-           let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+        guard let url = navigationAction.request.url else { return nil }
+        if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
             NSWorkspace.shared.open(url)
+        } else if let destination = CCwikiURL.destination(of: url.absoluteString),
+                  destination != .shell {
+            onNavigate?(destination, Self.disposition(of: navigationAction))
         }
         return nil
     }
@@ -372,12 +387,43 @@ final class ReaderWebView: WKWebView {
         // Copy LaTeX first, when the click was on a formula or an algorithm:
         // the one thing the default menu cannot offer, since the page shows
         // only glyphs.
-        let copyItems = controller?.contextTarget?.copyItems ?? []
+        let target = controller?.contextTarget
+        let copyItems = target?.copyItems ?? []
         if !copyItems.isEmpty {
             for (index, item) in copyItems.enumerated() {
                 menu.insertItem(Self.menuItem(for: item), at: index)
             }
             menu.insertItem(.separator(), at: copyItems.count)
+        }
+        // A link to a page opens in a new tab, a new window or on the site,
+        // and a link to a folder in the first two, in place of WebKit's Open
+        // Link in New Window. The items follow WebKit's Open Link, as
+        // Safari's do; without it they make a group of their own after the
+        // copy items.
+        let linkItems = target?.linkItems ?? []
+        if let destination = linkItems.first?.destination {
+            let onNavigate = controller?.onNavigate
+            let identifiers = menu.items.map { $0.identifier?.rawValue }
+            let afterOpenLink = ReaderContextTarget.indexAfterOpenLink(in: identifiers)
+            if let afterOpenLink {
+                // WebKit's Open Link loads the link with no click behind it,
+                // a navigation the delegate cancels, so the app's own Open
+                // Link, under WebKit's title, takes its place.
+                let openLink = afterOpenLink - 1
+                let title = menu.items[openLink].title
+                menu.removeItem(at: openLink)
+                menu.insertItem(ClosureMenuItem(title) {
+                    onNavigate?(destination, .here)
+                }, at: openLink)
+            }
+            var index = afterOpenLink ?? (copyItems.isEmpty ? 0 : copyItems.count + 1)
+            for entry in linkItems {
+                menu.insertItem(ClosureMenuItem(entry.title) {
+                    onNavigate?(entry.destination, entry.disposition)
+                }, at: index)
+                index += 1
+            }
+            if afterOpenLink == nil { menu.insertItem(.separator(), at: index) }
         }
         // The page itself, wherever the click was.
         let siteURL = controller?.siteURLProvider?()
@@ -434,9 +480,9 @@ final class ReaderWebView: WKWebView {
 }
 
 /// What the page reported under the pointer at a right-click: the formula,
-/// the pseudocode block, both or neither. Reported by `ccwiki.js` just ahead
-/// of the menu, and turned into the menu's copy items here, where they can
-/// be tested without a menu.
+/// the pseudocode block and the link, any or none of them. Reported by
+/// `ccwiki.js` just ahead of the menu, and turned into the menu's copy and
+/// link items here, where they can be tested without a menu.
 struct ReaderContextTarget: Equatable, Sendable {
 
     /// One copy entry at the top of the menu.
@@ -447,6 +493,14 @@ struct ReaderContextTarget: Equatable, Sendable {
         let isAlternate: Bool
     }
 
+    /// One link entry, after WebKit's Open Link: the link's page somewhere
+    /// other than here.
+    struct LinkItem: Equatable, Sendable {
+        let title: String
+        let destination: CCwikiURL.Destination
+        let disposition: LinkDisposition
+    }
+
     /// The formula's LaTeX as written on the page, without delimiters.
     let tex: String?
     /// The pseudocode block's source, `\algname{…}` taken out.
@@ -454,12 +508,19 @@ struct ReaderContextTarget: Equatable, Sendable {
     /// The same with the wiki's macros written out, for a document that
     /// does not have the preamble.
     let algorithmExpanded: String?
+    /// The `href` of the link under the pointer, when it is one the app
+    /// follows itself rather than the web or a place on the page.
+    let link: String?
 
-    /// An empty string counts as absent: there is nothing to copy.
-    init(tex: String? = nil, algorithm: String? = nil, algorithmExpanded: String? = nil) {
+    /// An empty string counts as absent: there is nothing to copy or open.
+    init(
+        tex: String? = nil, algorithm: String? = nil, algorithmExpanded: String? = nil,
+        link: String? = nil
+    ) {
         self.tex = tex?.isEmpty == false ? tex : nil
         self.algorithm = algorithm?.isEmpty == false ? algorithm : nil
         self.algorithmExpanded = algorithmExpanded?.isEmpty == false ? algorithmExpanded : nil
+        self.link = link?.isEmpty == false ? link : nil
     }
 
     /// The bridge message. A JavaScript `null` arrives as `NSNull`, which
@@ -468,7 +529,8 @@ struct ReaderContextTarget: Equatable, Sendable {
         self.init(
             tex: message["tex"] as? String,
             algorithm: message["algorithm"] as? String,
-            algorithmExpanded: message["algorithmExpanded"] as? String)
+            algorithmExpanded: message["algorithmExpanded"] as? String,
+            link: message["link"] as? String)
     }
 
     /// In menu order: the formula, then the algorithm, then the algorithm
@@ -488,6 +550,43 @@ struct ReaderContextTarget: Equatable, Sendable {
             }
         }
         return items
+    }
+
+    /// For a link to a page of the wiki, in menu order: a new tab, a new
+    /// window, the site (reader-comforts §1.1). A link to a folder gets the
+    /// tab and the window alone, as a folder label in the sidebar does.
+    /// Nothing for a file, which opens in an app of its own, or for anything
+    /// that is not a `ccwiki://` link.
+    var linkItems: [LinkItem] {
+        guard let link, let destination = CCwikiURL.destination(of: link) else { return [] }
+        switch destination {
+        case .page, .folder:
+            break
+        case .asset, .shell:
+            return []
+        }
+        var items = [
+            LinkItem(title: "Open Link in New Tab", destination: destination,
+                     disposition: .newTab(inBackground: true)),
+            LinkItem(title: "Open Link in New Window", destination: destination,
+                     disposition: .newWindow),
+        ]
+        if case .page = destination {
+            items.append(LinkItem(title: "Open Link on cryptology.city", destination: destination,
+                                  disposition: .onSite))
+        }
+        return items
+    }
+
+    /// WebKit's own Open Link, which the link items follow, where Safari
+    /// puts its own.
+    static let openLinkIdentifier = "WKMenuItemIdentifierOpenLink"
+
+    /// Where the link items go in a menu whose items carry `identifiers`, in
+    /// order: directly after WebKit's Open Link. nil when the menu has none;
+    /// the items then make a group of their own after the copy items.
+    static func indexAfterOpenLink(in identifiers: [String?]) -> Int? {
+        identifiers.firstIndex(of: openLinkIdentifier).map { $0 + 1 }
     }
 }
 

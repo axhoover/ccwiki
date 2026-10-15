@@ -1,0 +1,53 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 418 >>
+stream
+BT
+/F1 24 Tf
+1 0 0 1 72 700 Tm
+(CCwiki test fixture) Tj
+/F1 13 Tf
+1 0 0 1 72 658 Tm
+(This one-page PDF stands in for IACR ePrint 2002/022 in CCwiki's) Tj
+/F1 13 Tf
+1 0 0 1 72 635 Tm
+(tests and in the paper window of `make shots`.) Tj
+/F1 13 Tf
+1 0 0 1 72 612 Tm
+(It is not a copy of the paper, and says nothing about it.) Tj
+/F1 11 Tf
+1 0 0 1 72 589 Tm
+(Generated for Tests/CCwikiTests/Fixtures/papers/022.pdf.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Title (CCwiki test fixture) /Producer (CCwiki tests) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000000715 00000 n 
+0000000812 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R /Info 6 0 R >>
+startxref
+887
+%%EOF

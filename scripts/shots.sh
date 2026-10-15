@@ -13,6 +13,16 @@
 #   search:<query>            the ⇧⌘F full-text sheet, pre-filled
 #   outline | backlinks       flip the inspector
 #   light | dark              switch NSAppearance
+#   paper:<content-relative>  a reference page's paper window, served from
+#                             CCWIKI_PAPER_FIXTURES (Offline for any paper
+#                             without a fixture); it stays in front
+#   window:<content-relative> a second reader window on that page; the
+#                             steps after it drive the new window
+#   tab:<content-relative>    a new tab of the key reader window on that
+#                             page, in front; the steps after it drive it
+#   bgtab:<content-relative>  the same tab behind the one being read, once
+#                             WindowTabbing.joinsInBackground is on (in
+#                             front until then)
 #
 # The app pauses at each step and writes `.ready-N`; this script captures the
 # window with `screencapture -l` and answers with `.go-N`. That handshake is
@@ -29,6 +39,11 @@
 # "Application Support/CCwiki-Dev", which its first launch downloads; a release
 # that is open meanwhile is left alone. Windows are found by the pid of the
 # process started here, never by name.
+#
+# The app starts with -ApplePersistenceIgnoreState YES, so windows macOS saved
+# from your own use of it never come back into a capture. CCWIKI_PAPER_FIXTURES
+# defaults to Tests/CCwikiTests/Fixtures/papers; under the harness the app will
+# never fetch a paper.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -61,7 +76,8 @@ rm -f "$PROBE"
 CCWIKI_SHOTS="$OUT" \
 CCWIKI_SHOT_PLAN="$PLAN" \
 CCWIKI_SHOT_EXTERNAL="$EXTERNAL" \
-	"$APP/Contents/MacOS/CCwiki" >/dev/null 2>&1 &
+CCWIKI_PAPER_FIXTURES="${CCWIKI_PAPER_FIXTURES:-$ROOT/Tests/CCwikiTests/Fixtures/papers}" \
+	"$APP/Contents/MacOS/CCwiki" -ApplePersistenceIgnoreState YES >/dev/null 2>&1 &
 APP_PID=$!
 trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
 

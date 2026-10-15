@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// One full-text hit.
 struct SearchHit: Identifiable, Sendable {
@@ -47,8 +48,23 @@ struct ReferenceHit: Identifiable, Sendable {
     var id: String { path }
 }
 
-/// The derived search index: SQLite FTS5, rebuilt after every pull, safe to
-/// delete at any time.
+/// What one `SearchIndex.sync` wrote, for the log.
+struct SyncReport: Equatable, Sendable {
+    var inserted = 0, updated = 0, deleted = 0, unchanged = 0
+    var rebuiltFromScratch = false
+
+    /// Rows written, of any kind.
+    var writes: Int { inserted + updated + deleted }
+
+    /// "3 updated, 874 unchanged", or "rebuilt, 877 rows".
+    var summary: String {
+        if rebuiltFromScratch { return "rebuilt, \(inserted) rows" }
+        return "\(inserted) inserted, \(updated) updated, \(deleted) deleted, \(unchanged) unchanged"
+    }
+}
+
+/// The derived search index: SQLite FTS5, brought in line with the library
+/// after every load, safe to delete at any time.
 ///
 /// Nothing else in the app reads from it, and nothing in it is authoritative —
 /// if the file is missing or corrupt the app deletes it and rebuilds, and the
@@ -78,6 +94,11 @@ actor SearchIndex {
     /// External-content FTS5: the text lives once in `doc`, and `doc_fts`
     /// indexes it. Contentless would be smaller but `snippet()` needs the
     /// original text, and a search result without context is barely a result.
+    ///
+    /// `doc.hash` is the fingerprint of the file each row was built from, and
+    /// `meta` holds `builder`, the build that wrote the rows, so a load
+    /// rewrites only the rows whose file changed (plans/reader-comforts.md
+    /// §3.4).
     private static let schema = """
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
@@ -92,9 +113,16 @@ actor SearchIndex {
           title    TEXT NOT NULL,
           aliases  TEXT NOT NULL DEFAULT '',
           headings TEXT NOT NULL DEFAULT '',
-          body     TEXT NOT NULL
+          body     TEXT NOT NULL,
+          -- '' when the file's fingerprint was not known: it never matches.
+          hash     TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS doc_slug ON doc(slug);
+
+        CREATE TABLE IF NOT EXISTS meta(
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS doc_fts USING fts5(
           title, aliases, headings, body,
@@ -127,7 +155,8 @@ actor SearchIndex {
     /// Bump when the tables, tokenizer or weights change. `IF NOT EXISTS`
     /// would otherwise keep an old index behind the same file name. The
     /// index is derived, so a mismatch is answered by throwing it away.
-    static let schemaVersion = 2
+    /// Version 3 added `doc.hash` and `meta`.
+    static let schemaVersion = 3
 
     private func open() throws -> SQLiteDatabase {
         if let database { return database }
@@ -161,52 +190,224 @@ actor SearchIndex {
         }
     }
 
-    // MARK: Rebuild
+    // MARK: Writing
 
-    /// Rebuild from scratch. The corpus is ~300 pages and ~800 KB, so a full
-    /// rebuild takes about a tenth of a second — much simpler than tracking
-    /// which files a pull changed, and it cannot drift.
+    /// Rebuild from scratch: every row written again, and no `builder`
+    /// recorded, so the next `sync` rebuilds too.
     ///
     /// `backlinks` is `WikiIndex.backlinkMap()`, for the concept pages that
     /// cite each reference.
     func rebuild(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]] = [:]) throws {
-        ranker = ConceptRanker(pages: pages)
-        referenceRanker = ReferenceRanker(pages: pages, backlinks: backlinks)
-        let database: SQLiteDatabase
+        let pages = Self.sortedByPath(pages)
+        rank(pages, backlinks: backlinks)
+        _ = try writeAll(pages, digests: [:], builder: nil, in: try openOrReset())
+    }
+
+    /// Bring the index in line with a library load: what `AppModel` calls
+    /// after every one (plans/reader-comforts.md §3.4).
+    ///
+    /// The rows are kept by the fingerprint of the file each was built from,
+    /// and stamped with `builder`, the build that wrote them:
+    ///
+    /// - A `builder` that differs from the stamp (another app build, or a
+    ///   fresh file) rewrites every row, so a change to how rows are built
+    ///   rebuilds once with no one having to remember a version bump.
+    /// - Otherwise only the rows whose fingerprint differs are rewritten, new
+    ///   pages inserted and gone ones deleted, in one transaction. A load
+    ///   whose index already matches, as at most launches, writes nothing.
+    ///
+    /// The stamp is written in the same transaction as the rows, so a crash
+    /// never leaves it over rows it does not describe. Any doubt (a read that
+    /// fails, `CCWIKI_FULL_RELOAD=1`) is answered with the full rewrite.
+    @discardableResult
+    func sync(
+        pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]],
+        fingerprints: ContentFingerprints, builder: String
+    ) throws -> SyncReport {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let pages = Self.sortedByPath(pages)
+        rank(pages, backlinks: backlinks)
+
+        var database = try openOrReset()
+        let report: SyncReport
         do {
-            database = try open()
+            let stamped = try Self.builder(in: database)
+            if stamped != builder || LibraryChanges.areIgnored {
+                report = try writeAll(pages, digests: fingerprints.pages, builder: builder, in: database)
+            } else {
+                report = try writeChanges(
+                    pages, digests: fingerprints.pages, builder: builder, in: database)
+            }
         } catch {
             reset()
             database = try open()
+            report = try writeAll(pages, digests: fingerprints.pages, builder: builder, in: database)
         }
 
+        let message = "Search index: \(report.summary) in \(start.duration(to: clock.now))"
+        Logger.library.notice("\(message, privacy: .public)")
+        return report
+    }
+
+    /// The rankers, from pages sorted by path: their ties then fall the same
+    /// way whichever build made the rows.
+    private func rank(_ pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]]) {
+        ranker = ConceptRanker(pages: pages)
+        referenceRanker = ReferenceRanker(pages: pages, backlinks: backlinks)
+    }
+
+    private static func sortedByPath(_ pages: [WikiPage]) -> [WikiPage] {
+        pages.sorted { $0.path < $1.path }
+    }
+
+    private func openOrReset() throws -> SQLiteDatabase {
+        do {
+            return try open()
+        } catch {
+            reset()
+            return try open()
+        }
+    }
+
+    /// Every row deleted and written again, then the index optimized and
+    /// the log folded into the file.
+    private func writeAll(
+        _ pages: [WikiPage], digests: [String: String], builder: String?,
+        in database: SQLiteDatabase
+    ) throws -> SyncReport {
         try database.transaction {
             try database.execute("DELETE FROM doc")
-            let insert = try database.prepare("""
-                INSERT INTO doc(path, slug, kind, status, title, aliases, headings, body)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """)
-
+            let insert = try database.prepare(Self.insertRow)
             for page in pages {
-                insert.reset()
-                insert.bind(1, page.path)
-                insert.bind(2, page.slug)
-                insert.bind(3, page.kind.rawValue)
-                insert.bind(4, page.status.rawValue)
-                // References are filed under a citation key, so index the paper
-                // title too — nobody searches for "AGGM06" when they mean
-                // "one-way functions on NP-hardness".
-                insert.bind(5, page.kind == .reference
-                    ? "\(page.title) \(page.displayTitle)" : page.title)
-                insert.bind(6, page.aliases.joined(separator: "\n"))
-                insert.bind(7, page.headings().map(\.text).joined(separator: "\n"))
-                insert.bind(8, Self.indexableBody(page.body))
-                _ = try insert.step()
+                try Self.write(page, digest: digests[page.path], with: insert)
             }
+            try Self.stamp(builder, in: database)
         }
         try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('optimize')")
         try database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         indexedCount = pages.count
+        return SyncReport(inserted: pages.count, rebuiltFromScratch: true)
+    }
+
+    /// Only the rows whose file changed, came or went. FTS5's automerge keeps
+    /// the index in shape after a few writes; a pull that touched many pages
+    /// is optimized as a rebuild is.
+    private func writeChanges(
+        _ pages: [WikiPage], digests: [String: String], builder: String,
+        in database: SQLiteDatabase
+    ) throws -> SyncReport {
+        var stored = try Self.storedHashes(in: database)
+        var report = SyncReport()
+        var inserts: [WikiPage] = []
+        var updates: [WikiPage] = []
+        for page in pages {
+            guard let hash = stored.removeValue(forKey: page.path) else {
+                inserts.append(page)
+                continue
+            }
+            // A page with no fingerprint is always rewritten: nothing says
+            // its row still describes it.
+            if let digest = digests[page.path], digest == hash {
+                report.unchanged += 1
+            } else {
+                updates.append(page)
+            }
+        }
+        let deletions = stored.keys.sorted()
+        report.inserted = inserts.count
+        report.updated = updates.count
+        report.deleted = deletions.count
+        indexedCount = pages.count
+        guard report.writes > 0 else { return report }
+
+        try database.transaction {
+            let delete = try database.prepare("DELETE FROM doc WHERE path = ?")
+            for path in deletions {
+                delete.reset()
+                delete.bind(1, path)
+                _ = try delete.step()
+            }
+            // The `doc_au` trigger keeps the full-text index in step.
+            let update = try database.prepare(Self.updateRow)
+            for page in updates {
+                try Self.write(page, digest: digests[page.path], with: update)
+            }
+            let insert = try database.prepare(Self.insertRow)
+            for page in inserts {
+                try Self.write(page, digest: digests[page.path], with: insert)
+            }
+            try Self.stamp(builder, in: database)
+        }
+        if report.writes > Self.optimizeAfterWrites {
+            try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('optimize')")
+        }
+        try database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return report
+    }
+
+    /// More writes than this, and a sync optimizes the index as a rebuild
+    /// does; fewer are left to FTS5's automerge.
+    static let optimizeAfterWrites = 100
+
+    private static let insertRow = """
+        INSERT INTO doc(path, slug, kind, status, title, aliases, headings, body, hash)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        """
+
+    private static let updateRow = """
+        UPDATE doc SET slug = ?2, kind = ?3, status = ?4, title = ?5, aliases = ?6,
+          headings = ?7, body = ?8, hash = ?9
+        WHERE path = ?1
+        """
+
+    /// Binds `page`'s row to `statement`, one of the two above, and runs it.
+    private static func write(
+        _ page: WikiPage, digest: String?, with statement: SQLiteDatabase.Statement
+    ) throws {
+        statement.reset()
+        statement.bind(1, page.path)
+        statement.bind(2, page.slug)
+        statement.bind(3, page.kind.rawValue)
+        statement.bind(4, page.status.rawValue)
+        // References are filed under a citation key, so index the paper
+        // title too — nobody searches for "AGGM06" when they mean
+        // "one-way functions on NP-hardness".
+        statement.bind(5, page.kind == .reference
+            ? "\(page.title) \(page.displayTitle)" : page.title)
+        statement.bind(6, page.aliases.joined(separator: "\n"))
+        statement.bind(7, page.headings().map(\.text).joined(separator: "\n"))
+        statement.bind(8, indexableBody(page.body))
+        statement.bind(9, digest ?? "")
+        _ = try statement.step()
+    }
+
+    /// Each row's path and the fingerprint it was built from.
+    private static func storedHashes(in database: SQLiteDatabase) throws -> [String: String] {
+        var stored: [String: String] = [:]
+        let select = try database.prepare("SELECT path, hash FROM doc")
+        while try select.step() {
+            stored[select.string(0)] = select.string(1)
+        }
+        return stored
+    }
+
+    /// The build that wrote the rows, if one is recorded.
+    private static func builder(in database: SQLiteDatabase) throws -> String? {
+        let statement = try database.prepare("SELECT value FROM meta WHERE key = 'builder'")
+        return try statement.step() ? statement.string(0) : nil
+    }
+
+    /// Records `builder` as the build that wrote the rows; nil records none.
+    private static func stamp(_ builder: String?, in database: SQLiteDatabase) throws {
+        guard let builder else {
+            try database.execute("DELETE FROM meta WHERE key = 'builder'")
+            return
+        }
+        let statement = try database.prepare(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('builder', ?)")
+        statement.bind(1, builder)
+        _ = try statement.step()
     }
 
     /// Strip the markup that makes search results unreadable while keeping the
@@ -329,7 +530,7 @@ actor SearchIndex {
             FROM doc_fts
             JOIN doc d ON d.id = doc_fts.rowid
             WHERE doc_fts MATCH ?
-            ORDER BY bm25(doc_fts, 14.0, 10.0, 4.0, 1.0)
+            ORDER BY bm25(doc_fts, 14.0, 10.0, 4.0, 1.0), d.path
             LIMIT ?
             """)
         statement.bind(1, expression)

@@ -8,11 +8,15 @@ struct CCwikiApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
-        // An id, so the explorer can open a reader when none is on screen to
-        // show the page it was asked to open.
-        WindowGroup(id: CCwikiApp.mainWindowID) {
-            RootView()
-                .modifier(ReaderWindowHooks())
+        // A reader window or tab, each with a session of its own
+        // (plans/reader-comforts.md §1.3). The value is the window's identity
+        // and where it opens. Every value is new, so opening one always
+        // opens a window; the default is new too, and opens Home, for a
+        // window SwiftUI opens by itself. The id lets the explorer open a
+        // reader when none is on screen to show the page it was asked to
+        // open.
+        WindowGroup(id: CCwikiApp.mainWindowID, for: ReaderWindow.self) { $window in
+            ReaderWindowView(window: $window)
                 .environment(model)
                 .frame(
                     minWidth: Theme.windowMinWidth,
@@ -20,6 +24,8 @@ struct CCwikiApp: App {
                 // The delegate is made before the model's view exists; this is
                 // the first moment both are in hand.
                 .onAppear { appDelegate.model = model }
+        } defaultValue: {
+            ReaderWindow()
         }
         .defaultSize(
             width: Theme.windowDefaultWidth,
@@ -27,12 +33,37 @@ struct CCwikiApp: App {
         .windowResizability(.contentMinSize)
         .commands { CCwikiCommands() }
 
+        // A paper gets a window of its own, one per paper, keyed by its
+        // reference page's path: a PDF is a document, and it stays put while
+        // the reader moves through the wiki (plans/reader-comforts.md §2.2).
+        // After the reader's group, which has to stay the first scene:
+        // SwiftUI opens the first `WindowGroup` when nothing is restored.
+        WindowGroup("Paper", id: CCwikiApp.paperWindowID, for: String.self) { $referencePath in
+            PaperWindowView(referencePath: referencePath)
+                .environment(model)
+                .frame(minWidth: Theme.paperMinWidth, minHeight: Theme.paperMinHeight)
+                // A paper window restored on its own still needs the model.
+                // The view itself runs the launch and sets the tabbing
+                // identifier that keeps papers out of a reader's tabs.
+                .onAppear { appDelegate.model = model }
+        }
+        .defaultSize(width: Theme.paperDefaultWidth, height: Theme.paperDefaultHeight)
+        .defaultPosition(.trailing)
+        .windowResizability(.contentMinSize)
+        // Never for a ccwiki:// link or a PDF from Finder: those belong to a
+        // reader, and an empty paper window is no answer to either.
+        .handlesExternalEvents(matching: [])
+        // Nor from File ▸ New: the group's own New Paper Window item would
+        // open a window with no paper. Only Show Paper opens one.
+        .commandsRemoved()
+
         // Jobs get their own window rather than a fourth pane: the thing you
         // actually want is to watch a job run while reading the page it is
-        // going to edit.
+        // going to edit. Never a tab of anything (reader-comforts §1.8).
         Window("Jobs", id: CCwikiApp.jobsWindowID) {
             JobsView()
                 .environment(model)
+                .background { WindowReader { $0.tabbingMode = .disallowed } }
         }
         .defaultSize(width: 1000, height: 640)
         .keyboardShortcut("j", modifiers: [.command, .shift])
@@ -44,6 +75,7 @@ struct CCwikiApp: App {
         Window("Relations Explorer", id: CCwikiApp.explorerWindowID) {
             RelationsExplorerView()
                 .environment(model)
+                .background { WindowReader { $0.tabbingMode = .disallowed } }
         }
         .defaultSize(width: Theme.explorerDefaultWidth, height: Theme.explorerDefaultHeight)
         .windowResizability(.contentMinSize)
@@ -57,26 +89,7 @@ struct CCwikiApp: App {
     static let jobsWindowID = "ccwiki.jobs"
     static let explorerWindowID = "ccwiki.relations-explorer"
     static let mainWindowID = "ccwiki.main"
-}
-
-/// What a reader window does for the others: it counts itself, so the
-/// explorer knows whether a page it opens will be seen, and it answers the
-/// model's requests to open the explorer. `openWindow` is an environment
-/// action, so a view has to make the call; the requests come from AppKit's
-/// menus and from `AppModel.explore(_:)`. The Jobs window's requests are
-/// answered the same way, in `RootView`.
-private struct ReaderWindowHooks: ViewModifier {
-    @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
-
-    func body(content: Content) -> some View {
-        content
-            .onAppear { model.mainWindowCount += 1 }
-            .onDisappear { model.mainWindowCount -= 1 }
-            .onChange(of: model.explorerWindowRequests) { _, _ in
-                openWindow(id: CCwikiApp.explorerWindowID)
-            }
-    }
+    static let paperWindowID = "ccwiki.paper"
 }
 
 /// The one AppKit hook SwiftUI does not offer: a say in whether the app quits.
@@ -122,10 +135,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// Every primary action gets a shortcut and every shortcut appears in a menu,
 /// so it is discoverable rather than folklore. The actions reach the focused
 /// scene through `@FocusedValue` rather than through a shared singleton.
+///
+/// Two values, both published by the key reader window: its session, for
+/// everything about the page it shows, and the model, for what is app-wide
+/// (sync, updates, text size, ingestion). Neither is published by Jobs, the
+/// explorer, a paper or Settings, so the reader's commands are disabled there
+/// (plans/reader-comforts.md §1.5).
 struct CCwikiCommands: Commands {
     @FocusedValue(\.appModel) private var model
+    @FocusedValue(\.readerSession) private var session
     @FocusedValue(\.findAction) private var findAction
     @FocusedValue(\.searchAction) private var searchAction
+    /// Set while a paper window is key: the text-size items zoom the PDF.
+    @FocusedValue(\.paperZoom) private var paperZoom
     @FocusedValue(\.proofCopyAction) private var proofCopyAction
     @Environment(\.openWindow) private var openWindow
 
@@ -140,52 +162,85 @@ struct CCwikiCommands: Commands {
             }
         }
 
+        // The same three keys zoom a paper while its window is key, titled
+        // for what they do there. ⌘0 fits the PDF to the window again, as it
+        // opened, so it is Zoom to Fit: Actual Size means 100% in Preview
+        // (reader-comforts §1.5).
         CommandGroup(after: .toolbar) {
-            Button("Make Text Bigger") { model?.makeTextBigger() }
-                .keyboardShortcut("+", modifiers: .command)
-                .disabled(model == nil)
+            Button(paperZoom == nil ? "Make Text Bigger" : "Zoom In") {
+                if let paperZoom { paperZoom.zoomIn() } else { model?.makeTextBigger() }
+            }
+            .keyboardShortcut("+", modifiers: .command)
+            .disabled(paperZoom == nil && model == nil)
 
-            Button("Make Text Smaller") { model?.makeTextSmaller() }
-                .keyboardShortcut("-", modifiers: .command)
-                .disabled(model == nil)
+            Button(paperZoom == nil ? "Make Text Smaller" : "Zoom Out") {
+                if let paperZoom { paperZoom.zoomOut() } else { model?.makeTextSmaller() }
+            }
+            .keyboardShortcut("-", modifiers: .command)
+            .disabled(paperZoom == nil && model == nil)
 
-            Button("Actual Size") { model?.resetTextSize() }
-                .keyboardShortcut("0", modifiers: .command)
-                .disabled(model == nil || model?.webController.pageZoom == 1)
+            Button(paperZoom == nil ? "Actual Size" : "Zoom to Fit") {
+                if let paperZoom { paperZoom.zoomToFit() } else { model?.resetTextSize() }
+            }
+            .keyboardShortcut("0", modifiers: .command)
+            .disabled(paperZoom == nil && (model == nil || model?.pageZoom == 1))
 
             Divider()
 
-            Button("Toggle Inspector") { model?.showInspector.toggle() }
+            Button("Toggle Inspector") { session?.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.option, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
-            Button("Show Outline") { model?.showInspectorTab(.outline) }
+            Button("Show Outline") { session?.showInspectorTab(.outline) }
                 .keyboardShortcut("1", modifiers: [.option, .command])
-                .disabled(model == nil)
-            Button("Show Backlinks") { model?.showInspectorTab(.backlinks) }
+                .disabled(session == nil)
+            Button("Show Backlinks") { session?.showInspectorTab(.backlinks) }
                 .keyboardShortcut("2", modifiers: [.option, .command])
-                .disabled(model == nil)
-            Button("Show Relations") { model?.showInspectorTab(.relations) }
+                .disabled(session == nil)
+            Button("Show Relations") { session?.showInspectorTab(.relations) }
                 .keyboardShortcut("3", modifiers: [.option, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
             Divider()
 
-            Button("Back") { model?.goBack() }
+            Button("Back") { session?.goBack() }
                 .keyboardShortcut("[", modifiers: .command)
-                .disabled(model?.canGoBack != true)
+                .disabled(session?.canGoBack != true)
 
-            Button("Forward") { model?.goForward() }
+            Button("Forward") { session?.goForward() }
                 .keyboardShortcut("]", modifiers: .command)
-                .disabled(model?.canGoForward != true)
+                .disabled(session?.canGoForward != true)
         }
 
         CommandGroup(replacing: .newItem) {
-            Button("Quick Switcher…") { model?.presentQuickSwitcher() }
-                .keyboardShortcut("o", modifiers: .command)
-                .disabled(model == nil)
+            // A window of its own at Home, whichever window is key: only the
+            // first window of a launch opens the page read last (§1.7).
+            Button("New Window") {
+                openWindow(id: CCwikiApp.mainWindowID, value: ReaderWindow())
+            }
+            .keyboardShortcut("n", modifiers: .command)
 
-            Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
+            // At Home too, as a tab of the key reader window, in front, as
+            // in Safari. While the explorer, Jobs or a paper is key there is
+            // no reader to join, and it is a window of its own (§1.8).
+            Button("New Tab") {
+                let window = ReaderWindow()
+                if let model, let request = ReaderWindowRequest(
+                    opening: window, as: .newTab(inBackground: false),
+                    beside: session?.hostWindowNumber) {
+                    model.expectReaderWindow(request)
+                }
+                openWindow(id: CCwikiApp.mainWindowID, value: window)
+            }
+            .keyboardShortcut("t", modifiers: .command)
+
+            Divider()
+
+            Button("Quick Switcher…") { session?.presentQuickSwitcher() }
+                .keyboardShortcut("o", modifiers: .command)
+                .disabled(session == nil)
+
+            Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
         }
@@ -210,9 +265,9 @@ struct CCwikiCommands: Commands {
                 .disabled(findAction?.previous == nil)
 
             // ⇧⌘F, as Find in Project is in Xcode: the literal text, everywhere.
-            Button("Find in All Pages…") { model?.grepPresented = true }
+            Button("Find in All Pages…") { session?.grepPresented = true }
                 .keyboardShortcut("f", modifiers: [.shift, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
             // ⌘S, because searching is the thing a reader does most and ⌘S is
             // the easiest chord to reach. It is Save by convention, but CCwiki
@@ -223,9 +278,9 @@ struct CCwikiCommands: Commands {
                 .disabled(searchAction == nil)
 
             // ⇧⌘R, because ⌘R is Sync: reload, as in nearly every Mac app.
-            Button("Search References…") { model?.referenceSearchPresented = true }
+            Button("Search References…") { session?.referenceSearchPresented = true }
                 .keyboardShortcut("r", modifiers: [.shift, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
         }
 
         // A reader has no documents: no Save, Save As, Revert or Duplicate.
@@ -233,18 +288,18 @@ struct CCwikiCommands: Commands {
 
         // The page you are reading. The print panel's PDF menu is Save as PDF.
         CommandGroup(replacing: .printItem) {
-            Button("Print…") { model?.printCurrentPage() }
+            Button("Print…") { session?.printCurrentPage() }
                 .keyboardShortcut("p", modifiers: .command)
-                .disabled(model == nil || model?.location == .empty)
+                .disabled(session == nil || session?.location == .empty)
         }
 
         // The default "CCwiki Help" item opens a help book that does not
         // exist. These are what help there is.
         CommandGroup(replacing: .help) {
-            Button("Welcome to CCwiki") { model?.showWelcome() }
-                .disabled(model == nil)
-            Button("What's New in CCwiki") { model?.showWhatsNew() }
-                .disabled(model == nil)
+            Button("Welcome to CCwiki") { session?.showWelcome() }
+                .disabled(session == nil)
+            Button("What's New in CCwiki") { session?.showWhatsNew() }
+                .disabled(session == nil)
             Divider()
             Button("Report an Issue…") {
                 if let url = URL(string: "https://github.com/axhoover/ccwiki/issues/new") {
@@ -264,15 +319,15 @@ struct CCwikiCommands: Commands {
                 .disabled(model?.syncState.isRunning ?? true)
 
             // ⇧⌘H, as in Safari. ⌘0 is "Actual Size" everywhere else on the Mac.
-            Button("Go Home") { model?.openHome() }
+            Button("Go Home") { session?.openHome() }
                 .keyboardShortcut("h", modifiers: [.shift, .command])
-                .disabled(model == nil)
+                .disabled(session == nil)
 
-            Button("Show Sync Log…") { model?.syncLogPresented = true }
-                .disabled(model == nil)
+            Button("Show Sync Log…") { session?.syncLogPresented = true }
+                .disabled(session == nil)
 
-            Button("Random Page") { model?.openRandomPage() }
-                .disabled(model?.index == nil)
+            Button("Random Page") { session?.openRandomPage() }
+                .disabled(session == nil || model?.index == nil)
 
             Divider()
 
@@ -286,41 +341,49 @@ struct CCwikiCommands: Commands {
             // reader's page, so it is disabled unless a reader window is key
             // and its page has something to explore.
             Button("Explore From This Page") {
-                guard let model, let query = model.currentPageExplorerQuery else { return }
+                guard let model, let query = session?.currentPageExplorerQuery else { return }
                 model.explore(query)
                 openWindow(id: CCwikiApp.explorerWindowID)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift, .option])
-            .disabled(model?.canExploreCurrentPage != true)
+            .disabled(session?.canExploreCurrentPage != true)
 
             Divider()
 
             Button("Open on cryptology.city") {
-                guard let url = model?.currentSiteURL else { return }
+                guard let url = session?.currentSiteURL else { return }
                 NSWorkspace.shared.open(url)
             }
-            .disabled(model?.currentSiteURL == nil)
+            .disabled(session?.currentSiteURL == nil)
 
             Button("Copy Link") {
-                guard let model, let url = model.currentSiteURL else { return }
+                guard let model, let url = session?.currentSiteURL else { return }
                 model.copyToPasteboard(url.absoluteString)
             }
-            .disabled(model?.currentSiteURL == nil)
+            .disabled(session?.currentSiteURL == nil)
 
             Button("Copy Wikilink") {
-                guard let model, let page = model.currentPage else { return }
+                guard let model, let page = session?.currentPage else { return }
                 model.copyToPasteboard(page.wikilink)
             }
-            .disabled(model?.currentPage == nil)
+            .disabled(session?.currentPage == nil)
+
+            // ⌥⌘P: ⌘P is Print, and ⇧⌘P is Page Setup by convention.
+            Button("Show Paper") {
+                guard let model, let page = session?.currentPage else { return }
+                ShowPaperCommand.perform(page, model: model, openWindow: openWindow)
+            }
+            .keyboardShortcut("p", modifiers: [.command, .option])
+            .disabled(!ShowPaperCommand.isEnabled(for: session?.currentPage))
 
             Divider()
 
             Button("Reveal Page in Finder") {
-                guard let model, let page = model.currentPage else { return }
+                guard let model, let page = session?.currentPage else { return }
                 NSWorkspace.shared.activateFileViewerSelecting(
                     [model.paths.content.appending(path: page.path)])
             }
-            .disabled(model?.currentPage == nil)
+            .disabled(session?.currentPage == nil)
 
             Button("Reveal Clone in Finder") {
                 guard let model else { return }
@@ -330,7 +393,7 @@ struct CCwikiCommands: Commands {
         }
 
         CommandMenu("Jobs") {
-            Button("Ingest a Paper…") { model?.ingestSheetPresented = true }
+            Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model == nil)
 

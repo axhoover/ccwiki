@@ -1,8 +1,14 @@
 import SwiftUI
 
-/// The frame ⌘S and ⇧⌘R share: a field, a list you move through with the
-/// arrow keys and open with Return, and a footer. Each search supplies only
-/// its rows and what opening one does.
+/// The frame ⌘S, ⇧⌘R and ⇧⌘F share: a field, a list you move through with
+/// the arrow keys and open with Return, and a footer. Each search supplies
+/// only its rows and what opening one does.
+///
+/// Return opens the highlighted row where you are and closes the palette.
+/// ⌘Return opens it in a tab behind this one and leaves the palette open,
+/// with its highlight, so a reader can open hit after hit; ⇧⌘Return opens
+/// it in a tab in front and closes the palette (reader-comforts §1.1). A
+/// click reads the modifiers held, as a link does.
 struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == String {
     @Binding var query: String
     let placeholder: String
@@ -16,7 +22,9 @@ struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == Strin
     let emptyDescription: String
     /// "12 pages", "3 papers".
     let countLabel: (Int) -> String
-    let open: (Item) -> Void
+    /// Opens a row where the disposition says: here, or in a new tab or
+    /// window.
+    let open: (Item, LinkDisposition) -> Void
     @ViewBuilder let row: (Item) -> Row
 
     @Environment(\.dismiss) private var dismiss
@@ -44,7 +52,7 @@ struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == Strin
                     .textFieldStyle(.plain)
                     .font(Theme.Fonts.paletteTitle)
                     .focused($fieldFocused)
-                    .onSubmit(openHighlighted)
+                    .onSubmit { openHighlighted(.here) }
                 if !query.isEmpty {
                     Button {
                         query = ""
@@ -73,12 +81,14 @@ struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == Strin
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.tertiary)
                 }
+                KeyHint(key: "⌘↩", label: "New Tab")
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.escape, modifiers: [])
             }
             .padding(.horizontal, Theme.large)
             .padding(.vertical, Theme.small)
+            .background { PaletteTabShortcuts { openHighlighted($0) } }
         }
         .frame(width: 720, height: 540)
         .background(.regularMaterial)
@@ -123,7 +133,10 @@ struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == Strin
                                 .contentShape(.rect)
                                 .onTapGesture {
                                     highlightedID = item.id
-                                    openHighlighted()
+                                    openItem(item, LinkDisposition.current)
+                                }
+                                .contextMenu {
+                                    OpenElsewhereItems { openItem(item, $0) }
                                 }
                                 .accessibilityElement(children: .combine)
                                 .accessibilityAddTraits(.isButton)
@@ -146,11 +159,17 @@ struct SearchPalette<Item: Identifiable, Row: View>: View where Item.ID == Strin
         return .handled
     }
 
-    private func openHighlighted() {
+    private func openHighlighted(_ disposition: LinkDisposition) {
         guard let id = currentHighlight, let item = items.first(where: { $0.id == id })
         else { return }
-        open(item)
-        dismiss()
+        openItem(item, disposition)
+    }
+
+    /// Opens `item`, then closes the palette, unless it opened in a tab
+    /// behind this window: then the palette stays for the next hit.
+    private func openItem(_ item: Item, _ disposition: LinkDisposition) {
+        open(item, disposition)
+        if !disposition.keepsPaletteOpen { dismiss() }
     }
 }
 

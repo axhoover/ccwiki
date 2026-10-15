@@ -17,9 +17,11 @@ any moment with no consequence beyond a brief rebuild. `SearchIndex.reset()` is
 a legitimate response to any problem — corruption, a schema change, a version
 skew — and the rebuild path takes it automatically if opening fails.
 
-A **full** rebuild runs after every pull. The corpus is ~300 pages and ~800 KB;
-a full rebuild is about a tenth of a second, which is much simpler than tracking
-which files a pull touched and cannot drift.
+Until schema version 3, a **full** rebuild ran after every load. Now each row
+carries the fingerprint of the file it was built from, and a load rewrites only
+the rows whose file changed (§3, "Kept in step, not rebuilt"). The full rebuild
+is still the definition: it runs whenever the build that wrote the rows is not
+this one, and a sync must leave exactly what it would.
 
 ## 2. No SwiftPM dependency is needed
 
@@ -39,7 +41,10 @@ implicitly `@MainActor` and unreachable from a nonisolated context.
 ## 3. Schema: external-content FTS5
 
 ```sql
-CREATE TABLE doc(id, path UNIQUE, slug, kind, status, title, aliases, headings, body);
+-- Schema version 3 (PRAGMA user_version); any other version is thrown away.
+CREATE TABLE doc(id, path UNIQUE, slug, kind, status, title, aliases, headings, body,
+                 hash);                -- the fingerprint of the file the row was built from
+CREATE TABLE meta(key PRIMARY KEY, value);   -- 'builder': the build that wrote the rows
 CREATE VIRTUAL TABLE doc_fts USING fts5(
   title, aliases, headings, body,
   content='doc', content_rowid='id',
@@ -51,6 +56,33 @@ CREATE VIRTUAL TABLE doc_fts USING fts5(
 Contentless (`content=''`) would be smaller, but `snippet()` needs the original
 text and a search result without context is barely a result. The delete trigger
 **must** pass the OLD column values — FTS5 uses them to locate the postings.
+
+### Kept in step, not rebuilt
+
+Every library load calls `SearchIndex.sync(pages:backlinks:fingerprints:builder:)`
+([reader-comforts.md](reader-comforts.md) §3.4). `hash` is the file's
+`ContentFingerprints` digest, and `builder` is the app's `CFBundleVersion` with
+the schema version.
+
+- **A different `builder`** (an app update, or a fresh file after Settings ▸
+  Storage ▸ Rebuild resets it), or `CCWIKI_FULL_RELOAD=1`, deletes and writes
+  every row, then `optimize` and a WAL checkpoint, as every load used to. Any
+  change to how a row is built therefore rebuilds once, with no version bump
+  to remember.
+- **Otherwise** one `SELECT path, hash`, then one transaction: delete the paths
+  that are gone, `UPDATE` the rows whose hash differs (the `doc_au` trigger
+  keeps FTS in step) and insert the new ones. `optimize` runs only after more
+  than 100 writes; FTS5's automerge handles the rest. A load whose index
+  already matches, as at a launch, writes nothing at all.
+- **The stamp is written in the same transaction as the rows**, so a crash
+  never leaves it over rows it does not describe. A row with no known
+  fingerprint has `hash = ''`, which never matches, so it is rewritten.
+- **Ties are deterministic.** The rankers are built from pages sorted by path,
+  and `ORDER BY bm25(…)` breaks ties by `d.path`: rows written incrementally get
+  new rowids, so a tie would otherwise fall back to the order rows were written.
+  `SearchIndexSyncTests` checks that an index synced from one version of the
+  wiki to the next holds the same rows, hits, snippets and scores as a fresh
+  build of the second.
 
 ### Two tokenizer decisions
 

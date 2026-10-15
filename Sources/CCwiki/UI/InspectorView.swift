@@ -9,16 +9,18 @@ import SwiftUI
 /// this object implies and what implies it. None is worth a permanent column.
 struct InspectorView: View {
     @Environment(AppModel.self) private var model
+    /// The outline, backlinks and relations are this window's page's.
+    @Environment(ReaderSession.self) private var session
 
     var body: some View {
-        @Bindable var model = model
+        @Bindable var session = session
 
         VStack(spacing: 0) {
             // Titles without icons. Two segments fitted comfortably with both;
             // three do not, and a truncated word is worse than no glyph — the
             // names are the affordance here, and macOS segmented controls are
             // routinely text-only.
-            Picker("Inspector", selection: $model.inspectorTab) {
+            Picker("Inspector", selection: $session.inspectorTab) {
                 ForEach(AppModel.InspectorTab.allCases) { tab in
                     Text(tab.rawValue).tag(tab)
                 }
@@ -29,7 +31,7 @@ struct InspectorView: View {
 
             Divider()
 
-            switch model.inspectorTab {
+            switch session.inspectorTab {
             case .outline: outline
             case .backlinks: backlinks
             case .relations: RelationsView()
@@ -45,7 +47,7 @@ struct InspectorView: View {
 
     private var outline: some View {
         Group {
-            let headings = model.webController.outline
+            let headings = session.webController.outline
             if headings.isEmpty {
                 emptyPane("No Headings", systemImage: "list.bullet.indent",
                           detail: "This page has no section headings.")
@@ -53,12 +55,12 @@ struct InspectorView: View {
                 List {
                     ForEach(headings) { heading in
                         Button {
-                            model.webController.scrollTo(anchor: heading.id)
+                            session.webController.scrollTo(anchor: heading.id)
                         } label: {
                             Text(heading.text)
                                 .font(headingFont(heading.level))
                                 .foregroundStyle(
-                                    heading.id == model.webController.activeHeadingID
+                                    heading.id == session.webController.activeHeadingID
                                         ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -89,15 +91,18 @@ struct InspectorView: View {
 
     private var backlinks: some View {
         Group {
-            let links = model.currentBacklinks
+            let links = session.currentBacklinks
             if links.isEmpty {
                 emptyPane("No Backlinks", systemImage: "arrow.turn.up.left",
                           detail: "No other page links here yet.")
             } else {
                 List {
                     ForEach(links) { link in
+                        // A button, so ⌘-click is a link's: a tab behind
+                        // this one (reader-comforts §1.1).
+                        let location = AppModel.Location.page(path: link.sourcePath, anchor: nil)
                         Button {
-                            model.openPage(link.sourcePath)
+                            session.open(location, LinkDisposition.current)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(model.title(forPath: link.sourcePath))
@@ -117,8 +122,10 @@ struct InspectorView: View {
                         .buttonStyle(.plain)
                         .listRowSeparator(.hidden)
                         .contextMenu {
+                            OpenElsewhereItems { session.open(location, $0) }
                             if let page = model.index?.pages[link.sourcePath],
                                let url = AppModel.siteURL(slug: page.slug) {
+                                Divider()
                                 Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
                                 Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
                             }

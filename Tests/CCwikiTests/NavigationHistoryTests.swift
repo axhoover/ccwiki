@@ -144,4 +144,205 @@ struct NavigationHistoryTests {
         #expect(history.back.count == NavigationHistory.capacity)
         #expect(history.back.first == .page(path: "10.md", anchor: nil))
     }
+
+    // MARK: Saved and restored (reader-comforts §1.7)
+
+    private static let d = Location.page(path: "D.md", anchor: nil)
+    private static let welcome = Location.document(.welcome)
+
+    /// A, B#section, the folder, C, then back twice: something on each side.
+    private static func travelled() -> NavigationHistory {
+        var history = NavigationHistory()
+        history.visit(a)
+        history.visit(bAnchored)
+        history.visit(folder)
+        history.visit(c)
+        _ = history.goBack()
+        _ = history.goBack()
+        return history
+    }
+
+    /// The shape `NavigationHistory` encodes to, without its bounds, so a
+    /// test can write what an older or damaged save might hold.
+    private struct Saved: Encodable {
+        var current: Location
+        var back: [Location]
+        var forward: [Location]
+    }
+
+    private static func decode(_ saved: Saved) throws -> NavigationHistory {
+        try JSONDecoder().decode(NavigationHistory.self, from: JSONEncoder().encode(saved))
+    }
+
+    @Test("Back and Forward survive encoding and decoding, anchors and all")
+    func codableRoundTrip() throws {
+        let history = Self.travelled()
+        #expect(history.current == Self.bAnchored)
+        #expect(history.back == [Self.a])
+        #expect(history.forward == [Self.c, Self.folder])
+
+        let data = try JSONEncoder().encode(history)
+        var decoded = try JSONDecoder().decode(NavigationHistory.self, from: data)
+        #expect(decoded == history)
+        let step22 = decoded.goForward()
+        #expect(step22 == Self.folder)
+        let step23 = decoded.goBack()
+        #expect(step23 == Self.bAnchored)
+        let step24 = decoded.goBack()
+        #expect(step24 == Self.a)
+
+        let documents = NavigationHistory(current: Self.welcome, back: [Self.a], forward: [])
+        let decodedDocuments = try JSONDecoder().decode(
+            NavigationHistory.self, from: JSONEncoder().encode(documents))
+        #expect(decodedDocuments == documents)
+    }
+
+    @Test("a decoded history keeps the nearest entries within capacity, on both sides")
+    func decodeAppliesCapacity() throws {
+        let pages = (0..<(NavigationHistory.capacity + 50)).map {
+            Location.page(path: "\($0).md", anchor: nil)
+        }
+        let decoded = try Self.decode(Saved(current: Self.c, back: pages, forward: pages))
+        #expect(decoded.current == Self.c)
+        #expect(decoded.back.count == NavigationHistory.capacity)
+        #expect(decoded.forward.count == NavigationHistory.capacity)
+        // Both are stacks, nearest last: the far ends are what goes.
+        #expect(decoded.back.first == .page(path: "50.md", anchor: nil))
+        #expect(decoded.back.last == pages.last)
+        #expect(decoded.forward.first == .page(path: "50.md", anchor: nil))
+
+        let built = NavigationHistory(current: Self.c, back: pages, forward: [])
+        #expect(built.back == decoded.back, "the initializer applies the same bound")
+    }
+
+    @Test("a saved history with nothing on screen has nothing to go back or forward to")
+    func decodeNormalisesEmpty() throws {
+        let gaps = try Self.decode(Saved(
+            current: Self.c, back: [Self.a, .empty, Self.b], forward: [.empty]))
+        #expect(gaps.back == [Self.a, Self.b])
+        #expect(!gaps.canGoForward)
+
+        let blank = try Self.decode(Saved(current: .empty, back: [Self.a], forward: [Self.c]))
+        #expect(blank.current == Self.a, "the nearest Back entry is put on screen")
+        #expect(!blank.canGoBack)
+        #expect(blank.forward == [Self.c])
+
+        let twice = try Self.decode(Saved(current: .empty, back: [Self.a, Self.a], forward: []))
+        #expect(twice.current == Self.a)
+        #expect(!twice.canGoBack, "Back to the page on screen is a step that goes nowhere")
+
+        let nothing = try Self.decode(Saved(current: .empty, back: [], forward: [Self.c]))
+        #expect(nothing == NavigationHistory())
+    }
+
+    @Test("a saved history's Back and Forward never end on the location on screen")
+    func decodeDropsStepsToNowhere() throws {
+        let stuck = try Self.decode(Saved(
+            current: Self.b, back: [Self.a, Self.b, Self.b], forward: [Self.c, Self.b]))
+        #expect(stuck.current == Self.b)
+        #expect(stuck.back == [Self.a])
+        #expect(stuck.forward == [Self.c])
+
+        let built = NavigationHistory(
+            current: Self.b, back: [Self.a, Self.b], forward: [Self.c, Self.b])
+        #expect(built == stuck, "the initializer applies the same rule")
+    }
+
+    @Test("pruning drops the pages the wiki lost from Back and Forward")
+    func prunedDropsLostPages() {
+        var history = NavigationHistory()
+        history.visit(Self.a)
+        history.visit(Self.b)
+        history.visit(Self.c)
+        history.visit(Self.d)
+        _ = history.goBack()
+        // Back A, B; on C; Forward D.
+        let pruned = history.pruned { $0 != Self.b && $0 != Self.d }
+        #expect(pruned.current == Self.c)
+        #expect(pruned.back == [Self.a])
+        #expect(!pruned.canGoForward)
+    }
+
+    @Test("pruning keeps a history whose pages all survive as it was")
+    func prunedKeepsEverything() {
+        let history = Self.travelled()
+        #expect(history.pruned { _ in true } == history)
+    }
+
+    @Test("a lost current page falls back to the nearest kept Back entry, keeping Forward")
+    func prunedLostCurrentFallsBack() {
+        var history = NavigationHistory()
+        history.visit(Self.a)
+        history.visit(Self.b)
+        history.visit(Self.folder)
+        history.visit(Self.c)
+        history.visit(Self.d)
+        _ = history.goBack()
+        // Back A, B, folder; on C; Forward D. C and the folder are gone.
+        let pruned = history.pruned { $0 != Self.c && $0 != Self.folder }
+        #expect(pruned.current == Self.b)
+        #expect(pruned.back == [Self.a])
+        #expect(pruned.forward == [Self.d])
+    }
+
+    @Test("a lost current page with nothing kept behind it leaves an empty history")
+    func prunedLostCurrentWithNothingBehind() {
+        var history = NavigationHistory()
+        history.visit(Self.a)
+        history.visit(Self.c)
+        history.visit(Self.d)
+        _ = history.goBack()
+        // Back A; on C; Forward D. Only D survives.
+        let pruned = history.pruned { $0 == Self.d }
+        #expect(pruned.current == .empty)
+        #expect(!pruned.canGoBack)
+        #expect(!pruned.canGoForward, "an empty reader has nowhere to go forward from")
+    }
+
+    @Test("pruning collapses the duplicates a removed page leaves side by side")
+    func prunedCollapsesAdjacentDuplicates() {
+        // A, B, A, C: without B, Back would hold A twice in a row.
+        var history = NavigationHistory()
+        history.visit(Self.a)
+        history.visit(Self.b)
+        history.visit(Self.a)
+        history.visit(Self.c)
+        let withoutB = history.pruned { $0 != Self.b }
+        #expect(withoutB.current == Self.c)
+        #expect(withoutB.back == [Self.a])
+
+        // A, B, A: without B, Back's A is the page on screen.
+        var returned = NavigationHistory()
+        returned.visit(Self.a)
+        returned.visit(Self.b)
+        returned.visit(Self.a)
+        let onA = returned.pruned { $0 != Self.b }
+        #expect(onA.current == Self.a)
+        #expect(!onA.canGoBack)
+
+        // The same on the Forward side, a stack with the nearest entry last:
+        // on C, ahead of it D, B, D, C. Without B: D, C.
+        let ahead = NavigationHistory(
+            current: Self.c, back: [], forward: [Self.c, Self.d, Self.b, Self.d])
+        let collapsed = ahead.pruned { $0 != Self.b }
+        #expect(collapsed.forward == [Self.c, Self.d])
+
+        // Back repeating itself behind a lost current: one C, on screen.
+        let repeated = NavigationHistory(
+            current: Self.b, back: [Self.a, Self.c, Self.c], forward: [])
+        let fallen = repeated.pruned { $0 != Self.b }
+        #expect(fallen.current == Self.c)
+        #expect(fallen.back == [Self.a])
+    }
+
+    @Test("an anchor is part of the entry: pruning compares whole locations")
+    func prunedKeepsAnchoredEntries() {
+        var history = NavigationHistory()
+        history.visit(Self.b)
+        history.visit(Self.bAnchored)
+        history.visit(Self.c)
+        let pruned = history.pruned { $0 != Self.c }
+        #expect(pruned.current == Self.bAnchored)
+        #expect(pruned.back == [Self.b])
+    }
 }

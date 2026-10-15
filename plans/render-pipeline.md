@@ -170,8 +170,9 @@ inside pseudocode blocks only.
 
 **Right-click.** A capturing `contextmenu` listener posts `contextTarget`
 with `tex` (the formula under the pointer), `algorithm` (its block's
-`data-source`) and `algorithmExpanded` (the same with the macros written
-out). `ReaderContextTarget` turns that into the menu's copy items, which
+`data-source`), `algorithmExpanded` (the same with the macros written
+out) and `link` (the app's link under the pointer, for the link items of
+§4). `ReaderContextTarget` turns that into the menu's copy items, which
 `ReaderWebView.willOpenMenu` puts at the top: **Copy LaTeX** for the
 formula, then **Copy Algorithm as LaTeX** with **Copy Algorithm as LaTeX (No
 Macros)** as its Option-key alternate. Each item captures its text by value,
@@ -244,9 +245,24 @@ The two things only a scheme handler can do:
    in Application Support. Those have no useful common ancestor.
 
 It also means a wikilink click is a real navigation to a URL we can intercept,
-which is where back/forward come from. A ⌘-click opens the same page on
-cryptology.city in the browser: the app has one reader window, so "open
-elsewhere" means the site.
+which is where back/forward come from. Where the page opens is Swift's call.
+`ccwiki.js` posts `navigate` with the keys held (`command`, `shift`,
+`option`) and `middleButton`, and `LinkDisposition.forClick` reads them as
+Safari does: ⌘-click or a middle click opens a tab behind the current one
+(in front until `WindowTabbing.joinsInBackground` is turned on after the
+by-eye check, reader-comforts §1.4), ⇧⌘-click a tab in front, ⌥⌘-click a new
+window, and a plain click, or ⇧ or ⌥ alone, opens it where you are.
+WebKit may not dispatch `auxclick`, so the middle button is read from
+`mousedown` and `mouseup`, and a middle `click` or `auxclick` is only
+stopped. A link WebKit follows itself, the page's listener having missed it,
+gets the same table from `WKNavigationAction`'s `buttonNumber` and
+`modifierFlags`. The page on cryptology.city has an item of its own, **Open
+Link on cryptology.city**, in the link's context menu, after **Open Link in
+New Tab** and **Open Link in New Window**; a link to a folder gets those two
+alone. `contextTarget` carries the link's `href` for them. They
+follow WebKit's **Open Link**, which for these links is the app's own:
+WebKit's loads the link with no click behind it, a navigation of type
+`.other` that the delegate cancels.
 
 ## 5. Three layers that keep reading offline
 
