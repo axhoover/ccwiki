@@ -209,8 +209,11 @@ empty `gh` configuration and an `origin` push URL that goes nowhere. That stops
 an accident, not a determined agent: ingestion keeps `node`, which can run
 anything. So the **tripwire** (`Tripwire`) lists GitHub's branches before the
 agent starts and again after it exits, and asks `gh` for pull requests opened
-meanwhile; anything CCwiki did not make is named in an orange notice, and a pull
-request the agent opened itself makes the job `opened`. Other jobs' branches
+meanwhile; anything CCwiki did not make is named in an orange notice. Only a
+pull request from the job's own branch in the target repository makes the job
+`opened`; one from any other branch, which may be the maintainer's own from
+Terminal, is named with where to look, and the job still goes to review with
+its own diff (corrections.md §5.5). Other jobs' branches
 are CCwiki's own, but never this job's: a branch name is used again once its
 local branch is gone, so an old record can carry it. The review is the gate.
 
@@ -296,7 +299,7 @@ cancelled), then reads the outcome. The states, and they are not all failures:
 | State | Meaning | Worktree |
 |---|---|---|
 | `awaitingReview` | The agent changed something and did not abort. CCwiki has pushed nothing; the job waits for Approve or Discard (corrections.md §6). | kept |
-| `opened(url)` | After Approve, the draft PR CCwiki opened. Or the tripwire found a pull request the agent opened itself, with an orange notice. GitHub is believed, never the agent's prose. | pruned after Approve; kept, for inspection, after the tripwire |
+| `opened(url)` | After Approve, the draft PR CCwiki opened. Or the tripwire found a pull request from the job's own branch, in the target repository, that CCwiki did not open, with an orange notice. GitHub is believed, never the agent's prose. | pruned after Approve; kept, for inspection, after the tripwire |
 | `aborted(reason)` | The agent declined on purpose. **A good outcome.** | kept |
 | `failed(message)` | Something broke, or the agent ran out of turns. | kept |
 | `failed("The agent finished without changing anything.")` | Nothing to review. | pruned |

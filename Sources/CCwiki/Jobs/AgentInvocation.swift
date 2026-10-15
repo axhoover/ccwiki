@@ -288,8 +288,9 @@ struct AgentRun {
 
     /// Runs `claude` with `invocation` in the job's worktree, and settles
     /// the job: `awaitingReview` when the agent changed something and did
-    /// not abort, `opened` when the tripwire found a pull request it opened
-    /// itself, and otherwise aborted, failed or cancelled. `base` is the
+    /// not abort, `opened` when the tripwire found a pull request from the
+    /// job's own branch that CCwiki did not open, and otherwise aborted,
+    /// failed or cancelled. `base` is the
     /// commit the worktree started from; `siteURL` is the page on the
     /// site, for the pull request CCwiki proposes.
     func run(_ invocation: AgentInvocation, claude: String, base: String, siteURL: URL?) async {
@@ -361,8 +362,11 @@ struct AgentRun {
         if let notice = caught.notice { job.setNotice(notice) }
         if let outcome = parser.outcome { job.setOutcome(outcome) }
         if let url = caught.pullRequest {
-            // Not CCwiki's pull request, and nothing to review: the change
-            // is already on GitHub. The worktree stays, for inspection.
+            // A pull request from this job's own branch, in the target
+            // repository, that CCwiki did not open: the change is already on
+            // GitHub, and there is nothing to review. The worktree stays, for
+            // inspection. Any other pull request is only the notice's, and
+            // the job goes on to review with its own diff.
             await cleanUp(keep: true)
             job.setState(.opened(url: url))
             return

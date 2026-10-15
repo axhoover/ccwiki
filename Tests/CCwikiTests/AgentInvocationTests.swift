@@ -232,44 +232,121 @@ struct TripwireTests {
             == ["fix/prf"])
     }
 
-    @Test("only pull requests created since the job started count, newest first")
+    static func pullRequest(
+        _ number: Int, head: String, isCrossRepository: Bool = false,
+        createdAt: Date = TripwireTests.started
+    ) -> OpenedPullRequest {
+        OpenedPullRequest(
+            url: url(number), head: head, isCrossRepository: isCrossRepository,
+            createdAt: createdAt)
+    }
+
+    @Test("only pull requests created since a minute before the job started count, newest first")
     func pullRequestListing() {
         let listing = """
-            2026-10-12T09:59:30Z fix/prf https://github.com/axhoover/cryptology.city/pull/52
-            2026-10-12T10:20:00Z paper-submission/AB12-x https://github.com/axhoover/cryptology.city/pull/53
-            2026-09-20T09:00:00Z fix/old https://github.com/axhoover/cryptology.city/pull/36
+            2026-10-12T09:59:30Z false fix/prf https://github.com/axhoover/cryptology.city/pull/52
+            2026-10-12T10:20:00Z false paper-submission/AB12-x https://github.com/axhoover/cryptology.city/pull/53
+            2026-10-12T10:21:00Z true fix/prf https://github.com/axhoover/cryptology.city/pull/54
+            2026-09-20T09:00:00Z false fix/old https://github.com/axhoover/cryptology.city/pull/36
+            2026-10-12T10:22:00Z fix/three-fields https://github.com/axhoover/cryptology.city/pull/55
             garbage line
             """
         let since = Self.started.addingTimeInterval(-60)
         let found = Tripwire.pullRequests(createdAfter: since, in: listing)
-        #expect(found.map(\.url) == [Self.url(53), Self.url(52)])
-        #expect(found.map(\.head) == ["paper-submission/AB12-x", "fix/prf"])
+        #expect(found.map(\.url) == [Self.url(54), Self.url(53), Self.url(52)])
+        #expect(found.map(\.head) == ["fix/prf", "paper-submission/AB12-x", "fix/prf"])
+        #expect(found.map(\.isCrossRepository) == [true, false, false])
         #expect(Tripwire.pullRequests(createdAfter: since, in: "").isEmpty)
+    }
+
+    @Test("the listing asks whether each head is in another repository")
+    func listArguments() {
+        let target = PublishTarget(
+            repository: "axhoover/cryptology.city", pushURL: "origin",
+            isDevBuild: false, isOverridden: false)
+        let arguments = Tripwire.listArguments(target: target)
+        #expect(Array(arguments.prefix(2)) == ["pr", "list"])
+        #expect(AgentInvocationTests.value(of: "--repo", in: arguments) == "axhoover/cryptology.city")
+        #expect(AgentInvocationTests.value(of: "--author", in: arguments) == "@me")
+        #expect(AgentInvocationTests.value(of: "--json", in: arguments)
+            == "url,createdAt,headRefName,isCrossRepository")
+        #expect(AgentInvocationTests.value(of: "--jq", in: arguments)
+            == #".[] | "\(.createdAt) \(.isCrossRepository) \(.headRefName) \(.url)""#)
     }
 
     @Test("the job's own pull request makes it opened, and says the agent bypassed review")
     func ownPullRequest() {
-        let own = OpenedPullRequest(url: Self.url(52), head: "fix/prf", createdAt: Self.started)
-        let other = OpenedPullRequest(
-            url: Self.url(53), head: "paper-submission/AB12-x",
-            createdAt: Self.started.addingTimeInterval(60))
+        let own = Self.pullRequest(52, head: "fix/prf")
+        let other = Self.pullRequest(
+            53, head: "paper-submission/AB12-x", createdAt: Self.started.addingTimeInterval(60))
         let finding = Tripwire.finding(
             jobBranch: "fix/prf", moved: ["fix/prf"], opened: [other, own])
         #expect(finding.pullRequest == Self.url(52))
         #expect(finding.notice?.tone == .warning)
-        #expect(finding.notice?.text == "The agent opened this pull request itself, bypassing review.")
+        #expect(finding.notice?.text == "The agent opened this pull request itself, bypassing review. "
+            + "A pull request from paper-submission/AB12-x was opened while the agent ran, and "
+            + "CCwiki did not open it: https://github.com/axhoover/cryptology.city/pull/53.")
     }
 
-    @Test("someone else's pull request is named as one CCwiki did not open")
+    @Test("a pull request from another branch never opens the job: it is a notice, and review goes on")
+    func otherBranchPullRequest() {
+        // The maintainer, from Terminal, while job/A ran.
+        let manual = Self.pullRequest(53, head: "manual/B")
+        let finding = Tripwire.finding(jobBranch: "job/A", moved: [], opened: [manual])
+        #expect(finding.pullRequest == nil)
+        #expect(finding.notice == JobNotice(tone: .warning, text:
+            "A pull request from manual/B was opened while the agent ran, and CCwiki did not "
+            + "open it: https://github.com/axhoover/cryptology.city/pull/53. Look at it on GitHub "
+            + "to see whether the agent made it; CCwiki has sent nothing from this job, which "
+            + "waits for your review."))
+    }
+
+    @Test("one opened in the minute's look-back before the job started is still not the job's")
+    func lookBackPullRequest() {
+        let listing = "2026-10-12T09:59:30Z false manual/B "
+            + "https://github.com/axhoover/cryptology.city/pull/53"
+        let opened = Tripwire.pullRequests(
+            createdAfter: Self.started.addingTimeInterval(-60), in: listing)
+        #expect(opened.map(\.head) == ["manual/B"], "inside the look-back, so it is listed")
+        let finding = Tripwire.finding(jobBranch: "job/A", moved: [], opened: opened)
+        #expect(finding.pullRequest == nil)
+        #expect(finding.notice?.tone == .warning)
+        #expect(finding.notice?.text.contains("manual/B") == true)
+    }
+
+    @Test("a pull request from the job's branch name in another repository is not the job's")
+    func forkPullRequest() {
+        let fork = Self.pullRequest(54, head: "fix/prf", isCrossRepository: true)
+        let finding = Tripwire.finding(jobBranch: "fix/prf", moved: [], opened: [fork])
+        #expect(finding.pullRequest == nil)
+        #expect(finding.notice?.text.hasPrefix(
+            "A pull request from fix/prf in another repository was opened while the agent ran")
+            == true)
+    }
+
+    @Test("someone else's pull requests and pushes are named as ones CCwiki did not make")
     func otherPullRequest() {
-        let other = OpenedPullRequest(
-            url: Self.url(53), head: "paper-submission/AB12-x", createdAt: Self.started)
+        let other = Self.pullRequest(53, head: "paper-submission/AB12-x")
         let finding = Tripwire.finding(
             jobBranch: "ingest/eprint-2025-375", moved: ["paper-submission/AB12-x"], opened: [other])
-        #expect(finding.pullRequest == Self.url(53))
-        #expect(finding.notice?.text == "A pull request was opened while the agent ran, and CCwiki "
-            + "did not open it. paper-submission/AB12-x was pushed to GitHub while the agent ran, "
+        #expect(finding.pullRequest == nil, "not the job's branch, so not the job's pull request")
+        #expect(finding.notice?.text == "A pull request from paper-submission/AB12-x was opened "
+            + "while the agent ran, and CCwiki did not open it: "
+            + "https://github.com/axhoover/cryptology.city/pull/53. Look at it on GitHub to see "
+            + "whether the agent made it; CCwiki has sent nothing from this job, which waits for "
+            + "your review. paper-submission/AB12-x was pushed to GitHub while the agent ran, "
             + "and CCwiki did not push it.")
+
+        let two = Tripwire.finding(
+            jobBranch: "fix/prf", moved: ["fix/prf"],
+            opened: [Self.pullRequest(53, head: "manual/B"), Self.pullRequest(54, head: "manual/C")])
+        #expect(two.pullRequest == nil)
+        #expect(two.notice?.text == "The agent pushed fix/prf itself, bypassing review. "
+            + "Pull requests from manual/B and manual/C were opened while the agent ran, and "
+            + "CCwiki did not open them: https://github.com/axhoover/cryptology.city/pull/53 and "
+            + "https://github.com/axhoover/cryptology.city/pull/54. Look at them on GitHub to see "
+            + "whether the agent made them; CCwiki has sent nothing from this job, which waits "
+            + "for your review.")
     }
 
     @Test("a push without a pull request leaves the job for review, with a notice")

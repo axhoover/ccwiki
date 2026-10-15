@@ -890,6 +890,88 @@ struct JobCenterTests {
             tone: .warning, text: "The agent pushed fix/page itself, bypassing review."))
     }
 
+    /// A correction whose agent changes b to B, run while GitHub lists one
+    /// open pull request by the signed-in account, from `head`, opened
+    /// twenty seconds before the job: inside the tripwire's minute of
+    /// look-back. The `gh` answers nothing else. Returns when the job has
+    /// settled, with when the pull request was opened.
+    static func correction(
+        whileListing head: String, isCrossRepository: Bool = false, number: Int
+    ) async throws -> (JobScene, Job, Date)? {
+        let root = JobScene.newRoot()
+        let opened = Date().addingTimeInterval(-20)
+        let created = ISO8601DateFormatter().string(from: opened)
+        let tools = try JobScene.fakeTools([
+            .claude: #"printf 'a\nB\nc' > content/page.md"# + "\n" + readyForReview,
+            .gh: """
+                case "$1 $2" in
+                "pr list")
+                    echo '\(created) \(isCrossRepository) \(head) \(TripwireTests.url(number).absoluteString)' ;;
+                *) echo 'error connecting to api.github.com' >&2; exit 1 ;;
+                esac
+                """,
+        ], in: root.appending(path: "tools"))
+        guard let scene = try await JobScene.make(root: root, tools: tools) else {
+            try? FileManager.default.removeItem(at: root)
+            return nil
+        }
+        let job = scene.center.startCorrection(request(scene))
+        await job.task?.value
+        return (scene, job, opened)
+    }
+
+    @Test("a pull request from another branch, opened just before the job, leaves it in review with its own diff")
+    func tripwireWithAnotherBranchesPullRequest() async throws {
+        guard let (scene, job, opened) = try await Self.correction(
+            whileListing: "manual/B", number: 53)
+        else { return }
+        defer { scene.delete() }
+        let started = try #require(job.startedAt)
+        #expect(opened < started && opened >= started.addingTimeInterval(-60),
+                "the premise: opened in the minute before the job started")
+
+        #expect(job.state == .awaitingReview, "\(job.state)")
+        #expect(job.notice?.tone == .warning)
+        #expect(job.notice?.text.hasPrefix("A pull request from manual/B was opened while the "
+            + "agent ran, and CCwiki did not open it: "
+            + "https://github.com/axhoover/cryptology.city/pull/53.") == true,
+            "\(job.notice?.text ?? "no notice")")
+        #expect(job.log.contains { $0.text == "Opened while the agent ran: "
+            + "https://github.com/axhoover/cryptology.city/pull/53 (from manual/B)" })
+        // The job's own change, from its own worktree, is what waits.
+        #expect(job.review?.files.map(\.path) == ["content/page.md"])
+        #expect(scene.patch(of: job).contains("+B"))
+        #expect(job.log.contains {
+            $0.text.hasPrefix("Awaiting review in Jobs. CCwiki has pushed nothing")
+        })
+    }
+
+    @Test("a pull request from the job's branch name in another repository leaves it in review")
+    func tripwireWithAForksPullRequest() async throws {
+        guard let (scene, job, _) = try await Self.correction(
+            whileListing: "fix/page", isCrossRepository: true, number: 54)
+        else { return }
+        defer { scene.delete() }
+        #expect(job.branch == "fix/page")
+        #expect(job.state == .awaitingReview, "\(job.state)")
+        #expect(job.notice?.text.hasPrefix(
+            "A pull request from fix/page in another repository was opened") == true)
+        #expect(job.review?.files.map(\.path) == ["content/page.md"])
+    }
+
+    @Test("a pull request from the job's own branch opens the job, and its worktree is kept")
+    func tripwireWithTheJobsOwnPullRequest() async throws {
+        guard let (scene, job, _) = try await Self.correction(whileListing: "fix/page", number: 52)
+        else { return }
+        defer { scene.delete() }
+        #expect(job.branch == "fix/page")
+        #expect(job.state == .opened(url: TripwireTests.url(52)), "\(job.state)")
+        #expect(job.notice == JobNotice(
+            tone: .warning, text: "The agent opened this pull request itself, bypassing review."))
+        #expect(FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false)),
+                "kept, for inspection")
+    }
+
     @Test("Review Anyway is offered for every way an agent job ends but opened and discarded")
     func reviewAnywayStates() throws {
         let offered: [JobState] = [.failed("claude exited 1."), .aborted(reason: "ABORTED: no."),

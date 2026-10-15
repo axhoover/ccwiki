@@ -797,7 +797,8 @@ value holding `{{`, as LaTeX does, arrives as it was.
 | No changes, no abort | `failed("The agent finished without changing anything.")` | pruned |
 | Error, or out of turns | `failed`, with Review Anyway if the worktree holds changes | kept |
 | Cancelled | `cancelled` | kept |
-| The tripwire finds a PR | `opened(url)`, with an orange notice | kept, for inspection |
+| The tripwire finds a PR from the job's own branch, in the target repository | `opened(url)`, with an orange notice | kept, for inspection |
+| The tripwire finds any other PR | as the rows above say, with an orange notice naming it | as the rows above say |
 
 **The tripwire.** Before the agent starts, the runner records `git ls-remote
 --heads <PublishTarget.pushURL>`. After it exits, unless cancelled, it checks
@@ -809,12 +810,23 @@ two things:
    bypassing review." Any other gives "<branch> was pushed to GitHub while
    the agent ran, and CCwiki did not push it." The job still goes to review.
 2. **Pull requests.** `gh pr list --repo R --author @me --state open --json
-   url,createdAt,headRefName`, keeping PRs created at or after `startedAt −
-   60 s` whose head is not another CCwiki job's branch. A hit makes the job
-   `opened(url)`, with the orange notice "The agent opened this pull request
-   itself, bypassing review." if its head is the job's branch, or "A pull
-   request was opened while the agent ran, and CCwiki did not open it." if
-   not.
+   url,createdAt,headRefName,isCrossRepository`, keeping PRs created at or
+   after `startedAt − 60 s`, but for those from another CCwiki job's branch
+   in R itself, where CCwiki opens its own. Only a PR from **the job's own branch in R itself** (`isCrossRepository`
+   false) is evidence that this job's changes left without review: it makes
+   the job `opened(url)`, with the orange notice "The agent opened this pull
+   request itself, bypassing review." Any other PR, from another branch, or
+   from a branch of the same name in a fork, never does. The maintainer may
+   open one from Terminal while a job runs, and the minute of look-back
+   reaches back before the job started; CCwiki cannot tell that PR from one
+   the agent opened on a branch of its own, so it does not guess. The notice
+   names it and says where to look: "A pull request from manual/b was opened
+   while the agent ran, and CCwiki did not open it: <url>. Look at it on
+   GitHub to see whether the agent made it; CCwiki has sent nothing from
+   this job, which waits for your review." The job goes on to the hand-over
+   and to `awaitingReview` with its own diff. (Fixed after the PR #11
+   review, which found that the newest unrelated PR used to complete the
+   job and skip its review.)
 
 If GitHub cannot be reached, the log says the tripwire did not run. The
 contract's own branch name, `paper-submission/<KEY>-<slug>`, is covered by
@@ -2406,6 +2418,22 @@ merges to `main`.**
   directory, outside the worktree; the three token variables and
   `SSH_AUTH_SOCK` are gone; `GIT_CONFIG_COUNT` and its keys and values;
   `GIT_SSH_COMMAND` and the two askpass variables.
+
+**`TripwireTests`** (B)
+- The listing asks for `isCrossRepository`; lines are read with it, newest
+  first, from a minute before the job started.
+- `finding(jobBranch: "job/A", moved: [], opened: [a PR from manual/B])`,
+  the PR opened inside the minute of look-back before the job started: a
+  warning naming it, its URL and where to look, and `pullRequest == nil`.
+  So for a PR from the job's branch name in a fork. Only a PR from the
+  job's own branch in the target repository is returned, and the notice
+  says the agent bypassed review.
+
+**`JobCenterTests`**, the tripwire with a fake `gh` (B)
+- A correction while `gh` lists a PR from manual/B opened twenty seconds
+  before the job: it reaches `awaitingReview` with its own diff of
+  `content/page.md` and the warning. A fork's PR from `fix/page`: the same.
+  A PR from the job's own `fix/page`: `opened(url)`, worktree kept.
 
 **`PromptCompositionTests`** (B, changed)
 - `ingest.md` contains `.ccwiki/pull-request.md`, and no longer the
