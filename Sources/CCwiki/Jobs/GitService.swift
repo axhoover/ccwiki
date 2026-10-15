@@ -194,10 +194,10 @@ struct GitService: Sendable {
     ///
     /// Written when no value names a helper: there are none, or each is
     /// empty (git's "forget the helpers listed before this one"). Written
-    /// when the values of CCwiki's kind are anything but `helper` once: a
-    /// gh since moved, a path written unquoted, or `helper` twice.
-    /// Otherwise not: they are exactly `helper`, or there are none of them
-    /// and the user has set a helper of their own.
+    /// when there is a value of CCwiki's kind and they are anything but
+    /// `helper` once: a gh since moved, a path written unquoted, or
+    /// `helper` twice. Otherwise not: they are exactly `helper`, or there
+    /// are none of them and the user has set a helper of their own.
     static func rewritesCredentialHelper(_ values: [String], with helper: String) -> Bool {
         if values.allSatisfy(\.isEmpty) { return true }
         let gitCredential = values.filter {
