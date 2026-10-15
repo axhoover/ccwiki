@@ -399,7 +399,7 @@ them, one click away (§7).
   query is app-wide. The quick switcher leaves out the page on screen in the
   window that presented it: `session.presentQuickSwitcher()` sets
   `model.quickSwitcherExcludedPath`, which `refreshQuickSwitcher()` reads on
-  every keystroke.
+  every keystroke. Presenting one closes any other window's switcher.
 - **Status bar.** The sync state, warnings, job count and update progress are
   the same in every window. `lastRenderError` is the window's own.
 - **Find.** The find bar's text and state are `@State` in `ReaderView`,
