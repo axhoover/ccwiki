@@ -370,6 +370,58 @@ struct DerivationTests {
         #expect(reasons == expectedReasons)
     }
 
+    @Test("a quarantine of one direction holds back that direction of an equivalence only")
+    func quarantineOneDirection() throws {
+        let manifest = try Fx.manifest(
+            objects: [Fx.object("e", type: "assumption"), Fx.object("f"), Fx.object("g")],
+            reductions: [Fx.reduction("red-e-eq-f", ["e"], "f", kind: "equivalence"),
+                         Fx.reduction("red-f-to-g", ["f"], "g")])
+        let reason = "The Statement does not establish this direction."
+        let json = """
+            { "quarantine": [{ "edge": "red-e-eq-f", "direction": "forward", "reason": "\(reason)" }],
+              "equivalences": { "red-e-eq-f": { "forward": "record", "reverse": "record" } } }
+            """
+        let curation = try DerivationCuration.decode(Data(json.utf8))
+        #expect(curation.quarantineReason("red-e-eq-f", isReverse: false) == reason)
+        #expect(curation.quarantineReason("red-e-eq-f", isReverse: true) == nil)
+        let derivation = Derivation(manifest: manifest, curation: curation)
+
+        // Only the held direction is quarantined, and the reduction is not
+        // excluded: its other direction is still a step.
+        let held = derivation.quarantinedSteps.map { $0.id }
+        #expect(held == ["red-e-eq-f"])
+        #expect(derivation.excluded[.quarantined] == nil)
+        let steps = derivation.steps.map { "\($0.id):\($0.reductionClass)" }
+        #expect(steps == ["red-e-eq-f~reverse:fully-black-box", "red-f-to-g:fully-black-box"])
+
+        // The held direction is named on its pair, with the reason, and
+        // refused on the way.
+        let forward = try #require(derivation.answer(from: ["e"], to: "f", options: .standard).noPath)
+        let rows = forward.recordedOnPair.map { "\($0.relationID):\($0.isReverse):\($0.status.rawValue)" }
+        #expect(rows == ["red-e-eq-f:false:quarantined"])
+        #expect(forward.recordedOnPair.first?.detail == reason)
+        let far = try #require(derivation.answer(from: ["e"], to: "g", options: .standard).noPath)
+        let refused = far.refused.map { $0.step.id }
+        #expect(refused == ["red-e-eq-f"])
+        let reasons = far.refused.first?.reasons ?? []
+        let expectedReasons = [Derivation.Refusal.quarantined(reason: reason)]
+        #expect(reasons == expectedReasons)
+
+        // The other direction takes the record's class.
+        let backward = try #require(derivation.answer(from: ["f"], to: "e", options: .standard).derived)
+        #expect(backward.fact.chainClass == .fullyBlackBox)
+        #expect(backward.proof.reverseRelationIDs == ["red-e-eq-f"])
+        let used = backward.recordedOnPair.map { "\($0.relationID):\($0.isReverse):\($0.status.rawValue)" }
+        #expect(used == ["red-e-eq-f:true:used"])
+        #expect(derivation.invariants().noIneligibleEdges)
+
+        // An implication has one direction: scoping its quarantine to the
+        // other does not resolve.
+        let implication = DerivationCuration(quarantine: ["red-f-to-g": reason],
+                                             quarantineDirections: ["red-f-to-g": true])
+        #expect(implication.unresolved(in: manifest) == ["not an equivalence red-f-to-g"])
+    }
+
     // MARK: R14
 
     @Test("a refuted start is vacuous, and neither it nor a setting is a source or completion")

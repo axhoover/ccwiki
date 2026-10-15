@@ -292,6 +292,19 @@ class Curation:
     def empty(cls) -> "Curation":
         return cls({}, "")
 
+    def quarantined(self, edge: str, reverse: bool):
+        """R13: the quarantine entry that holds this direction of `edge` back,
+        or None. An entry without `direction` quarantines the whole reduction;
+        one with `direction` ("reverse", or anything else for the forward
+        direction) quarantines that direction of an equivalence alone, and the
+        other direction stays a step (Swift's
+        `DerivationCuration.quarantineReason(_:isReverse:)`)."""
+        e = self.quarantine.get(edge)
+        if e is None:
+            return None
+        d = e.get("direction")
+        return e if d is None or (d == "reverse") == reverse else None
+
     def adding_refutations(self, refutations: list) -> "Curation":
         """A copy whose `refuted` also holds these, each replacing the file's
         for the same object: the manifest's record wins over CCwiki's.
@@ -316,6 +329,11 @@ class Curation:
                 bad.append(f"reduction {e}")
         for e, v in self.equivalences.items():
             if e in m.reductions and m.reductions[e]["kind"] != "equivalence":
+                bad.append(f"not an equivalence {e}")
+        # A quarantine scoped to one direction names a direction of an
+        # equivalence; an implication has only the one.
+        for e, q in self.quarantine.items():
+            if q.get("direction") is not None and e in m.reductions and m.reductions[e]["kind"] != "equivalence":
                 bad.append(f"not an equivalence {e}")
         for (e, rev), reqs in self.requires.items():
             r = m.reductions.get(e)
@@ -454,12 +472,19 @@ def build_steps(m: Manifest, cur: Curation):
                 rev_cls = cls if rv.get("reverse") == "record" else "unstated"
             dirs = [(False, tuple(r["hypotheses"]), r["conclusion"], fwd_cls),
                     (True, (r["conclusion"],), r["hypotheses"][0], rev_cls)]
+        held = 0
         for rev, hyps, concl, c in dirs:
             s = Step(rid, hyps, concl, rev, model, c, stub,
                      tuple(cur.requires.get((rid, rev), ())),
                      None if rev else cur.weakens.get(rid))
-            (quarantined if rid in cur.quarantine else steps).append(s)
-        if rid in cur.quarantine:  # R13: hypotheses do not match the Statement
+            # R13: the record does not match the Statement, for the whole
+            # reduction or for this direction of an equivalence.
+            if cur.quarantined(rid, rev) is not None:
+                quarantined.append(s)
+                held += 1
+            else:
+                steps.append(s)
+        if held == len(dirs):  # R13: no direction of it is a step
             skip("quarantined", rid)
     return steps, quarantined, excluded, unreviewed
 
@@ -1064,10 +1089,13 @@ class Derivation:
                 continue
             row = {"edge": rid, "reverse": not fwd}
             s = self.step_index.get((rid, not fwd))
-            if rid in reason:
-                row["status"] = reason[rid]
-                if rid in self.cur.quarantine:
-                    row["detail"] = self.cur.quarantine[rid]["reason"]
+            # A quarantine of one direction leaves the reduction eligible, so
+            # it is not in `excluded`; its row says so all the same.
+            held = self.cur.quarantined(rid, not fwd)
+            if rid in reason or held is not None:
+                row["status"] = reason.get(rid, "quarantined")
+                if held is not None:
+                    row["detail"] = held["reason"]
             elif s is not None and s.stub and not inc:
                 row["status"] = "stub"
             elif s is not None and not s.default and not inc:
@@ -1092,8 +1120,9 @@ class Derivation:
             s = self.step_index[(e, rev)]
             hf = {h: rcl.facts[h] for h in s.hyps}
             reasons = []
-            if e in self.cur.quarantine:
-                reasons.append({"kind": "quarantined", "reason": self.cur.quarantine[e]["reason"]})
+            held = self.cur.quarantined(e, rev)
+            if held is not None:
+                reasons.append({"kind": "quarantined", "reason": held["reason"]})
             for h, f in hf.items():
                 w = f.step.weakens if f.step is not None else None
                 if w is not None and e not in w.accepted_by:
@@ -1286,10 +1315,12 @@ class Derivation:
 def invariants(dv: Derivation, all_derived: list) -> dict:
     m = dv.m
     res = {}
-    eligible = {s.edge for s in dv.steps}
-    bad = sorted(e for e in eligible if m.reductions[e]["kind"] == "inclusion"
-                 or m.reductions[e].get("heuristic") or e in dv.cur.quarantine
-                 or any(m.type(x) in EXCLUDED_TYPES for x in m.reductions[e]["hypotheses"] + [m.reductions[e]["conclusion"]]))
+    # Step by step: a quarantine of one direction of an equivalence leaves
+    # the other direction a step.
+    bad = sorted({s.edge for s in dv.steps if m.reductions[s.edge]["kind"] == "inclusion"
+                  or m.reductions[s.edge].get("heuristic") or dv.cur.quarantined(s.edge, s.reverse) is not None
+                  or any(m.type(x) in EXCLUDED_TYPES
+                         for x in m.reductions[s.edge]["hypotheses"] + [m.reductions[s.edge]["conclusion"]])})
     res["noIneligibleEdges"] = not bad
     leaks = []
     starts = sorted(o for o in m.objects if m.type(o) not in EXCLUDED_TYPES)
@@ -2026,6 +2057,9 @@ def _what_it_changes(m: Manifest, entry: dict) -> str:
         return f"{_name(m, entry['object'])} is listed apart as a setting, never as an assumption or a completion"
     step = _step_name(m, entry["edge"])
     if key == "quarantine":
+        if raw.get("direction") is not None:
+            way = "right-to-left" if raw["direction"] == "reverse" else "left-to-right"
+            return f"The {way} direction of {step} is never used"
         return f"{step} is never used"
     if key == "equivalences":
         fwd, rev = raw.get("forward") == "record", raw.get("reverse") == "record"
@@ -2060,6 +2094,10 @@ def _description(m: Manifest, entry: dict) -> str:
                 f"never a completion. CCwiki's sentence: {md_escape(raw.get('text', ''))}")
     step = f"**{md_escape(_step_name(m, entry['edge']))}**"
     if key == "quarantine":
+        if raw.get("direction") is not None:
+            way = "right to left" if raw["direction"] == "reverse" else "left to right"
+            return (f"{step} is never used {way}: its Statement does not establish that direction. "
+                    f"The other direction is still a step.")
         return f"{step} is never used: its recorded hypotheses do not match its Statement."
     if key == "equivalences":
         cls = m.reductions.get(entry["edge"], {}).get("class", "?")
@@ -2524,7 +2562,51 @@ def selftest(dv: Derivation) -> bool:
     check("a stub barrier is not propagated",
           len(mad) < base and all(d["barrier"] != "bar-owp-to-ke-ir89" for d in a["derivedBarriers"]))
     ok &= selftest_upstream(dv, ad, res)
+    ok &= selftest_direction_quarantine(dv)
     return ok
+
+
+def selftest_direction_quarantine(dv: Derivation) -> bool:
+    """A quarantine entry with `direction` holds back that direction of an
+    equivalence only (R13, plans/derivations.md §2a): the other direction is
+    still a step with the record's class, the reduction is not `excluded`,
+    and the held direction is named on its pair and in its refusal. On an
+    implication, `direction` does not resolve."""
+    check, state = _checker()
+    print("a quarantine of one direction (R13)")
+    eq = dict(_red("red-syn-e-eq-f", ["syn-e"], "syn-f", "fully-black-box"), kind="equivalence")
+    patch = {"objects": [_obj("syn-e", "assumption"), _obj("syn-f"), _obj("syn-g")],
+             "reductions": [eq, _red("red-syn-f-to-g", ["syn-f"], "syn-g", "fully-black-box")]}
+    pm = Manifest(apply_patch(dv.m.data, patch), "")
+    data = copy.deepcopy(dv.cur.data)
+    reason = "The Statement does not establish this direction."
+    data.setdefault("quarantine", []).append({"edge": "red-syn-e-eq-f", "direction": "forward", "reason": reason})
+    data.setdefault("equivalences", {})["red-syn-e-eq-f"] = {"forward": "record", "reverse": "record"}
+    qdv = Derivation(pm, Curation(data, ""))
+    held = sorted(s.sort_key for s in qdv.quarantined if s.edge == "red-syn-e-eq-f")
+    check("only the held direction is quarantined, and the reduction is not excluded",
+          held == [("red-syn-e-eq-f", False)] and "red-syn-e-eq-f" not in qdv.excluded.get("quarantined", []),
+          held)
+    a = qdv.query(["syn-e"], "syn-g")
+    refused = [(r["edge"], r["reverse"], [x["kind"] for x in r["reasons"]]) for r in a["refusedSteps"]]
+    check("the held direction is refused, with its reason",
+          not a["derivable"] and ("red-syn-e-eq-f", False, ["quarantined"]) in refused
+          and any(x.get("reason") == reason for r in a["refusedSteps"] for x in r["reasons"]), refused)
+    a = qdv.query(["syn-e"], "syn-f")
+    rows = [(r["edge"], r["reverse"], r["status"], r.get("detail")) for r in a["recordedOnPair"]]
+    check("its row on the pair is quarantined, with the reason",
+          rows == [("red-syn-e-eq-f", False, "quarantined", reason)], rows)
+    a = qdv.query(["syn-f"], "syn-e")
+    rows = [(r["edge"], r["reverse"], r["status"]) for r in a["recordedOnPair"]]
+    check("the other direction is a step, with the record's class",
+          a["derivable"] and a["chainClass"] == "fully-black-box" and a["reverseSteps"] == ["red-syn-e-eq-f"]
+          and rows == [("red-syn-e-eq-f", True, "used")], (a.get("chainClass"), rows))
+    inv = invariants(qdv, qdv.derived_barriers())
+    check("invariants hold with a quarantine of one direction", inv["noIneligibleEdges"], inv["_detail"])
+    data["quarantine"].append({"edge": "red-syn-f-to-g", "direction": "reverse", "reason": reason})
+    check("a quarantine of one direction of an implication does not resolve",
+          "not an equivalence red-syn-f-to-g" in Curation(data, "").unresolved(pm))
+    return state["ok"]
 
 
 def _checker():

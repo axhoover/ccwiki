@@ -550,7 +550,14 @@ These come from the curation (§2a), never from the engine's own judgement.
   forward-game iPRF is a PRF). Every other step is refused on it.
 - **Quarantine**: a reduction whose recorded hypotheses do not match its own
   Statement is never used. It appears in R10 item 0 and in refused steps,
-  with the reason.
+  with the reason. An entry with a `direction` (`forward` or `reverse`)
+  holds back that **one direction of an equivalence** and leaves the other
+  a step with its own class (R1): the Statement proves one direction and
+  only gestures at the other. The reduction is then not in `excluded`,
+  since one direction of it is eligible; R10 item 0 still lists the held
+  direction's row as `quarantined`, with the reason, and the refusal names
+  it. A `direction` on an implication does not resolve
+  (`curationResolves`).
 - **No parameter tracking.** A regime is never carried along a chain, even a
   parameter-preserving one. LS15's degree-1 identity keeps the modulus, so
   rank-n module LWE ⇒ LWE ⇒ BGV12 is true, but it is refused. That is
@@ -606,7 +613,7 @@ and its effect on the answers.
 |---|---|---|
 | `refuted` | object, source, text, evidence, cites | `circular-evasive-lwe`, `sidh`, `ssddh` |
 | `settings` | object, text, evidence, cites | the two honest-majority variants |
-| `quarantine` | edge, reason, cites | BW07 (composite order, three assumptions); Wee22 BE and Wee22 ABE (drop LWE) |
+| `quarantine` | edge, `direction` (optional: one direction of an equivalence), reason, cites; one entry per edge, id `quarantine:<edge>` | BW07 (composite order, three assumptions); Wee22 BE and Wee22 ABE (drop LWE) |
 | `equivalences` | edge → `forward`/`reverse` (`record` or `unstated`), note, cites | all 7 eligible; ISIS ⇒ SIS `unstated` |
 | `requires` | edge, direction, hypothesis, notion, `notionMarkdown`, `metBy`, evidence, cites | 23 entries on 18 edges, below |
 | `weakens` | edge, notion, `notionMarkdown`, `acceptedBy`, evidence, cites | GPSW06 (selective KP-ABE; none), PRP ⇒ iPRF (forward game; iPRF ⇒ PRF) |
@@ -1068,7 +1075,10 @@ hypothesis; an equivalence with one direction unstated; an inclusion and a
 heuristic edge that never fire; a `{rom} ⇒ X` edge mis-typed `standard`; a
 free step after a ROM step; a requirement met by a given (tagged), by a
 `metBy` producer, and refused; a weakened fact that blocks no full fact; a
-quarantined edge; a barrier with a quantum side edge that R12 must not
+quarantined edge; a quarantine of one direction of an equivalence, which
+leaves the other direction a step (`quarantineOneDirection`, with the
+reference engine's `selftest_direction_quarantine` on a patched copy of the
+real manifest); a barrier with a quantum side edge that R12 must not
 propagate.
 
 ---

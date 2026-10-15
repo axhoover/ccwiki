@@ -217,7 +217,7 @@ residual risk.
 |---|---|---|
 | `refuted` | `{object, source, text, evidence, cites}` | `evidence` |
 | `settings` | `{object, text, evidence, cites}` | `evidence` |
-| `quarantine` | `{edge, reason, cites}`; the old `evidence` key is removed | `reason` |
+| `quarantine` | `{edge, direction?, reason, cites}`; the old `evidence` key is removed; `direction` (`forward` or `reverse`, added 2026-10-15 for the PR #9 audit, §13) holds back one direction of an equivalence only | `reason` |
 | `equivalences` | `{"<edge>": {forward, reverse, note, cites}}` | `note` |
 | `requires` | `{edge, direction?, hypothesis, notion, notionMarkdown?, metBy, evidence, cites}` | `evidence` |
 | `statementLint` | `{"<edge>": {"note": "…", "cites": [ … ]}}`; Phase 0 still decodes the old bare string | `note` |
@@ -287,7 +287,7 @@ and the asks all use them.
 |---|---|---|
 | `refuted` | `refuted:<object>` | `refuted:circular-evasive-lwe` |
 | `settings` | `settings:<object>` | `settings:honest-majority-t-lt-n-over-2` |
-| `quarantine` | `quarantine:<edge>` | `quarantine:red-bdh-to-hve-bw07` |
+| `quarantine` | `quarantine:<edge>`, one per edge, with or without `direction` | `quarantine:red-bdh-to-hve-bw07` |
 | `equivalences` | `equivalences:<edge>` | `equivalences:red-rabin-ot-to-ot` |
 | `requires` | `requires:<edge>:<hypothesis>`, with `~reverse` after the edge for a reverse direction | `requires:red-dlog-to-prg-bm84:dlog` |
 | `statementLint` | `statementLint:<edge>` | `statementLint:red-evasive-lwe-to-abe` |
