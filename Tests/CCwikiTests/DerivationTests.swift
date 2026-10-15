@@ -318,7 +318,9 @@ struct DerivationTests {
     @Test("a precondition on the reverse direction of an equivalence is assumed of a given, in its model only")
     func reverseDirectionPrecondition() throws {
         // DLO24's shape: an equivalence in a non-standard model whose reverse
-        // direction needs more of its hypothesis than the node states.
+        // direction needs more of its hypothesis than the node states. The
+        // engine supported reverse-direction requirements before the PR #9
+        // audit; this pins them on the shape the audit's entry gives them.
         let manifest = try Fx.manifest(
             objects: [Fx.object("r", type: "assumption"), Fx.object("f", type: "assumption"),
                       Fx.object("d", type: "assumption")],
@@ -340,7 +342,8 @@ struct DerivationTests {
         #expect(given.fact.isModelScoped)
         #expect(given.fact.chainClass == .free)
         #expect(given.proof.reverseRelationIDs == ["red-r-eq-f"])
-        #expect(derivation.answer(from: ["f"], to: "r", options: .standard).derived == nil)
+        // Not in the default models: the only step is in model `other`.
+        _ = try #require(derivation.answer(from: ["f"], to: "r", options: .standard).noPath)
 
         // Derived by another step: refused, and named.
         let refused = try #require(derivation.answer(from: ["d"], to: "r", options: .all).noPath)
@@ -461,6 +464,18 @@ struct DerivationTests {
         let implication = DerivationCuration(quarantine: ["red-f-to-g": reason],
                                              quarantineDirections: ["red-f-to-g": true])
         #expect(implication.unresolved(in: manifest) == ["not an equivalence red-f-to-g"])
+
+        // A misspelt direction reads as forward, as the reference engine
+        // reads it, and does not resolve: it would hold back the forward
+        // direction silently.
+        let misspeltJSON = """
+            { "quarantine": [{ "edge": "red-e-eq-f", "direction": "Reverse", "reason": "\(reason)" }] }
+            """
+        let misspelt = try DerivationCuration.decode(Data(misspeltJSON.utf8))
+        let misspeltIDs: Set<String> = ["red-e-eq-f"]
+        #expect(misspelt.misspeltDirections == misspeltIDs)
+        #expect(misspelt.quarantineReason("red-e-eq-f", isReverse: false) == reason)
+        #expect(misspelt.unresolved(in: manifest) == ["direction red-e-eq-f"])
     }
 
     // MARK: R14

@@ -226,6 +226,11 @@ makes redundant.
 - **Change.**
   - `ot-to-mpc-kil88.md` and `ot-to-com.md`: `hypotheses: [malicious-ot-security]`.
     The variant exists on `oblivious-transfer.md#malicious-security`.
+  - `oblivious-transfer.md` § Malicious Security: define the variant as
+    stand-alone, simulation-based security against a static malicious
+    adversary. That is what Kil88's substitution of a real OT for the ideal
+    one consumes; the section's game-based definitions, which it says "do
+    not capture all malicious-sender attacks", are not enough for it.
   - `cpir-to-ot-dmo00.md`: `conclusion: malicious-ot-security`. Its
     Statement already says single-server PIR is complete for secure
     computation.
@@ -329,6 +334,17 @@ the rows marked so.
   queries never collide, while a random function's collide with probability
   1/2. The switching gap is at most $q(q-1)/(2|\calD|)$. Both conversions
   need the row: with only one re-pointed, the other bypasses it.
+- LR88's own hypothesis has the same gap one step back. Its PRP is
+  large-domain only under its premise, a PRF on $\bits^n$ with $2^n$
+  superpolynomial (its Notes), and the `prf` node does not bound the
+  domain either: a PRF on a polynomial-size domain exists unconditionally
+  (its key is a whole random table). So when `prf-to-prp-lr88.md`
+  concludes `prp-large-domain`, its hypothesis should be a large-domain PRF
+  variant too (`prf-large-domain` on `pseudorandom-function.md`, a PRF
+  whose domain has superpolynomial size, with a folklore identity edge to
+  `prf`), concluded by the PRF constructions whose Statements give one
+  (`needs_paper` for which do). CCwiki accepts LR88 relative to its own
+  premise meanwhile, and says so in the two PRP entries' evidence.
 - **Not asked:** Wat09's IBE and HIBE need DBDH and DLIN in **one** group.
   No node can say that either, so CCwiki keeps its four entries. GPSW06's
   DBDH is ask 11.
@@ -386,7 +402,8 @@ the rows marked so.
   | `{kem} ⇒ owf` | `needs_paper`: IL89 does not treat KEMs; the verifiers find the source | 17 |
   | `{one-time-signature} ⇒ owf` | Rom90 (`needs_paper`) | 15 |
 
-  The audit's curation changes lowered four counts: the starts that lost
+  The audit's curation changes lowered five counts (SKE 104 → 93, CRHF
+  63 → 47, MAC 59 → 48, PRF 44 → 33, SIS 32 → 16): the starts that lost
   their answers (a strong PRP, whose domain may be small, no longer reaches
   PRF; ISIS no longer reaches SIS) gain less from an OWF edge.
 - **Pages.** Ten new reduction pages in `content/Reductions/`. The
@@ -561,7 +578,8 @@ regimes.
 
 ### Ask 14. Semi-honest OT ⇒ malicious OT (Haitner's compiler)
 
-`ccw:missing-edge-ot-semi-honest-to-malicious`, kind `missing-edge`.
+`ccw:missing-edge-ot-semi-honest-to-malicious`, kind `missing-edge`,
+`needs_paper` for the compiled OT's security notion.
 
 - **Need.** Kil88's OT ⇒ MPC and OT ⇒ COM substitute a real OT for an
   ideal one, which needs OT secure against malicious parties; the `ot`
@@ -582,6 +600,15 @@ regimes.
     assumption: semi-honest OT gives OWFs (Theorem 4, p. 425), which is
     also ask 8's OT row. A reference page for Hai08 (Haitner, TCC 2008) is
     new.
+  - The Statement should say which malicious security the compiled OT
+    has: stand-alone, simulation-based security against a static malicious
+    adversary. That is the notion Kil88's substitution of a real OT for the
+    ideal one consumes, so it is the notion ask 4's `malicious-ot-security`
+    should be defined by, not the OT page's game-based malicious
+    definitions, which the page says "do not capture all malicious-sender
+    attacks". Read with those, the chain compiler ⇒ `malicious-ot-security`
+    ⇒ Kil88 would prove more than the papers do. The verifiers confirm the
+    notion against Hai08's definitions, Theorem 2 and Corollary 2.
   - With ask 4, Kil88's two pages take `malicious-ot-security` as their
     hypothesis, and the chain is the compiler, then the direct Kil88 step.
     Without ask 4, extend the two Statements and their citations to include
@@ -602,13 +629,21 @@ regimes.
     Ordinary computational commitments also follow from semi-honest OT
     through OT ⇒ OWF ⇒ PRG ⇒ COM (ask 8).
 - **Pages.** `content/Reductions/ot-to-malicious-ot-security-hai08.md`
-  (new), a reference page for Hai08 (new),
-  `content/Reductions/ot-to-mpc-kil88.md`, `content/Reductions/ot-to-com.md`,
-  `content/Reductions/cpir-to-ot-dmo00.md`.
+  (new),
+  `content/References/Hai08 - Semi-Honest to Malicious Oblivious Transfer The Black-Box Way.md`
+  (new), `content/Reductions/ot-to-mpc-kil88.md`,
+  `content/Reductions/ot-to-com.md`, `content/Reductions/cpir-to-ot-dmo00.md`,
+  `content/Primitives/oblivious-transfer.md` (the variant's notion, with
+  ask 4).
 - **Effect,** measured with ask 4's re-pointing and its two requirements
-  dropped: +33 default derived pairs (998 → 1,031). ETDP ⇒ MPC is derived
-  (EGL, the compiler, Kil88), as static malicious MPC with abort only, and
-  so is ETDP ⇒ COM. Ask 4 alone adds 21 and leaves ETDP ⇒ MPC underived.
+  dropped: +33 default full pairs (998 → 1,031): 23 X ⇒ malicious OT, 7
+  X ⇒ COM (ETDP ⇒ COM among them), and malicious OT ⇒ OT, Rabin OT and
+  OIHF; and 7 new weakened-only X ⇒ MPC pairs (18 → 25), ETDP ⇒ MPC
+  among them (EGL, the compiler, Kil88),
+  as static malicious MPC with abort only: Kil88's weakening accepts
+  nothing. Ask 4 alone adds 21 full pairs net and leaves ETDP ⇒ MPC
+  underived. The golden mutations `ask-14-etdp-mpc` and `ask-14-etdp-com`
+  replay both.
 - **Sources.** Haitner, TCC 2008: Theorem 2 and Corollary 2 (p. 415),
   Theorem 4 (p. 425).
 - **Related.** ask 4, ask 5, ask 8, `ffr:content-error-26`,
@@ -642,13 +677,22 @@ regimes.
   - Keep the existing CP construction as it is.
 - **Pages.** `content/Reductions/kp-abe-to-be.md` (new), or
   `content/Reductions/abe-to-be.md`.
-- **Effect.** One new default derived pair (circular evasive LWE ⇒ BE,
-  vacuous), and ABE ⇒ BE no longer assumes CP-ABE. GPSW06's selective
-  KP-ABE still reaches no BE: the record has no selective-BE node for it.
+- **Effect.** ABE ⇒ BE would then need either CP-ABE with disjunctions
+  (the recorded construction) or adaptive KP-ABE with membership policies
+  (this one). The KP route carries its own condition, which CCwiki would
+  enforce with a requirement citing the new Statement, as it does on the CP
+  route, unless the edge's hypothesis is a variant that states it. The
+  measurement assumes no such requirement: with the KP edge taking the
+  plain `abe` node as its hypothesis, one new default derived pair
+  (circular evasive LWE ⇒ BE, vacuous).
+  GPSW06's selective KP-ABE still reaches no BE: the record has no
+  selective-BE node for it.
 - **Related.** ask 6's ABE ⇒ BE row, ask 12, `ffr:missing-edge-4`.
 - **Retires** no entry: CCwiki keeps `requires:red-abe-to-be:abe` for the
   CP construction. It adds answers.
-- **How CCwiki takes it in.** Golden drift.
+- **How CCwiki takes it in.** Golden drift, and a `requires` entry on the
+  new edge for adaptive KP-ABE with membership policies, citing its
+  Statement, unless its hypothesis is a variant that says so.
 
 ### Ask 16. BM84's rationale
 
@@ -794,7 +838,10 @@ regimes.
   LWE formulation HLL23 assume and breaks its post-condition, under the
   base hardness the theorem assumes for the pre-condition. That refutes
   this formulation only: not every evasive LWE variant, and it is no
-  impossibility result for ABE for unbounded-depth circuits.
+  impossibility result for ABE for unbounded-depth circuits. What that
+  premise is (LWE in which modulus and noise regime, or more than LWE)
+  neither the wiki nor the PR #9 audit says, so CCwiki's entry names it
+  without stating it; this ask is where it gets stated.
 - **Change.** On both lines, and in a formal definition for § Circular
   evasive LWE (a TODO today), state the attacked formulation (AMYY25's
   Assumption 4.1, HLL23's), the sampler class (public-coin), the theorem
@@ -869,9 +916,11 @@ regimes.
 - **Asks 8, 9 and 12–15 add answers:** 373 default pairs from ask 8's ten
   OWF edges (405 with ask 13's DLOG ⇒ OWF, which alone adds 32, CDH ⇒ PRG
   among them); 41 from selective KP-ABE ⇒ PKE with ask 5 (ask 12), BDH ⇒
-  PKE among them; 33 from Haitner's compiler with ask 4 (ask 14), ETDP ⇒
-  MPC among them, as static malicious MPC with abort; 1 from KP-ABE ⇒ BE
-  (ask 15); and classical lattice chains (ask 9).
+  PKE among them; 33 full pairs from Haitner's compiler with ask 4 (ask
+  14), ETDP ⇒ COM among them, and 7 weakened-only pairs, ETDP ⇒ MPC
+  among them as static malicious MPC with abort; 1 from KP-ABE ⇒ BE
+  recorded with no requirement (ask 15); and classical lattice chains
+  (ask 9).
 - **Asks 16, 19 and 20 correct text** the curation relies on; they retire
   nothing by themselves.
 - **What remains** is 8 entries: 5 `requires` entries (JLS21's shared prime

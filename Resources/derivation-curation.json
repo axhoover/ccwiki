@@ -9,7 +9,7 @@
    "object": "circular-evasive-lwe",
    "source": "AMYY25",
    "text": "AMYY25 (§4.1, Theorem 4.6, Claim 4.7) give a public-coin sampler that meets the pre-condition of the public-coin circular evasive LWE formulation HLL23 assume (AMYY25's Assumption 4.1) and breaks its post-condition. That formulation is therefore false, conditional on the base hardness the theorem assumes for its pre-condition, which contains LWE samples. This refutes that formulation only: not every evasive LWE variant, and not ABE for unbounded-depth circuits as such.",
-   "evidence": "content/Assumptions/learning-with-errors.md:113, :260, :272. The attacked formulation, sampler class and theorem are the PR #9 audit's pointers into AMYY25 (§4.1, Assumption 4.1; Theorem 4.6, p. 29; Claim 4.7, p. 30); the wiki's 'is false' does not pin down the formulation (AMYY25's Assumption 4.1) or state the base-hardness premise (wiki ask ccw:content-circular-evasive-lwe-scope). A pre-condition that contains LWE samples cannot hold unless LWE with those parameters is hard, so the premise implies that much.",
+   "evidence": "content/Assumptions/learning-with-errors.md:113, :260, :272. The attacked formulation, sampler class and theorem are the PR #9 audit's pointers into AMYY25 (§4.1, Assumption 4.1; Theorem 4.6, p. 29; Claim 4.7, p. 30); the wiki's 'is false' does not pin down the formulation (AMYY25's Assumption 4.1) or state the base-hardness premise (wiki ask ccw:content-circular-evasive-lwe-scope). A pre-condition that contains LWE samples cannot hold unless LWE with those parameters is hard, so the premise implies that much. What the premise is (LWE in which modulus and noise regime, or anything beyond LWE) neither the audit nor the wiki states, and CCwiki does not guess it: the sentence names the premise without stating it until that ask, which needs the paper, records it.",
    "cites": [
     {"page": "content/Assumptions/learning-with-errors.md", "section": "Evasive LWE counterexamples",
      "quote": "Public-coin [[#Circular evasive LWE|circular evasive LWE]], the assumption behind ABE for unbounded-depth circuits ([[HLL23 - Attribute-Based Encryption for Circuits of Unbounded Depth from Lattices Garbled Circuits of Optimal Size, Laconic Functional Evaluation, and More|HLL23]]; [[evasive-lwe-to-abe]]), is false: some sampler satisfies the pre-condition but not the post-condition — [[AMYY25 - Evasive LWE Attacks, Variants & Obfustopia|AMYY25]]"},
@@ -405,8 +405,8 @@
   {
    "edge": "red-dlog-to-prg-bm84",
    "hypothesis": "dlog",
-   "notion": "DLOG hard in Z_p^* (p prime, g a generator), where the generator reads residues as integers: each x_i is the next exponent, and the output bit is [x_i >= (p-1)/2]",
-   "notionMarkdown": "DLOG hard in $\\ZZ_p^*$ ($p$ prime, $g$ a generator), where the generator reads residues as integers: each $x_i$ is the next exponent, and the output bit is $[x_i \\ge (p-1)/2]$",
+   "notion": "DLOG hard in Z_p^* (p prime, g a generator), where the Blum-Micali generator (the PRG) reads residues as integers: each x_i is the next exponent, and the output bit is [x_i >= (p-1)/2]",
+   "notionMarkdown": "DLOG hard in $\\ZZ_p^*$ ($p$ prime, $g$ a generator), where the Blum–Micali generator (the PRG) reads residues as integers: each $x_i$ is the next exponent, and the output bit is $[x_i \\ge (p-1)/2]$",
    "metBy": [],
    "evidence": "Statement: 'If DLOG is hard in Z_p^* (p prime, g a generator), the Blum-Micali generator is a PRG: ... it iterates x_{i+1} = g^{x_i} mod p and outputs at each step the bit [x_i >= (p-1)/2]'. The recurrence feeds each residue back as an integer exponent and the predicate compares residues by their integer order: an interface of the prime field Z_p that an arbitrary cyclic group's encoding does not supply. So DLOG derived from CDH, DDH or BDH, which lives in their own group, does not meet it. The rationale's 'uses only the group operation' is inaccurate (wiki ask ccw:content-bm84-rationale). DDH => PRG is still derived without BM84 (ElGamal, IL89, HILL99). CDH => PRG is not: it awaits a DLOG => OWF edge on the same group family (wiki ask ccw:missing-edge-dlog-to-owf), which with OWF => PRG (HILL99) would give it without BM84.",
    "cites": [
@@ -462,12 +462,14 @@
    "notion": "OT secure against malicious parties (it instantiates Kil88's ideal OT)",
    "notionMarkdown": "OT secure against malicious parties",
    "metBy": ["red-cpir-to-ot-dmo00"],
-   "evidence": "Statement: 'in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties'. The proof substitutes a real OT for the ideal one, which needs OT secure against malicious parties; the OT page's definitions are semi-honest (oblivious-transfer.md:107), and EGL's OT is semi-honest. DMO00 is accepted on its Statement that non-trivial single-server PIR 'is therefore complete for secure two-party and multi-party computation', a claim about malicious security, so it includes upgrading the OT its PIR gives to security against malicious parties (by a semi-honest-to-malicious compiler: GMW87's, which uses one-way functions, or Haitner's fully black-box one); the page states the conclusion, not the upgrade (wiki ask ccw:missing-edge-ot-semi-honest-to-malicious). Semi-honest OT reaches malicious OT by Haitner's compiler (Hai08, Theorem 2 and Corollary 2), which the wiki does not record; until it does, semi-honest OT => MPC is refused here. What Kil88 and GMW87 conclude is the weakened notion in weakens:red-ot-to-mpc-kil88.",
+   "evidence": "Statement: 'in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties'. The proof substitutes a real OT for the ideal one, which needs OT secure against malicious parties, and in the stand-alone, static setting of the conclusion that means simulation-based security against a static malicious adversary: the OT page's game-based malicious definitions 'do not capture all malicious-sender attacks', so they would not do either. The OT page's definitions are semi-honest (oblivious-transfer.md:107), and EGL's OT is semi-honest. DMO00 is accepted on its Statement that non-trivial single-server PIR 'is therefore complete for secure two-party and multi-party computation', a claim about malicious security, so it includes upgrading the OT its PIR gives to security against malicious parties (by a semi-honest-to-malicious compiler: GMW87's, which uses one-way functions, or Haitner's fully black-box one); the page states the conclusion, not the upgrade (wiki ask ccw:missing-edge-ot-semi-honest-to-malicious). Semi-honest OT reaches malicious OT by Haitner's compiler (Hai08, Theorem 2 and Corollary 2), which the wiki does not record; until it does, semi-honest OT => MPC is refused here. What Kil88 and GMW87 conclude is the weakened notion in weakens:red-ot-to-mpc-kil88.",
    "cites": [
     {"page": "content/Reductions/ot-to-mpc-kil88.md", "section": "Statement",
      "quote": "in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties"},
     {"page": "content/Primitives/oblivious-transfer.md", "section": "Malicious Security",
      "quote": "The definitions above are **semi-honest**"},
+    {"page": "content/Primitives/oblivious-transfer.md", "section": "Malicious Security",
+     "quote": "game-based definitions alone do not capture all malicious-sender attacks"},
     {"page": "content/Reductions/cpir-to-ot-dmo00.md", "section": "Statement",
      "quote": "Non-trivial single-server PIR is therefore complete for secure two-party and multi-party computation"}
    ]
@@ -562,7 +564,7 @@
    "notion": "a PRP over a domain D with |D| = lambda^omega(1), superpolynomial in the security parameter",
    "notionMarkdown": "a PRP over a domain $\\calD$ with $|\\calD| = \\secpar^{\\omega(1)}$, superpolynomial in the security parameter",
    "metBy": ["red-prf-to-prp-lr88"],
-   "evidence": "Statement: 'A PRP (KeyGen, Eval, Invert) over a domain D with |D| superpolynomial in lambda is an invertible PRF for the traditional (forward-oracle) game', with the O(q^2/|D|) switching-lemma term, negligible only then. The PRP page's syntax puts no bound on D. On D = {0,1}, P_k(x) = x XOR k for a uniform bit k is exactly a random permutation, so a perfect PRP; querying both points never finds a collision, while a random function has one with probability 1/2, so the forward game is lost with advantage 1/2. The forward switching gap is at most q(q-1)/(2|D|). LR88 meets the condition: its PRP is on {0,1}^{2n}, and its own bound is negligible only when 2^n is superpolynomial in lambda. sPRP => PRP does not: a strong PRP may have a small domain too. The weakened conclusion is weakens:red-prp-to-invertible-prf.",
+   "evidence": "Statement: 'A PRP (KeyGen, Eval, Invert) over a domain D with |D| superpolynomial in lambda is an invertible PRF for the traditional (forward-oracle) game', with the O(q^2/|D|) switching-lemma term, negligible only then. The PRP page's syntax puts no bound on D. On D = {0,1}, P_k(x) = x XOR k for a uniform bit k is exactly a random permutation, so a perfect PRP; querying both points never finds a collision, while a random function has one with probability 1/2, so the forward game is lost with advantage 1/2. The forward switching gap is at most q(q-1)/(2|D|). LR88 meets the condition under LR88's own premise, a PRF on {0,1}^n with 2^n superpolynomial in lambda: its PRP is on {0,1}^{2n}, and its bound is negligible only then (its Notes), so whenever LR88 gives a PRP at all, the domain is large. The prf node does not enforce that premise: the PRF page's syntax bounds neither domain nor range, and a PRF on a polynomial-size domain exists unconditionally (the key is a whole random table). CCwiki accepts LR88 relative to its own theorem; a large-domain PRF hypothesis for LR88 is proposed with the PRP rows of wiki ask ccw:node-hypothesis-regimes. sPRP => PRP does not meet the condition: a strong PRP may have a small domain too. The weakened conclusion is weakens:red-prp-to-invertible-prf.",
    "cites": [
     {"page": "content/Reductions/prp-to-invertible-prf.md", "section": "Statement",
      "quote": "A [[pseudorandom-permutation|PRP]] $(\\KeyGen, \\Eval, \\Invert)$ over a domain $\\calD$ with $|\\calD|$ superpolynomial in $\\secpar$ is an [[pseudorandom-function#invertible-prfs|invertible PRF]] for the traditional (forward-oracle) game $\\Game^{\\mathrm{prf}}$"},
@@ -571,7 +573,9 @@
     {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Statement",
      "quote": "is a [[pseudorandom-permutation|PRP]] on $\\bits^{2n}$"},
     {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Notes",
-     "quote": "The birthday term $O(q^2/2^n)$ makes the bound negligible only when $2^n$ is superpolynomial in $\\secpar$"}
+     "quote": "The birthday term $O(q^2/2^n)$ makes the bound negligible only when $2^n$ is superpolynomial in $\\secpar$"},
+    {"page": "content/Primitives/pseudorandom-function.md", "section": "Syntax",
+     "quote": "A PRF is a pair of efficient algorithms $\\PRF= (\\KeyGen, \\Eval)$ with respect to keyspace $\\calK$, domain $\\calD$, and range $\\calR$:"}
    ]
   },
   {
@@ -580,7 +584,7 @@
    "notion": "a PRP over a domain D with |D| = lambda^omega(1), superpolynomial in the security parameter",
    "notionMarkdown": "a PRP over a domain $\\calD$ with $|\\calD| = \\secpar^{\\omega(1)}$, superpolynomial in the security parameter",
    "metBy": ["red-prf-to-prp-lr88"],
-   "evidence": "Statement: 'A PRP over a domain D with |D| superpolynomial in lambda is a PRF with Eval unchanged', with Adv^prf <= Adv^prp + q(q-1)/(2|D|), negligible only then. The PRP page's syntax puts no bound on D, and a two-point PRP is not a PRF: P_k(x) = x XOR k on D = {0,1}, k a uniform bit, is a perfect PRP, and its two outputs never collide, while a random function's collide with probability 1/2: advantage 1/2. Without this entry the identity conversion would bypass the domain condition on PRP => iPRF. LR88 meets the condition, as there; sPRP => PRP does not.",
+   "evidence": "Statement: 'A PRP over a domain D with |D| superpolynomial in lambda is a PRF with Eval unchanged', with Adv^prf <= Adv^prp + q(q-1)/(2|D|), negligible only then. The PRP page's syntax puts no bound on D, and a two-point PRP is not a PRF: P_k(x) = x XOR k on D = {0,1}, k a uniform bit, is a perfect PRP, and its two outputs never collide, while a random function's collide with probability 1/2: advantage 1/2. Without this entry the identity conversion would bypass the domain condition on PRP => iPRF. LR88 meets the condition under LR88's own premise, a PRF on {0,1}^n with 2^n superpolynomial, which the prf node does not enforce, as there (requires:red-prp-to-invertible-prf:prp); sPRP => PRP does not meet it.",
    "cites": [
     {"page": "content/Reductions/prp-to-prf.md", "section": "Statement",
      "quote": "A [[pseudorandom-permutation|PRP]] over a domain $\\calD$ with $|\\calD|$ superpolynomial in $\\secpar$ is a [[pseudorandom-function|PRF]] with $\\Eval$ unchanged"},
@@ -591,7 +595,9 @@
     {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Statement",
      "quote": "is a [[pseudorandom-permutation|PRP]] on $\\bits^{2n}$"},
     {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Notes",
-     "quote": "The birthday term $O(q^2/2^n)$ makes the bound negligible only when $2^n$ is superpolynomial in $\\secpar$"}
+     "quote": "The birthday term $O(q^2/2^n)$ makes the bound negligible only when $2^n$ is superpolynomial in $\\secpar$"},
+    {"page": "content/Primitives/pseudorandom-function.md", "section": "Syntax",
+     "quote": "A PRF is a pair of efficient algorithms $\\PRF= (\\KeyGen, \\Eval)$ with respect to keyspace $\\calK$, domain $\\calD$, and range $\\calR$:"}
    ]
   }
  ],

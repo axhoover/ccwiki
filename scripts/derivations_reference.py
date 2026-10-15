@@ -295,10 +295,10 @@ class Curation:
     def quarantined(self, edge: str, reverse: bool):
         """R13: the quarantine entry that holds this direction of `edge` back,
         or None. An entry without `direction` quarantines the whole reduction;
-        one with `direction` ("reverse", or anything else for the forward
-        direction) quarantines that direction of an equivalence alone, and the
-        other direction stays a step (Swift's
-        `DerivationCuration.quarantineReason(_:isReverse:)`)."""
+        one with `direction` ("forward" or "reverse") quarantines that
+        direction of an equivalence alone, and the other direction stays a
+        step (Swift's `DerivationCuration.quarantineReason(_:isReverse:)`).
+        Any other value reads as forward here, and `unresolved` reports it."""
         e = self.quarantine.get(edge)
         if e is None:
             return None
@@ -331,10 +331,17 @@ class Curation:
             if e in m.reductions and m.reductions[e]["kind"] != "equivalence":
                 bad.append(f"not an equivalence {e}")
         # A quarantine scoped to one direction names a direction of an
-        # equivalence; an implication has only the one.
+        # equivalence; an implication has only the one. The direction is
+        # "forward" or "reverse": any other value would hold back the forward
+        # direction silently. (A requirement meant for the reverse direction
+        # but misspelt reads as forward too, and then names a hypothesis its
+        # step lacks, which the check below reports.)
         for e, q in self.quarantine.items():
-            if q.get("direction") is not None and e in m.reductions and m.reductions[e]["kind"] != "equivalence":
+            d = q.get("direction")
+            if d is not None and e in m.reductions and m.reductions[e]["kind"] != "equivalence":
                 bad.append(f"not an equivalence {e}")
+            if d is not None and d not in ("forward", "reverse"):
+                bad.append(f"direction {e}")
         for (e, rev), reqs in self.requires.items():
             r = m.reductions.get(e)
             if r is None:
@@ -1686,10 +1693,43 @@ def _bar(bid, hyps, concl, cls):
             "status": "draft", "page": "", "slug": bid, "graphSlug": "", "title": bid}
 
 
+#: The PR #9 audit's positive cases (plans/relations-followups.md §13), each
+#: on the manifest a wiki ask would give (plans/wiki-asks.md), with the
+#: curation entries that ask retires left out (`dropCuration`).
+#:
+#: Ask 5's GPSW06 conclusion, with ask 12's selective KP-ABE => CPA-secure
+#: PKE. The variant says what the weakening said, so its entry goes; DBDH
+#: (requires:red-bdh-to-abe-gpsw06:bdh) stays, as ask 11 is not applied.
+ASK_12_PATCH = {
+    "reductionPatches": [{"id": "red-bdh-to-abe-gpsw06", "set": {"conclusion": "abe-selective-security"}}],
+    "reductions": [_red("red-syn-abe-selective-security-to-pke", ["abe-selective-security"], "pke",
+                        "fully-black-box")],
+    "dropCuration": ["weakens:red-bdh-to-abe-gpsw06"],
+}
+#: Ask 13: DLOG => OWF on the same group family. It retires nothing: BM84
+#: still needs DLOG in Z_p^*.
+ASK_13_PATCH = {
+    "reductions": [_red("red-syn-dlog-to-owf", ["dlog"], "owf", "fully-black-box")],
+}
+#: Ask 4's re-pointing at `malicious-ot-security`, with its identity edge
+#: back to `ot`, and ask 14's compiler (Hai08). Ask 4 retires the two
+#: malicious-OT requirements; Kil88's weakening stays (ask 5 is not applied).
+ASK_4_14_PATCH = {
+    "reductionPatches": [{"id": "red-ot-to-mpc-kil88", "set": {"hypotheses": ["malicious-ot-security"]}},
+                         {"id": "red-ot-to-com", "set": {"hypotheses": ["malicious-ot-security"]}},
+                         {"id": "red-cpir-to-ot-dmo00", "set": {"conclusion": "malicious-ot-security"}}],
+    "reductions": [_red("red-syn-malicious-ot-security-to-ot", ["malicious-ot-security"], "ot", "fully-black-box"),
+                   _red("red-syn-ot-to-malicious-ot-security-hai08", ["ot"], "malicious-ot-security",
+                        "fully-black-box")],
+    "dropCuration": ["requires:red-ot-to-mpc-kil88:ot", "requires:red-ot-to-com:ot"],
+}
+
 #: (id, patch, query start, target, toggle). A patch adds records, then sets
 #: fields on existing barriers and reductions and appends consequences to
-#: barriers. The last three try the upstream fields of
-#: plans/relations-followups.md §4.4 before the wiki ships them.
+#: barriers; its `dropCuration` leaves curation entries out
+#: (`patched_curation`). Three try the upstream fields of
+#: plans/relations-followups.md §4.4 before the wiki ships them, and the
+#: last six the audit's asks.
 MUTATIONS = [
     ("strongest-chain-conflict",
      {"objects": [_obj("syn-x", "assumption")],
@@ -1735,6 +1775,17 @@ MUTATIONS = [
      {"objects": [dict(_obj("syn-r", "assumption"), refutedBy=["[[X - Y|X]]"])],
       "reductions": [_red("red-syn-r-to-pke", ["syn-r"], "pke", "fully-black-box")]},
      ["syn-r"], "pke", False),
+    # Asks 5 and 12: selective KP-ABE reaches ordinary PKE (BDH => PKE,
+    # assuming DBDH), and still no adaptive IBE or BE.
+    ("ask-12-selective-kp-abe-pke", ASK_12_PATCH, ["bdh"], "pke", False),
+    ("ask-12-no-adaptive-ibe", ASK_12_PATCH, ["bdh"], "ibe", False),
+    ("ask-12-no-adaptive-be", ASK_12_PATCH, ["bdh"], "be", False),
+    # Ask 13: CDH reaches PRG through DLOG => OWF, without BM84.
+    ("ask-13-cdh-prg", ASK_13_PATCH, ["cdh"], "prg", False),
+    # Asks 4 and 14: semi-honest OT reaches Kil88 through the compiler, which
+    # concludes static malicious MPC with abort only; and ETDP => COM.
+    ("ask-14-etdp-mpc", ASK_4_14_PATCH, ["enhanced-trapdoor-permutation"], "mpc", False),
+    ("ask-14-etdp-com", ASK_4_14_PATCH, ["enhanced-trapdoor-permutation"], "com", False),
 ]
 
 
@@ -1752,10 +1803,30 @@ def apply_patch(data: dict, patch: dict) -> dict:
     return d
 
 
+#: The curation entries a patch's `dropCuration` may leave out, by key.
+DROPPABLE_ENTRIES = ("quarantine", "requires", "weakens")
+
+
+def patched_curation(cur: Curation, patch: dict) -> Curation:
+    """The curation a patch's `dropCuration` leaves: without those entries,
+    by id, as the re-review after a wiki ask would leave it (the asks'
+    "Retires" lines). Swift's `GoldenPatch.curation(_:from:)`."""
+    drops = set(patch.get("dropCuration", []))
+    if not drops:
+        return cur
+    data = cur.data
+    for e in curation_entries(cur.data):
+        if e["id"] in drops:
+            if e["key"] not in DROPPABLE_ENTRIES:
+                raise ValueError(f"dropCuration names {e['id']}: only {', '.join(DROPPABLE_ENTRIES)} entries")
+            data = without_entry(data, e)
+    return Curation(data, cur.sha256)
+
+
 def run_mutation(m: Manifest, cur: Curation, mut):
     mid, patch, start, target, inc = mut
     pm = Manifest(apply_patch(m.data, patch), "")
-    dv = Derivation(pm, cur)
+    dv = Derivation(pm, patched_curation(cur, patch))
     ad = dv.derived_barriers()
     return dv, ad, dv.query(start, target, inc), invariants(dv, ad)
 
@@ -1846,17 +1917,24 @@ GOLDEN_QUERIES = [
     ("bdh-range-query", ["bdh"], "range-query-encryption", False, ["derivable"]),
     ("evasive-lwe-be", ["evasive-lwe"], "be", False, ["derivable"]),
     ("subexp-lpn-crhf", ["subexponential-lpn"], "crhf", False, ["derivable"]),
-    # The PR #9 audit's semantic cases (plans/relations-followups.md §13). A
-    # case a wiki ask would change asserts nothing on a drifted manifest.
-    ("bdh-be", ["bdh"], "be", False, []),
-    ("bdh-pke", ["bdh"], "pke", False, []),
+    # The PR #9 audit's semantic cases (plans/relations-followups.md §13).
+    # CI's clone is drifted, so `derivable` is pinned wherever no wiki ask
+    # can change it without first retiring or changing a reduction a
+    # curation entry names, which fails curationResolves,
+    # curationEdgesUnchanged or curationQuotesFound and forces a re-review
+    # anyway: GPSW06's (asks 5, 11, 12), Kil88's (ask 4), the PRP
+    # conversions' (ask 6), DLO24's (asks 1, 17) and ISIS's (ask 21).
+    # etdp-mpc, above, is pinned for the same reason. Only cdh-prg is not:
+    # ask 13 derives it with no entry to re-review, as plain golden drift.
+    ("bdh-be", ["bdh"], "be", False, ["derivable"]),
+    ("bdh-pke", ["bdh"], "pke", False, ["derivable"]),
     ("cdh-prg", ["cdh"], "prg", False, []),
-    ("ot-mpc", ["ot"], "mpc", False, []),
-    ("prp-prf", ["prp"], "prf", False, []),
-    ("sprp-prf", ["strong-pseudorandom-permutation"], "prf", False, []),
+    ("ot-mpc", ["ot"], "mpc", False, ["derivable"]),
+    ("prp-prf", ["prp"], "prf", False, ["derivable"]),
+    ("sprp-prf", ["strong-pseudorandom-permutation"], "prf", False, ["derivable"]),
     ("rsa-fac", ["rsa"], "fac", False, ["derivable"]),
-    ("dcr-rsa-all", ["dcr"], "rsa", True, []),
-    ("isis-sis", ["inhomogeneous-sis"], "sis", False, []),
+    ("dcr-rsa-all", ["dcr"], "rsa", True, ["derivable"]),
+    ("isis-sis", ["inhomogeneous-sis"], "sis", False, ["derivable"]),
     # R14: refuted starts.
     ("circular-evasive-lwe-pke", ["circular-evasive-lwe"], "pke", False, ["derivable"]),
     ("ssddh-ke", ["ssddh"], "ke", False, ["derivable"]),
@@ -2548,9 +2626,12 @@ def selftest(dv: Derivation) -> bool:
           not a["derivable"] and any(r["edge"] == "red-prp-to-prf" and [x["kind"] for x in r["reasons"]] == ["requires"]
                                      for r in a["refusedSteps"]))
     # HPPY25 (unstated) gives the full iPRF from a PRF first, so LR88's route
-    # shows over the fully black-box steps only (R6).
+    # shows over the fully black-box steps only (R6). This rests on LR88's
+    # own premise, a PRF on {0,1}^n with 2^n superpolynomial, which the prf
+    # node does not enforce (wiki ask ccw:node-hypothesis-regimes).
     w = dv.restricted("fully-black-box").single("prf").weak.get("invertible-prf")
-    check("LR88's PRP meets the domain condition: PRF => PRP => forward-game iPRF assumes nothing",
+    check("LR88's PRP meets the domain condition under LR88's premise: PRF => PRP => forward-game iPRF "
+          "assumes nothing",
           w is not None and w.weak.edge == "red-prp-to-invertible-prf" and not w.assumes
           and w.step.hyps == ("prp",) and dv.restricted("fully-black-box").single("prf").facts["prp"].step.edge
           == "red-prf-to-prp-lr88")
@@ -2627,6 +2708,30 @@ def selftest(dv: Derivation) -> bool:
     mdv, mad, a, inv = res["stub-barrier-not-propagated"]
     check("a stub barrier is not propagated",
           len(mad) < base and all(d["barrier"] != "bar-owp-to-ke-ir89" for d in a["derivedBarriers"]))
+    # The PR #9 audit's positive cases, on the manifests its asks would give.
+    _, _, a, inv = res["ask-12-selective-kp-abe-pke"]
+    check("with asks 5 and 12, BDH => PKE holds through selective KP-ABE, assuming DBDH",
+          a["derivable"] and a["weakened"] is None
+          and "red-syn-abe-selective-security-to-pke" in a["edges"]
+          and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-bdh-to-abe-gpsw06", "bdh")]
+          and all(v for k, v in inv.items() if not k.startswith("_")), (a.get("edges"), a.get("assumes")))
+    for t in ("ibe", "be"):
+        _, _, a, _ = res[f"ask-12-no-adaptive-{t}"]
+        check(f"with asks 5 and 12, selective KP-ABE still reaches no {t.upper()}", not a["derivable"])
+    _, _, a, inv = res["ask-13-cdh-prg"]
+    check("with ask 13, CDH => PRG holds fully black-box through DLOG => OWF, avoiding BM84",
+          a["derivable"] and a["chainClass"] == "fully-black-box" and not a["assumes"]
+          and "red-syn-dlog-to-owf" in a["edges"] and "red-dlog-to-prg-bm84" not in a["edges"]
+          and all(v for k, v in inv.items() if not k.startswith("_")), (a.get("chainClass"), a.get("edges")))
+    _, _, a, inv = res["ask-14-etdp-mpc"]
+    check("with asks 4 and 14, ETDP => MPC holds through the compiler, as Kil88's static MPC with abort only",
+          a["derivable"] and a["weakened"] and a["weakened"]["edge"] == "red-ot-to-mpc-kil88" and not a["assumes"]
+          and "red-syn-ot-to-malicious-ot-security-hai08" in a["edges"]
+          and all(v for k, v in inv.items() if not k.startswith("_")), (a.get("edges"), a.get("weakened")))
+    _, _, a, _ = res["ask-14-etdp-com"]
+    check("with asks 4 and 14, ETDP => COM holds through the compiler, in full",
+          a["derivable"] and a["weakened"] is None and not a["assumes"]
+          and "red-syn-ot-to-malicious-ot-security-hai08" in a["edges"], a.get("edges"))
     ok &= selftest_upstream(dv, ad, res)
     ok &= selftest_direction_quarantine(dv)
     return ok
@@ -2637,7 +2742,8 @@ def selftest_direction_quarantine(dv: Derivation) -> bool:
     equivalence only (R13, plans/derivations.md §2a): the other direction is
     still a step with the record's class, the reduction is not `excluded`,
     and the held direction is named on its pair and in its refusal. On an
-    implication, `direction` does not resolve."""
+    implication, `direction` does not resolve, and nor does a direction
+    other than "forward" or "reverse"."""
     check, state = _checker()
     print("a quarantine of one direction (R13)")
     eq = dict(_red("red-syn-e-eq-f", ["syn-e"], "syn-f", "fully-black-box"), kind="equivalence")
@@ -2669,9 +2775,15 @@ def selftest_direction_quarantine(dv: Derivation) -> bool:
           and rows == [("red-syn-e-eq-f", True, "used")], (a.get("chainClass"), rows))
     inv = invariants(qdv, qdv.derived_barriers())
     check("invariants hold with a quarantine of one direction", inv["noIneligibleEdges"], inv["_detail"])
+    misspelt = copy.deepcopy(data)
     data["quarantine"].append({"edge": "red-syn-f-to-g", "direction": "reverse", "reason": reason})
     check("a quarantine of one direction of an implication does not resolve",
           "not an equivalence red-syn-f-to-g" in Curation(data, "").unresolved(pm))
+    # A misspelt direction would hold back the forward direction silently.
+    misspelt["quarantine"].append({"edge": "red-syn-e-eq-f", "direction": "Reverse", "reason": reason})
+    bad = Curation(misspelt, "").unresolved(pm)
+    check("a quarantine direction other than forward or reverse does not resolve",
+          "direction red-syn-e-eq-f" in bad and "not an equivalence red-syn-e-eq-f" not in bad, bad)
     return state["ok"]
 
 

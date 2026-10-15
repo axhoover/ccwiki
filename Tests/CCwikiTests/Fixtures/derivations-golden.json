@@ -3,7 +3,7 @@
  "generator": "scripts/derivations_reference.py",
  "wikiCommit": "ab81f02ff4a0e898d1e6b76dcf5ec8df2acf4157",
  "manifestSHA256": "b0c3fb657570d678d1d8bf69ca60d05ded9ade2b0bba05169d597767b4c0e3ee",
- "curationSHA256": "f61fc9ca8b090d739a39b6d490b6309b36705455c330331fe72f1fb5d18df90f",
+ "curationSHA256": "20eeb2d6712283dc9487d08f740456b9b40806bdd9b67c26367949a635539875",
  "counts": {
   "objects": 262,
   "reductions": 283,
@@ -138,7 +138,7 @@
      "pairCount": 21,
      "models": [],
      "assumes": [
-      "DLOG hard in Z_p^* (p prime, g a generator), where the generator reads residues as integers: each x_i is the next exponent, and the output bit is [x_i >= (p-1)/2]",
+      "DLOG hard in Z_p^* (p prime, g a generator), where the Blum-Micali generator (the PRG) reads residues as integers: each x_i is the next exponent, and the output bit is [x_i >= (p-1)/2]",
       "public-key FE for P/poly that is single-key, sub-exponentially secure and weakly compact"
      ]
     },
@@ -146,7 +146,7 @@
      "pairCount": 14,
      "models": [],
      "assumes": [
-      "DLOG hard in Z_p^* (p prime, g a generator), where the generator reads residues as integers: each x_i is the next exponent, and the output bit is [x_i >= (p-1)/2]",
+      "DLOG hard in Z_p^* (p prime, g a generator), where the Blum-Micali generator (the PRG) reads residues as integers: each x_i is the next exponent, and the output bit is [x_i >= (p-1)/2]",
       "LPN that is 2^(O(sqrt n))-hard",
       "a PRP over a domain D with |D| = lambda^omega(1), superpolynomial in the security parameter"
      ]
@@ -3466,7 +3466,9 @@
    ],
    "target": "be",
    "includeIdealised": false,
-   "stable": [],
+   "stable": [
+    "derivable"
+   ],
    "expect": {
     "supported": true,
     "derivable": false,
@@ -3506,7 +3508,9 @@
    ],
    "target": "pke",
    "includeIdealised": false,
-   "stable": [],
+   "stable": [
+    "derivable"
+   ],
    "expect": {
     "supported": true,
     "derivable": false,
@@ -3589,7 +3593,9 @@
    ],
    "target": "mpc",
    "includeIdealised": false,
-   "stable": [],
+   "stable": [
+    "derivable"
+   ],
    "expect": {
     "supported": true,
     "derivable": true,
@@ -3628,7 +3634,9 @@
    ],
    "target": "prf",
    "includeIdealised": false,
-   "stable": [],
+   "stable": [
+    "derivable"
+   ],
    "expect": {
     "supported": true,
     "derivable": true,
@@ -3667,7 +3675,9 @@
    ],
    "target": "prf",
    "includeIdealised": false,
-   "stable": [],
+   "stable": [
+    "derivable"
+   ],
    "expect": {
     "supported": true,
     "derivable": false,
@@ -3749,7 +3759,9 @@
    ],
    "target": "rsa",
    "includeIdealised": true,
-   "stable": [],
+   "stable": [
+    "derivable"
+   ],
    "expect": {
     "supported": true,
     "derivable": false,
@@ -3785,7 +3797,9 @@
    ],
    "target": "sis",
    "includeIdealised": false,
-   "stable": [],
+   "stable": [
+    "derivable"
+   ],
    "expect": {
     "supported": true,
     "derivable": false,
@@ -4856,6 +4870,564 @@
     "weakened": null
    },
    "derivedBarrierCount": 406,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
+  },
+  {
+   "id": "ask-12-selective-kp-abe-pke",
+   "patch": {
+    "reductionPatches": [
+     {
+      "id": "red-bdh-to-abe-gpsw06",
+      "set": {
+       "conclusion": "abe-selective-security"
+      }
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-abe-selective-security-to-pke",
+      "kind": "implication",
+      "hypotheses": [
+       "abe-selective-security"
+      ],
+      "conclusion": "pke",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-abe-selective-security-to-pke",
+      "graphSlug": "",
+      "title": "red-syn-abe-selective-security-to-pke"
+     }
+    ],
+    "dropCuration": [
+     "weakens:red-bdh-to-abe-gpsw06"
+    ]
+   },
+   "start": [
+    "bdh"
+   ],
+   "target": "pke",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 2,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-bdh-to-abe-gpsw06",
+     "red-syn-abe-selective-security-to-pke"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [
+     "red-bdh-to-abe-gpsw06:bdh"
+    ],
+    "weakened": null
+   },
+   "derivedBarrierCount": 435,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
+  },
+  {
+   "id": "ask-12-no-adaptive-ibe",
+   "patch": {
+    "reductionPatches": [
+     {
+      "id": "red-bdh-to-abe-gpsw06",
+      "set": {
+       "conclusion": "abe-selective-security"
+      }
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-abe-selective-security-to-pke",
+      "kind": "implication",
+      "hypotheses": [
+       "abe-selective-security"
+      ],
+      "conclusion": "pke",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-abe-selective-security-to-pke",
+      "graphSlug": "",
+      "title": "red-syn-abe-selective-security-to-pke"
+     }
+    ],
+    "dropCuration": [
+     "weakens:red-bdh-to-abe-gpsw06"
+    ]
+   },
+   "start": [
+    "bdh"
+   ],
+   "target": "ibe",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [
+     {
+      "edge": "red-bdh-to-ibe-bf01",
+      "reverse": false,
+      "status": "idealised-model"
+     }
+    ],
+    "completions": [
+     "decisional-linear"
+    ],
+    "completionCount": 1,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [
+      "k-linear-assumption"
+     ],
+     "startHostsDerive": []
+    },
+    "withIdealised": {
+     "depth": 1,
+     "models": [
+      "rom"
+     ],
+     "usesStub": false
+    }
+   },
+   "derivedBarrierCount": 435,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
+  },
+  {
+   "id": "ask-12-no-adaptive-be",
+   "patch": {
+    "reductionPatches": [
+     {
+      "id": "red-bdh-to-abe-gpsw06",
+      "set": {
+       "conclusion": "abe-selective-security"
+      }
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-abe-selective-security-to-pke",
+      "kind": "implication",
+      "hypotheses": [
+       "abe-selective-security"
+      ],
+      "conclusion": "pke",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-abe-selective-security-to-pke",
+      "graphSlug": "",
+      "title": "red-syn-abe-selective-security-to-pke"
+     }
+    ],
+    "dropCuration": [
+     "weakens:red-bdh-to-abe-gpsw06"
+    ]
+   },
+   "start": [
+    "bdh"
+   ],
+   "target": "be",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": false,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "completions": [],
+    "completionCount": 0,
+    "questionBecomes": [],
+    "refusedSteps": [],
+    "nearMisses": {
+     "targetVariantsDerived": [],
+     "targetHostDerived": null,
+     "startVariantsDerive": [
+      "k-linear-assumption",
+      "n-bdhe"
+     ],
+     "startHostsDerive": []
+    }
+   },
+   "derivedBarrierCount": 435,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
+  },
+  {
+   "id": "ask-13-cdh-prg",
+   "patch": {
+    "reductions": [
+     {
+      "id": "red-syn-dlog-to-owf",
+      "kind": "implication",
+      "hypotheses": [
+       "dlog"
+      ],
+      "conclusion": "owf",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-dlog-to-owf",
+      "graphSlug": "",
+      "title": "red-syn-dlog-to-owf"
+     }
+    ]
+   },
+   "start": [
+    "cdh"
+   ],
+   "target": "prg",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-cdh-to-dlog",
+     "red-owf-to-prg-hill99",
+     "red-syn-dlog-to-owf"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   },
+   "derivedBarrierCount": 406,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
+  },
+  {
+   "id": "ask-14-etdp-mpc",
+   "patch": {
+    "reductionPatches": [
+     {
+      "id": "red-ot-to-mpc-kil88",
+      "set": {
+       "hypotheses": [
+        "malicious-ot-security"
+       ]
+      }
+     },
+     {
+      "id": "red-ot-to-com",
+      "set": {
+       "hypotheses": [
+        "malicious-ot-security"
+       ]
+      }
+     },
+     {
+      "id": "red-cpir-to-ot-dmo00",
+      "set": {
+       "conclusion": "malicious-ot-security"
+      }
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-malicious-ot-security-to-ot",
+      "kind": "implication",
+      "hypotheses": [
+       "malicious-ot-security"
+      ],
+      "conclusion": "ot",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-malicious-ot-security-to-ot",
+      "graphSlug": "",
+      "title": "red-syn-malicious-ot-security-to-ot"
+     },
+     {
+      "id": "red-syn-ot-to-malicious-ot-security-hai08",
+      "kind": "implication",
+      "hypotheses": [
+       "ot"
+      ],
+      "conclusion": "malicious-ot-security",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-ot-to-malicious-ot-security-hai08",
+      "graphSlug": "",
+      "title": "red-syn-ot-to-malicious-ot-security-hai08"
+     }
+    ],
+    "dropCuration": [
+     "requires:red-ot-to-mpc-kil88:ot",
+     "requires:red-ot-to-com:ot"
+    ]
+   },
+   "start": [
+    "enhanced-trapdoor-permutation"
+   ],
+   "target": "mpc",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-enhanced-trapdoor-permutations-to-ot-gkm-00",
+     "red-ot-to-mpc-kil88",
+     "red-syn-ot-to-malicious-ot-security-hai08"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": "red-ot-to-mpc-kil88"
+   },
+   "derivedBarrierCount": 442,
+   "invariants": {
+    "noIneligibleEdges": true,
+    "defaultHasNoIdealisedModels": true,
+    "noChainContradictsRecordedBarrier": true,
+    "noChainProvesBelievedProposition": true,
+    "noChainContradictsDerivedBarrier": true,
+    "noDerivedBarrierContradictsRecordedReduction": true,
+    "romDoesNotReachOT": true,
+    "romDoesNotReachKE": true
+   },
+   "superseded": []
+  },
+  {
+   "id": "ask-14-etdp-com",
+   "patch": {
+    "reductionPatches": [
+     {
+      "id": "red-ot-to-mpc-kil88",
+      "set": {
+       "hypotheses": [
+        "malicious-ot-security"
+       ]
+      }
+     },
+     {
+      "id": "red-ot-to-com",
+      "set": {
+       "hypotheses": [
+        "malicious-ot-security"
+       ]
+      }
+     },
+     {
+      "id": "red-cpir-to-ot-dmo00",
+      "set": {
+       "conclusion": "malicious-ot-security"
+      }
+     }
+    ],
+    "reductions": [
+     {
+      "id": "red-syn-malicious-ot-security-to-ot",
+      "kind": "implication",
+      "hypotheses": [
+       "malicious-ot-security"
+      ],
+      "conclusion": "ot",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-malicious-ot-security-to-ot",
+      "graphSlug": "",
+      "title": "red-syn-malicious-ot-security-to-ot"
+     },
+     {
+      "id": "red-syn-ot-to-malicious-ot-security-hai08",
+      "kind": "implication",
+      "hypotheses": [
+       "ot"
+      ],
+      "conclusion": "malicious-ot-security",
+      "class": "fully-black-box",
+      "model": "standard",
+      "source": [
+       "folklore"
+      ],
+      "via": [],
+      "heuristic": false,
+      "securityLoss": "",
+      "status": "draft",
+      "page": "",
+      "slug": "red-syn-ot-to-malicious-ot-security-hai08",
+      "graphSlug": "",
+      "title": "red-syn-ot-to-malicious-ot-security-hai08"
+     }
+    ],
+    "dropCuration": [
+     "requires:red-ot-to-mpc-kil88:ot",
+     "requires:red-ot-to-com:ot"
+    ]
+   },
+   "start": [
+    "enhanced-trapdoor-permutation"
+   ],
+   "target": "com",
+   "includeIdealised": false,
+   "expect": {
+    "supported": true,
+    "derivable": true,
+    "recordedBarriers": [],
+    "reverseBarriers": [],
+    "derivedBarriers": [],
+    "derivedReverseBarriers": [
+     "bar-tdp-to-enhanced-trapdoor-permutation-haj18:fully-black-box"
+    ],
+    "recordedOnPair": [],
+    "depth": 3,
+    "models": [],
+    "scoped": false,
+    "chainClass": "fully-black-box",
+    "edges": [
+     "red-enhanced-trapdoor-permutations-to-ot-gkm-00",
+     "red-ot-to-com",
+     "red-syn-ot-to-malicious-ot-security-hai08"
+    ],
+    "reverseSteps": [],
+    "caveats": [],
+    "conflictingBarriers": [],
+    "majorResultBarriers": [],
+    "assumes": [],
+    "weakened": null
+   },
+   "derivedBarrierCount": 442,
    "invariants": {
     "noIneligibleEdges": true,
     "defaultHasNoIdealisedModels": true,

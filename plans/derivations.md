@@ -70,12 +70,12 @@ claims, and each one led to a rule below:
 | ETDP ⇒ OT ⇒ MPC | EGL's OT is semi-honest (as is the OT page's definition); Kil88 needs OT secure against malicious parties | R13 |
 | BDH ⇒ ABE ⇒ IBE | GPSW06 gives selectively secure KP-ABE; ABE ⇒ IBE turns adaptive ABE into adaptive IBE | R13 |
 | BDH ⇒ HVE | BW07 needs two assumptions on one composite-order group family (cBDH and C3DH); the record has one prime-order hypothesis | R13 |
-| BDH ⇒ ABE, unqualified | GPSW06 assumes **decisional** BDH; the `bdh` node also covers computational BDH, which DBDH implies but not conversely | R13 |
+| BDH ⇒ ABE, unqualified | GPSW06 assumes **decisional** BDH; the `bdh` node also covers computational BDH, which DBDH implies; no converse is known (GPSW06 supplies none) | R13 |
 | DDH ⇒ OT ⇒ MPC, as full MPC | Kil88 with GMW87 gives static malicious MPC with abort: no fairness, guaranteed output delivery, adaptive or UC security | R13 |
 | sPRP ⇒ PRP ⇒ PRF | Both PRP conversions need a domain with \|D\| = λ^ω(1); a two-point PRP is perfect and is not a PRF | R13 |
 | ISIS ⇒ SIS ⇒ CRHF | The Statement gives no parameters for ISIS ⇒ SIS, and read at fixed parameters it is false | R13 |
 | DCR ⇒ FAC ⇒ RSA (generic ring) | DLO24 needs factoring hardness against preprocessing fixed before the modulus is sampled | R13 |
-| Circular evasive LWE ⇒ PKE | The hypothesis, as HLL23 state it, is false (AMYY25), so the implication is vacuous | R14 |
+| Circular evasive LWE ⇒ PKE | The hypothesis, as HLL23 state it (AMYY25's Assumption 4.1), is false under the base hardness AMYY25's Theorem 4.6 assumes, so the implication is vacuous | R14 |
 
 The rows from "BDH ⇒ ABE, unqualified" to "DCR ⇒ FAC ⇒ RSA" came from the
 maintainer's audit on PR #9 (relations-followups.md §13), as did BW07's
@@ -572,8 +572,10 @@ These come from the curation (§2a), never from the engine's own judgement.
   only gestures at the other. The reduction is then not in `excluded`,
   since one direction of it is eligible; R10 item 0 still lists the held
   direction's row as `quarantined`, with the reason, and the refusal names
-  it. A `direction` on an implication does not resolve
-  (`curationResolves`).
+  it, saying that the Statement does not establish that direction. A
+  `direction` on an implication does not resolve (`curationResolves`), and
+  nor does any value but `forward` or `reverse`, which would otherwise read
+  as forward silently.
 - **No parameter tracking.** A regime is never carried along a chain, even a
   parameter-preserving one. LS15's degree-1 identity keeps the modulus, so
   rank-n module LWE ⇒ LWE ⇒ BGV12 is true, but it is refused. That is
@@ -829,7 +831,7 @@ objects, and L ≤ 10 layers per phase (the maximum default depth is 9).
 | Derived barriers, all | O(barriers · E) | 2 ms |
 | Implied-by PKE | candidate pairs × closure | 122 ms cold, 1 ms warm |
 | Invariants (every barrier, every derived barrier) | restricted closures | 90 ms |
-| Whole golden file (72 queries, 7 patched manifests) | — | 4.7 s |
+| Whole golden file (81 queries, 16 patched manifests) | — | 7.8 s |
 
 These are CPython timings on the Linux container; nothing was compiled here.
 A Swift port of the same loops should be at least an order of magnitude
@@ -1070,7 +1072,7 @@ and the curation's SHA-256, counts, policy constants, closure sizes (15
 objects, with weakened counts), backward summaries for PKE, OT and MPC with
 group tags, the invariants and sentinels by name, `curatedEdges`, a snapshot
 of every reduction the curation names, **81 query records** and
-**10 mutation records**. A query record holds the start, target and toggle and
+**16 mutation records**. A query record holds the start, target and toggle and
 the expected answer: *supported*, *derivable*, vacuous, model start, recorded
 barriers with qualifiers, reverse barriers, **derived barriers in full**
 (class, consequence, up and down paths, circumventions, redundancy),
@@ -1082,8 +1084,10 @@ hints and the toggle hint.
 
 **A mutation record** is one of the review's counterexamples as a patch: it
 adds objects, reductions and barriers, sets fields on existing barriers and
-reductions, or appends consequences to barriers. The Swift test applies the
-patch to the decoded manifest and asserts the invariants and, when both
+reductions, or appends consequences to barriers; its `dropCuration` leaves
+out the `quarantine`, `requires` or `weakens` entries, by id, that a wiki
+ask's re-review would retire. The Swift test applies the patch to the
+decoded manifest and the curation and asserts the invariants and, when both
 hashes match, the query, the derived-barrier count and the entries
 `curationSuperseded` lists. The seven: a stronger chain behind an unstated
 shortcut conflicts; a chain contradicting a derived barrier fails its
@@ -1093,7 +1097,12 @@ conflicts with a `free` barrier; a stub barrier is not propagated. Three
 more test the upstream fields of
 [relations-followups.md](relations-followups.md) §4.4: a barrier `model`
 that stops R12, a `reverseClass` that overrides the curation, and a
-`refutedBy` that makes an answer vacuous.
+`refutedBy` that makes an answer vacuous. Six replay the PR #9 audit's
+positive cases on the manifests its asks would give
+([relations-followups.md](relations-followups.md) §13): with asks 5 and 12,
+BDH ⇒ PKE assuming DBDH, and still no IBE or BE; with ask 13, CDH ⇒ PRG
+fully black-box without BM84; with asks 4 and 14, ETDP ⇒ MPC only as
+Kil88's static MPC with abort, and ETDP ⇒ COM.
 
 **The corpus test** (`DerivationTests`, gated on `CCWIKI_WIKI` like
 `RelationsTests`) reads the golden file and the curation through

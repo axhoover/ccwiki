@@ -92,6 +92,10 @@ struct DerivationCuration: Sendable {
     /// reduction id → `true` for the reverse direction, `false` for the
     /// forward one. A reduction absent here is quarantined whole.
     let quarantineDirections: [String: Bool]
+    /// R13: the quarantine entries whose `direction` is neither `forward`
+    /// nor `reverse`, by reduction id. Each reads as forward, as the
+    /// reference engine reads it, and `unresolved(in:)` reports it.
+    let misspeltDirections: Set<String>
     let equivalences: [String: Directions]
     /// In the file's order.
     let requires: [Requirement]
@@ -131,6 +135,7 @@ struct DerivationCuration: Sendable {
         settings: [Setting] = [],
         quarantine: [String: String] = [:],
         quarantineDirections: [String: Bool] = [:],
+        misspeltDirections: Set<String> = [],
         equivalences: [String: Directions] = [:],
         requires: [Requirement] = [],
         weakens: [Weakening] = [],
@@ -155,6 +160,7 @@ struct DerivationCuration: Sendable {
         self.settings = settingsByObject
         self.quarantine = quarantine
         self.quarantineDirections = quarantineDirections
+        self.misspeltDirections = misspeltDirections
         self.equivalences = equivalences
         self.requires = requires
         self.weakens = weakensByRelation
@@ -305,12 +311,20 @@ struct DerivationCuration: Sendable {
         }
         // A quarantine's direction, as the reference engine reads it: absent
         // (or null) holds back the whole reduction, "reverse" the reverse
-        // direction, anything else the forward one. The last entry for an
-        // edge wins, as it does for the reason: assigning nil removes it.
+        // direction, anything else the forward one. Anything but "forward"
+        // or "reverse" is misspelt, and `unresolved(in:)` reports it. The
+        // last entry for an edge wins, as it does for the reason: assigning
+        // nil removes it.
         var quarantineDirections: [String: Bool] = [:]
+        var misspeltDirections: Set<String> = []
         for raw in dto.quarantine {
             citations[.quarantine(relationID: raw.edge)] = raw.cites.map { $0.citation }
             quarantineDirections[raw.edge] = raw.direction.map { $0 == "reverse" }
+            if let direction = raw.direction, direction != "forward", direction != "reverse" {
+                misspeltDirections.insert(raw.edge)
+            } else {
+                misspeltDirections.remove(raw.edge)
+            }
         }
         for (relationID, raw) in dto.equivalences {
             citations[.equivalence(relationID: relationID)] = raw.cites.map { $0.citation }
@@ -340,6 +354,7 @@ struct DerivationCuration: Sendable {
             quarantine: Dictionary(
                 dto.quarantine.map { ($0.edge, $0.reason) }, uniquingKeysWith: { _, last in last }),
             quarantineDirections: quarantineDirections,
+            misspeltDirections: misspeltDirections,
             equivalences: dto.equivalences.mapValues {
                 Directions(forward: $0.forward, reverse: $0.reverse)
             },
@@ -362,8 +377,10 @@ struct DerivationCuration: Sendable {
     // MARK: Drift
 
     /// Ids in the file that the manifest no longer resolves: an object or a
-    /// reduction that is gone, an equivalence that is no longer one, or a
-    /// requirement naming a hypothesis its reduction does not have. Sorted.
+    /// reduction that is gone, an equivalence that is no longer one, a
+    /// quarantine whose direction is misspelt or names a direction of an
+    /// implication, or a requirement naming a hypothesis its reduction does
+    /// not have. Sorted.
     /// The corpus test fails on any, because the wiki moved under a reviewed
     /// correction and the correction has to be reviewed again.
     func unresolved(in manifest: RelationsManifest) -> [String] {
@@ -383,11 +400,18 @@ struct DerivationCuration: Sendable {
             }
         }
         // A quarantine scoped to one direction names a direction of an
-        // equivalence; an implication has only the one.
+        // equivalence; an implication has only the one. The direction is
+        // "forward" or "reverse": any other value would hold back the
+        // forward direction silently. (A requirement meant for the reverse
+        // direction but misspelt reads as forward too, and then names a
+        // hypothesis its step lacks, which the check below reports.)
         for relationID in quarantineDirections.keys {
             if let relation = manifest.reduction(relationID), relation.kind != .equivalence {
                 bad.insert("not an equivalence \(relationID)")
             }
+        }
+        for relationID in misspeltDirections {
+            bad.insert("direction \(relationID)")
         }
         for requirement in requires {
             guard let relation = manifest.reduction(requirement.relationID) else {

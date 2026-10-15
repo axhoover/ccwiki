@@ -120,7 +120,10 @@ struct DerivationCorpusTests {
                 #expect(!corpus.isExact, "\(id) names an object the patched manifest lacks")
                 continue
             }
-            let derivation = Derivation(manifest: manifest, curation: corpus.curation)
+            // A wiki ask's patch also leaves out the entries the re-review
+            // after it would retire (`dropCuration`).
+            let curation = try GoldenPatch.curation(patch, from: corpus.rawCuration) ?? corpus.curation
+            let derivation = Derivation(manifest: manifest, curation: curation)
 
             let invariants = derivation.invariants().byName
             let expectedInvariants = mutation["invariants"]?.bools ?? [:]
@@ -424,12 +427,14 @@ enum DerivationCorpusState: Sendable {
         let golden: GoldenJSON
         let curationData: Data
         let curation: DerivationCuration
+        let rawCuration: GoldenJSON
         let rawManifest: GoldenJSON
         do {
             let goldenData = try Data(contentsOf: tests.appending(path: "Fixtures/derivations-golden.json"))
             golden = try JSONDecoder().decode(GoldenJSON.self, from: goldenData)
             curationData = try Data(contentsOf: repository.appending(path: "Resources/\(DerivationCuration.resourceName)"))
             curation = try DerivationCuration.decode(curationData)
+            rawCuration = try JSONDecoder().decode(GoldenJSON.self, from: curationData)
             rawManifest = try JSONDecoder().decode(GoldenJSON.self, from: manifestData)
         } catch {
             return .unreadable("The golden file, the curation or the manifest did not parse: \(error)")
@@ -470,7 +475,8 @@ enum DerivationCorpusState: Sendable {
 
         return .ready(DerivationGoldenCorpus(
             isExact: isExact, golden: golden, rawManifest: rawManifest, manifest: manifest,
-            curation: curation, derivation: Derivation(manifest: manifest, curation: curation),
+            curation: curation, rawCuration: rawCuration,
+            derivation: Derivation(manifest: manifest, curation: curation),
             cloneRoot: cloneRoot))
     }
 
@@ -486,6 +492,8 @@ struct DerivationGoldenCorpus: Sendable {
     let rawManifest: GoldenJSON
     let manifest: RelationsManifest
     let curation: DerivationCuration
+    /// The curation file as plain JSON, for the patches' `dropCuration`.
+    let rawCuration: GoldenJSON
     let derivation: Derivation
     let cloneRoot: URL
 
@@ -778,6 +786,30 @@ enum GoldenPatch {
         }
         root["reductions"] = GoldenJSON.array(reductions)
         return GoldenJSON.object(root)
+    }
+
+    /// The curation a patch's `dropCuration` leaves: the file without those
+    /// entries, by id, as the re-review after a wiki ask would leave it
+    /// (`patched_curation`). Only `quarantine`, `requires` and `weakens`
+    /// entries are dropped this way. `nil` when the patch drops none.
+    static func curation(_ patch: GoldenJSON, from raw: GoldenJSON) throws -> DerivationCuration? {
+        let drops = Set(patch["dropCuration"]?.strings ?? [])
+        guard !drops.isEmpty, case .object(var root) = raw else { return nil }
+        for key in ["quarantine", "requires", "weakens"] {
+            guard let entries = root[key]?.array else { continue }
+            root[key] = GoldenJSON.array(entries.filter { !drops.contains(entryID(key, $0)) })
+        }
+        return try DerivationCuration.decode(JSONEncoder().encode(GoldenJSON.object(root)))
+    }
+
+    /// An entry's id, as `curation_entries` computes it:
+    /// `weakens:<edge>`, `quarantine:<edge>`, or
+    /// `requires:<edge>[~reverse]:<hypothesis>`.
+    static func entryID(_ key: String, _ entry: GoldenJSON) -> String {
+        let edge = entry["edge"]?.string ?? ""
+        guard key == "requires" else { return "\(key):\(edge)" }
+        let reverse = entry["direction"]?.string == "reverse" ? "~reverse" : ""
+        return "requires:\(edge)\(reverse):\(entry["hypothesis"]?.string ?? "")"
     }
 }
 

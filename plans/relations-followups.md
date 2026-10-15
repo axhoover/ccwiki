@@ -2055,21 +2055,21 @@ correction upstream.
 | §1 Do not whitelist adaptive IBE/BE consumers | Kept: `weakens:red-bdh-to-abe-gpsw06` accepts nothing (`bdh-ibe`, `bdh-be`) |
 | §2 Keep the BM84 guard; correct "uses only the group operation" | Done: the notion and evidence say the recurrence reads residues of $\ZZ_p^*$ as integers, which an arbitrary group's encoding does not supply; the wiki's rationale is ask 16. DDH ⇒ PRG still holds without BM84; the curation does not claim it was lost |
 | §2 DLOG ⇒ OWF on the same group family | Wiki ask 13 (and out of ask 8's list). CDH ⇒ PRG stays refused at BM84 until then (`cdh-prg`) |
-| §3 Haitner's compiler | Wiki ask 14. Semi-honest OT ⇒ malicious MPC stays refused (`etdp-mpc`) |
-| §3 Static malicious MPC with abort | Done: `weakens:red-ot-to-mpc-kil88`, accepting nothing. The record has no step that consumes MPC, so it refuses nothing; every answer through Kil88 now says what it concludes (`ot-mpc`, `ddh-mpc`, `rabin-ot-mpc`), and the 17 X ⇒ MPC pairs are weakened only. A variant node for it joins ask 5 |
+| §3 Haitner's compiler | Wiki ask 14, which asks for the compiled OT's notion to be stand-alone, simulation-based security against a static malicious adversary, the notion Kil88's substitution consumes (and ask 4's `malicious-ot-security` defined in that sense, not by the OT page's game-based definitions). Semi-honest OT ⇒ malicious MPC stays refused (`etdp-mpc`); the mutations `ask-14-etdp-mpc` and `ask-14-etdp-com` replay asks 4 and 14 |
+| §3 Static malicious MPC with abort | Done: `weakens:red-ot-to-mpc-kil88`, accepting nothing. The record has no step that consumes MPC, so it refuses nothing; every answer through Kil88 now says what it concludes (`ot-mpc`, `ddh-mpc`), and the 17 X ⇒ MPC pairs are weakened only. `rabin-ot-mpc` is not one of them: it stays refused at Kil88 (`requires`, since Cre87's Rabin OT is semi-honest), and its golden record changed only in losing the near-miss hint that its host OT derives MPC, which OT now does only weakened and assuming malicious OT. A variant node for it joins ask 5 |
 | §3 Record the malicious upgrade for `metBy`, DMO00 included | Done in both OT requirements' evidence: DMO00 is accepted on its Statement's completeness claim, which includes upgrading its OT to malicious security; the page's account of the upgrade is part of ask 14 |
 | §3 OT ⇒ COM: not both statistical in the real model | Done: the evidence says statistical hiding and binding hold in the OT-hybrid model only; the `com` it concludes is an ordinary commitment. OT ⇒ OWF ⇒ PRG ⇒ COM awaits ask 8's OT row (Hai08, Theorem 4) |
 | §4 Correct DLO24's experiment | Wiki ask 17 |
 | §4 Keep RSA ⇒ FAC; restrict FAC ⇒ RSA to the generic-RSA experiment | Done: `requires:red-rsa-to-fac-dlo24~reverse:fac`, factoring hardness against preprocessing fixed before the modulus is sampled, with the conclusion scoped to DLO24's generic-RSA adversaries; the `free` class no longer stands alone. RSA ⇒ FAC stays RSA78's, fully black-box (`rsa-fac`); FAC ⇒ RSA is conditional (`fac-rsa-all`); DCR ⇒ FAC ⇒ RSA is refused (`dcr-rsa-all`) |
-| §5 \|D\| = λ^ω(1) on both PRP conversions | Done: `requires:red-prp-to-prf:prp` and `requires:red-prp-to-invertible-prf:prp`. LR88's PRP meets it (its own bound needs $2^n$ superpolynomial), so DDH ⇒ iPRF is unchanged; a bare PRP gives a PRF only assuming it (`prp-prf`), and a strong PRP, whose domain may be small, no longer does (`sprp-prf`). The weakening's notion drops the domain, now an input condition |
+| §5 \|D\| = λ^ω(1) on both PRP conversions | Done: `requires:red-prp-to-prf:prp` and `requires:red-prp-to-invertible-prf:prp`. LR88's PRP meets it under LR88's own premise (a PRF on $\bits^n$ with $2^n$ superpolynomial, which its bound needs), so DDH ⇒ iPRF is unchanged. The `prf` node does not enforce that premise (a PRF on a polynomial-size domain exists unconditionally), so the acceptance is relative to LR88's theorem, as the evidence says; a large-domain PRF hypothesis for LR88 joins ask 6's PRP row; a bare PRP gives a PRF only assuming it (`prp-prf`), and a strong PRP, whose domain may be small, no longer does (`sprp-prf`). The weakening's notion drops the domain, now an input condition |
 | §5 Keep the strong-iPRF refusal | Kept: the weakening accepts only iPRF ⇒ PRF |
 | §6 BW07: two typed assumptions on one family | Done: the quarantine's reason names cBDH and C3DH on one composite-order family, with subgroup decision from C3DH, and keeps the selective conclusion; quarantine kept. The Statement and the reference's title are ask 18 |
 | §7 Keep SIS ⇒ ISIS; quarantine ISIS ⇒ SIS | Done: `quarantine:red-isis-inhomogeneous-sis-to-sis` (forward only); the circular requirement is gone; the equivalence note states the proved direction's parameters (`isis-sis`, `isis-crhf`, `sis-isis`). Parameters and proof are ask 21 |
 | §8 ABE ⇒ BE | Done: the evidence states the KP construction with membership policies and what selective KP-ABE gives; the requirement stays. The construction is ask 15 |
 | §8 TDP ⇒ NIZK | Done: the notion requires certification for adversarially chosen indices (CL18's certifiable injectivity suffices), not double enhancement alone. The Statement's sentence is ask 19 |
-| §8 Circular evasive LWE | Done: the sentence names the attacked formulation (AMYY25's Assumption 4.1, HLL23's), the sampler class, the theorem and its base-hardness premise, and says what it does not refute. The wiki's lines are ask 20 |
+| §8 Circular evasive LWE | **Partly.** The sentence names the attacked formulation (AMYY25's Assumption 4.1, HLL23's), the sampler class (public-coin) and the theorem (Theorem 4.6, Claim 4.7), says the refutation is conditional on the theorem's base-hardness premise, and says what it does not refute. It does not state the premise: neither the audit nor the wiki says what it is (LWE in which modulus and noise regime, or more), and the papers are out of reach here. The premise awaits ask 20 (`needs_paper`), and so does the wiki's text |
 | Preserve 12–13, 16–19, 20 | Unchanged, byte for byte |
-| Regenerate; quotes; ablations; regressions | Done: golden file (81 queries, 9 new for the audit's cases), [curation-review.md](curation-review.md) (47 entries, 114 of 114 quotes), a `--selftest` check per semantic case |
+| Regenerate; quotes; ablations; regressions | Done: golden file (81 queries, 9 new for the audit's cases; 16 patched manifests, 6 new for the asks' positive cases), [curation-review.md](curation-review.md) (47 entries, 117 of 117 quotes), a `--selftest` check per semantic case |
 
 **What it changed in the answers** (default models, single starts): the
 full derived pairs go from 1,022 to 998. Seventeen X ⇒ MPC pairs are kept
@@ -2083,9 +2083,35 @@ reasons plus ISIS's ROM chains and DCR ⇒ RSA.
 
 | Case | Today | Becomes |
 |---|---|---|
-| Computational BDH alone cannot invoke GPSW06 unqualified | BDH ⇒ ABE assumes DBDH | with ask 11, BDH stops reaching ABE and DBDH reaches it unconditionally |
-| Selective KP-ABE reaches ordinary PKE, not adaptive IBE/BE | IBE, BE refused on the weakened ABE; PKE underived | PKE with ask 12 (and 5) |
-| CDH reaches PRG through DLOG and OWF | refused at BM84 | derived with ask 13 |
-| Semi-honest OT reaches static malicious MPC with abort | refused at Kil88 | derived, weakened, with ask 14 (and 4) |
+| Computational BDH alone cannot invoke GPSW06 unqualified | BDH ⇒ ABE assumes DBDH | with ask 11, BDH stops reaching ABE, and DBDH reaches selective KP-ABE with no extra assumption |
+| Selective KP-ABE reaches ordinary PKE, not adaptive IBE/BE | IBE, BE refused on the weakened ABE; PKE underived | PKE with ask 12 (and 5), assuming DBDH; IBE and BE still underived (mutations `ask-12-*`, +41 pairs) |
+| CDH reaches PRG through DLOG and OWF | refused at BM84 | derived with ask 13, fully black-box and without BM84 (mutation `ask-13-cdh-prg`, +32 pairs) |
+| Semi-honest OT reaches static malicious MPC with abort | refused at Kil88 | derived, weakened, with ask 14 (and 4): ETDP ⇒ MPC is one of 7 new weakened-only pairs, beside 33 new full pairs, ETDP ⇒ COM among them (mutations `ask-14-*`) |
 | A two-point PRP cannot instantiate the PRF conversions | the domain requirement is not met by a bare PRP | — |
 | DLO's preprocessing cannot receive the eventual modulus | FAC ⇒ RSA only assuming DLO24's experiment | ask 17 restates it on the page |
+
+**After the review of these changes** (same day, before merge):
+
+- **Positive cases as mutations.** A golden patch may carry `dropCuration`,
+  the `quarantine`, `requires` or `weakens` entries the ask's re-review
+  would retire (Python `patched_curation`, Swift
+  `GoldenPatch.curation(_:from:)`). Six mutations replay the asks' positive
+  cases on the manifests they would give: asks 5 and 12 (BDH ⇒ PKE assuming
+  DBDH; BDH ⇒ IBE and BE underived), ask 13 (CDH ⇒ PRG), asks 4 and 14
+  (ETDP ⇒ MPC weakened only; ETDP ⇒ COM in full). Each has a `--selftest`
+  check; Swift asserts their answers in exact mode.
+- **Pins.** CI's clone is drifted, so `derivable` is pinned for every audit
+  case except `cdh-prg`: no ask changes the others without first failing
+  `curationResolves`, `curationEdgesUnchanged` or `curationQuotesFound`.
+- **A misspelt direction.** A quarantine `direction` other than `forward`
+  or `reverse` read as forward silently; both engines now report it as
+  `direction <edge>`, and `curationResolves` fails.
+- **The explorer's wording.** The on-pair row and the refusal of a
+  quarantine of one direction say the Statement does not establish that
+  direction, not that the recorded hypotheses differ.
+- **Not done.** A requirement on LR88's own hypothesis (a PRF on $\bits^n$
+  with $2^n$ superpolynomial): it is proposed in ask 6, and the PRP entries'
+  evidence says their acceptance of LR88 is relative to LR88's premise. The
+  vacuous-answer banner says a refuted start "is known to be false (…)",
+  which for circular evasive LWE holds only under AMYY25's premise (above);
+  the entry's own sentence says so, the banner does not yet.
