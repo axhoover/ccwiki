@@ -197,3 +197,79 @@ struct PaperStoreTests {
         #expect(try String(contentsOf: stray, encoding: .utf8) == "%PDF stray")
     }
 }
+
+/// A replacement that matches the old paper's name, size and second is
+/// still a new paper: the window's view identity is the keep's revision, so
+/// the open window loads the new file, and a re-read loads nothing.
+struct PaperRevisionTests {
+
+    private let eprint = URL(string: "https://eprint.iacr.org/2002/022.pdf")!
+
+    @Test("a same-second, same-size replacement gets a new revision; a re-read keeps it")
+    func replacementIsANewRevision() throws {
+        let root = try PaperFixtures.temporaryDirectory("papers-revision")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let instant = Date(timeIntervalSince1970: 1_790_000_000.4)
+        let store = PaperStore(
+            directory: root.appending(path: "papers"),
+            discard: { file in try FileManager.default.removeItem(at: file) },
+            now: { instant })
+        let source = PaperSource(page: PaperFixtures.reference(
+            "AABN02", source: "https://eprint.iacr.org/2002/022", title: "A Paper"))
+
+        func incoming(_ contents: String) throws -> URL {
+            let url = root.appending(path: "incoming-\(UUID().uuidString).pdf")
+            try Data(contents.utf8).write(to: url)
+            return url
+        }
+        let first = try store.keep(
+            try incoming("%PDF-1.4 AAAA"), for: source, origin: .downloaded(from: eprint))
+        let second = try store.keep(try incoming("%PDF-1.4 BBBB"), for: source, origin: .addedByYou)
+
+        // Everything the old identity read is the same.
+        #expect(first.fileName == second.fileName)
+        #expect(first.bytes == second.bytes)
+        #expect(first.addedAt == second.addedAt)
+        // The revision is not, so the window's paper view is a new one.
+        #expect(first.revision != second.revision)
+        #expect(PaperWindowView.documentIdentity(of: first)
+            != PaperWindowView.documentIdentity(of: second))
+        #expect(try String(contentsOf: store.fileURL(for: second), encoding: .utf8)
+            == "%PDF-1.4 BBBB")
+
+        // Reading the index again, as every view update does, changes nothing.
+        let reread = try #require(PaperStore(directory: store.directory).record(for: source.referencePath))
+        #expect(reread == second)
+        #expect(PaperWindowView.documentIdentity(of: reread)
+            == PaperWindowView.documentIdentity(of: second))
+    }
+
+    @Test("a record from before revisions reads with the same revision every time")
+    func legacyRecordRevision() throws {
+        let root = try PaperFixtures.temporaryDirectory("papers-legacy")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appending(path: "papers")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("%PDF-1.4 old".utf8).write(to: directory.appending(path: "AABN02.pdf"))
+        let index = """
+            {
+              "papers" : [
+                {
+                  "addedAt" : "2026-10-01T12:00:00Z",
+                  "bytes" : 12,
+                  "fileName" : "AABN02.pdf",
+                  "origin" : { "addedByYou" : {} },
+                  "referencePath" : "References/AABN02.md"
+                }
+              ],
+              "version" : 1
+            }
+            """
+        try Data(index.utf8).write(to: directory.appending(path: "papers.json"))
+
+        let first = try #require(PaperStore(directory: directory).record(for: "References/AABN02.md"))
+        let again = try #require(PaperStore(directory: directory).record(for: "References/AABN02.md"))
+        #expect(first.revision == again.revision)
+        #expect(!first.revision.isEmpty)
+    }
+}
