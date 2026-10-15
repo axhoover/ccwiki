@@ -53,8 +53,10 @@ extension Derivation {
         let ineligible = steps.filter { step in
             guard let relation = manifest.reduction(step.relationID) else { return false }
             let ends = relation.hypotheses + [relation.conclusion]
+            // Step by step: a quarantine of one direction of an equivalence
+            // leaves the other direction a step.
             return relation.kind == .inclusion || relation.heuristic
-                || curation.quarantine[step.relationID] != nil
+                || curation.quarantineReason(step.relationID, isReverse: step.isReverse) != nil
                 || ends.contains { nodeType($0) == Self.excludedType }
         }
         result.noIneligibleEdges = ineligible.isEmpty

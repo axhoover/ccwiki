@@ -455,8 +455,15 @@ struct ExplorerWriter: Sendable {
             }
             switch reason {
             case .quarantined(let why):
-                sentences.append("Not used: the wiki's record of \(text) does not match its "
-                    + "Statement. \(why)")
+                if derivation.curation.quarantineDirections[step.relationID] != nil {
+                    // One direction of an equivalence: its hypotheses match,
+                    // and its Statement does not establish this direction.
+                    sentences.append("Not used: the wiki records \(text) as one direction of an "
+                        + "equivalence, and its Statement does not establish that direction. \(why)")
+                } else {
+                    sentences.append("Not used: the wiki's record of \(text) does not match its "
+                        + "Statement. \(why)")
+                }
             case .weakened(let hypothesis, let producedBy, let notion):
                 sentences.append("Not derived: \(text) needs \(label(hypothesis)) as the wiki "
                     + "defines it, and \(producer(producedBy)) gives only \(notion).")

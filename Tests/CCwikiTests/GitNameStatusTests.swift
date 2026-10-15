@@ -98,10 +98,11 @@ struct GitNameStatusTests {
         let binary = GitNameStatus.binaryPaths(numstatZ: try Self.fixture("numstat.z"))
         let patch = try Self.fixture("staged.patch")
         let snapshot = ReviewSnapshot.assemble(
-            base: "4b825dc", entries: entries, binary: binary, patch: patch,
+            base: "4b825dc", tree: "9a3f1e2", entries: entries, binary: binary, patch: patch,
             oldTexts: Self.oldTexts, newTexts: Self.newTexts)
 
         #expect(snapshot.baseCommit == "4b825dc")
+        #expect(snapshot.tree == "9a3f1e2")
         #expect(snapshot.digest == "d2f71b32c9b6f7ea8ca95e37347920bb23f3739dbd98ed4b790c62fbd5011c20")
         #expect(snapshot.files.map(\.path) == entries.map(\.path))
         #expect(!snapshot.isEmpty)
@@ -147,7 +148,8 @@ struct GitNameStatusTests {
         // a.md's new text is missing (not UTF-8, say), and so is the old
         // text of c.md, by its path at the base.
         let snapshot = ReviewSnapshot.assemble(
-            base: "4b825dc", entries: entries, binary: [], patch: Data("diff".utf8),
+            base: "4b825dc", tree: "9a3f1e2", entries: entries, binary: [],
+            patch: Data("diff".utf8),
             oldTexts: ["content/Primitives/a.md": "line one\n", "content/Primitives/d.md": "gone\n"],
             newTexts: ["content/Primitives/b.md": "new\n", "content/Primitives/c.md": "moved\n"])
         let files = Dictionary(uniqueKeysWithValues: snapshot.files.map { ($0.path, $0) })
@@ -173,7 +175,8 @@ struct GitNameStatusTests {
     @Test("an empty change is an empty snapshot, digested all the same")
     func emptySnapshot() {
         let snapshot = ReviewSnapshot.assemble(
-            base: "4b825dc", entries: [], binary: [], patch: Data(), oldTexts: [:], newTexts: [:])
+            base: "4b825dc", tree: "4b825dc", entries: [], binary: [], patch: Data(),
+            oldTexts: [:], newTexts: [:])
         #expect(snapshot.isEmpty)
         #expect(snapshot.digest == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
     }

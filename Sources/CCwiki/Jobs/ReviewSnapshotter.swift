@@ -6,19 +6,26 @@ import Foundation
 ///
 /// ```
 /// git add -A -- . ':(exclude).ccwiki'
-/// git diff --cached -M --name-status -z <base>   → GitNameStatus.parse
-/// git diff --cached --numstat -z <base>          → binary paths
-/// git diff --cached --binary <base>              → the digest, and logs/<id>.patch
+/// git write-tree                                 → <tree>, what is staged, by name
+/// git diff -M --name-status -z <base> <tree>     → GitNameStatus.parse
+/// git diff --numstat -z <base> <tree>            → binary paths
+/// git diff <patchOptions> <base> <tree>          → the digest, and logs/<id>.patch
 /// git cat-file blob <base>:<old path>            → each changed file's old text
-/// git cat-file blob :<path>                      → its new text, from the index
+/// git cat-file blob <tree>:<path>                → its new text
 /// ```
+///
+/// Every command reads the objects themselves, never replacements
+/// (`GitService.realObjects`), and every diff shows every submodule
+/// (`--ignore-submodules=none`).
 ///
 /// - **Bytes, not lines.** Every read goes through `Subprocess.runData`, and
 ///   texts are decoded only after, strictly: a file whose bytes are not
 ///   UTF-8 has no text, and `ReviewSnapshot.assemble` treats it as binary,
 ///   which DiffGuard blocks.
-/// - **The new text comes from the index**, so the snapshot is exactly what
-///   was staged and digested, not what was on disk a moment later.
+/// - **Everything comes from one tree**, written from the index, so the
+///   snapshot is exactly what was staged and digested, not what was on disk
+///   or in the index a moment later; and Approve commits that tree or
+///   nothing.
 /// - **The patch is written every time**, byte for byte, to `logs/<id>.patch`
 ///   outside Caches, so a review survives its worktree (§4.4).
 /// - Assembling the diff and checking it run in `Task.detached`:
@@ -60,17 +67,17 @@ struct ReviewSnapshotter {
                 oldTexts[oldPath] = text
             }
             if entry.status != .deleted,
-               let data = await git.blob(":\(entry.path)", in: worktree),
+               let data = await git.blob("\(diff.tree):\(entry.path)", in: worktree),
                let text = String(data: data, encoding: .utf8) {
                 newTexts[entry.path] = text
             }
         }
 
-        let patch = diff.patch
+        let (tree, patch) = (diff.tree, diff.patch)
         let (before, after) = (oldTexts, newTexts)
         return await Task.detached(priority: .userInitiated) {
             ReviewSnapshot.assemble(
-                base: base, entries: entries, binary: binary,
+                base: base, tree: tree, entries: entries, binary: binary,
                 patch: patch, oldTexts: before, newTexts: after)
         }.value
     }

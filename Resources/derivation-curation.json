@@ -8,11 +8,13 @@
   {
    "object": "circular-evasive-lwe",
    "source": "AMYY25",
-   "text": "Public-coin circular evasive LWE is false (AMYY25).",
-   "evidence": "content/Assumptions/learning-with-errors.md:113, :272",
+   "text": "AMYY25 (§4.1, Theorem 4.6, Claim 4.7) give a public-coin sampler that meets the pre-condition of the public-coin circular evasive LWE formulation HLL23 assume (AMYY25's Assumption 4.1) and breaks its post-condition. That formulation is therefore false, conditional on the base hardness the theorem assumes for its pre-condition, which contains LWE samples. This refutes that formulation only: not every evasive LWE variant, and not ABE for unbounded-depth circuits as such.",
+   "evidence": "content/Assumptions/learning-with-errors.md:113, :260, :272. The attacked formulation, sampler class and theorem are the PR #9 audit's pointers into AMYY25 (§4.1, Assumption 4.1; Theorem 4.6, p. 29; Claim 4.7, p. 30); the wiki's 'is false' does not pin down the formulation (AMYY25's Assumption 4.1) or state the base-hardness premise (wiki ask ccw:content-circular-evasive-lwe-scope). A pre-condition that contains LWE samples cannot hold unless LWE with those parameters is hard, so the premise implies that much. What the premise is (LWE in which modulus and noise regime, or anything beyond LWE) neither the audit nor the wiki states, and CCwiki does not guess it: the sentence names the premise without stating it until that ask, which needs the paper, records it.",
    "cites": [
     {"page": "content/Assumptions/learning-with-errors.md", "section": "Evasive LWE counterexamples",
      "quote": "Public-coin [[#Circular evasive LWE|circular evasive LWE]], the assumption behind ABE for unbounded-depth circuits ([[HLL23 - Attribute-Based Encryption for Circuits of Unbounded Depth from Lattices Garbled Circuits of Optimal Size, Laconic Functional Evaluation, and More|HLL23]]; [[evasive-lwe-to-abe]]), is false: some sampler satisfies the pre-condition but not the post-condition — [[AMYY25 - Evasive LWE Attacks, Variants & Obfustopia|AMYY25]]"},
+    {"page": "content/Assumptions/learning-with-errors.md", "section": "Evasive LWE",
+     "quote": "if standard LWE remains hard even when $\\mathbf{P}$ is given in the clear (pre-condition), then it remains hard even when the short preimage $\\mathbf{K}$ is given instead (post-condition)"},
     {"page": "content/Assumptions/learning-with-errors.md", "section": "Circular evasive LWE",
      "quote": "It is false — [[AMYY25 - Evasive LWE Attacks, Variants & Obfustopia|AMYY25]]"}
    ]
@@ -71,10 +73,12 @@
  "quarantine": [
   {
    "edge": "red-bdh-to-hve-bw07",
-   "reason": "The Statement needs composite-order groups and three assumptions jointly (DBDH, bilinear subgroup decision, C3DH); the record has the single prime-order hypothesis bdh.",
+   "reason": "BW07's theorem needs two typed assumptions on one composite-order bilinear group family: composite-order cBDH and C3DH (BW07, Definitions 4.1 and 4.2). The bilinear subgroup decision assumption the Statement lists as a third follows from C3DH on the same family (BW07, Appendix B.2 and footnote 2: relabel the subgroups and apply the pairing). The record has the single hypothesis bdh, prime-order BDH, which states neither. The conclusion is selectively payload- and attribute-hiding HVE. Quarantined until both hypotheses are recorded on the same group family.",
    "cites": [
     {"page": "content/Reductions/bdh-to-hve-bw07.md", "section": "Statement",
      "quote": "In bilinear groups of composite order"},
+    {"page": "content/Reductions/bdh-to-hve-bw07.md", "section": "Statement",
+     "quote": "exists with selective payload- and attribute-hiding security"},
     {"page": "content/Reductions/bdh-to-hve-bw07.md", "section": "Statement",
      "quote": "under three assumptions jointly: the decisional bilinear Diffie–Hellman assumption ([[bilinear-map-assumptions|DBDH]]), the bilinear subgroup decision assumption, and the composite 3-party Diffie–Hellman assumption (C3DH, introduced there)"}
    ]
@@ -96,6 +100,17 @@
     {"page": "content/Assumptions/learning-with-errors.md", "section": "Evasive LWE",
      "quote": "Unlike a single-game hardness assumption, it is stated as an **implication** between two indistinguishability conditions, quantified over a PPT sampler."}
    ]
+  },
+  {
+   "edge": "red-isis-inhomogeneous-sis-to-sis",
+   "direction": "forward",
+   "reason": "ISIS hardness implying SIS hardness, the record's left-to-right direction, is stated without its parameters: the Statement says only that it holds under conditions on the column count and norm bound, and gives neither the inequalities, the distributions nor a proof or reference. Read at fixed parameters it is false: with q = 2, m = 1, n = λ and β = 2, the vector z = 2 solves SIS, while a uniform ISIS target lies in the span of the single column with probability at most 2^(1−n). That refutes only an unrestricted fixed-parameter reading, not a correctly parameterized equivalence. Quarantined until the conditions and a proof or reference are recorded; the other direction, SIS(n, m, q, √(β²+1)) hard ⇒ ISIS(n, m−1, q, β) hard, is still used.",
+   "cites": [
+    {"page": "content/Reductions/isis-inhomogeneous-sis-to-sis.md", "section": "Statement",
+     "quote": "[[shortest-integer-solution#isis-inhomogeneous-sis|ISIS]] and [[shortest-integer-solution|SIS]] are equivalent up to a polynomial change of the column count and norm bound — folklore."},
+    {"page": "content/Reductions/isis-inhomogeneous-sis-to-sis.md", "section": "Statement",
+     "quote": "The other, ISIS hardness implying SIS hardness (solving ISIS with a SIS oracle), holds only under conditions on the column count and norm bound."}
+   ]
   }
  ],
  "equivalences": {
@@ -113,12 +128,12 @@
   "red-isis-inhomogeneous-sis-to-sis": {
    "forward": "unstated",
    "reverse": "record",
-   "note": "SIS => ISIS is immediate; ISIS => SIS holds only under conditions on the column count and norm bound (requires entry below).",
+   "note": "SIS => ISIS (right to left) is the Sketch's fully black-box reduction, SIS(n, m, q, sqrt(beta^2 + 1)) hard => ISIS(n, m - 1, q, beta) hard: write a SIS instance as A = [A' | a]; one ISIS-oracle call on (A', a) returns z' with A'z' = a (mod q) and |z'| <= beta, and (z', -1) is a nonzero kernel vector of A of norm at most sqrt(beta^2 + 1). It takes the record's class. ISIS => SIS (left to right) is quarantined (quarantine entry); 'unstated' here claims nothing for it. Neither node carries the parameters, and CCwiki tracks none (R13).",
    "cites": [
     {"page": "content/Reductions/isis-inhomogeneous-sis-to-sis.md", "section": "Statement",
      "quote": "One direction is immediate: if SIS is hard for $(n, m, q, \\sqrt{\\beta^2 + 1})$, then ISIS is hard for $(n, m - 1, q, \\beta)$."},
-    {"page": "content/Reductions/isis-inhomogeneous-sis-to-sis.md", "section": "Statement",
-     "quote": "The other, ISIS hardness implying SIS hardness (solving ISIS with a SIS oracle), holds only under conditions on the column count and norm bound."}
+    {"page": "content/Reductions/isis-inhomogeneous-sis-to-sis.md", "section": "Sketch",
+     "quote": "Write a SIS instance as $\\mathbf{A} = [\\mathbf{A}' \\mid \\mathbf{a}]$; then $(\\mathbf{A}', \\mathbf{a})$ is a uniform ISIS instance, and one ISIS-oracle call returning $\\mathbf{z}'$ with $\\mathbf{A}'\\mathbf{z}' = \\mathbf{a} \\pmod q$ and $\\|\\mathbf{z}'\\| \\le \\beta$ gives the nonzero kernel vector $(\\mathbf{z}', -1)$ of $\\mathbf{A}$, of norm at most $\\sqrt{\\beta^2 + 1}$."}
    ]
   },
   "red-linear-secret-sharing-schemes-lsss-to-msp": {
@@ -168,7 +183,7 @@
   "red-rsa-to-fac-dlo24": {
    "forward": "record",
    "reverse": "record",
-   "note": "RSA => FAC is trivial in the standard model, FAC => RSA is DLO24's generic-ring theorem; the recorded model 'other' is kept for both, which only under-claims the trivial direction.",
+   "note": "RSA => FAC (left to right) is the ordinary fact that RSA hardness implies factoring hardness on the same modulus distribution, recorded fully black-box in the standard model as red-rsa-to-fac-rsa78; this record's model 'other' only under-claims it here. FAC => RSA (right to left) is DLO24's theorem, and only in its generic-RSA experiment with preprocessing (DLO24, Definition 28): the advice is fixed before the modulus is sampled, not computed from it as the Statement says, and the online adversary works on the encoded challenge through the model's generic interface, which also permits a non-generic intermediate computation on it, so the model is not only ring operations and equality tests (Definitions 15 and 16, Theorem 12). Its class 'free' holds inside that experiment only: the requires entry on the reverse direction makes every use of it conditional on it, and the model 'other' scopes what follows. Corrections: wiki ask ccw:content-dlo24-preprocessing.",
    "cites": [
     {"page": "content/Reductions/rsa-to-fac-dlo24.md", "section": "Statement",
      "quote": "Against generic ring algorithms, which access $\\ZZ_n$ only through ring operations and equality tests, computing $e$-th roots modulo $n$ ([[rsa-assumption|RSA]]) is equivalent to [[factoring|factoring]] $n$"},
@@ -287,28 +302,32 @@
    ]
   },
   {
-   "edge": "red-isis-inhomogeneous-sis-to-sis",
-   "direction": "forward",
-   "hypothesis": "inhomogeneous-sis",
-   "notion": "ISIS with the column count and norm bound under which ISIS hardness implies SIS hardness",
-   "notionMarkdown": "ISIS with the column count and norm bound under which ISIS hardness implies SIS hardness",
+   "edge": "red-rsa-to-fac-dlo24",
+   "direction": "reverse",
+   "hypothesis": "fac",
+   "notion": "factoring hard against algorithms whose preprocessing advice is fixed before the modulus is sampled (DLO24, Definition 28), which yields RSA hardness only against DLO24's generic-RSA adversaries in that experiment",
+   "notionMarkdown": "factoring hard against algorithms whose preprocessing advice is fixed before the modulus is sampled (DLO24, Definition 28), which yields RSA hardness only against DLO24's generic-RSA adversaries in that experiment",
    "metBy": [],
-   "evidence": "Statement: 'The other, ISIS hardness implying SIS hardness ... holds only under conditions on the column count and norm bound.'",
+   "evidence": "Statement: 'any such RSA adversary converts into a factoring adversary with polynomially related online complexity and polynomially longer advice'. So FAC => RSA takes factoring hardness against adversaries with preprocessing advice, which the fac node, whose adversary A(1^lambda, N) gets no advice, does not state, and gives RSA hardness against generic adversaries with preprocessing only. Per the PR #9 audit, DLO24's Definition 28 fixes the preprocessing from the security parameter and the random encoding before the modulus and challenge are sampled; the Statement's 'unbounded preprocessing on n' would let the advice contain a factor p of N = pq and make online factoring trivial (wiki ask ccw:content-dlo24-preprocessing). Nothing in the record concludes that notion of factoring, so this direction fires only on a given FAC, with idealised models included (model other), and the answer says what it assumes and concludes. RSA hardness implies factoring hardness (left to right, and red-rsa-to-fac-rsa78) is unaffected.",
    "cites": [
-    {"page": "content/Reductions/isis-inhomogeneous-sis-to-sis.md", "section": "Statement",
-     "quote": "The other, ISIS hardness implying SIS hardness (solving ISIS with a SIS oracle), holds only under conditions on the column count and norm bound."}
+    {"page": "content/Reductions/rsa-to-fac-dlo24.md", "section": "Statement",
+     "quote": "even when the adversary receives an advice string from unbounded preprocessing on $n$: any such RSA adversary converts into a factoring adversary with polynomially related online complexity and polynomially longer advice"},
+    {"page": "content/Reductions/rsa-to-fac-dlo24.md", "section": null,
+     "quote": "The theorem is proved in the generic ring model with preprocessing, which is none of the named models and differs from the generic group model."}
    ]
   },
   {
    "edge": "red-tdp-to-nizk-bfm88",
    "hypothesis": "tdp",
-   "notion": "a doubly enhanced, certified trapdoor permutation family",
-   "notionMarkdown": "a doubly enhanced, certified trapdoor permutation family",
+   "notion": "a doubly enhanced trapdoor permutation family whose certification holds for adversarially chosen indices (CL18's certifiable injectivity suffices); double enhancement alone does not",
+   "notionMarkdown": "a doubly enhanced trapdoor permutation family whose certification holds for adversarially chosen indices (CL18's certifiable injectivity suffices); double enhancement alone does not",
    "metBy": [],
-   "evidence": "Statement: 'A family of doubly enhanced, certified trapdoor permutations ... yields a NIZK proof system'. RSA78's TDP (red-rsa-to-tdp-rsa78) is not stated to be certified.",
+   "evidence": "Statement: 'A family of doubly enhanced, certified trapdoor permutations (indices are recognizably permutations) yields a NIZK proof system'. Soundness must hold for an index the prover chooses, so the certification has to hold for adversarially chosen indices: the Notes say doubly enhanced families still leave the FLS90 instantiation unsound for adversarially chosen indices whose domain is not recognizable, and that certifiable injectivity (CL18) closes the gap. The Statement's 'double enhancement suffices for it' (GR13) is withdrawn by Goldreich and Rothblum's 2017 erratum; CL18's certifiably injective doubly enhanced trapdoor functions are a sufficient replacement (per the PR #9 audit, which checked the erratum and CL18's abstract; wiki ask ccw:content-tdp-nizk-double-enhancement). RSA78's TDP (red-rsa-to-tdp-rsa78) is not stated to be certified for adversarially chosen indices.",
    "cites": [
     {"page": "content/Reductions/tdp-to-nizk-bfm88.md", "section": "Statement",
      "quote": "A family of doubly enhanced, certified [[trapdoor-permutation|trapdoor permutations]] (indices are recognizably permutations) yields a [[non-interactive-zero-knowledge|NIZK]] proof system"},
+    {"page": "content/Reductions/tdp-to-nizk-bfm88.md", "section": "Notes",
+     "quote": "Doubly enhanced families still leave the FLS90 instantiation unsound for adversarially chosen indices whose domain is not recognizable; _certifiable injectivity_ closes the gap and suffices for the FLS paradigm even for trapdoor functions"},
     {"page": "content/Reductions/rsa-to-tdp-rsa78.md", "section": "Notes",
      "quote": "Applications that sample domain elements from public coins, such as [[oblivious-transfer|OT]] and [[non-interactive-zero-knowledge|NIZK]], need the enhanced or doubly enhanced notions"}
    ]
@@ -386,13 +405,15 @@
   {
    "edge": "red-dlog-to-prg-bm84",
    "hypothesis": "dlog",
-   "notion": "DLOG hard in Z_p^* (p prime, g a generator)",
-   "notionMarkdown": "DLOG hard in $\\ZZ_p^*$ ($p$ prime, $g$ a generator)",
+   "notion": "DLOG hard in Z_p^* (p prime, g a generator), where the Blum-Micali generator (the PRG) reads residues as integers: each x_i is the next exponent, and the output bit is [x_i >= (p-1)/2]",
+   "notionMarkdown": "DLOG hard in $\\ZZ_p^*$ ($p$ prime, $g$ a generator), where the Blum–Micali generator (the PRG) reads residues as integers: each $x_i$ is the next exponent, and the output bit is $[x_i \\ge (p-1)/2]$",
    "metBy": [],
-   "evidence": "Statement: 'If DLOG is hard in Z_p^* (p prime, g a generator), the Blum-Micali generator is a PRG'. DLOG derived from CDH, DDH or BDH lives in their group, not Z_p^*.",
+   "evidence": "Statement: 'If DLOG is hard in Z_p^* (p prime, g a generator), the Blum-Micali generator is a PRG: ... it iterates x_{i+1} = g^{x_i} mod p and outputs at each step the bit [x_i >= (p-1)/2]'. The recurrence feeds each residue back as an integer exponent and the predicate compares residues by their integer order: an interface of the prime field Z_p that an arbitrary cyclic group's encoding does not supply. So DLOG derived from CDH, DDH or BDH, which lives in their own group, does not meet it. The rationale's 'uses only the group operation' is inaccurate (wiki ask ccw:content-bm84-rationale). DDH => PRG is still derived without BM84 (ElGamal, IL89, HILL99). CDH => PRG is not: it awaits a DLOG => OWF edge on the same group family (wiki ask ccw:missing-edge-dlog-to-owf), which with OWF => PRG (HILL99) would give it without BM84.",
    "cites": [
     {"page": "content/Reductions/dlog-to-prg-bm84.md", "section": "Statement",
      "quote": "If [[discrete-logarithm|DLOG]] is hard in $\\ZZ_p^*$ ($p$ prime, $g$ a generator)"},
+    {"page": "content/Reductions/dlog-to-prg-bm84.md", "section": "Statement",
+     "quote": "it iterates $x_{i+1} = g^{x_i} \\bmod p$ and outputs at each step the bit $[x_i \\ge (p-1)/2]$, the most significant bit of the discrete logarithm of $x_{i+1}$"},
     {"page": "content/Assumptions/discrete-logarithm.md", "section": "Discrete logarithm",
      "quote": "an adversary which can solve the DLOG problem can also solve [[computational-diffie-hellman|CDH]] in the same group — folklore."}
    ]
@@ -419,12 +440,14 @@
    "notion": "a CP-IND-CPA-secure ciphertext-policy ABE whose policy class contains disjunctions",
    "notionMarkdown": "a CP-IND-CPA-secure ciphertext-policy ABE whose policy class contains disjunctions",
    "metBy": ["red-k-linear-assumption-to-abe-rw13", "red-succinct-lwe-to-abe-wee25"],
-   "evidence": "Statement: 'Take a CP-ABE scheme ... If the scheme is CP-IND-CPA-secure'. KW19 (rw13 edge) and Wee25 state CP-ABE; GPSW06 is KP-ABE.",
+   "evidence": "Statement: 'Take a CP-ABE scheme ... whose policy class contains disjunctions ... If the scheme is CP-IND-CPA-secure, the resulting BE ... is IND-BE-CPA-secure'. Only this ciphertext-policy construction is recorded. A key-policy one also works when the KP-ABE supports membership policies: user i gets the key for f_i(x) = [i in x], and a broadcast to S encrypts under the attribute set S, so the forbidden BE key queries are exactly the policies that accept S* and the security game is preserved; adaptive KP-ABE gives adaptive BE, and selective KP-ABE only selective BE. The wiki does not record it (wiki ask ccw:missing-edge-kp-abe-to-be), so GPSW06's selective KP-ABE is not accepted here. KW19 (rw13 edge) and Wee25 state CP-ABE. No construction gives short BE ciphertexts by itself (Notes).",
    "cites": [
     {"page": "content/Reductions/abe-to-be.md", "section": "Statement",
      "quote": "Take a CP-[[attribute-based-encryption|ABE]] scheme over attribute universe $[n]$ whose policy class contains disjunctions."},
     {"page": "content/Reductions/abe-to-be.md", "section": "Statement",
      "quote": "If the scheme is [[attribute-based-encryption#cp-abe-ind-cpa-security|CP-IND-CPA-secure]], the resulting [[broadcast-encryption|BE]]"},
+    {"page": "content/Reductions/abe-to-be.md", "section": "Notes",
+     "quote": "The resulting BE has no ciphertext-size guarantee"},
     {"page": "content/Reductions/k-linear-assumption-to-abe-rw13.md", "section": "Statement",
      "quote": "there are key-policy and ciphertext-policy [[attribute-based-encryption|ABE]] schemes for $\\mathrm{NC}^1$ that are adaptively secure ([[attribute-based-encryption#kp-abe-ind-cpa-security|KP-IND-CPA]] and [[attribute-based-encryption#cp-abe-ind-cpa-security|CP-IND-CPA]])"},
     {"page": "content/Reductions/succinct-lwe-to-abe-wee25.md", "section": "Statement",
@@ -439,12 +462,14 @@
    "notion": "OT secure against malicious parties (it instantiates Kil88's ideal OT)",
    "notionMarkdown": "OT secure against malicious parties",
    "metBy": ["red-cpir-to-ot-dmo00"],
-   "evidence": "Statement: 'in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties'. The OT page's definitions are semi-honest (oblivious-transfer.md:107); EGL's OT is semi-honest. DMO00's Statement: 'single-server PIR is therefore complete for secure two-party and multi-party computation'.",
+   "evidence": "Statement: 'in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties'. The proof substitutes a real OT for the ideal one, which needs OT secure against malicious parties, and in the stand-alone, static setting of the conclusion that means simulation-based security against a static malicious adversary: the OT page's game-based malicious definitions 'do not capture all malicious-sender attacks', so they would not do either. The OT page's definitions are semi-honest (oblivious-transfer.md:107), and EGL's OT is semi-honest. DMO00 is accepted on its Statement that non-trivial single-server PIR 'is therefore complete for secure two-party and multi-party computation', a claim about malicious security, so it includes upgrading the OT its PIR gives to security against malicious parties (by a semi-honest-to-malicious compiler: GMW87's, which uses one-way functions, or Haitner's fully black-box one); the page states the conclusion, not the upgrade (wiki ask ccw:missing-edge-ot-semi-honest-to-malicious). Semi-honest OT reaches malicious OT by Haitner's compiler (Hai08, Theorem 2 and Corollary 2), which the wiki does not record; until it does, semi-honest OT => MPC is refused here. What Kil88 and GMW87 conclude is the weakened notion in weakens:red-ot-to-mpc-kil88.",
    "cites": [
     {"page": "content/Reductions/ot-to-mpc-kil88.md", "section": "Statement",
      "quote": "in the OT-hybrid model every two-party functionality can be computed with unconditional security against malicious parties"},
     {"page": "content/Primitives/oblivious-transfer.md", "section": "Malicious Security",
      "quote": "The definitions above are **semi-honest**"},
+    {"page": "content/Primitives/oblivious-transfer.md", "section": "Malicious Security",
+     "quote": "game-based definitions alone do not capture all malicious-sender attacks"},
     {"page": "content/Reductions/cpir-to-ot-dmo00.md", "section": "Statement",
      "quote": "Non-trivial single-server PIR is therefore complete for secure two-party and multi-party computation"}
    ]
@@ -455,7 +480,7 @@
    "notion": "OT secure against malicious parties (it instantiates Kil88's ideal OT)",
    "notionMarkdown": "OT secure against malicious parties",
    "metBy": ["red-cpir-to-ot-dmo00"],
-   "evidence": "Statement: 'in the OT-hybrid model there is a bit commitment that is statistically hiding and statistically binding'. The OT page's definitions are semi-honest (oblivious-transfer.md:107).",
+   "evidence": "Statement: 'in the OT-hybrid model there is a bit commitment that is statistically hiding and statistically binding'. Both hold with an ideal OT only. Instantiated with a real OT protocol secure against malicious parties, which the substitution needs (the OT page's definitions are semi-honest, oblivious-transfer.md:107), the commitment's hiding and binding rest on that OT's security, and no commitment in the plain model is both statistically hiding and statistically binding: CCwiki concludes the com node, an ordinary commitment, nothing statistical. DMO00 is accepted as for OT => MPC (requires:red-ot-to-mpc-kil88:ot), on the malicious upgrade its completeness claim rests on. An ordinary computational commitment also follows from semi-honest OT through OT => OWF (Hai08, Theorem 4) => PRG => COM, but the record has no OT => OWF edge (wiki ask ccw:missing-edge-owf).",
    "cites": [
     {"page": "content/Reductions/ot-to-com.md", "section": "Statement",
      "quote": "in the OT-hybrid model there is a bit commitment that is statistically hiding and statistically binding"},
@@ -514,6 +539,66 @@
     {"page": "content/Reductions/bdh-to-hibe-wat09.md", "section": "Statement",
      "quote": "If decisional bilinear Diffie–Hellman ([[bilinear-map-assumptions|DBDH]]) and decision linear ([[decisional-diffie-hellman#dlin|DLIN]], the case $k = 2$ of $k$-Lin) hold in a symmetric prime-order pairing group"}
    ]
+  },
+  {
+   "edge": "red-bdh-to-abe-gpsw06",
+   "hypothesis": "bdh",
+   "notion": "DBDH (decisional BDH) hard in the symmetric prime-order pairing group GPSW06 uses; computational BDH hardness does not suffice for its proof",
+   "notionMarkdown": "DBDH (decisional BDH) hard in the symmetric prime-order pairing group GPSW06 uses; computational BDH hardness does not suffice for its proof",
+   "metBy": [],
+   "evidence": "Statement: 'If decisional bilinear Diffie-Hellman (DBDH) holds, there is a key-policy ABE ...', and the Sketch's selective reduction embeds a DBDH challenge (g^a, g^b, g^c, Z) and decides whether Z = e(g,g)^{abc}, in a symmetric pairing e(g, g); GPSW06's group has prime order (GPSW06, §2, per the PR #9 audit). The bdh node's page defines both computational BDH and DBDH, so a bare bdh fact may be computational BDH only. DBDH hardness implies computational BDH hardness (computing e(g,g)^{abc} decides the challenge), and GPSW06 supplies nothing in the other direction. Nothing in the record concludes bdh, so GPSW06 fires only on a given BDH, and every answer through it says it assumes DBDH. A separate DBDH node would retire this entry (wiki ask ccw:node-dbdh). The selective KP-ABE it concludes is weakens:red-bdh-to-abe-gpsw06.",
+   "cites": [
+    {"page": "content/Reductions/bdh-to-abe-gpsw06.md", "section": "Statement",
+     "quote": "If decisional bilinear Diffie–Hellman ([[bilinear-map-assumptions|DBDH]]) holds"},
+    {"page": "content/Reductions/bdh-to-abe-gpsw06.md", "section": "Sketch",
+     "quote": "The selective reduction embeds a DBDH challenge $(g^a, g^b, g^c, Z)$ as $y = ab$, $s = c$"},
+    {"page": "content/Assumptions/bilinear-map-assumptions.md", "section": "Assumption",
+     "quote": "**Bilinear Diffie-Hellman (BDH):** Given $(g, g^a, g^b, g^c) \\in \\GG^4$ for a symmetric pairing group $e : \\GG \\times \\GG \\to \\GG_T$, compute $e(g, g)^{abc} \\in \\GG_T$."},
+    {"page": "content/Assumptions/bilinear-map-assumptions.md", "section": "Assumption",
+     "quote": "**Decisional BDH (DBDH / BDDH):** Distinguish $(g, g^a, g^b, g^c, e(g,g)^{abc})$ from $(g, g^a, g^b, g^c, e(g,g)^r)$ for random $r \\getsr \\ZZ_q$."}
+   ]
+  },
+  {
+   "edge": "red-prp-to-invertible-prf",
+   "hypothesis": "prp",
+   "notion": "a PRP over a domain D with |D| = lambda^omega(1), superpolynomial in the security parameter",
+   "notionMarkdown": "a PRP over a domain $\\calD$ with $|\\calD| = \\secpar^{\\omega(1)}$, superpolynomial in the security parameter",
+   "metBy": ["red-prf-to-prp-lr88"],
+   "evidence": "Statement: 'A PRP (KeyGen, Eval, Invert) over a domain D with |D| superpolynomial in lambda is an invertible PRF for the traditional (forward-oracle) game', with the O(q^2/|D|) switching-lemma term, negligible only then. The PRP page's syntax puts no bound on D. On D = {0,1}, P_k(x) = x XOR k for a uniform bit k is exactly a random permutation, so a perfect PRP; querying both points never finds a collision, while a random function has one with probability 1/2, so the forward game is lost with advantage 1/2. The forward switching gap is at most q(q-1)/(2|D|). LR88 meets the condition under LR88's own premise, a PRF on {0,1}^n with 2^n superpolynomial in lambda: its PRP is on {0,1}^{2n}, and its bound is negligible only then (its Notes), so whenever LR88 gives a PRP at all, the domain is large. The prf node does not enforce that premise: the PRF page's syntax bounds neither domain nor range, and a PRF on a polynomial-size domain exists unconditionally (the key is a whole random table). CCwiki accepts LR88 relative to its own theorem; a large-domain PRF hypothesis for LR88 is proposed with the PRP rows of wiki ask ccw:node-hypothesis-regimes. sPRP => PRP does not meet the condition: a strong PRP may have a small domain too. The weakened conclusion is weakens:red-prp-to-invertible-prf.",
+   "cites": [
+    {"page": "content/Reductions/prp-to-invertible-prf.md", "section": "Statement",
+     "quote": "A [[pseudorandom-permutation|PRP]] $(\\KeyGen, \\Eval, \\Invert)$ over a domain $\\calD$ with $|\\calD|$ superpolynomial in $\\secpar$ is an [[pseudorandom-function#invertible-prfs|invertible PRF]] for the traditional (forward-oracle) game $\\Game^{\\mathrm{prf}}$"},
+    {"page": "content/Primitives/pseudorandom-permutation.md", "section": "Syntax",
+     "quote": "A PRP is a triple of efficient algorithms $\\PRP = (\\KeyGen, \\Eval, \\Invert)$ with respect to keyspace $\\calK$ and domain $\\calD$:"},
+    {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Statement",
+     "quote": "is a [[pseudorandom-permutation|PRP]] on $\\bits^{2n}$"},
+    {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Notes",
+     "quote": "The birthday term $O(q^2/2^n)$ makes the bound negligible only when $2^n$ is superpolynomial in $\\secpar$"},
+    {"page": "content/Primitives/pseudorandom-function.md", "section": "Syntax",
+     "quote": "A PRF is a pair of efficient algorithms $\\PRF= (\\KeyGen, \\Eval)$ with respect to keyspace $\\calK$, domain $\\calD$, and range $\\calR$:"}
+   ]
+  },
+  {
+   "edge": "red-prp-to-prf",
+   "hypothesis": "prp",
+   "notion": "a PRP over a domain D with |D| = lambda^omega(1), superpolynomial in the security parameter",
+   "notionMarkdown": "a PRP over a domain $\\calD$ with $|\\calD| = \\secpar^{\\omega(1)}$, superpolynomial in the security parameter",
+   "metBy": ["red-prf-to-prp-lr88"],
+   "evidence": "Statement: 'A PRP over a domain D with |D| superpolynomial in lambda is a PRF with Eval unchanged', with Adv^prf <= Adv^prp + q(q-1)/(2|D|), negligible only then. The PRP page's syntax puts no bound on D, and a two-point PRP is not a PRF: P_k(x) = x XOR k on D = {0,1}, k a uniform bit, is a perfect PRP, and its two outputs never collide, while a random function's collide with probability 1/2: advantage 1/2. Without this entry the identity conversion would bypass the domain condition on PRP => iPRF. LR88 meets the condition under LR88's own premise, a PRF on {0,1}^n with 2^n superpolynomial, which the prf node does not enforce, as there (requires:red-prp-to-invertible-prf:prp); sPRP => PRP does not meet it.",
+   "cites": [
+    {"page": "content/Reductions/prp-to-prf.md", "section": "Statement",
+     "quote": "A [[pseudorandom-permutation|PRP]] over a domain $\\calD$ with $|\\calD|$ superpolynomial in $\\secpar$ is a [[pseudorandom-function|PRF]] with $\\Eval$ unchanged"},
+    {"page": "content/Reductions/prp-to-prf.md", "section": "Sketch",
+     "quote": "which happens with probability at most $q(q-1)/(2|\\calD|)$"},
+    {"page": "content/Primitives/pseudorandom-permutation.md", "section": "Syntax",
+     "quote": "A PRP is a triple of efficient algorithms $\\PRP = (\\KeyGen, \\Eval, \\Invert)$ with respect to keyspace $\\calK$ and domain $\\calD$:"},
+    {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Statement",
+     "quote": "is a [[pseudorandom-permutation|PRP]] on $\\bits^{2n}$"},
+    {"page": "content/Reductions/prf-to-prp-lr88.md", "section": "Notes",
+     "quote": "The birthday term $O(q^2/2^n)$ makes the bound negligible only when $2^n$ is superpolynomial in $\\secpar$"},
+    {"page": "content/Primitives/pseudorandom-function.md", "section": "Syntax",
+     "quote": "A PRF is a pair of efficient algorithms $\\PRF= (\\KeyGen, \\Eval)$ with respect to keyspace $\\calK$, domain $\\calD$, and range $\\calR$:"}
+   ]
   }
  ],
  "statementLint": {
@@ -538,7 +623,7 @@
    "notion": "selectively secure key-policy ABE only",
    "notionMarkdown": "selectively secure key-policy ABE only",
    "acceptedBy": [],
-   "evidence": "Statement: 'a key-policy ABE ... that is selectively KP-IND-CPA-secure'. The ABE page defines adaptive security; selective is a variant (attribute-based-encryption.md:110-112).",
+   "evidence": "Statement: 'a key-policy ABE ... that is selectively KP-IND-CPA-secure'. The ABE page defines adaptive security; selective is a variant (attribute-based-encryption.md:110-112). No recorded consumer accepts it: ABE => IBE turns adaptive ABE into adaptive IBE, and the same identity encoding of a selective KP-ABE gives selective IBE only; ABE => BE takes CP-ABE (requires:red-abe-to-be:abe). Selective KP-ABE does give CPA-secure PKE by a direct argument (fix x0 and f0 with f0(x0) = 1, use KeyGen(msk, f0) as the secret key and encrypt under x0; the reduction commits x0 and makes no key query), which the wiki does not record (wiki ask ccw:missing-edge-selective-kp-abe-to-pke). Its hypothesis must be DBDH: requires:red-bdh-to-abe-gpsw06:bdh.",
    "cites": [
     {"page": "content/Reductions/bdh-to-abe-gpsw06.md", "section": "Statement",
      "quote": "there is a key-policy [[attribute-based-encryption|ABE]] for monotone access structures (monotone Boolean formulas or LSSS) that is [[attribute-based-encryption#selective-security|selectively]] [[attribute-based-encryption#kp-abe-ind-cpa-security|KP-IND-CPA-secure]]"},
@@ -548,10 +633,10 @@
   },
   {
    "edge": "red-prp-to-invertible-prf",
-   "notion": "an invertible PRF for the forward-oracle game only, over a super-polynomial domain",
-   "notionMarkdown": "an invertible PRF for the forward-oracle game only, over a super-polynomial domain",
+   "notion": "an invertible PRF for the forward-oracle game only",
+   "notionMarkdown": "an invertible PRF for the forward-oracle game only",
    "acceptedBy": ["red-invertible-prfs-to-prf"],
-   "evidence": "Statement: 'is an invertible PRF for the traditional (forward-oracle) game ... Strong security under Game^iprf ... fails for every permutation'. The forward game is the PRF game, so iPRF => PRF accepts it.",
+   "evidence": "Statement: 'is an invertible PRF for the traditional (forward-oracle) game ... Strong security under Game^iprf ... fails for every permutation': y -> {Invert(k, y)} is never empty, while a random function's preimage set at a fixed point is empty with probability (1 - 1/|D|)^|D|. The forward game is the PRF game, so iPRF => PRF accepts it, and nothing else does. The superpolynomial domain the Statement needs is a condition on the PRP, enforced on the input by requires:red-prp-to-invertible-prf:prp, not part of this notion.",
    "cites": [
     {"page": "content/Reductions/prp-to-invertible-prf.md", "section": "Statement",
      "quote": "A [[pseudorandom-permutation|PRP]] $(\\KeyGen, \\Eval, \\Invert)$ over a domain $\\calD$ with $|\\calD|$ superpolynomial in $\\secpar$ is an [[pseudorandom-function#invertible-prfs|invertible PRF]] for the traditional (forward-oracle) game $\\Game^{\\mathrm{prf}}$"},
@@ -559,6 +644,21 @@
      "quote": "Strong security under $\\Game^{\\mathrm{iprf}}$, where $\\calA$ also queries the inversion oracle, fails for every permutation"},
     {"page": "content/Reductions/invertible-prfs-to-prf.md", "section": "Sketch",
      "quote": "Plain iPRF security is $\\Game^{\\mathrm{prf}}$ itself"}
+   ]
+  },
+  {
+   "edge": "red-ot-to-mpc-kil88",
+   "notion": "MPC secure with abort against a static malicious adversary corrupting any number of parties, stand-alone: no fairness, guaranteed output delivery, adaptive or UC security",
+   "notionMarkdown": "MPC secure with abort against a static malicious adversary corrupting any number of parties, stand-alone: no fairness, guaranteed output delivery, adaptive or UC security",
+   "acceptedBy": [],
+   "evidence": "Statement: GMW87's n-party protocol over Kil88's OT gives 'security with abort against a malicious dishonest majority'. The MPC node is undifferentiated: its page's malicious notion is 'typically with guaranteed output delivery or fairness conditions', and it also covers UC security; with a dishonest majority neither fairness nor guaranteed output delivery is achievable in general (Cle86). The adversary is static and the security stand-alone (the PR #9 audit's reading of Kil88 and GMW87): nothing adaptive or UC is inherited. No reduction in the record consumes MPC, so this refuses nothing today; it makes every answer through Kil88 say what it concludes. The malicious OT it needs is requires:red-ot-to-mpc-kil88:ot.",
+   "cites": [
+    {"page": "content/Reductions/ot-to-mpc-kil88.md", "section": "Statement",
+     "quote": "extends this to any number of parties, with security with abort against a malicious dishonest majority"},
+    {"page": "content/Primitives/secure-multi-party-computation.md", "section": "Security (malicious)",
+     "quote": "Full security requires simulation-based security against any such adversary, typically with guaranteed output delivery or fairness conditions."},
+    {"page": "content/Primitives/secure-multi-party-computation.md", "section": "Universal composability (UC)",
+     "quote": "The [[universal-composability-framework|UC framework]] by Canetti provides a strong composable security notion for MPC"}
    ]
   }
  ]

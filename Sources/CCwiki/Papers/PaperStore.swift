@@ -15,8 +15,33 @@ struct PaperRecord: Codable, Equatable, Sendable {
     let fileName: String
     let origin: Origin
     /// When it was kept, to the second: `papers.json` stores whole seconds.
+    /// For people; it does not tell two papers apart.
     let addedAt: Date
     let bytes: Int64
+    /// Which keep this is, new each time a paper is kept. A replacement can
+    /// have the same file name, size and second as the paper it replaced,
+    /// so the paper window is keyed by this (§2.6).
+    let revision: String
+
+    private enum CodingKeys: String, CodingKey {
+        case referencePath, fileName, origin, addedAt, bytes, revision
+    }
+}
+
+extension PaperRecord {
+    /// A record written before `revision` existed gets one made from its
+    /// other fields: the same on every read, so an open window does not
+    /// reload, and different from any revision `keep` makes.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        referencePath = try c.decode(String.self, forKey: .referencePath)
+        fileName = try c.decode(String.self, forKey: .fileName)
+        origin = try c.decode(Origin.self, forKey: .origin)
+        addedAt = try c.decode(Date.self, forKey: .addedAt)
+        bytes = try c.decode(Int64.self, forKey: .bytes)
+        revision = try c.decodeIfPresent(String.self, forKey: .revision)
+            ?? "legacy \(fileName) \(Int64(addedAt.timeIntervalSince1970)) \(bytes)"
+    }
 }
 
 /// The papers on disk: `library/papers/`, one PDF per reference, indexed by
@@ -36,12 +61,18 @@ struct PaperStore: Sendable {
     /// copy of one you added, can be put back. Tests pass their own, and
     /// leave the real Trash alone.
     private let discard: @Sendable (URL) throws -> Void
+    /// The clock `keep` stamps `addedAt` with. Tests pass a fixed one.
+    private let now: @Sendable () -> Date
 
-    init(directory: URL, discard: (@Sendable (URL) throws -> Void)? = nil) {
+    init(
+        directory: URL, discard: (@Sendable (URL) throws -> Void)? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.directory = directory
         self.discard = discard ?? { file in
             try FileManager.default.trashItem(at: file, resultingItemURL: nil)
         }
+        self.now = now
     }
 
     var indexURL: URL { directory.appending(path: "papers.json") }
@@ -119,8 +150,8 @@ struct PaperStore: Sendable {
         let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         let record = PaperRecord(
             referencePath: source.referencePath, fileName: name, origin: origin,
-            addedAt: Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down)),
-            bytes: Int64(size))
+            addedAt: Date(timeIntervalSince1970: now().timeIntervalSince1970.rounded(.down)),
+            bytes: Int64(size), revision: UUID().uuidString)
         records[source.referencePath] = record
         try save(records)
         return record

@@ -466,7 +466,7 @@ final class JobCenter {
                 ? "The pull request is already being opened."
                 : "Only a job awaiting review can be published.")
         }
-        let shown = job.review?.digest
+        let shown = job.review
         approving.insert(job.id)
         defer { approving.remove(job.id) }
 
@@ -479,9 +479,9 @@ final class JobCenter {
         }
     }
 
-    /// `shown` is the digest of the diff on screen when Open Draft PR was
-    /// pressed, or nil when none was.
-    private func publish(_ job: Job, shown: String?) async -> ApproveResult {
+    /// `shown` is the snapshot on screen when Open Draft PR was pressed, or
+    /// nil when none was. Its tree is what is committed, or nothing is.
+    private func publish(_ job: Job, shown: ReviewSnapshot?) async -> ApproveResult {
         guard job.state == .awaitingReview else {
             return .refused("Only a job awaiting review can be published.")
         }
@@ -489,7 +489,7 @@ final class JobCenter {
         guard let git = environment.git else {
             return settle(job, .refused("git was not found. Nothing was sent."))
         }
-        guard let digest = shown else {
+        guard let reviewed = shown else {
             // No diff was on screen: show it before anything is sent.
             await takeSnapshot(job)
             return settle(job, .changedSinceReview)
@@ -507,7 +507,7 @@ final class JobCenter {
         // The job's task, so a quit can interrupt the push or the gh call
         // (`Job.interruptPublishing`).
         let publishing = Task { @MainActor in
-            let outcome = await publisher.publish(job, reviewed: digest, provenance: provenance)
+            let outcome = await publisher.publish(job, reviewed: reviewed, provenance: provenance)
             self.publishResults[id] = outcome
         }
         job.task = publishing

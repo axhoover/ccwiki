@@ -68,7 +68,11 @@ hardness, that an assumption is broken, which direction of an equivalence a
 class covers. Where CCwiki takes one of these into account, the answer now
 ends with Adjustments, each with the passage of the wiki it rests on and a
 link to that section, and a refused step quotes its reason. If the wiki has
-since changed a quoted passage, CCwiki says so.
+since changed a quoted passage, CCwiki says so. Some steps now need more
+than before, and the answer says so. GPSW06 needs decisional BDH, and the
+PRP-to-PRF conversions need a superpolynomial domain. Kilian's OT-to-MPC
+step gives static malicious MPC with abort. The direction of ISIS/SIS
+whose parameters the wiki does not state is held back.
 
 ## 0.2.0 — unreleased
 

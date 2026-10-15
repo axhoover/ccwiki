@@ -292,6 +292,19 @@ class Curation:
     def empty(cls) -> "Curation":
         return cls({}, "")
 
+    def quarantined(self, edge: str, reverse: bool):
+        """R13: the quarantine entry that holds this direction of `edge` back,
+        or None. An entry without `direction` quarantines the whole reduction;
+        one with `direction` ("forward" or "reverse") quarantines that
+        direction of an equivalence alone, and the other direction stays a
+        step (Swift's `DerivationCuration.quarantineReason(_:isReverse:)`).
+        Any other value reads as forward here, and `unresolved` reports it."""
+        e = self.quarantine.get(edge)
+        if e is None:
+            return None
+        d = e.get("direction")
+        return e if d is None or (d == "reverse") == reverse else None
+
     def adding_refutations(self, refutations: list) -> "Curation":
         """A copy whose `refuted` also holds these, each replacing the file's
         for the same object: the manifest's record wins over CCwiki's.
@@ -317,6 +330,18 @@ class Curation:
         for e, v in self.equivalences.items():
             if e in m.reductions and m.reductions[e]["kind"] != "equivalence":
                 bad.append(f"not an equivalence {e}")
+        # A quarantine scoped to one direction names a direction of an
+        # equivalence; an implication has only the one. The direction is
+        # "forward" or "reverse": any other value would hold back the forward
+        # direction silently. (A requirement meant for the reverse direction
+        # but misspelt reads as forward too, and then names a hypothesis its
+        # step lacks, which the check below reports.)
+        for e, q in self.quarantine.items():
+            d = q.get("direction")
+            if d is not None and e in m.reductions and m.reductions[e]["kind"] != "equivalence":
+                bad.append(f"not an equivalence {e}")
+            if d is not None and d not in ("forward", "reverse"):
+                bad.append(f"direction {e}")
         for (e, rev), reqs in self.requires.items():
             r = m.reductions.get(e)
             if r is None:
@@ -454,12 +479,19 @@ def build_steps(m: Manifest, cur: Curation):
                 rev_cls = cls if rv.get("reverse") == "record" else "unstated"
             dirs = [(False, tuple(r["hypotheses"]), r["conclusion"], fwd_cls),
                     (True, (r["conclusion"],), r["hypotheses"][0], rev_cls)]
+        held = 0
         for rev, hyps, concl, c in dirs:
             s = Step(rid, hyps, concl, rev, model, c, stub,
                      tuple(cur.requires.get((rid, rev), ())),
                      None if rev else cur.weakens.get(rid))
-            (quarantined if rid in cur.quarantine else steps).append(s)
-        if rid in cur.quarantine:  # R13: hypotheses do not match the Statement
+            # R13: the record does not match the Statement, for the whole
+            # reduction or for this direction of an equivalence.
+            if cur.quarantined(rid, rev) is not None:
+                quarantined.append(s)
+                held += 1
+            else:
+                steps.append(s)
+        if held == len(dirs):  # R13: no direction of it is a step
             skip("quarantined", rid)
     return steps, quarantined, excluded, unreviewed
 
@@ -1064,10 +1096,13 @@ class Derivation:
                 continue
             row = {"edge": rid, "reverse": not fwd}
             s = self.step_index.get((rid, not fwd))
-            if rid in reason:
-                row["status"] = reason[rid]
-                if rid in self.cur.quarantine:
-                    row["detail"] = self.cur.quarantine[rid]["reason"]
+            # A quarantine of one direction leaves the reduction eligible, so
+            # it is not in `excluded`; its row says so all the same.
+            held = self.cur.quarantined(rid, not fwd)
+            if rid in reason or held is not None:
+                row["status"] = reason.get(rid, "quarantined")
+                if held is not None:
+                    row["detail"] = held["reason"]
             elif s is not None and s.stub and not inc:
                 row["status"] = "stub"
             elif s is not None and not s.default and not inc:
@@ -1092,8 +1127,9 @@ class Derivation:
             s = self.step_index[(e, rev)]
             hf = {h: rcl.facts[h] for h in s.hyps}
             reasons = []
-            if e in self.cur.quarantine:
-                reasons.append({"kind": "quarantined", "reason": self.cur.quarantine[e]["reason"]})
+            held = self.cur.quarantined(e, rev)
+            if held is not None:
+                reasons.append({"kind": "quarantined", "reason": held["reason"]})
             for h, f in hf.items():
                 w = f.step.weakens if f.step is not None else None
                 if w is not None and e not in w.accepted_by:
@@ -1286,10 +1322,12 @@ class Derivation:
 def invariants(dv: Derivation, all_derived: list) -> dict:
     m = dv.m
     res = {}
-    eligible = {s.edge for s in dv.steps}
-    bad = sorted(e for e in eligible if m.reductions[e]["kind"] == "inclusion"
-                 or m.reductions[e].get("heuristic") or e in dv.cur.quarantine
-                 or any(m.type(x) in EXCLUDED_TYPES for x in m.reductions[e]["hypotheses"] + [m.reductions[e]["conclusion"]]))
+    # Step by step: a quarantine of one direction of an equivalence leaves
+    # the other direction a step.
+    bad = sorted({s.edge for s in dv.steps if m.reductions[s.edge]["kind"] == "inclusion"
+                  or m.reductions[s.edge].get("heuristic") or dv.cur.quarantined(s.edge, s.reverse) is not None
+                  or any(m.type(x) in EXCLUDED_TYPES
+                         for x in m.reductions[s.edge]["hypotheses"] + [m.reductions[s.edge]["conclusion"]])})
     res["noIneligibleEdges"] = not bad
     leaks = []
     starts = sorted(o for o in m.objects if m.type(o) not in EXCLUDED_TYPES)
@@ -1655,10 +1693,43 @@ def _bar(bid, hyps, concl, cls):
             "status": "draft", "page": "", "slug": bid, "graphSlug": "", "title": bid}
 
 
+#: The PR #9 audit's positive cases (plans/relations-followups.md §13), each
+#: on the manifest a wiki ask would give (plans/wiki-asks.md), with the
+#: curation entries that ask retires left out (`dropCuration`).
+#:
+#: Ask 5's GPSW06 conclusion, with ask 12's selective KP-ABE => CPA-secure
+#: PKE. The variant says what the weakening said, so its entry goes; DBDH
+#: (requires:red-bdh-to-abe-gpsw06:bdh) stays, as ask 11 is not applied.
+ASK_12_PATCH = {
+    "reductionPatches": [{"id": "red-bdh-to-abe-gpsw06", "set": {"conclusion": "abe-selective-security"}}],
+    "reductions": [_red("red-syn-abe-selective-security-to-pke", ["abe-selective-security"], "pke",
+                        "fully-black-box")],
+    "dropCuration": ["weakens:red-bdh-to-abe-gpsw06"],
+}
+#: Ask 13: DLOG => OWF on the same group family. It retires nothing: BM84
+#: still needs DLOG in Z_p^*.
+ASK_13_PATCH = {
+    "reductions": [_red("red-syn-dlog-to-owf", ["dlog"], "owf", "fully-black-box")],
+}
+#: Ask 4's re-pointing at `malicious-ot-security`, with its identity edge
+#: back to `ot`, and ask 14's compiler (Hai08). Ask 4 retires the two
+#: malicious-OT requirements; Kil88's weakening stays (ask 5 is not applied).
+ASK_4_14_PATCH = {
+    "reductionPatches": [{"id": "red-ot-to-mpc-kil88", "set": {"hypotheses": ["malicious-ot-security"]}},
+                         {"id": "red-ot-to-com", "set": {"hypotheses": ["malicious-ot-security"]}},
+                         {"id": "red-cpir-to-ot-dmo00", "set": {"conclusion": "malicious-ot-security"}}],
+    "reductions": [_red("red-syn-malicious-ot-security-to-ot", ["malicious-ot-security"], "ot", "fully-black-box"),
+                   _red("red-syn-ot-to-malicious-ot-security-hai08", ["ot"], "malicious-ot-security",
+                        "fully-black-box")],
+    "dropCuration": ["requires:red-ot-to-mpc-kil88:ot", "requires:red-ot-to-com:ot"],
+}
+
 #: (id, patch, query start, target, toggle). A patch adds records, then sets
 #: fields on existing barriers and reductions and appends consequences to
-#: barriers. The last three try the upstream fields of
-#: plans/relations-followups.md §4.4 before the wiki ships them.
+#: barriers; its `dropCuration` leaves curation entries out
+#: (`patched_curation`). Three try the upstream fields of
+#: plans/relations-followups.md §4.4 before the wiki ships them, and the
+#: last six the audit's asks.
 MUTATIONS = [
     ("strongest-chain-conflict",
      {"objects": [_obj("syn-x", "assumption")],
@@ -1704,6 +1775,17 @@ MUTATIONS = [
      {"objects": [dict(_obj("syn-r", "assumption"), refutedBy=["[[X - Y|X]]"])],
       "reductions": [_red("red-syn-r-to-pke", ["syn-r"], "pke", "fully-black-box")]},
      ["syn-r"], "pke", False),
+    # Asks 5 and 12: selective KP-ABE reaches ordinary PKE (BDH => PKE,
+    # assuming DBDH), and still no adaptive IBE or BE.
+    ("ask-12-selective-kp-abe-pke", ASK_12_PATCH, ["bdh"], "pke", False),
+    ("ask-12-no-adaptive-ibe", ASK_12_PATCH, ["bdh"], "ibe", False),
+    ("ask-12-no-adaptive-be", ASK_12_PATCH, ["bdh"], "be", False),
+    # Ask 13: CDH reaches PRG through DLOG => OWF, without BM84.
+    ("ask-13-cdh-prg", ASK_13_PATCH, ["cdh"], "prg", False),
+    # Asks 4 and 14: semi-honest OT reaches Kil88 through the compiler, which
+    # concludes static malicious MPC with abort only; and ETDP => COM.
+    ("ask-14-etdp-mpc", ASK_4_14_PATCH, ["enhanced-trapdoor-permutation"], "mpc", False),
+    ("ask-14-etdp-com", ASK_4_14_PATCH, ["enhanced-trapdoor-permutation"], "com", False),
 ]
 
 
@@ -1721,10 +1803,30 @@ def apply_patch(data: dict, patch: dict) -> dict:
     return d
 
 
+#: The curation entries a patch's `dropCuration` may leave out, by key.
+DROPPABLE_ENTRIES = ("quarantine", "requires", "weakens")
+
+
+def patched_curation(cur: Curation, patch: dict) -> Curation:
+    """The curation a patch's `dropCuration` leaves: without those entries,
+    by id, as the re-review after a wiki ask would leave it (the asks'
+    "Retires" lines). Swift's `GoldenPatch.curation(_:from:)`."""
+    drops = set(patch.get("dropCuration", []))
+    if not drops:
+        return cur
+    data = cur.data
+    for e in curation_entries(cur.data):
+        if e["id"] in drops:
+            if e["key"] not in DROPPABLE_ENTRIES:
+                raise ValueError(f"dropCuration names {e['id']}: only {', '.join(DROPPABLE_ENTRIES)} entries")
+            data = without_entry(data, e)
+    return Curation(data, cur.sha256)
+
+
 def run_mutation(m: Manifest, cur: Curation, mut):
     mid, patch, start, target, inc = mut
     pm = Manifest(apply_patch(m.data, patch), "")
-    dv = Derivation(pm, cur)
+    dv = Derivation(pm, patched_curation(cur, patch))
     ad = dv.derived_barriers()
     return dv, ad, dv.query(start, target, inc), invariants(dv, ad)
 
@@ -1815,6 +1917,24 @@ GOLDEN_QUERIES = [
     ("bdh-range-query", ["bdh"], "range-query-encryption", False, ["derivable"]),
     ("evasive-lwe-be", ["evasive-lwe"], "be", False, ["derivable"]),
     ("subexp-lpn-crhf", ["subexponential-lpn"], "crhf", False, ["derivable"]),
+    # The PR #9 audit's semantic cases (plans/relations-followups.md §13).
+    # CI's clone is drifted, so `derivable` is pinned wherever no wiki ask
+    # can change it without first retiring or changing a reduction a
+    # curation entry names, which fails curationResolves,
+    # curationEdgesUnchanged or curationQuotesFound and forces a re-review
+    # anyway: GPSW06's (asks 5, 11, 12), Kil88's (ask 4), the PRP
+    # conversions' (ask 6), DLO24's (asks 1, 17) and ISIS's (ask 21).
+    # etdp-mpc, above, is pinned for the same reason. Only cdh-prg is not:
+    # ask 13 derives it with no entry to re-review, as plain golden drift.
+    ("bdh-be", ["bdh"], "be", False, ["derivable"]),
+    ("bdh-pke", ["bdh"], "pke", False, ["derivable"]),
+    ("cdh-prg", ["cdh"], "prg", False, []),
+    ("ot-mpc", ["ot"], "mpc", False, ["derivable"]),
+    ("prp-prf", ["prp"], "prf", False, ["derivable"]),
+    ("sprp-prf", ["strong-pseudorandom-permutation"], "prf", False, ["derivable"]),
+    ("rsa-fac", ["rsa"], "fac", False, ["derivable"]),
+    ("dcr-rsa-all", ["dcr"], "rsa", True, ["derivable"]),
+    ("isis-sis", ["inhomogeneous-sis"], "sis", False, ["derivable"]),
     # R14: refuted starts.
     ("circular-evasive-lwe-pke", ["circular-evasive-lwe"], "pke", False, ["derivable"]),
     ("ssddh-ke", ["ssddh"], "ke", False, ["derivable"]),
@@ -2026,6 +2146,9 @@ def _what_it_changes(m: Manifest, entry: dict) -> str:
         return f"{_name(m, entry['object'])} is listed apart as a setting, never as an assumption or a completion"
     step = _step_name(m, entry["edge"])
     if key == "quarantine":
+        if raw.get("direction") is not None:
+            way = "right-to-left" if raw["direction"] == "reverse" else "left-to-right"
+            return f"The {way} direction of {step} is never used"
         return f"{step} is never used"
     if key == "equivalences":
         fwd, rev = raw.get("forward") == "record", raw.get("reverse") == "record"
@@ -2060,6 +2183,10 @@ def _description(m: Manifest, entry: dict) -> str:
                 f"never a completion. CCwiki's sentence: {md_escape(raw.get('text', ''))}")
     step = f"**{md_escape(_step_name(m, entry['edge']))}**"
     if key == "quarantine":
+        if raw.get("direction") is not None:
+            way = "right to left" if raw["direction"] == "reverse" else "left to right"
+            return (f"{step} is never used {way}: its Statement does not establish that direction. "
+                    f"The other direction is still a step.")
         return f"{step} is never used: its recorded hypotheses do not match its Statement."
     if key == "equivalences":
         cls = m.reductions.get(entry["edge"], {}).get("class", "?")
@@ -2431,10 +2558,16 @@ def selftest(dv: Derivation) -> bool:
     fe = [r for r in dv.step_index[("red-fe-to-io", False)].requires]
     check("an FE concluded by SW14 never meets FE => iO's precondition",
           fe and all("red-hash-function-and-io-to-fe-sw14" not in r.met_by for r in fe))
-    a = q(["inhomogeneous-sis"], "crhf")
-    check("ISIS => SIS is unstated and assumed", a["derivable"] and a["chainClass"] == "unstated" and a["assumes"])
+    a = q(["inhomogeneous-sis"], "sis")
+    check("ISIS => SIS (left to right) is quarantined, and its row on the pair says so",
+          not a["derivable"]
+          and [(r["edge"], r["reverse"], r["status"]) for r in a["recordedOnPair"]]
+          == [("red-isis-inhomogeneous-sis-to-sis", False, "quarantined")]
+          and any(x["kind"] == "quarantined" for r in a["refusedSteps"] for x in r["reasons"]))
+    check("ISIS => CRHF is not derived", not q(["inhomogeneous-sis"], "crhf")["derivable"])
     a = q(["sis"], "inhomogeneous-sis")
-    check("SIS => ISIS keeps the record's class", a["derivable"] and a["chainClass"] == "fully-black-box")
+    check("SIS => ISIS keeps the record's class", a["derivable"] and a["chainClass"] == "fully-black-box"
+          and a["reverseSteps"] == ["red-isis-inhomogeneous-sis-to-sis"] and not a["assumes"])
     a = q(["circular-evasive-lwe"], "pke")
     check("a refuted start is marked vacuous", a.get("vacuous"))
     r = dv.implied_by("pke")
@@ -2455,14 +2588,66 @@ def selftest(dv: Derivation) -> bool:
     check("no 'strongest' across iPRF notions", a["derivable"] and "strongest" not in a)
     a = q(["ddh"], "prg")
     check("DDH => PRG avoids BM84", a["derivable"] and "red-dlog-to-prg-bm84" not in a["edges"])
+    # The PR #9 audit's semantic cases (plans/relations-followups.md §13).
+    a = q(["cdh"], "prg")
+    check("CDH => PRG is refused at BM84 (no DLOG => OWF on the same group yet: ccw:missing-edge-dlog-to-owf)",
+          not a["derivable"] and any(r["edge"] == "red-dlog-to-prg-bm84"
+                                     and [x["kind"] for x in r["reasons"]] == ["requires"] for r in a["refusedSteps"]))
     a = q(["lwe"], "com")
     check("LWE => COM avoids PKE => COM", a["derivable"] and "red-pke-to-com" not in a["edges"])
-    check("ETDP => MPC is refused at Kil88 (semi-honest EGL OT)", not q(["enhanced-trapdoor-permutation"], "mpc")["derivable"])
+    a = q(["enhanced-trapdoor-permutation"], "mpc")
+    check("ETDP => MPC is refused at Kil88 (semi-honest EGL OT; no compiler yet: "
+          "ccw:missing-edge-ot-semi-honest-to-malicious)",
+          not a["derivable"] and any(r["edge"] == "red-ot-to-mpc-kil88" for r in a["refusedSteps"]))
     a = q(["ddh"], "mpc")
-    check("DDH => MPC holds through DMO00's OT", a["derivable"])
+    check("DDH => MPC holds through DMO00's OT, and only as Kil88's static MPC with abort",
+          a["derivable"] and a["weakened"] and a["weakened"]["edge"] == "red-ot-to-mpc-kil88"
+          and "red-cpir-to-ot-dmo00" in a["edges"])
+    a = q(["ot"], "mpc")
+    check("OT => MPC assumes malicious OT and concludes static MPC with abort only",
+          a["derivable"] and [x["edge"] for x in a["assumes"]] == ["red-ot-to-mpc-kil88"]
+          and a["weakened"] and a["weakened"]["edge"] == "red-ot-to-mpc-kil88")
     a = q(["bdh"], "abe")
-    check("GPSW06 gives only selective KP-ABE", a["derivable"] and a["weakened"])
+    check("GPSW06 gives only selective KP-ABE, and only assuming DBDH (computational BDH does not invoke it)",
+          a["derivable"] and a["weakened"] and a["weakened"]["edge"] == "red-bdh-to-abe-gpsw06"
+          and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-bdh-to-abe-gpsw06", "bdh")])
     check("selective KP-ABE does not feed ABE => IBE", not q(["bdh"], "ibe")["derivable"])
+    a = q(["bdh"], "be")
+    check("selective KP-ABE does not feed ABE => BE",
+          not a["derivable"] and any(r["edge"] == "red-abe-to-be" and "weakened" in [x["kind"] for x in r["reasons"]]
+                                     for r in a["refusedSteps"]))
+    check("BDH => PKE is not derived (selective KP-ABE => PKE awaits ccw:missing-edge-selective-kp-abe-to-pke)",
+          not q(["bdh"], "pke")["derivable"])
+    a = q(["prp"], "prf")
+    check("a bare PRP gives a PRF only assuming a superpolynomial domain",
+          a["derivable"] and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-prp-to-prf", "prp")])
+    a = q(["strong-pseudorandom-permutation"], "prf")
+    check("an sPRP, whose domain may be small, does not meet the PRP => PRF domain condition",
+          not a["derivable"] and any(r["edge"] == "red-prp-to-prf" and [x["kind"] for x in r["reasons"]] == ["requires"]
+                                     for r in a["refusedSteps"]))
+    # HPPY25 (unstated) gives the full iPRF from a PRF first, so LR88's route
+    # shows over the fully black-box steps only (R6). This rests on LR88's
+    # own premise, a PRF on {0,1}^n with 2^n superpolynomial, which the prf
+    # node does not enforce (wiki ask ccw:node-hypothesis-regimes).
+    w = dv.restricted("fully-black-box").single("prf").weak.get("invertible-prf")
+    check("LR88's PRP meets the domain condition under LR88's premise: PRF => PRP => forward-game iPRF "
+          "assumes nothing",
+          w is not None and w.weak.edge == "red-prp-to-invertible-prf" and not w.assumes
+          and w.step.hyps == ("prp",) and dv.restricted("fully-black-box").single("prf").facts["prp"].step.edge
+          == "red-prf-to-prp-lr88")
+    a = q(["fac"], "rsa", True)
+    check("FAC => RSA (DLO24, generic ring) only assuming its preprocessing experiment",
+          a["derivable"] and a["models"] == ["other"] and a["reverseSteps"] == ["red-rsa-to-fac-dlo24"]
+          and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-rsa-to-fac-dlo24", "fac")]
+          and "before the modulus is sampled" in a["assumes"][0]["notion"])
+    a = q(["dcr"], "rsa", True)
+    check("DCR => FAC => RSA is refused at DLO24: uniform factoring hardness is not its preprocessing notion",
+          not a["derivable"] and any(r["edge"] == "red-rsa-to-fac-dlo24" and r["reverse"]
+                                     and [x["kind"] for x in r["reasons"]] == ["requires"] for r in a["refusedSteps"]))
+    a = q(["rsa"], "fac")
+    check("RSA => FAC stays the ordinary fully black-box standard-model direction (RSA78)",
+          a["derivable"] and a["chainClass"] == "fully-black-box" and a["edges"] == ["red-rsa-to-fac-rsa78"]
+          and not a["assumes"])
     r = dv.implied_by("deniable-encryption")
     check("implied-by pair rows carry models", any(g["models"] for g in r["groups"]))
     r = dv.implied_by("mpc")
@@ -2523,8 +2708,83 @@ def selftest(dv: Derivation) -> bool:
     mdv, mad, a, inv = res["stub-barrier-not-propagated"]
     check("a stub barrier is not propagated",
           len(mad) < base and all(d["barrier"] != "bar-owp-to-ke-ir89" for d in a["derivedBarriers"]))
+    # The PR #9 audit's positive cases, on the manifests its asks would give.
+    _, _, a, inv = res["ask-12-selective-kp-abe-pke"]
+    check("with asks 5 and 12, BDH => PKE holds through selective KP-ABE, assuming DBDH",
+          a["derivable"] and a["weakened"] is None
+          and "red-syn-abe-selective-security-to-pke" in a["edges"]
+          and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-bdh-to-abe-gpsw06", "bdh")]
+          and all(v for k, v in inv.items() if not k.startswith("_")), (a.get("edges"), a.get("assumes")))
+    for t in ("ibe", "be"):
+        _, _, a, _ = res[f"ask-12-no-adaptive-{t}"]
+        check(f"with asks 5 and 12, selective KP-ABE still reaches no {t.upper()}", not a["derivable"])
+    _, _, a, inv = res["ask-13-cdh-prg"]
+    check("with ask 13, CDH => PRG holds fully black-box through DLOG => OWF, avoiding BM84",
+          a["derivable"] and a["chainClass"] == "fully-black-box" and not a["assumes"]
+          and "red-syn-dlog-to-owf" in a["edges"] and "red-dlog-to-prg-bm84" not in a["edges"]
+          and all(v for k, v in inv.items() if not k.startswith("_")), (a.get("chainClass"), a.get("edges")))
+    _, _, a, inv = res["ask-14-etdp-mpc"]
+    check("with asks 4 and 14, ETDP => MPC holds through the compiler, as Kil88's static MPC with abort only",
+          a["derivable"] and a["weakened"] and a["weakened"]["edge"] == "red-ot-to-mpc-kil88" and not a["assumes"]
+          and "red-syn-ot-to-malicious-ot-security-hai08" in a["edges"]
+          and all(v for k, v in inv.items() if not k.startswith("_")), (a.get("edges"), a.get("weakened")))
+    _, _, a, _ = res["ask-14-etdp-com"]
+    check("with asks 4 and 14, ETDP => COM holds through the compiler, in full",
+          a["derivable"] and a["weakened"] is None and not a["assumes"]
+          and "red-syn-ot-to-malicious-ot-security-hai08" in a["edges"], a.get("edges"))
     ok &= selftest_upstream(dv, ad, res)
+    ok &= selftest_direction_quarantine(dv)
     return ok
+
+
+def selftest_direction_quarantine(dv: Derivation) -> bool:
+    """A quarantine entry with `direction` holds back that direction of an
+    equivalence only (R13, plans/derivations.md §2a): the other direction is
+    still a step with the record's class, the reduction is not `excluded`,
+    and the held direction is named on its pair and in its refusal. On an
+    implication, `direction` does not resolve, and nor does a direction
+    other than "forward" or "reverse"."""
+    check, state = _checker()
+    print("a quarantine of one direction (R13)")
+    eq = dict(_red("red-syn-e-eq-f", ["syn-e"], "syn-f", "fully-black-box"), kind="equivalence")
+    patch = {"objects": [_obj("syn-e", "assumption"), _obj("syn-f"), _obj("syn-g")],
+             "reductions": [eq, _red("red-syn-f-to-g", ["syn-f"], "syn-g", "fully-black-box")]}
+    pm = Manifest(apply_patch(dv.m.data, patch), "")
+    data = copy.deepcopy(dv.cur.data)
+    reason = "The Statement does not establish this direction."
+    data.setdefault("quarantine", []).append({"edge": "red-syn-e-eq-f", "direction": "forward", "reason": reason})
+    data.setdefault("equivalences", {})["red-syn-e-eq-f"] = {"forward": "record", "reverse": "record"}
+    qdv = Derivation(pm, Curation(data, ""))
+    held = sorted(s.sort_key for s in qdv.quarantined if s.edge == "red-syn-e-eq-f")
+    check("only the held direction is quarantined, and the reduction is not excluded",
+          held == [("red-syn-e-eq-f", False)] and "red-syn-e-eq-f" not in qdv.excluded.get("quarantined", []),
+          held)
+    a = qdv.query(["syn-e"], "syn-g")
+    refused = [(r["edge"], r["reverse"], [x["kind"] for x in r["reasons"]]) for r in a["refusedSteps"]]
+    check("the held direction is refused, with its reason",
+          not a["derivable"] and ("red-syn-e-eq-f", False, ["quarantined"]) in refused
+          and any(x.get("reason") == reason for r in a["refusedSteps"] for x in r["reasons"]), refused)
+    a = qdv.query(["syn-e"], "syn-f")
+    rows = [(r["edge"], r["reverse"], r["status"], r.get("detail")) for r in a["recordedOnPair"]]
+    check("its row on the pair is quarantined, with the reason",
+          rows == [("red-syn-e-eq-f", False, "quarantined", reason)], rows)
+    a = qdv.query(["syn-f"], "syn-e")
+    rows = [(r["edge"], r["reverse"], r["status"]) for r in a["recordedOnPair"]]
+    check("the other direction is a step, with the record's class",
+          a["derivable"] and a["chainClass"] == "fully-black-box" and a["reverseSteps"] == ["red-syn-e-eq-f"]
+          and rows == [("red-syn-e-eq-f", True, "used")], (a.get("chainClass"), rows))
+    inv = invariants(qdv, qdv.derived_barriers())
+    check("invariants hold with a quarantine of one direction", inv["noIneligibleEdges"], inv["_detail"])
+    misspelt = copy.deepcopy(data)
+    data["quarantine"].append({"edge": "red-syn-f-to-g", "direction": "reverse", "reason": reason})
+    check("a quarantine of one direction of an implication does not resolve",
+          "not an equivalence red-syn-f-to-g" in Curation(data, "").unresolved(pm))
+    # A misspelt direction would hold back the forward direction silently.
+    misspelt["quarantine"].append({"edge": "red-syn-e-eq-f", "direction": "Reverse", "reason": reason})
+    bad = Curation(misspelt, "").unresolved(pm)
+    check("a quarantine direction other than forward or reverse does not resolve",
+          "direction red-syn-e-eq-f" in bad and "not an equivalence red-syn-e-eq-f" not in bad, bad)
+    return state["ok"]
 
 
 def _checker():
@@ -2731,7 +2991,7 @@ def selftest_units() -> bool:
         data = json.load(f)
     entries = curation_entries(data)
     ids = [e["id"] for e in entries]
-    check("42 entries, each id once", len(ids) == 42 and len(set(ids)) == len(ids), len(ids))
+    check("47 entries, each id once", len(ids) == 47 and len(set(ids)) == len(ids), len(ids))
     uncited = [e["id"] for e in entries if not e["cites"]]
     check("every entry cites the wiki", not uncited, uncited)
     bad = [(e["id"], c.get("page")) for e in entries for c in e["cites"]

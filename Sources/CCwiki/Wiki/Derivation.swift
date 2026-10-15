@@ -739,8 +739,9 @@ extension Derivation {
                     ]
                 }
 
-                // R13: hypotheses that do not match the Statement.
-                let isQuarantined = curation.quarantine[id] != nil
+                // R13: a record that does not match the Statement, for the
+                // whole reduction or for one direction of an equivalence.
+                var heldDirections = 0
                 for direction in directions {
                     let step = Step(
                         relationID: id,
@@ -752,13 +753,15 @@ extension Derivation {
                         isStub: isStub,
                         requirements: curation.requirements(on: id, isReverse: direction.isReverse),
                         weakening: direction.isReverse ? nil : curation.weakens[id])
-                    if isQuarantined {
+                    if curation.quarantineReason(id, isReverse: direction.isReverse) != nil {
                         quarantined.append(step)
+                        heldDirections += 1
                     } else {
                         steps.append(step)
                     }
                 }
-                if isQuarantined {
+                // Excluded only when no direction of it is a step.
+                if heldDirections == directions.count {
                     excluded[.quarantined, default: []].append(id)
                 }
             }
