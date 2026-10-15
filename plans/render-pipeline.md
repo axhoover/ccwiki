@@ -95,7 +95,15 @@ than the wart.
 
 **Heading ids** use the deduplicating `GithubSlugger`, computed from the
 heading's plain text with math reduced to its source — because `rehype-slug` runs
-before `rehype-katex` in the site's chain.
+before `rehype-katex` in the site's chain. The text is read after the site's
+typography (below): `ccwiki_typography` runs before `ccwiki_heading_ids`, so
+`## A -> B` reads `A → B` and its id is `a--b`, as rehype-slug has it.
+`WikiPage.Heading.plainText` reads a heading the same way (`educated`: the
+same arrows, `--` and `...`, outside math, code and wikilinks, with an
+escaped character or a character reference read as the character it stands
+for), so the outline, search, the preview cards and DiffGuard name the ids
+the page has. `FixesWikiparseTests` checks the two against each
+other; on the wiki at ab81f02 all 2,769 headings of 883 pages agree.
 
 **Options** match the site: `linkify: true` (GFM autolinks), `typographer: true`
 (smartypants), `breaks: false` (`HardLineBreaks` is not configured), and
@@ -113,8 +121,26 @@ as written. A wikilink's text is a `text` token between `wikilink_open` and
 preview cards get the same rules.
 
 **Callouts** take their title from the marker's line only (math and links
-included) and the lines after it as their body, as ofm.ts does, and map
+included) and the lines after it as their body, as ofm.ts does (its text
+transform ends the paragraph after a `> [!type]` line, ofm.ts:187), and map
 Obsidian's other names (`caution` is a warning, `summary` an abstract).
+
+The marker is ofm.ts:147's regex as the site has it,
+`^\[\!([\w-]+)\|?(.+?)?\]([+-]?)`, matched against what the site matches it
+against (ofm.ts:477): the first line of the first text node of the
+blockquote's first paragraph, decoded. `(.+?)?` runs on to the first `]` in
+that text after the marker's own, and the text up to it is metadata: on the
+site and here, `> [!note] As shown in [HLL23], …` is titled `, …`. A
+`[[link]]`, math or code before any such `]` ends the text node first, and the
+marker ends at its own `]`. `siteTextNode` finds the node: markdown-it's inline
+parser reads the line, without the core rules and with a copy of the
+footnotes, and the node ends at the first token that is not text, an escape
+or an entity (a link, an image, math, a code span, emphasis, an autolink, HTML,
+a wikilink, a footnote reference); then, as on the site, at the first of OFM's
+own splits (ofm.ts:239: a wikilink, a `==highlight==`, an arrow, a tag that is
+not all digits and slashes), and at a `www.` link or an email address, which
+remark-gfm links and markdown-it's inline parse does not. The title is the rest
+of the line, as written, and with nothing left it is the type, capitalised.
 
 **The site's text transform** (ofm.ts:179) runs before the parse here too:
 `%%` comments are deleted, and in a table each wikilink's pipes are escaped,
@@ -122,7 +148,45 @@ so `[[slug|Name]]` stays one cell (and `\|` in a table's math keeps its
 backslash). A wikilink shows its alias decoded (`IND\$-CPA` reads
 `IND$-CPA`); without one, `[[page#Heading]]` shows `Heading` (in a table,
 `page`, as the site's `#` escape there leaves it) and `[[page]]` the last
-segment of the target.
+segment of the target. A link preview card shows a wikilink's text by the
+same rule (`PreviewExcerpt`).
+
+A table the site's regex finds inside fenced code, display math or an HTML
+block is shown as written, its cells never split, so it gets the site's edit
+exactly (ofm.ts:196: in each link, the first `#` and each unescaped `|`
+escaped) and nothing more: `| $\|x\|$ | [[a\|b]] |` in a fence reads as
+written, and `[[a|b]]` reads `[[a\|b]]`, as the site's code block shows it.
+Which lines those are comes from a block parse of its own (`verbatimLines`),
+whose tokens and `env` are thrown away. An indented code block never holds
+one: the regex wants a `|` at the start of the line.
+
+**Still different from the site**, known and left so:
+
+- A callout's `+` or `-` (folded) is not honoured: the reader has no control to
+  unfold it.
+- A line after the marker line that continues its paragraph without a `>`
+  is the callout's body here; the site's forced break ends the blockquote
+  before it. A callout the site does not break (nested in another blockquote,
+  or with its `>` indented) takes only its first line as its title here; the
+  site adds the paragraph's later inline markup to the title.
+- The site builds a callout's title as HTML before smartypants runs, so its
+  quotes and dashes stay straight there; here the title is ordinary inline
+  text, and educated.
+- In code, the site's text transform rewrites wikilinks too
+  (`[[page#Some Heading]]` reads `[[page#some-heading|Some Heading]]` in a
+  code block, `[[https://x|y]]` reads `[y](https://x)`); the reader shows
+  code as written, but for a table in it (above), where the table's escapes
+  stop the rewrite of every link but an external one.
+- A wikilink in a heading counts towards the id as its alias, decoded, or as
+  its target, as `WikiPage.Heading.plainText` reads it; the site slugs the
+  text the link shows, which for `[[page#Section]]` is `Section`, and which
+  smartypants has educated. No heading in the wiki holds a wikilink
+  (2026-10).
+- `Heading.plainText` decodes the character references
+  `MarkdownLinkParser.unescape` knows (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
+  `&apos;`, `&nbsp;` and numeric ones); markdown-it decodes every HTML5 name,
+  and makes an invalid code point U+FFFD, so `## A &mdash; B` has another id
+  in the outline than on the page. No heading in the wiki holds one.
 
 **Not** reproduced, deliberately: the SPA router and the graph view.
 

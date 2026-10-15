@@ -253,17 +253,22 @@ struct WikiPage: Identifiable, Sendable {
 extension WikiPage.Heading {
     /// The heading's text as `ccwiki-markdown.js`'s `headingPlainText` reads
     /// it from markdown-it's tokens, which is the text `rehype-slug` slugs on
-    /// the site: a wikilink is its alias, or its target without the anchor;
-    /// a markdown link is its text; math and code keep their source, losing
-    /// only their delimiters; a backslash escape is the character escaped;
-    /// and emphasis loses its markers.
+    /// the site: a wikilink is its alias, decoded (`IND\$-CPA` reads
+    /// `IND$-CPA`), or its target without the anchor; a markdown link is its
+    /// text; math and code keep their source, losing only their delimiters;
+    /// a backslash escape or a character reference is the character it
+    /// stands for; and emphasis loses its markers.
     ///
     /// Underscores need the care, because github-slugger keeps `_`: only a
     /// pair markdown-it reads as emphasis goes, so `_k_` reads `k` while
     /// `snake_case` and the `_` in `$\mathsf{Enc}_k$` stay.
+    ///
+    /// The rest of the text is educated as the page educates it before the
+    /// ids are made (`educated`): `## A -> B` reads `A → B`, and its id is
+    /// `a--b`, not `a---b`.
     static func plainText(_ markdown: String) -> String {
         // Text that is already final (a link's display text, a math or code
-        // span, an escaped character) stands in as one private-use scalar
+        // span, a decoded `_` or `*`) stands in as one private-use scalar
         // while the emphasis around it is undone, so nothing inside changes.
         var literals: [String] = []
         // The markdown each wikilink's placeholder stands for. markdown-it
@@ -282,7 +287,9 @@ extension WikiPage.Heading {
         var cursor = markdown.startIndex
         for link in WikilinkParser.links(in: markdown) {
             linked.append(contentsOf: markdown[cursor..<link.range.lowerBound])
-            let alias = link.alias ?? ""
+            // Decoded, then trimmed, as the page reads an alias.
+            let alias = MarkdownLinkParser.unescape(link.alias ?? "")
+                .trimmingCharacters(in: .whitespaces)
             linkSources[literals.count] = String(markdown[link.range])
             linked.append(protect(alias.isEmpty ? link.target : alias))
             cursor = link.range.upperBound
@@ -294,14 +301,42 @@ extension WikiPage.Heading {
 
         let scalars = Array(linked.unicodeScalars)
         var masked = String.UnicodeScalarView()
+        // An escaped character, or a character reference markdown-it
+        // decodes, joins the text around it, so `educated` reads it too:
+        // `\->` is an arrow. Punctuation goes in as itself, except `_` and
+        // `*`, which the emphasis rules must not see; those, and anything
+        // else, stand in as a placeholder, which the emphasis rules read as
+        // punctuation, as they read the `\` or `;` in the source.
+        func appendDecoded(_ text: String) {
+            let decoded = text.unicodeScalars
+            if decoded.count == 1, let scalar = decoded.first, scalar != "_", scalar != "*",
+               MarkdownLinkParser.isASCIIPunctuation(scalar.value) {
+                masked.append(scalar)
+            } else {
+                masked.append(contentsOf: protect(text).unicodeScalars)
+            }
+        }
         var i = 0
         while i < scalars.count {
             let c = scalars[i]
             if c == "\\", i + 1 < scalars.count,
                MarkdownLinkParser.isASCIIPunctuation(scalars[i + 1].value) {
-                masked.append(contentsOf: protect(String(Character(scalars[i + 1]))).unicodeScalars)
+                appendDecoded(String(Character(scalars[i + 1])))
                 i += 2
                 continue
+            }
+            // markdown-it's entity rule: `&amp;` reads `&`. Only the
+            // references `MarkdownLinkParser.unescape` knows are decoded;
+            // any other stays as written.
+            if c == "&", let semicolon = scalars[(i + 1)...].prefix(33).firstIndex(of: ";") {
+                let reference = String(String.UnicodeScalarView(scalars[i...semicolon]))
+                let decoded = MarkdownLinkParser.unescape(reference)
+                if decoded != reference,
+                   reference.range(of: Self.entityPattern, options: .regularExpression) != nil {
+                    appendDecoded(decoded)
+                    i = semicolon + 1
+                    continue
+                }
             }
             guard c == "$" || c == "`" else {
                 masked.append(c)
@@ -357,7 +392,10 @@ extension WikiPage.Heading {
             i = close + (end - i)
         }
 
-        var plain = String(masked)
+        // Before the emphasis markers go: in markdown-it the text on either
+        // side of one is a token of its own, which the page educates alone.
+        // A placeholder (a wikilink, math, code) ends a token as well.
+        var plain = Self.educated(String(masked))
         for pattern in Self.emphasisPatterns {
             plain = plain.replacingOccurrences(of: pattern, with: "$1", options: .regularExpression)
         }
@@ -379,6 +417,40 @@ extension WikiPage.Heading {
     /// The first of `plainText`'s placeholders, in plane 15's private use
     /// area, which no heading holds.
     private static let literalBase: UInt32 = 0xF0000
+
+    /// A character reference as markdown-it's entity rule reads one.
+    private static let entityPattern =
+        #"^&(?:[A-Za-z][A-Za-z0-9]{1,31}|#[xX][0-9A-Fa-f]{1,6}|#[0-9]{1,7});$"#
+
+    /// `ccwiki-markdown.js`'s `educated`, which `ccwiki_typography` runs on
+    /// a heading's text before `ccwiki_heading_ids` makes its id: OFM's
+    /// arrows (`->` → →, `<--` → ⇐), then smartypants' `--` (only two) as
+    /// an em dash and three or more dots as an ellipsis. github-slugger
+    /// deletes all of those, and keeps `-`. The quotes the page curls change
+    /// no id, so they stay as written.
+    static func educated(_ text: String) -> String {
+        let ns = text as NSString
+        var out = ""
+        var last = 0
+        for match in arrowPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let arrow = ns.substring(with: match.range)
+            out += ns.substring(with: NSRange(location: last, length: match.range.location - last))
+            out += arrows[arrow] ?? arrow
+            last = match.range.location + match.range.length
+        }
+        out += ns.substring(from: last)
+        return out
+            .replacingOccurrences(of: #"(^|[^-])--(?!-)"#, with: "$1—", options: .regularExpression)
+            .replacingOccurrences(of: #"\.{3,}"#, with: "…", options: .regularExpression)
+    }
+
+    /// ofm.ts:121, and what each arrow becomes.
+    private static let arrowPattern = try! NSRegularExpression(
+        pattern: "(-{1,2}>|={1,2}>|<-{1,2}|<={1,2})")
+    private static let arrows: [String: String] = [
+        "->": "→", "-->": "⇒", "=>": "⇒", "==>": "⇒",
+        "<-": "←", "<--": "⇐", "<=": "⇐", "<==": "⇐",
+    ]
 
     /// `__strong__`, then `_emphasis_`, where markdown-it reads them as such:
     /// the opening run not after a letter or digit and not before a space,

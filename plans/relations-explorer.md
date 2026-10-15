@@ -821,7 +821,8 @@ and tested:
   prose.
 - **Reduce to inline markdown without links:**
   - `[[target|alias]]` → its display text, by the same rule as `displayText`
-    in `ccwiki.js` (alias, else the last path segment, plus ` › anchor`);
+    in `ccwiki-markdown.js` (alias, else the heading, else the last path
+    segment);
   - `[text](dest)` → its text;
   - footnote markers, images and inline HTML tags dropped.
   - **`$…$`, `**`, `_` and backticks are kept**, so JS renders math and

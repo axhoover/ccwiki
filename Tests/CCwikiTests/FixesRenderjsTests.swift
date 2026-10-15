@@ -3,8 +3,9 @@ import Testing
 @testable import CCwiki
 
 /// The reader's Markdown, closer to the site's: a wikilink in a table, a
-/// link's text decoded and educated, the site's dashes, ellipses and
-/// arrows, callouts, `%%` comments, and how a Game block groups
+/// table in a code block, a link's text decoded and educated, the site's
+/// dashes, ellipses and arrows, callouts and their markers, `%%` comments,
+/// and how a Game block groups
 /// (`ccwiki-markdown.js`, `ccwiki.js`; plans/render-pipeline.md §3).
 @Suite("Renderer parity fixes")
 struct FixesRenderjsTests {
@@ -62,6 +63,29 @@ struct FixesRenderjsTests {
         #expect(html.contains(#"<td><a class="internal" href="/prf-escaped">PRF</a></td>"#))
         #expect(html.contains(#"data-tex="\|x\|""#), "the site's KaTeX gets ‖x‖")
         #expect(html.contains("<td><code>a|b</code></td>"), "code loses the backslash, as on the site")
+    }
+
+    @Test("a table in fenced code reads as on the site: its escapes and math as written")
+    func tableInFence() throws {
+        let html = try render(#"""
+            ```text
+            | A | B |
+            | --- | --- |
+            | $\|x\|$ | [[a\|b]] |
+            | [[a|b]] | [[p#h|q]] |
+            ```
+
+            | Link | Norm |
+            | ---- | ---- |
+            | [[pseudorandom-function|PRF]] | $\|x\|$ |
+            """#)
+        #expect(html.contains(#"| $\|x\|$ | [[a\|b]] |"#), "byte for byte")
+        #expect(html.contains(##"| [[a\|b]] | [[p\#h\|q]] |"##),
+                "the site's own escapes, which its code block shows")
+        #expect(!html.contains(#"\\|"#))
+        #expect(html.contains(#"<td><a class="internal" href="/prf">PRF</a></td>"#),
+                "a table outside the fence is still rewritten")
+        #expect(html.contains(#"<td><span class="math" data-tex="\|x\|">"#))
     }
 
     @Test("[[page#Heading]] shows the heading; in a table, the page, as the site does")
@@ -162,6 +186,32 @@ struct FixesRenderjsTests {
         #expect(html.contains(#"<a class="internal" href="/owf">OWF</a></div>"#))
         #expect(html.contains(#"<div class="callout callout-abstract""#))
         #expect(html.contains(#"<div class="callout-title" data-source-lines="2-3">Summary</div>"#))
+    }
+
+    @Test("a callout's marker runs to the first ] of the site's text node, as ofm.ts's regex does")
+    func calloutMarker() throws {
+        let html = try render("""
+            > [!note] As shown in [HLL23], the bound holds.
+
+            > [!note] Proof that [[one-way-function|OWF]] suffices [KL14]
+
+            > [!tip] Remember this
+
+            > [!note|wide] A wide one
+
+            > [!note] A -> B [x]
+            """)
+        #expect(html.contains(#"<div class="callout-title" data-source-lines="0-1">, the bound holds.</div>"#),
+                "the site takes `] As shown in [HLL23` for metadata")
+        #expect(html.contains(#"<div class="callout-title" data-source-lines="2-3">Proof that "#
+            + #"<a class="internal" href="/owf">OWF</a> suffices [KL14]</div>"#),
+                "a link ends the site's text node, so the marker ends at its own ]")
+        #expect(html.contains(#"<div class="callout callout-tip" data-source-lines="4-5">"#))
+        #expect(html.contains(#"<div class="callout-title" data-source-lines="4-5">Remember this</div>"#))
+        #expect(html.contains(#"<div class="callout-title" data-source-lines="6-7">A wide one</div>"#),
+                "metadata after a | is not the title")
+        #expect(html.contains(#"<div class="callout-title" data-source-lines="8-9">A → B [x]</div>"#),
+                "OFM's arrow splits the site's text node too")
     }
 
     // MARK: Comments

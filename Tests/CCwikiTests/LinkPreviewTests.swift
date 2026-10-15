@@ -174,7 +174,12 @@ struct LinkPreviewTests {
         let wikilinks = PreviewExcerpt.inlineWithoutLinks(
             "See [[pseudorandom-generator|PRGs]], [[one-way-function]] and "
                 + "[[Primitives/hash-function#collision-resistance]].")
-        #expect(wikilinks == "See PRGs, one-way-function and hash-function › collision-resistance.")
+        #expect(wikilinks == "See PRGs, one-way-function and collision-resistance.")
+
+        // As the page shows them: an alias decoded, a heading with one `#` off.
+        let decoded = PreviewExcerpt.inlineWithoutLinks(
+            #"[[x|IND\$-CPA]], [[x|AT&amp;T]], [[a/b##Two]] and [[p|]]."#)
+        #expect(decoded == #"IND\$-CPA, AT\&T, #Two and p."#)
 
         let markdownLink = PreviewExcerpt.inlineWithoutLinks(
             "The [$k$-Lin](bilinear-map-assumptions#k-linear) and [IR89](<IR89 - Limits>) results.")

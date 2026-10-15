@@ -163,6 +163,35 @@ struct FixesWikiparseTests {
         #expect(rendered.count == headings.count)
     }
 
+    @Test("heading ids are made after the page's arrows, dashes and ellipses, as the renderer makes them")
+    func headingIDsAfterTypography() throws {
+        let headings = [
+            "A -> B", "A --> B", "A <- B", "A <-- B", "A => B", "A <= B", "A->B", "A ---> B", "A <--- B",
+            "A -- B", "A--B", "A --- B", "Wait...", "OWF -> PRG -> PRF",
+            "`a -> b` code", "$x -> y$ math", "x `->` y -> z", "a -$x$-> b",
+            #"A \-> B"#, #"A \-\- B"#, "_a -> b_", "a -_-_ b", "[a -> b](url) link",
+            "[[x|a -> b]] alias", "[[x]]-->y", #"Pages [[x|IND\$-CPA]]"#, "[[x|AT&amp;T]] notes",
+            "a &#45;&#45;> b", "AT&amp;T", "x&#97;_y_",
+        ]
+        let markdown = headings.map { "## " + $0 }.joined(separator: "\n\n") + "\n"
+        let script = try MarkdownScript.load()
+        let toc = try script.json(
+            "(function () { var env = { links: {} }; md.render(" + MarkdownScript.literal(markdown)
+                + ", env); return env.toc.map(function (h) { return h.id; }); })()")
+        let rendered = try #require(toc as? [String])
+        let page = WikiPage(path: "Primitives/x.md", text: markdown)
+        #expect(page.headings().map(\.id) == rendered)
+        #expect(rendered.count == headings.count)
+        #expect(page.headings().first?.id == "a--b", "the page's id, not a---b")
+
+        #expect(WikiPage.Heading.plainText("A -> B") == "A → B")
+        #expect(WikiPage.Heading.plainText("$x -> y$ and `a -- b`") == "x -> y and a -- b",
+                "never in math or code")
+        #expect(WikiPage.Heading.plainText(#"[[x|IND\$-CPA]] and [[x|a -> b]]"#) == "IND$-CPA and a -> b",
+                "an alias decoded, and as written otherwise")
+        #expect(WikiPage.Heading.plainText("AT&amp;T -- x&#97;_y_") == "AT&T — xay")
+    }
+
     @Test("a wikilink inside math is the math's source, never a placeholder")
     func wikilinkInsideMath() {
         #expect(WikiPage.Heading.plainText("Bound on $[[a]]$") == "Bound on [[a]]")
