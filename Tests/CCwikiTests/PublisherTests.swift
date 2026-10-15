@@ -20,6 +20,7 @@ struct PublisherTests {
         let first = Publisher.pushArguments(
             remote: "origin", branch: "x", commit: "c0ffee", expecting: nil)
         #expect(first.contains("--force-with-lease=refs/heads/x:"))
+        #expect(first.contains("--no-follow-tags"), "one ref, and no tag with it")
         #expect(Array(first.suffix(2)) == ["origin", "c0ffee:refs/heads/x"],
                 "the commit that was checked, by name")
         let next = Publisher.pushArguments(
@@ -159,14 +160,15 @@ struct PublisherTests {
     }
 
     /// An edit of `content/page.md` to `text`, reviewed, with a title: the
-    /// digest of the diff a person would have seen.
+    /// snapshot a person would have seen.
     @discardableResult
-    static func edit(_ scene: JobScene, _ job: Job, to text: String) async throws -> String {
+    static func edit(_ scene: JobScene, _ job: Job, to text: String) async throws
+        -> ReviewSnapshot {
         try scene.write("content/page.md", text, in: job)
         let snapshot = try #require(await ReviewSnapshotter(git: scene.git).snapshot(
             worktree: job.worktree, base: scene.base, patchFile: job.patchFile))
         job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
-        return snapshot.digest
+        return snapshot
     }
 
     /// `edit`, then the commit Approve makes of it.
@@ -348,10 +350,16 @@ struct PublisherTests {
         #expect(await scene.originTip("fix/page") == .at(checked))
         #expect(job.pushedCommit == checked)
         let command = try #require(job.log.last { $0.text.hasPrefix("git ") })
-        #expect(command.text.hasPrefix("git -c core.hooksPath=/dev/null push --no-verify "))
+        #expect(command.text.hasPrefix(Self.loggedPush), "\(command.text)")
         #expect(command.text.hasSuffix(" \(checked):refs/heads/fix/page"))
         #expect(!command.text.contains("HEAD"))
     }
+
+    /// How the transcript starts the push it ran: the objects themselves,
+    /// every hook off, and one ref with no tag.
+    static let loggedPush = "git --no-replace-objects -c core.useReplaceRefs=false "
+        + "-c core.hooksPath=/dev/null -c core.fsmonitor=false "
+        + "push --no-verify --no-follow-tags --recurse-submodules=no "
 
     /// A `gh` that is signed in, may push, and opens pull request 99.
     static let gitHubThatOpens = #"""
@@ -390,9 +398,11 @@ struct PublisherTests {
             environment: FixtureRepository.environment())
         let reviewedTree = written.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         try #require(written.succeeded && !reviewedTree.isEmpty, "\(written.output)")
+        #expect(job.review?.tree == reviewedTree, "the review is of the staged tree, by name")
 
         // Hooks everywhere, from now on, in the directory the clone's own
-        // configuration names; post-commit amends HEAD with extra.md.
+        // configuration names; post-commit amends HEAD with extra.md, and
+        // the clone's configuration names a file-system monitor too.
         let trap = try await HookTrap.install(beside: scene.clone)
         let result = await scene.center.approve(job)
         let ran = trap.ran()
@@ -409,13 +419,16 @@ struct PublisherTests {
         #expect(parents.stdout == "\(commit) \(scene.base)", "one commit, on the base")
         #expect(await scene.git.blob("\(commit):extra.md", in: scene.clone.root) == nil)
         let command = try #require(job.log.last { $0.text.hasPrefix("git ") })
-        #expect(command.text.hasPrefix("git -c core.hooksPath=/dev/null push --no-verify "))
+        #expect(command.text.hasPrefix(Self.loggedPush), "\(command.text)")
         #expect(command.text.hasSuffix(" \(commit):refs/heads/fix/page"),
                 "the push names the validated commit")
 
-        // The control: the hooks are live for git's own commands.
+        // The control: the hooks and the monitor are live for git's own
+        // commands.
         #expect(await scene.clone.run(["update-ref", "refs/heads/control", scene.base]).succeeded)
         #expect(trap.ran().contains("reference-transaction"), "\(trap.ran())")
+        #expect(await scene.clone.run(["status", "--porcelain"]).succeeded)
+        #expect(trap.ran().contains(HookTrap.fsmonitor), "\(trap.ran())")
     }
 
     @Test("a tree staged after the check is never published: the job goes back to review")
@@ -459,6 +472,78 @@ struct PublisherTests {
             == scene.base, "the branch never moved")
     }
 
+    // MARK: What git shows is what git sends (the PR #11 review)
+
+    /// git in the job's worktree, as an agent would run it.
+    @discardableResult
+    static func agent(_ scene: JobScene, _ job: Job, _ arguments: [String]) async
+        -> Subprocess.Result {
+        await Subprocess.run(
+            executable: scene.clone.git,
+            arguments: ["-C", job.worktree.path(percentEncoded: false)] + arguments,
+            environment: FixtureRepository.environment())
+    }
+
+    /// Approve of `job`, whose review must hold `hidden`, a file git's own
+    /// diff does not show: DiffGuard blocks it, and nothing is sent.
+    static func approveRefuses(_ scene: JobScene, _ job: Job, showing hidden: String) async {
+        let porcelain = await agent(scene, job, ["diff", "--cached", "--name-only", scene.base])
+        #expect(porcelain.stdout == "content/page.md", "git's own diff hides \(hidden)")
+
+        await scene.center.refreshReview(job)
+        #expect(job.review?.files.map(\.path) == ["content/page.md", hidden])
+        #expect(job.findings.contains { $0.path == hidden && $0.severity == .blocking },
+                "\(job.findings)")
+
+        let result = await scene.center.approve(job)
+        guard case .refused(let message) = result else {
+            Issue.record("Approve did not refuse what the review must show: \(result)")
+            return
+        }
+        #expect(message.hasPrefix("DiffGuard blocks this change"), "\(message)")
+        #expect(job.state == .awaitingReview)
+        #expect(await scene.originTip("fix/page") == .absent, "nothing was pushed")
+    }
+
+    @Test("a replaced tree hides nothing from the review, and Approve refuses the file it hid")
+    func approveSeesPastReplacements() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        // An agent (it keeps node) stages extra.md, writes that tree, and
+        // makes it stand in for the base's tree in the clone's shared refs.
+        try scene.write("extra.md", "unreviewed\n", in: job)
+        #expect(await Self.agent(scene, job, ["add", "extra.md"]).succeeded)
+        let planted = await Self.agent(scene, job, ["write-tree"])
+            .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replaced = await Self.agent(scene, job, ["replace", "\(scene.base)^{tree}", planted])
+        try #require(replaced.succeeded, "git replace: \(replaced.output)")
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        #expect(await Self.agent(scene, job, ["add", "-A"]).succeeded)
+
+        await Self.approveRefuses(scene, job, showing: "extra.md")
+    }
+
+    @Test("a submodule's new commit is in the review whatever diff.ignoreSubmodules says, and Approve refuses it")
+    func approveSeesSubmodules() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        #expect(await scene.clone.run(["config", "diff.ignoreSubmodules", "all"]).succeeded)
+        // What `git submodule update --remote` and an add leave: a gitlink at
+        // a new commit, its directory there and not populated.
+        let commit = String(repeating: "1", count: 40)
+        let linked = await Self.agent(
+            scene, job, ["update-index", "--add", "--cacheinfo", "160000,\(commit),vendor/cryptobib"])
+        try #require(linked.succeeded, "git update-index: \(linked.output)")
+        try FileManager.default.createDirectory(
+            at: job.worktree.appending(path: "vendor/cryptobib"), withIntermediateDirectories: true)
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        #expect(await Self.agent(scene, job, ["add", "-A"]).succeeded)
+
+        await Self.approveRefuses(scene, job, showing: "vendor/cryptobib")
+    }
+
     // MARK: Checking, which needs the review model
 
     @Test("Approve refuses a diff that changed since it was reviewed")
@@ -468,11 +553,12 @@ struct PublisherTests {
         let job = try await scene.beginEdit()
         try scene.write("content/page.md", "a\nB\nc", in: job)
         await scene.center.refreshReview(job)
-        let reviewed = try #require(job.review?.digest)
+        let reviewed = try #require(job.review)
         try scene.write("content/page.md", "a\nBB\nc", in: job)
 
         #expect(await Self.publisher(scene).check(job, reviewed: reviewed) == .changedSinceReview)
-        #expect(job.review?.digest != reviewed, "the review now shows the new diff")
+        #expect(job.review?.digest != reviewed.digest, "the review now shows the new diff")
+        #expect(job.review?.tree != reviewed.tree)
     }
 
     @Test("Approve asks GitHub last, and without gh nothing is sent")
@@ -498,7 +584,7 @@ struct PublisherTests {
         let job = try await scene.beginEdit()
         try scene.write("content/page.md", "a\nB\nc", in: job)
         await scene.center.refreshReview(job)
-        let reviewed = try #require(job.review?.digest)
+        let reviewed = try #require(job.review)
 
         let anonymous = GitService(
             executable: scene.clone.git,

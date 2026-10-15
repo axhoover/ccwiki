@@ -5,13 +5,18 @@ import Foundation
 /// the only code that runs `gh pr create`.
 ///
 /// ```
-/// 1. Checking…            snapshot again: the digest must be the reviewed one;
-///                         DiffGuard; the title and body; git's identity; GitHub
-/// 2. Committing…          git write-tree; its diff from <base> must have the
-///                         reviewed digest; git commit-tree -p <base>; its tree
-///                         and parent checked; git update-ref refs/heads/<branch>
+/// 1. Checking…            snapshot again: the tree and the digest must be the
+///                         reviewed ones; DiffGuard; the title and body; git's
+///                         identity; GitHub
+/// 2. Committing…          git write-tree, which must be the reviewed tree; its
+///                         diff from <base> must have the reviewed digest;
+///                         git commit-tree -p <base>; its tree and parent
+///                         checked; git update-ref refs/heads/<branch>
 /// 3. Pushing <branch>…    pushingCommit persisted, then
-///                         git push --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
+///                         git --no-replace-objects -c core.useReplaceRefs=false
+///                         -c core.hooksPath=/dev/null -c core.fsmonitor=false
+///                         push --no-verify --no-follow-tags --recurse-submodules=no
+///                         --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
 ///                         <remote> <commit>:refs/heads/<branch>
 ///                         a refused lease asks GitHub where the branch is (leaseRecovery)
 /// 4. Opening the pull request…
@@ -25,9 +30,11 @@ import Foundation
 /// never set to merge itself. Nothing is ever deleted on GitHub.
 ///
 /// No git hook runs from the first step to the last: every git command
-/// here carries `GitService.hooksOff`. What is pushed is the commit step 2
-/// checked, by name, never HEAD: a commit whose tree is not the reviewed
-/// change is never made into the branch, and nothing is sent.
+/// here carries `GitService.hooksOff`, and, as every git command CCwiki
+/// runs, reads the objects themselves (`GitService.realObjects`). What is
+/// pushed is the commit step 2 checked, by name, never HEAD: a commit
+/// whose tree is not the reviewed tree is never made into the branch, and
+/// nothing is sent.
 ///
 /// The caller, `JobCenter.approve`, has saved every editor of the job and
 /// waited for its git queue. Every outcome but `opened` returns the job to
@@ -67,13 +74,15 @@ struct Publisher {
     /// And one push, which carries the whole change.
     nonisolated static let pushDeadline: Duration = .seconds(180)
 
+    /// `reviewed` is the snapshot that was on screen when Open Draft PR was
+    /// pressed: its tree is what is committed, or nothing is.
     func publish(
-        _ job: Job, reviewed digest: String, provenance: PullRequestDraft.Provenance
+        _ job: Job, reviewed: ReviewSnapshot, provenance: PullRequestDraft.Provenance
     ) async -> ApproveResult {
-        if let stop = await check(job, reviewed: digest) { return stop }
+        if let stop = await check(job, reviewed: reviewed) { return stop }
 
         let committed: String
-        switch await self.commit(job, version: provenance.appVersion, reviewed: digest) {
+        switch await self.commit(job, version: provenance.appVersion, reviewed: reviewed) {
         case .committed(let commit):
             committed = commit
         case .notReviewed:
@@ -116,7 +125,7 @@ struct Publisher {
     /// Why the job cannot be published as it stands, or nil to go on. The
     /// snapshot taken here becomes the job's review either way, so a
     /// changed diff is the one shown when this returns.
-    func check(_ job: Job, reviewed digest: String) async -> ApproveResult? {
+    func check(_ job: Job, reviewed: ReviewSnapshot) async -> ApproveResult? {
         step(job, "Checking…")
         let snapshotter = ReviewSnapshotter(git: git)
         guard let review = await snapshotter.review(
@@ -126,7 +135,9 @@ struct Publisher {
         }
         job.setReview(review.snapshot, findings: review.findings)
 
-        if review.snapshot.digest != digest { return .changedSinceReview }
+        if review.snapshot.tree != reviewed.tree || review.snapshot.digest != reviewed.digest {
+            return .changedSinceReview
+        }
         if review.snapshot.isEmpty {
             return .refused("There are no changes to open a pull request with.")
         }
@@ -178,20 +189,21 @@ struct Publisher {
 
     // MARK: 2. Committing
 
-    /// One commit on the base of exactly the change whose digest is
-    /// `reviewed`, authored by the user's own git identity
-    /// (`GitService.commitReviewed`). Whatever the agent committed collapses
-    /// into it, no hook runs, and a tree that is not the reviewed change is
-    /// never committed to the branch: that is `notReviewed`, and nothing is
-    /// sent.
-    func commit(_ job: Job, version: String, reviewed digest: String) async
+    /// One commit on the base of exactly `reviewed`'s tree, authored by the
+    /// user's own git identity (`GitService.commitReviewed`). Whatever the
+    /// agent committed collapses into it, no hook runs, and a tree that is
+    /// not the reviewed one, or whose diff does not have the reviewed
+    /// digest, is never committed to the branch: that is `notReviewed`, and
+    /// nothing is sent.
+    func commit(_ job: Job, version: String, reviewed: ReviewSnapshot) async
         -> GitService.ReviewedCommit {
         guard let base = job.baseCommit else { return .failed }
         step(job, "Committing…")
         let message = Self.commitMessage(
             title: job.pullRequest.title, version: version, jobID: job.id)
         let outcome = await git.commitReviewed(
-            in: job.worktree, base: base, branch: job.branch, reviewed: digest, message: message)
+            in: job.worktree, base: base, branch: job.branch, tree: reviewed.tree,
+            digest: reviewed.digest, message: message)
         switch outcome {
         case .committed(let commit):
             job.append(JobLogEntry(.system, "Committed \(commit.prefix(12)) on \(base.prefix(12))."))
@@ -293,7 +305,7 @@ struct Publisher {
         let git = self.git
         let worktree = job.worktree
         let branch = job.branch
-        job.append(JobLogEntry(.system, "git " + (GitService.hooksOff + Self.pushArguments(
+        job.append(JobLogEntry(.system, "git " + git.invocation(Self.pushArguments(
             remote: remote, branch: branch, commit: commit, expecting: expecting))
                 .joined(separator: " ")))
         let result = await Subprocess.withDeadline(Self.pushDeadline) {
@@ -496,8 +508,8 @@ struct Publisher {
     // MARK: The dry run
 
     private func logDryRun(_ job: Job, commit: String, provenance: PullRequestDraft.Provenance) {
-        let push = GitService.hooksOff + Self.pushArguments(
-            remote: target.pushURL, branch: job.branch, commit: commit, expecting: job.pushedCommit)
+        let push = git.invocation(Self.pushArguments(
+            remote: target.pushURL, branch: job.branch, commit: commit, expecting: job.pushedCommit))
         let create = Self.createArguments(
             target: target, base: AppPaths.defaultBranch, branch: job.branch,
             title: job.pullRequest.title, bodyFile: "<body>")
@@ -542,9 +554,10 @@ struct Publisher {
         return pushed == nil ? .rename : .refuse
     }
 
-    /// `push --no-verify --force-with-lease=refs/heads/<branch>:<expecting>
-    /// <remote> <commit>:refs/heads/<branch>`: on absence (`…:`) before the
-    /// first push, and the checked commit by name, never HEAD.
+    /// `push --no-verify --no-follow-tags --recurse-submodules=no
+    /// --force-with-lease=refs/heads/<branch>:<expecting> <remote>
+    /// <commit>:refs/heads/<branch>`: on absence (`…:`) before the first
+    /// push, and the checked commit by name, never HEAD, and nothing else.
     nonisolated static func pushArguments(
         remote: String, branch: String, commit: String, expecting: String?
     ) -> [String] {

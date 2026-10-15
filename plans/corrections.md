@@ -59,7 +59,7 @@ checked against a clone at `ab81f02`.
 | How are issues created and previewed? | `gh issue create --repo … --title … --body-file …`. The sheet is the preview: one Body editor holding the exact text sent, with the footer CCwiki adds shown beneath it. A GitHub permalink to the lines at the reader's commit shows as a code snippet | §8.2 |
 | What does DiffGuard check? | Nineteen rules, in three severities. **Blocking**, for what the wiki forbids outright: any path outside `content/` (an allow-list), a rename or deletion, a binary, a hand-edited generated region, relation fields on an object page, math in a wikilink, a local path or a token. Approve stays disabled. **Warnings** need a confirmation. **Notes** inform. A pure function, tested rule by rule | §6.2 |
 | What may the correction agent touch? | One page, named in the prompt. Tools: `Read`, `Edit`, `Write`, `Glob`, `Grep`; no `Bash` at all. Every agent job runs **sealed**: no `gh` credentials and no push credentials in its environment. That stops a confused agent, not a determined one: ingestion keeps `node`. A tripwire after each run looks for any push or PR CCwiki did not make | §5 |
-| How are duplicate PRs and lost edits prevented? | Duplicates: a state machine, a lease on every push recorded before it is sent, a recovery path when the lease is refused, and a check for an open PR on the branch before creating one. Lost edits: the editors are flushed before Approve and before quit, a patch backup outside Caches, one git queue per job, and a digest that makes Approve commit only the diff that was reviewed | §4.4 |
+| How are duplicate PRs and lost edits prevented? | Duplicates: a state machine, a lease on every push recorded before it is sent, a recovery path when the lease is refused, and a check for an open PR on the branch before creating one. Lost edits: the editors are flushed before Approve and before quit, a patch backup outside Caches, one git queue per job, and the reviewed tree, by name, with the digest of its diff, so that Approve commits only what was reviewed | §4.4, §6.5 |
 | What does CCwiki Dev do? | It targets the **same repository** and **says so**: in the review and the issue sheet before anything is sent, and in a footer on every PR and issue body. `CCWIKI_TARGET_REPO=owner/name` points a Dev build at a fork for testing; the release ignores it | §10 |
 | Which model? | `claude --model sonnet` by default for corrections, set in Settings → Jobs. Ingestion keeps the CLI's default | §5.4 |
 
@@ -842,25 +842,43 @@ check 1, which watches every head.
 
 ```
 git add -A -- . ':(exclude).ccwiki'
-git diff --cached -M --name-status -z <base>     → GitNameStatus.parse
-git diff --cached --numstat -z <base>            → binary paths ("-\t-\t")
-git diff --cached --binary <base>                → the digest (SHA-256), and logs/<id>.patch
-git show <base>:<old path>                       → each changed file's old text
-git show :<path>                                 → each changed file's new text, from the index
+git write-tree                                   → <tree>: what is staged, by name
+git diff -M --name-status -z <base> <tree>       → GitNameStatus.parse
+git diff --numstat -z <base> <tree>              → binary paths ("-\t-\t")
+git diff <patchOptions> <base> <tree>            → the digest (SHA-256), and logs/<id>.patch
+git cat-file blob <base>:<old path>              → each changed file's old text
+git cat-file blob <tree>:<path>                  → each changed file's new text
 ```
 
+- **One tree, by name.** The snapshot records `<tree>` (`ReviewSnapshot.tree`)
+  and reads everything else from it, never from the index again. Approve
+  commits that tree or nothing (§6.5).
+- **What git shows is what git sends.** Every git command CCwiki runs starts
+  `git --no-replace-objects -c core.useReplaceRefs=false`
+  (`GitService.realObjects`): a `refs/replace/` entry, which an ingestion
+  agent can write since it keeps `node`, changes what `diff` and `cat-file`
+  show but not what `push` sends, so a replaced base tree could hide a file
+  from the review and from the digest and still reach GitHub (found in the
+  PR #11 review). Every diff carries `--ignore-submodules=none`, and the
+  patch `--submodule=short`, so a submodule's new commit shows, by its full
+  name, whatever `diff.ignoreSubmodules`, `submodule.<name>.ignore` or
+  `diff.submodule` say: the wiki has two submodules, and ingestion agents
+  may run `git submodule update`, `--remote` included. A gitlink is outside
+  `content/`, so DiffGuard blocks it.
 - **Bytes, not lines.** `Subprocess.run` goes through `LineSplitter`, which
   splits on `\r` as well as `\n`, decodes lossily and drops the final
-  newline. Every `git show`, `-z` and `--binary` call therefore uses
+  newline. Every `git cat-file`, `-z` and `--binary` call therefore uses
   `Subprocess.runData` (§11.6), and texts are decoded only after. Otherwise
   every file would gain a spurious end-of-file hunk, and the patch backup
   would not apply.
-- **The new text comes from the index**, so the snapshot shows exactly what
-  was staged and digested, not what was on disk a moment later.
+- **The new text comes from the staged tree**, so the snapshot shows exactly
+  what was staged and digested, not what was on disk or in the index a
+  moment later.
 - `-z` is not optional: reference filenames carry spaces, `&` and non-ASCII
   titles, which git otherwise quotes.
-- If the agent committed despite the deny-list, `git diff --cached <base>`
-  still shows everything since the base, and Approve collapses it (§6.5).
+- If the agent committed despite the deny-list, the diff from `<base>` to
+  the staged tree still shows everything since the base, and Approve
+  collapses it (§6.5).
 - **The base is required.** Snapshot, Revert File, Restore and Approve
   refuse when `baseCommit` is nil.
 
@@ -1113,15 +1131,16 @@ identity.
 
 ### 6.5 Approve, Discard, Revert File, Review Anyway
 
-**Approve** is `JobCenter.approve(job)`. It awaits `flushEdits(job)`, then the
-job's git queue, sets `publishing("Checking…")` (which makes every editor of
-the job read-only), clears `notice`, and calls
-`Publisher.publish(job, reviewed:provenance:)`. Each step sets
-`publishing(step)` and is also written to the job's log file.
+**Approve** is `JobCenter.approve(job)`. It notes the snapshot on screen
+(`job.review`), awaits `flushEdits(job)`, then the job's git queue, sets
+`publishing("Checking…")` (which makes every editor of the job read-only),
+clears `notice`, and calls `Publisher.publish(job, reviewed:provenance:)`
+with that snapshot. Each step sets `publishing(step)` and is also written to
+the job's log file.
 
 1. **"Checking…"**
-   - Take a snapshot. If its digest differs from the reviewed one, return
-     `.changedSinceReview`.
+   - Take a snapshot. If its tree or its digest differs from the reviewed
+     one's, return `.changedSinceReview`.
    - Run DiffGuard. A blocking finding returns `.refused`. So does a
      `PrivateText` hit in the title or body.
    - `git config user.name` / `user.email` in the worktree: if either is
@@ -1132,15 +1151,17 @@ the job read-only), clears `notice`, and calls
      request when you are connected.")`.
 2. **"Committing…"** (`GitService.commitReviewed`), plumbing only, so that
    nothing reads HEAD and no `git commit` runs:
-   - `git write-tree`: the tree of what step 1 staged;
+   - `git write-tree`: the tree of what step 1 staged, which must be the
+     reviewed snapshot's tree, by name (`ReviewSnapshot.tree`). This is the
+     binding: the commit has exactly the tree the review was read from;
    - `git diff <base> <tree>`, with the options the snapshot's patch uses
-     (`GitService.patchOptions`), must have the reviewed digest. The patch
-     names every changed path with its full blob ids, so a tree whose diff
-     from the base has that digest is the reviewed tree. If it is not,
-     nothing is committed and `.refused(Publisher.notReviewed)` returns the
-     job to review: "What git would have committed is not the change you
-     reviewed, so nothing was sent. Check the diff, then open the pull
-     request again." The transcript says which tree it was;
+     (`GitService.patchOptions`), must have the reviewed digest: a second
+     check, on the real objects (§6.1), with every submodule shown and named
+     in full. If either fails, nothing is committed and
+     `.refused(Publisher.notReviewed)` returns the job to review: "What git
+     would have committed is not the change you reviewed, so nothing was
+     sent. Check the diff, then open the pull request again." The
+     transcript says which tree it was;
    - `git commit-tree -p <base> -m … <tree>` (with `-S` when
      `commit.gpgSign` is true, as `git commit` would sign), which collapses
      anything the agent committed: the base is the only parent;
@@ -1151,11 +1172,16 @@ the job read-only), clears `notice`, and calls
      reflog has every Approve's commit (step 3's recovery reads it).
 3. **"Pushing fix/pseudorandom-function…"**
    - persist `pushingCommit` = the new commit;
-   - `git push --no-verify --recurse-submodules=no
+   - `git --no-replace-objects -c core.useReplaceRefs=false -c
+     core.hooksPath=/dev/null -c core.fsmonitor=false push --no-verify
+     --no-follow-tags --recurse-submodules=no
      --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
-     <PublishTarget.pushURL> <commit>:refs/heads/<branch>`: the commit step 2
-     checked, **by name, never HEAD**, which anything may move after the
-     check, on the first try and on the retry alike;
+     <PublishTarget.pushURL> <commit>:refs/heads/<branch>`, as the
+     transcript logs it: the commit step 2 checked, **by name, never HEAD**,
+     which anything may move after the check, on the first try and on the
+     retry alike. One ref: `--no-follow-tags` sends no annotated tag with
+     it whatever `push.followTags` says (on GitHub a tag can start a
+     workflow), and `--recurse-submodules=no` no submodule's;
    - on success, persist `pushedCommit`.
    - **If the lease is refused**, ask GitHub: `git ls-remote <pushURL>
      refs/heads/<branch>`, then `Publisher.leaseRecovery` decides:
@@ -1181,15 +1207,24 @@ the job read-only), clears `notice`, and calls
 
 **No git hook runs from step 1 to step 5.** `Publisher` keeps its
 `GitService` as `withoutHooks`, so every git command it runs, the staging
-of step 1's snapshot included, starts `git -c core.hooksPath=/dev/null`.
+of step 1's snapshot included, carries `-c core.hooksPath=/dev/null -c
+core.fsmonitor=false` (`GitService.hooksOff`), after `realObjects`.
 `--no-verify` is not enough: it skips `pre-commit` and `commit-msg` only,
 and a `post-commit` hook can amend the commit just made (the PR #11 review
-showed one adding an unreviewed file). A `-c` on the command line is read
-after every configuration file and after `GIT_CONFIG_COUNT`, so no
-`core.hooksPath` the clone, a worktree or the user sets can undo it, and
-nothing can be put under `/dev/null` to run. The push carries `--no-verify`
-as well. Step 2 does not depend on this, though: whatever runs, the commit
-pushed is the one whose tree was checked against the reviewed digest.
+showed one adding an unreviewed file). `core.hooksPath` does not cover
+`core.fsmonitor`, which githooks(5) counts as the `fsmonitor-watchman` hook
+and which the configuration can point at any program; git would otherwise
+run it from staging, `diff`, `write-tree` and `cat-file`. A `-c` on the
+command line is read after every configuration file and after
+`GIT_CONFIG_COUNT`, so nothing the clone, a worktree or the user sets can
+undo either, and nothing can be put under `/dev/null` to run. The push
+carries `--no-verify` as well.
+
+Programs the configuration names for other purposes still run, by design: a
+credential helper (the push needs one), a GPG or SSH signing program
+(`commit.gpgSign`), a clean filter during staging. Step 2 does not depend on
+any of this: whatever runs, the commit pushed is the one whose tree is the
+reviewed tree, by name, and whose diff has the reviewed digest.
 
 `CCWIKI_PUBLISH_DRY_RUN=1` stops after step 2, logs the push and `gh`
 commands it would have run, and returns
@@ -2018,13 +2053,14 @@ struct JobError: Error, Sendable, Equatable { let message: String; init(_ messag
 // MARK: Jobs/ReviewSnapshot.swift, LineDiff.swift, GitNameStatus.swift — Track A
 struct ReviewSnapshot: Sendable, Equatable {
     let baseCommit: String
+    let tree: String                      // `git write-tree` of what was staged: what Approve commits
     let files: [ChangedFile]
-    let digest: String                    // hex SHA-256 of `git diff --cached --binary <base>`
+    let digest: String                    // hex SHA-256 of `git diff <patchOptions> <base> <tree>`
     var isEmpty: Bool { files.isEmpty }
     /// Pure and Sendable, so it runs in Task.detached.
-    static func assemble(base: String, entries: [GitNameStatus.Entry], binary: Set<String>,
-                         patch: Data, oldTexts: [String: String], newTexts: [String: String])
-        -> ReviewSnapshot
+    static func assemble(base: String, tree: String, entries: [GitNameStatus.Entry],
+                         binary: Set<String>, patch: Data, oldTexts: [String: String],
+                         newTexts: [String: String]) -> ReviewSnapshot
 }
 struct ChangedFile: Sendable, Equatable, Identifiable {
     enum Status: String, Sendable { case added, modified, deleted, renamed }
@@ -2131,9 +2167,11 @@ struct AgentInvocation: Sendable, Equatable {
     let tools: ToolLocator
     let git: GitService            // the one given, `withoutHooks` (§6.5)
     let target: PublishTarget
-    func publish(_ job: Job, reviewed digest: String,
+    /// `reviewed`: the snapshot on screen when Open Draft PR was pressed.
+    func publish(_ job: Job, reviewed: ReviewSnapshot,
                  provenance: PullRequestDraft.Provenance) async -> ApproveResult
-    func commit(_ job: Job, version: String, reviewed digest: String) async
+    func check(_ job: Job, reviewed: ReviewSnapshot) async -> ApproveResult?
+    func commit(_ job: Job, version: String, reviewed: ReviewSnapshot) async
         -> GitService.ReviewedCommit
     nonisolated static let notReviewed: String
     enum LeaseRecovery: Sendable, Equatable { case retry(expecting: String?), rename, refuse }
@@ -2157,20 +2195,25 @@ extension GitService {
     func resolveCommit(_ ref: String, in directory: URL) async -> String?       // rev-parse --verify <ref>^{commit}
     func mergeBase(_ a: String, _ b: String, in directory: URL) async -> String?
     func stageAll(in worktree: URL) async -> Bool                               // excludes .ccwiki
+    /// write-tree, then every diff from <base> to that tree (§6.1).
     func stagedDiff(in worktree: URL, base: String) async
-        -> (nameStatus: Data, numstat: Data, patch: Data)?
-    /// `git show <spec>`, bytes exact: "<base>:<path>", or ":<path>" for the index.
+        -> (tree: String, nameStatus: Data, numstat: Data, patch: Data)?
+    /// `git cat-file blob <spec>`, bytes exact: "<commit or tree>:<path>", or ":<path>".
     func blob(_ spec: String, in directory: URL) async -> Data?
     func revertPath(_ path: String, to base: String, in worktree: URL) async -> Bool
-    static let hooksOff: [String]                 // ["-c", "core.hooksPath=/dev/null"]
+    static let realObjects: [String]              // ["--no-replace-objects", "-c", "core.useReplaceRefs=false"]
+    static let hooksOff: [String]                 // ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
     var hooksDisabled: Bool
     var withoutHooks: GitService { get }
+    /// realObjects, hooksOff when disabled, then `arguments`: what runs, and what a transcript shows.
+    func invocation(_ arguments: [String]) -> [String]
     static let patchOptions: [String]             // the snapshot's patch and commitReviewed's check
     enum ReviewedCommit: Sendable, Equatable { case committed(String), notReviewed(String), failed }
-    /// write-tree; its digest checked; commit-tree -p <base>; checked; update-ref (§6.5).
-    func commitReviewed(in worktree: URL, base: String, branch: String, reviewed digest: String,
-                        message: String) async -> ReviewedCommit
-    /// <commit>:refs/heads/<branch>, never HEAD; hooks off.
+    /// write-tree, which must be `reviewedTree`; its digest checked; commit-tree -p <base>;
+    /// checked; update-ref (§6.5).
+    func commitReviewed(in worktree: URL, base: String, branch: String, tree reviewedTree: String,
+                        digest: String, message: String) async -> ReviewedCommit
+    /// <commit>:refs/heads/<branch>, never HEAD, no tag; hooks off.
     func push(_ commit: String, in worktree: URL, to remote: String, branch: String,
               expecting: String?) async -> Subprocess.Result
     func remoteTip(of branch: String, remote: String, in directory: URL) async -> RemoteTip
@@ -2445,20 +2488,29 @@ merges to `main`.**
 **`PublisherTests`** (B)
 - The lease is `--force-with-lease=refs/heads/x:` before the first push,
   and `:<sha>` after. The source is `<commit>:refs/heads/x`, never HEAD, and
-  `--no-verify` is there.
+  `--no-verify` and `--no-follow-tags` are there.
 - Against a bare origin: HEAD and the branch moved after the commit was
-  checked, and the push still sends, and logs, the checked commit.
+  checked, and the push still sends, and logs, the checked commit, the log
+  starting `git --no-replace-objects -c core.useReplaceRefs=false -c
+  core.hooksPath=/dev/null -c core.fsmonitor=false push --no-verify
+  --no-follow-tags --recurse-submodules=no`.
 - Approve end to end, with a `gh` script that is signed in and opens PR 99,
   and executable `pre-commit`, `prepare-commit-msg`, `commit-msg`,
   `post-commit` (which amends HEAD with `extra.md`), `post-rewrite`,
   `post-index-change`, `post-checkout`, `reference-transaction` and
-  `pre-push` hooks in the directory the clone's `core.hooksPath` names: no
-  hook runs; the pushed commit's tree is the reviewed tree, its only parent
-  the base, and the logged push names it. A control shows the hooks run for
-  git's own `update-ref`.
+  `pre-push` hooks in the directory the clone's `core.hooksPath` names, and
+  a `core.fsmonitor` program: none runs; the pushed commit's tree is the
+  reviewed tree (the review's `tree`), its only parent the base, and the
+  logged push names it. A control shows the hooks run for git's own
+  `update-ref`, and the monitor for its `status`.
 - A `gh` that stages `extra.md` while it is asked about push rights, after
   the check's snapshot: `.refused(Publisher.notReviewed)`, the job back in
   review with that notice, no push tried, the branch never moved.
+- A replacement for the base's tree that already has `extra.md` (in the
+  clone's `refs/replace/`), and a gitlink at a new commit with
+  `diff.ignoreSubmodules=all`: git's own `diff --cached` hides each, the
+  review shows it, DiffGuard blocks it, and Approve refuses with nothing
+  pushed.
 - `leaseRecovery`: absent → retry on absence; the tip equal to
   `pushingCommit`, to `pushedCommit`, or in the reflog → retry expecting it;
   unknown with no confirmed push → rename; unknown after a confirmed push →
@@ -2512,13 +2564,21 @@ sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
    and `refreshOrphanedWorktrees` never lists the job's worktree.
 8. `commitReviewed` collapses an agent commit: the commit's tree is the
    reviewed tree, its only parent the base, and the branch and its reflog
-   name it. A tree staged after the review is `notReviewed`, and the branch
-   stays. With the hooks of `PublisherTests` in the clone's own
-   `.git/hooks`, and again in a directory its `core.hooksPath` names, each
-   time also named by `GIT_CONFIG_COUNT`, staging, `commitReviewed` and
-   `push` run none of them; then git's own `reset --soft` and `commit
-   --no-verify`, as Approve used to run them, do run them, and
-   `post-commit` amends HEAD.
+   name it. A tree staged after the review is `notReviewed`, by its tree,
+   and by its digest when given its own tree, and the branch stays. With
+   the hooks of `HookTrap` (in `GitReviewIntegrationTests.swift`; Publisher
+   tests use it too) in the clone's own `.git/hooks` with nothing
+   configured, in a directory the clone's `core.hooksPath` names, and in
+   one only `GIT_CONFIG_COUNT` names, and a `core.fsmonitor` program each
+   time, staging, `commitReviewed` and `push` run none of them; then git's
+   own `reset --soft` and `commit --no-verify`, as Approve used to run
+   them, do run them and the monitor, and `post-commit` amends HEAD.
+   A replacement for the base's tree, and a gitlink with
+   `diff.ignoreSubmodules=all` and `diff.submodule=log`, show in the
+   review's name-status and patch (the gitlink by its full name), and a
+   digest taken as git's own `diff --cached` takes it is `notReviewed`.
+   With an annotated tag on the base and `push.followTags=true`, the push
+   sends no tag; git's own push of the same commit does.
 9. The first push with the absence lease succeeds, a second push after an
    edit with `expecting:` succeeds, and a push with a stale lease is refused.
    With `pushedCommit` dropped and `pushingCommit` set, Approve recovers and

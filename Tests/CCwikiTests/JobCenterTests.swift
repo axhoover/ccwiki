@@ -225,6 +225,7 @@ struct JobCenterTests {
     static func snapshot(changing path: String) -> ReviewSnapshot {
         ReviewSnapshot(
             baseCommit: "865206d47c53",
+            tree: "4b825dc",
             files: [ChangedFile(
                 path: path, oldPath: nil, status: .modified, isBinary: false,
                 oldText: "a\n", newText: "b\n", hunks: [LineHunk(old: 0..<1, new: 0..<1)])],
@@ -248,7 +249,8 @@ struct JobCenterTests {
         let edit = try #require(center.job(id: "edit"))
         #expect(center.reviewCount == 1)
 
-        edit.setReview(ReviewSnapshot(baseCommit: "b", files: [], digest: "e"), findings: [])
+        edit.setReview(
+            ReviewSnapshot(baseCommit: "b", tree: "t", files: [], digest: "e"), findings: [])
         #expect(edit.isUntouchedEdit && center.reviewCount == 1)
 
         edit.setReview(Self.snapshot(changing: "content/Primitives/pseudorandom-function.md"),

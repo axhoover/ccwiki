@@ -431,7 +431,7 @@ struct AgentRun {
             handover: handover.flatMap { PullRequestDraft.parse(handover: $0) },
             siteURL: siteURL)
 
-        var diff: (nameStatus: Data, numstat: Data, patch: Data)?
+        var diff: (tree: String, nameStatus: Data, numstat: Data, patch: Data)?
         if await git.stageAll(in: job.worktree) {
             diff = await git.stagedDiff(in: job.worktree, base: base)
         }

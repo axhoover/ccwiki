@@ -170,19 +170,24 @@ ever staged. Nothing on GitHub is ever deleted: Discard removes the worktree
 and the local branch, and leaves a pushed branch and an open pull request
 where they are.
 
-**Approve sends only what was reviewed.** It notes the digest of the diff on
-screen when it is pressed, saves every editor of the job, waits for the job's
-git queue, and snapshots again: if the staged patch's SHA-256 differs from the
-one on screen, nothing is sent and the new diff is shown. A snapshot that
-finished during the wait was never seen, so it is not what is approved. Then
-DiffGuard, the title and body (`PrivateText`), git's identity and GitHub
-(`GitHubAccess`) are checked, in that order, before anything leaves. The
-commit is made with plumbing, `git write-tree` and `git commit-tree -p
-<base>`, and only once the tree's diff from the base has the reviewed digest,
-so whatever the agent committed collapses into one commit of exactly the
-reviewed change. Every git command from the check to the push runs with
-`-c core.hooksPath=/dev/null`, so no hook runs at all, and the push names
-that commit, never HEAD (plans/corrections.md §6.5).
+**Approve sends only what was reviewed.** A review is of one staged tree, by
+name (`git write-tree`), and its diff from the base. Approve notes the
+snapshot on screen when it is pressed, saves every editor of the job, waits
+for the job's git queue, and snapshots again: if the staged tree or its
+patch's SHA-256 differs from the one on screen, nothing is sent and the new
+diff is shown. A snapshot that finished during the wait was never seen, so it
+is not what is approved. Then DiffGuard, the title and body (`PrivateText`),
+git's identity and GitHub (`GitHubAccess`) are checked, in that order, before
+anything leaves. The commit is made with plumbing, `git write-tree` and `git
+commit-tree -p <base>`, and only once the tree is the reviewed tree and its
+diff from the base has the reviewed digest, so whatever the agent committed
+collapses into one commit of exactly the reviewed change. Every git command
+CCwiki runs reads the objects themselves, never a `refs/replace/`
+substitute, and every diff shows every submodule, so what the review shows
+is what a push sends. Every git command from the check to the push runs with
+`-c core.hooksPath=/dev/null -c core.fsmonitor=false`, so no hook runs at
+all, and the push names that commit, never HEAD, with no tag
+(plans/corrections.md §6.1, §6.5).
 
 **No pull request twice, no branch overwritten.** The commit being pushed is
 recorded before the push is sent, and the push leases on the last one GitHub

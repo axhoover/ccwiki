@@ -17,16 +17,35 @@ struct GitService: Sendable {
     /// `withoutHooks`, so nothing from a review to its push runs a hook.
     var hooksDisabled = false
 
-    /// `-c core.hooksPath=/dev/null`, before the subcommand: git looks for
-    /// every hook under `/dev/null/`, where nothing can exist, so none runs.
-    /// `--no-verify` is not enough: it skips `pre-commit` and `commit-msg`,
-    /// and `post-commit`, `reference-transaction`, `post-index-change` and
-    /// the rest still run, and a `post-commit` can amend the commit just
-    /// made. A `-c` on the command line is read after every configuration
-    /// file and after `GIT_CONFIG_COUNT`, so no `core.hooksPath` the clone,
-    /// a worktree or the user configures can undo it; and `/dev/null`, unlike
-    /// a directory of CCwiki's, is not a place anyone can put a hook.
-    static let hooksOff = ["-c", "core.hooksPath=/dev/null"]
+    /// `--no-replace-objects -c core.useReplaceRefs=false`, before every
+    /// subcommand this service runs: git reads each object as it is, never
+    /// the one a `refs/replace/` entry substitutes for it. A replacement
+    /// changes what `diff` and `cat-file` show and nothing that `push`
+    /// sends, so a replaced tree could hide a file from the review, and from
+    /// the digest Approve checks, and still reach GitHub (the PR #11 review,
+    /// plans/corrections.md §6.1). The `-c` is read after every
+    /// configuration file, so no `core.useReplaceRefs` the clone or the user
+    /// sets can turn replacements back on.
+    static let realObjects = ["--no-replace-objects", "-c", "core.useReplaceRefs=false"]
+
+    /// `-c core.hooksPath=/dev/null -c core.fsmonitor=false`, before the
+    /// subcommand: git looks for every hook under `/dev/null/`, where
+    /// nothing can exist, so none runs, and asks no file-system monitor,
+    /// which githooks(5) counts as a hook (`fsmonitor-watchman`) but
+    /// `core.fsmonitor` names wherever it likes. `--no-verify` is not
+    /// enough: it skips `pre-commit` and `commit-msg`, and `post-commit`,
+    /// `reference-transaction`, `post-index-change` and the rest still run,
+    /// and a `post-commit` can amend the commit just made. A `-c` on the
+    /// command line is read after every configuration file and after
+    /// `GIT_CONFIG_COUNT`, so nothing the clone, a worktree or the user
+    /// configures can undo it; and `/dev/null`, unlike a directory of
+    /// CCwiki's, is not a place anyone can put a hook.
+    ///
+    /// Programs the configuration names for other purposes still run, by
+    /// design: a credential helper, a GPG or SSH signing program, a clean
+    /// filter. None of them can change which tree is committed: Approve
+    /// checks it by name (`commitReviewed`).
+    static let hooksOff = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
 
     /// This service with every hook off (`hooksOff`).
     var withoutHooks: GitService {
@@ -442,7 +461,9 @@ struct GitService: Sendable {
     // A job's worktree is the only place these write. They never touch the
     // reader's clone except to add, prune and delete a job's own worktree and
     // branch. Every read of file contents, `-z` output or a patch goes through
-    // `Subprocess.runData`, so no line splitting touches the bytes (§6.1).
+    // `Subprocess.runData`, so no line splitting touches the bytes (§6.1),
+    // and, like every command here, reads the objects themselves
+    // (`realObjects`).
 
     /// `rev-parse --verify <ref>^{commit}`: the commit `ref` names, in full.
     /// A job's base is recorded as one, never as a ref, so a sync during
@@ -478,46 +499,61 @@ struct GitService: Sendable {
         ]).succeeded
     }
 
-    /// What is staged against `base`, as three byte-exact outputs:
+    /// What is staged, as a tree, and its diff from `base`:
     ///
+    /// - `tree`, `git write-tree`: the staged tree, by name. Everything else
+    ///   here is read from it, never from the index again, so the snapshot
+    ///   is of one immutable tree, and Approve commits that tree or nothing
+    ///   (`commitReviewed`);
     /// - `--name-status -z -M`, for `GitNameStatus.parse`;
     /// - `--numstat -z`, for `GitNameStatus.binaryPaths`. With
     ///   `--no-renames`, so each entry is one path: git otherwise detects
     ///   renames here by default and writes those as two;
-    /// - the patch, `--binary` with full object names and the standard
-    ///   `a/` and `b/` prefixes, whatever the user's configuration says, so
-    ///   it applies again (Restore) and its digest is stable.
+    /// - the patch (`patchOptions`), which applies again (Restore) and whose
+    ///   digest is stable.
     ///
-    /// Nil when git fails. `-z`, because reference filenames carry spaces,
-    /// `&` and non-ASCII titles, which git otherwise quotes.
+    /// Each diff has `--ignore-submodules=none`, so a submodule's new commit
+    /// shows whatever `diff.ignoreSubmodules` or `submodule.<name>.ignore`
+    /// say: the wiki has two submodules, and an ingestion agent may run
+    /// `git submodule update --remote`. Nil when git fails. `-z`, because
+    /// reference filenames carry spaces, `&` and non-ASCII titles, which git
+    /// otherwise quotes.
     func stagedDiff(in worktree: URL, base: String) async
-        -> (nameStatus: Data, numstat: Data, patch: Data)? {
+        -> (tree: String, nameStatus: Data, numstat: Data, patch: Data)? {
         let path = worktree.path(percentEncoded: false)
+        let written = await run(["-C", path, "write-tree"])
+        guard written.succeeded, let tree = Self.nonEmpty(written.stdout) else { return nil }
         let nameStatus = await data([
-            "-C", path, "diff", "--cached", "--no-color", "-M", "--name-status", "-z", base,
+            "-C", path, "diff", "--no-color", "--ignore-submodules=none", "-M", "--name-status",
+            "-z", base, tree,
         ])
         guard nameStatus.status == 0 else { return nil }
         let numstat = await data([
-            "-C", path, "diff", "--cached", "--no-color", "--no-textconv", "--no-renames",
-            "--numstat", "-z", base,
+            "-C", path, "diff", "--no-color", "--ignore-submodules=none", "--no-textconv",
+            "--no-renames", "--numstat", "-z", base, tree,
         ])
         guard numstat.status == 0 else { return nil }
-        let patch = await data(["-C", path, "diff", "--cached"] + Self.patchOptions + [base])
+        let patch = await data(["-C", path, "diff"] + Self.patchOptions + [base, tree])
         guard patch.status == 0 else { return nil }
-        return (nameStatus.stdout, numstat.stdout, patch.stdout)
+        return (tree, nameStatus.stdout, numstat.stdout, patch.stdout)
     }
 
     /// How every patch is written, the reviewed one and the one Approve
     /// checks a tree against: the same options give the same bytes, and so
-    /// the same digest, for the same change.
+    /// the same digest, for the same change, whatever the user's
+    /// configuration says. Full object names, `--binary`, the standard `a/`
+    /// and `b/` prefixes; every submodule shown (`--ignore-submodules=none`),
+    /// and as its two full commit names (`--submodule=short`), never the
+    /// abbreviated ones `diff.submodule=log` would print.
     static let patchOptions = [
         "--no-color", "--no-ext-diff", "--no-textconv",
+        "--ignore-submodules=none", "--submodule=short",
         "-M", "--binary", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
     ]
 
-    /// The blob `spec` names, bytes exact: "<commit>:<path>", or ":<path>"
-    /// for the index. Nil when there is no such file, as for a page the
-    /// commit does not have.
+    /// The blob `spec` names, bytes exact: "<commit or tree>:<path>", or
+    /// ":<path>" for the index. Nil when there is no such file, as for a
+    /// page the commit does not have.
     ///
     /// `cat-file blob` prints what `git show` prints for a blob, with no
     /// text conversion, and refuses a tree rather than listing it.
@@ -550,8 +586,8 @@ struct GitService: Sendable {
 
     /// What `commitReviewed` made, or why it made nothing.
     enum ReviewedCommit: Sendable, Equatable {
-        /// The commit: its tree's diff from the base is the reviewed one,
-        /// its one parent is the base, and the job's branch names it.
+        /// The commit: its tree is the reviewed one, its one parent is the
+        /// base, and the job's branch names it.
         case committed(String)
         /// What git would commit is not what was reviewed: why, for the
         /// transcript. No branch moved.
@@ -568,24 +604,29 @@ struct GitService: Sendable {
     }
 
     /// One commit of exactly the change that was reviewed (§6.5). Plumbing,
-    /// every command with `hooksOff`, and nothing read from HEAD:
+    /// every command with `hooksOff` and `realObjects`, and nothing read
+    /// from HEAD:
     ///
     /// ```
-    /// git write-tree                                → the tree of what is staged
-    /// git diff <patchOptions> <base> <tree>         → its digest must be `reviewed`
+    /// git write-tree                                → the tree of what is staged,
+    ///                                                 which must be `reviewedTree`
+    /// git diff <patchOptions> <base> <tree>         → its digest must be `digest`
     /// git commit-tree -p <base> -m <message> <tree> → the commit
     /// git cat-file commit <commit>                  → its tree and only parent, checked
     /// git update-ref refs/heads/<branch> <commit>   → the job's branch, and its reflog
     /// ```
     ///
-    /// `reviewed` is the digest of the reviewed diff (`ReviewSnapshot`):
-    /// the diff names every changed path with its full blob ids, so a tree
-    /// whose diff from the base has that digest is the reviewed tree.
-    /// Whatever the agent committed is collapsed, as the commit's only
-    /// parent is the base. The commit is signed when `commit.gpgSign` says
-    /// so, as `git commit` would sign it; `commit-tree` does not read that.
+    /// `reviewedTree` and `digest` are the reviewed snapshot's
+    /// (`ReviewSnapshot`): the tree it was taken of, by name, and the digest
+    /// of that tree's diff from the base. The tree is the binding; the
+    /// digest is a second check, of the real objects, with every submodule
+    /// shown. Whatever the agent committed is collapsed, as the commit's
+    /// only parent is the base. The commit is signed when `commit.gpgSign`
+    /// says so, as `git commit` would sign it; `commit-tree` does not read
+    /// that.
     func commitReviewed(
-        in worktree: URL, base: String, branch: String, reviewed digest: String, message: String
+        in worktree: URL, base: String, branch: String, tree reviewedTree: String,
+        digest: String, message: String
     ) async -> ReviewedCommit {
         let git = withoutHooks
         let directory = worktree.path(percentEncoded: false)
@@ -593,6 +634,10 @@ struct GitService: Sendable {
         guard let parent = await git.resolveCommit(base, in: worktree) else { return .failed }
         let written = await git.run(["-C", directory, "write-tree"])
         guard written.succeeded, let tree = Self.nonEmpty(written.stdout) else { return .failed }
+        guard tree == reviewedTree else {
+            return .notReviewed("The staged tree \(tree.prefix(12)) is not the reviewed change: "
+                + "the review was of the tree \(reviewedTree.prefix(12)).")
+        }
 
         let patch = await git.data(["-C", directory, "diff"] + Self.patchOptions + [parent, tree])
         guard patch.status == 0 else { return .failed }
@@ -657,17 +702,19 @@ struct GitService: Sendable {
                 remote: remote, branch: branch, commit: commit, expecting: expecting))
     }
 
-    /// `push --no-verify --force-with-lease=refs/heads/<branch>:<expected>
-    /// <remote> <commit>:refs/heads/<branch>`. An empty expectation leases
-    /// on absence, so the first push cannot overwrite a branch someone else
-    /// made. One ref, and never a submodule's, whatever
+    /// `push --no-verify --no-follow-tags --recurse-submodules=no
+    /// --force-with-lease=refs/heads/<branch>:<expected> <remote>
+    /// <commit>:refs/heads/<branch>`. An empty expectation leases on
+    /// absence, so the first push cannot overwrite a branch someone else
+    /// made. One ref: no tag, whatever `push.followTags` says (on GitHub a
+    /// tag can start a workflow), and never a submodule's, whatever
     /// `push.recurseSubmodules` says. `--no-verify` as well as `hooksOff`:
     /// no `pre-push` either way.
     static func pushArguments(
         remote: String, branch: String, commit: String, expecting: String?
     ) -> [String] {
         [
-            "push", "--no-verify", "--recurse-submodules=no",
+            "push", "--no-verify", "--no-follow-tags", "--recurse-submodules=no",
             "--force-with-lease=refs/heads/\(branch):\(expecting ?? "")",
             remote, "\(commit):refs/heads/\(branch)",
         ]
@@ -851,20 +898,22 @@ struct GitService: Sendable {
 
     // MARK: Plumbing
 
-    /// `arguments`, after `hooksOff` when hooks are disabled.
-    private func command(_ arguments: [String]) -> [String] {
-        hooksDisabled ? Self.hooksOff + arguments : arguments
+    /// What git is given for `arguments`: `realObjects`, then `hooksOff`
+    /// when hooks are disabled, then `arguments`. What a transcript shows
+    /// of a command, so it shows what ran.
+    func invocation(_ arguments: [String]) -> [String] {
+        Self.realObjects + (hooksDisabled ? Self.hooksOff : []) + arguments
     }
 
     private func run(_ arguments: [String]) async -> Subprocess.Result {
         await Subprocess.run(
-            executable: executable, arguments: command(arguments), environment: environment)
+            executable: executable, arguments: invocation(arguments), environment: environment)
     }
 
     /// Run git and keep stdout as bytes (`Subprocess.runData`).
     private func data(_ arguments: [String]) async -> (status: Int32, stdout: Data, stderr: String) {
         await Subprocess.runData(
-            executable: executable, arguments: command(arguments), environment: environment)
+            executable: executable, arguments: invocation(arguments), environment: environment)
     }
 
     /// Run git, forwarding each line to `onLine` and keeping a copy.
@@ -879,7 +928,7 @@ struct GitService: Sendable {
         var status: Int32 = -1
         var transcript: [String] = []
         for await line in Subprocess.lines(
-            executable: executable, arguments: command(arguments),
+            executable: executable, arguments: invocation(arguments),
             currentDirectory: directory, environment: environment
         ) {
             if let exit = line.exitStatus { status = exit; continue }

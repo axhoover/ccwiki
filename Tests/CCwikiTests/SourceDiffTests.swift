@@ -238,9 +238,9 @@ struct SourceDiffTests {
 
     @Test("the rows are rebuilt when the snapshot's digest or its files change")
     func key() {
-        let one = ReviewSnapshot(baseCommit: "a", files: [Self.file(old: "a\n", new: "b\n", hunks: [])], digest: "1")
-        let same = ReviewSnapshot(baseCommit: "a", files: [Self.file(old: "a\n", new: "b\n", hunks: [])], digest: "1")
-        let other = ReviewSnapshot(baseCommit: "a", files: [], digest: "1")
+        let one = ReviewSnapshot(baseCommit: "a", tree: "t", files: [Self.file(old: "a\n", new: "b\n", hunks: [])], digest: "1")
+        let same = ReviewSnapshot(baseCommit: "a", tree: "t", files: [Self.file(old: "a\n", new: "b\n", hunks: [])], digest: "1")
+        let other = ReviewSnapshot(baseCommit: "a", tree: "t", files: [], digest: "1")
         #expect(SourceDiff.Key(one) == SourceDiff.Key(same))
         #expect(SourceDiff.Key(one) != SourceDiff.Key(other))
     }
