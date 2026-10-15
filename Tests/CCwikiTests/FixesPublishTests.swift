@@ -3,10 +3,10 @@ import Testing
 @testable import CCwiki
 
 /// The review and Approve against what git can stage besides text pages: a
-/// submodule's commit, a symbolic link, a worktree's `.git` rewritten, and
-/// a warning a sync brings after the review (plans/corrections.md §5.1,
-/// §6.1, §6.2, §6.5). Against real git in temporary repositories; nothing
-/// touches the network.
+/// submodule's commit, a symbolic link, a worktree's `.git` or `commondir`
+/// rewritten, and a warning a sync brings after the review
+/// (plans/corrections.md §5.1, §6.1, §6.2, §6.5). Against real git in
+/// temporary repositories; nothing touches the network.
 @MainActor
 @Suite struct FixesPublishTests {
 
@@ -277,6 +277,124 @@ import Testing
         #expect(!GitService.isWorktree(scene.worktree, of: clone))
     }
 
+    @Test("a worktree's commondir must lead to the clone's own repository, read as git reads it")
+    func worktreeCommondir() async throws {
+        guard let scene = try await GitReviewIntegrationTests.Scene.make() else { return }
+        defer { scene.delete() }
+        let manager = FileManager.default
+        let clone = scene.clone.root
+        let admin = try Self.adminPath(of: scene.worktree)
+        let commondir = admin + "/commondir"
+        #expect(GitService.isWorktree(scene.worktree, of: clone), "as git wrote it")
+
+        // `../..` from the folder, as git writes it; with the CR git also
+        // takes off; and the clone's own repository named outright.
+        let own = clone.appending(path: ".git").path(percentEncoded: false)
+        for text in ["../..\n", "../..\r\n", own + "\n"] {
+            try Data(text.utf8).write(to: URL(fileURLWithPath: commondir))
+            #expect(GitService.isWorktree(scene.worktree, of: clone), "\(text.debugDescription)")
+        }
+
+        // Another repository on this machine, named outright or from the
+        // folder. The .git and the gitdir still lead to and from the clone,
+        // and git there reads the other repository's configuration.
+        let other = try await Self.otherRepository(
+            cloning: scene.clone,
+            at: clone.deletingLastPathComponent().appending(path: clone.lastPathComponent + "-other"))
+        defer { other.delete() }
+        for text in [other.root.appending(path: ".git").path(percentEncoded: false),
+                     "../../../../\(other.root.lastPathComponent)/.git"] {
+            try Data((text + "\n").utf8).write(to: URL(fileURLWithPath: commondir))
+            #expect(!GitService.isWorktree(scene.worktree, of: clone), "\(text)")
+            #expect(await Self.setting(in: scene.worktree, git: scene.clone.git) == Self.otherSetting,
+                    "git in the worktree reads \(text)")
+        }
+
+        // A link, even to a file that says `../..`: git follows it, and an
+        // agent could rewrite what it leads to.
+        let held = scene.worktree.appending(path: ".ccwiki/commondir")
+        try manager.createDirectory(
+            at: held.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("../..\n".utf8).write(to: held)
+        try manager.removeItem(atPath: commondir)
+        try manager.createSymbolicLink(
+            atPath: commondir, withDestinationPath: held.path(percentEncoded: false))
+        #expect(!GitService.isWorktree(scene.worktree, of: clone), "a link")
+
+        // No commondir at all: git takes the folder itself for the
+        // repository, with a configuration of its own.
+        try manager.removeItem(atPath: commondir)
+        let objects = admin + "/objects", refs = admin + "/refs", config = admin + "/config"
+        for folder in [objects, refs] {
+            try manager.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        }
+        try Data("[review]\n\tsentinel = \(Self.otherSetting)\n".utf8)
+            .write(to: URL(fileURLWithPath: config))
+        #expect(await Self.setting(in: scene.worktree, git: scene.clone.git) == Self.otherSetting)
+        #expect(!GitService.isWorktree(scene.worktree, of: clone), "none")
+        for item in [objects, refs, config] { try manager.removeItem(atPath: item) }
+        try Data("../..\n".utf8).write(to: URL(fileURLWithPath: commondir))
+        #expect(GitService.isWorktree(scene.worktree, of: clone))
+
+        // The gitdir is a file too, not a link to one.
+        let gitdir = admin + "/gitdir"
+        let back = try Data(contentsOf: URL(fileURLWithPath: gitdir))
+        let copy = scene.worktree.appending(path: ".ccwiki/gitdir")
+        try back.write(to: copy)
+        try manager.removeItem(atPath: gitdir)
+        try manager.createSymbolicLink(
+            atPath: gitdir, withDestinationPath: copy.path(percentEncoded: false))
+        #expect(!GitService.isWorktree(scene.worktree, of: clone), "a link for gitdir")
+        try manager.removeItem(atPath: gitdir)
+        try back.write(to: URL(fileURLWithPath: gitdir))
+        #expect(GitService.isWorktree(scene.worktree, of: clone))
+
+        // To git, a space at the end of the .git's line is part of the path:
+        // the folder of that name is the one whose commondir counts.
+        let file = scene.worktree.appending(path: ".git")
+        let written = try Data(contentsOf: file)
+        let spaced = admin + " "
+        try manager.copyItem(atPath: admin, toPath: spaced)
+        defer { try? manager.removeItem(atPath: spaced) }
+        try Data((other.root.appending(path: ".git").path(percentEncoded: false) + "\n").utf8)
+            .write(to: URL(fileURLWithPath: spaced + "/commondir"))
+        try Data("gitdir: \(spaced)\n".utf8).write(to: file)
+        #expect(await Self.setting(in: scene.worktree, git: scene.clone.git) == Self.otherSetting)
+        #expect(!GitService.isWorktree(scene.worktree, of: clone), "the folder with the space")
+        try written.write(to: file)
+        #expect(GitService.isWorktree(scene.worktree, of: clone))
+    }
+
+    @Test("a worktree git moved, or one moved by hand and repaired, still leads to the clone")
+    func worktreeMovedAndRepaired() async throws {
+        guard let scene = try await GitReviewIntegrationTests.Scene.make() else { return }
+        defer { scene.delete() }
+        let manager = FileManager.default
+        let clone = scene.clone.root
+        let parent = clone.deletingLastPathComponent()
+        let moved = parent.appending(path: clone.lastPathComponent + "-moved")
+        let root = parent.appending(path: clone.lastPathComponent + "-root")
+        defer {
+            try? manager.removeItem(at: moved)
+            try? manager.removeItem(at: root)
+        }
+
+        try #require(await scene.git.moveWorktree(clone: clone, from: scene.worktree, to: moved))
+        #expect(GitService.isWorktree(moved, of: clone), "git worktree move")
+
+        try manager.createDirectory(at: root, withIntermediateDirectories: true)
+        let byHand = root.appending(path: "worktree")
+        try manager.moveItem(at: moved, to: byHand)
+        #expect(!GitService.isWorktree(byHand, of: clone), "its gitdir still names where it was")
+        await scene.git.repairWorktrees(clone: clone, worktreeRoot: root)
+        #expect(GitService.isWorktree(byHand, of: clone), "git worktree repair")
+
+        // Neither touched commondir.
+        let admin = try Self.adminPath(of: byHand)
+        let commondir = try String(contentsOfFile: admin + "/commondir", encoding: .utf8)
+        #expect(commondir.trimmingCharacters(in: .newlines) == "../..")
+    }
+
     @Test("no review is taken through a .git pointed at another repository")
     func redirectedWorktree() async throws {
         guard let scene = try await JobScene.make() else { return }
@@ -307,6 +425,97 @@ import Testing
         #expect(job.log.last?.text == GitService.redirectedWorktree)
         #expect(await PublisherTests.publisher(scene).check(job, reviewed: "")
             == .failed(GitService.redirectedWorktree + " Nothing was sent."))
+    }
+
+    @Test("no snapshot, staging or publishing git runs where commondir leads to another repository")
+    func redirectedCommondir() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
+        await scene.center.refreshReview(job)
+        try #require(job.review?.isEmpty == false)
+
+        // The worktree's .git and its folder's gitdir stay as git wrote them.
+        // Only commondir names another repository, whose configuration git
+        // there now reads.
+        let other = try await Self.otherRepository(
+            cloning: scene.clone, at: scene.root.appending(path: "other"))
+        let admin = try Self.adminPath(of: job.worktree)
+        try Data((other.root.appending(path: ".git").path(percentEncoded: false) + "\n").utf8)
+            .write(to: URL(fileURLWithPath: admin + "/commondir"))
+        #expect(await Self.setting(in: job.worktree, git: scene.clone.git) == Self.otherSetting)
+        #expect(!GitService.isWorktree(job.worktree, of: scene.paths.clone))
+
+        // A change since, which any git add there would write into one
+        // repository or the other.
+        try scene.write("content/page.md", "a\nB\nC", in: job)
+        let blob = try await Self.blob(
+            of: job.worktree.appending(path: "content/page.md"), in: scene.clone)
+
+        await scene.center.refreshReview(job)
+        #expect(job.log.last?.text == GitService.redirectedWorktree)
+        let result = await scene.center.approve(job)
+        #expect(result == .failed(GitService.redirectedWorktree + " Nothing was sent."), "\(result)")
+        #expect(job.state == .awaitingReview)
+        #expect(await scene.originTip(job.branch) == .absent, "nothing was pushed")
+        for repository in [scene.clone, other] {
+            let staged = await repository.run(["cat-file", "-e", blob]).succeeded
+            #expect(!staged, "git add ran: \(repository.root.lastPathComponent) has the new page")
+        }
+    }
+
+    // MARK: Another repository
+
+    /// What a worktree's `.git` names: the folder in `<clone>/.git/worktrees/`
+    /// git keeps its index, HEAD, gitdir and commondir in.
+    static func adminPath(of worktree: URL) throws -> String {
+        let text = try String(contentsOf: worktree.appending(path: ".git"), encoding: .utf8)
+        let named = String(text.trimmingCharacters(in: .newlines).dropFirst("gitdir: ".count))
+        return named.hasPrefix("/")
+            ? named : worktree.appending(path: named).path(percentEncoded: false)
+    }
+
+    /// A local clone of `source` at `place`, with a setting of its own in
+    /// its configuration: another repository on this machine.
+    static func otherRepository(cloning source: FixtureRepository, at place: URL) async throws
+        -> FixtureRepository {
+        let cloned = await source.run([
+            "clone", "-q", "--no-checkout", source.root.path(percentEncoded: false),
+            place.path(percentEncoded: false),
+        ])
+        try #require(cloned.succeeded, "git clone: \(cloned.output)")
+        let other = FixtureRepository(root: place, git: source.git)
+        let configured = await other.run(["config", "review.sentinel", otherSetting])
+        try #require(configured.succeeded, "git config: \(configured.output)")
+        return other
+    }
+
+    static let otherSetting = "other-repository"
+
+    /// `review.sentinel` as git run in `worktree` reads it: `otherSetting`
+    /// once the worktree leads to the other repository. Run only to show
+    /// the test's redirection is real; CCwiki runs no git there.
+    static func setting(in worktree: URL, git: String) async -> String? {
+        let result = await Subprocess.run(
+            executable: git,
+            arguments: [
+                "-C", worktree.path(percentEncoded: false), "config", "--get", "review.sentinel",
+            ],
+            environment: FixtureRepository.environment())
+        return result.succeeded ? result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+    }
+
+    /// The blob git would make of `file`, asked of `repository` and written
+    /// nowhere.
+    static func blob(of file: URL, in repository: FixtureRepository) async throws -> String {
+        let hashed = await repository.run([
+            "hash-object", "--no-filters", file.path(percentEncoded: false),
+        ])
+        let blob = hashed.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        try #require(hashed.succeeded && !blob.isEmpty, "git hash-object: \(hashed.output)")
+        return blob
     }
 
     // MARK: A warning that appears at Approve

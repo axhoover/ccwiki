@@ -644,14 +644,27 @@ without approval. §13 records this.
 
 CCwiki's own commands (the snapshot, the commit, the push, `gh pr create`)
 run with `tools.childEnvironment()` as today, unsealed. git finds the
-repository through the worktree's `.git` file, which an agent could rewrite,
-so the hand-over (before its `git add -A`) and every review snapshot,
-Approve's included, first check that it still names a folder in
-`<clone>/.git/worktrees/` whose own `gitdir` names this worktree's `.git`
-back, so another job's folder will not do (`GitService.isWorktree`). When it
-does not, no git runs there: the hand-over fails the job and keeps the
-worktree, and the review and Approve say "The worktree's .git no longer
-leads to CCwiki's clone, so CCwiki ran no git in it."
+repository through the worktree's `.git` file, which names a folder in the
+clone, and then through that folder's `commondir`. An agent could rewrite
+either, so the hand-over (before its `git add -A`) and every review snapshot,
+Approve's included, first check (`GitService.isWorktree`), from the files
+alone and with no git run there:
+
+- the `.git` names a folder in `<clone>/.git/worktrees/`;
+- that folder's own `gitdir` names this worktree's `.git` back, so another
+  job's folder will not do;
+- and its `commondir`, where git finds the repository's configuration,
+  objects and branches, leads to `<clone>/.git` itself: `../..` as git
+  writes it, read from the folder; an absolute path as it is. Without one,
+  git would take the folder itself for the repository, so that fails too.
+
+`.git`, `gitdir` and `commondir` must be files, not links, and the folder a
+folder. They are read as git reads them: only a line end comes off, so a
+trailing space is part of the path. A `git worktree move` or `repair` keeps
+all three good. When any check fails, no git runs there: the hand-over fails
+the job and keeps the worktree, and the review and Approve say "The
+worktree's .git no longer leads to CCwiki's clone, so CCwiki ran no git in
+it."
 
 ### 5.2 The handover file
 

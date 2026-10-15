@@ -324,6 +324,40 @@ struct FixesJobsTests {
             "the worktree is kept, for inspection")
     }
 
+    @Test("an agent that points the worktree's commondir at another repository gets no git add")
+    func handOverCommondirRedirected() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let root = JobScene.newRoot()
+        let place = root.appending(path: "other")
+        // The .git and its folder's gitdir as git wrote them; only the
+        // folder's commondir rewritten, found from the .git as a shell can.
+        let tools = try JobScene.fakeClaude("""
+            printf 'a\\nB\\nc' > content/page.md
+            read -r line < .git
+            printf '%s\\n' '\(place.path(percentEncoded: false))/.git' > "${line#gitdir: }/commondir"
+            """ + "\n" + JobCenterTests.readyForReview, in: directory)
+        guard let scene = try await JobScene.make(root: root, tools: tools) else { return }
+        defer { scene.delete() }
+        let other = try await FixesPublishTests.otherRepository(cloning: scene.clone, at: place)
+
+        let job = scene.center.startCorrection(JobCenterTests.request(scene))
+        await job.task?.value
+        #expect(await FixesPublishTests.setting(in: job.worktree, git: scene.clone.git)
+            == FixesPublishTests.otherSetting, "the stand-in agent rewrote commondir")
+        #expect(job.state == .failed(AgentRun.redirectedAtHandOver), "\(job.state)")
+        #expect(job.log.contains { $0.text == GitService.redirectedWorktree })
+
+        // No git add ran: neither repository has the agent's page.
+        let blob = try await FixesPublishTests.blob(
+            of: job.worktree.appending(path: "content/page.md"), in: scene.clone)
+        for repository in [scene.clone, other] {
+            let staged = await repository.run(["cat-file", "-e", blob]).succeeded
+            #expect(!staged, "git add ran: \(repository.root.lastPathComponent) has the page")
+        }
+    }
+
     private static func offersReviewAnyway(_ job: Job) -> Bool {
         JobReview.offersReviewAnyway(
             kind: job.kind.tag, state: job.state,

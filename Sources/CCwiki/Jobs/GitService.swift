@@ -787,45 +787,76 @@ struct GitService: Sendable {
     static let gitlinkMode = "160000"
 
     /// Whether `worktree` is still one of `clone`'s worktrees as git made
-    /// it: its `.git` is a file, not a link or a folder, that names a folder
-    /// in `<clone>/.git/worktrees/` (a relative name is read from the
-    /// worktree, as git reads it), and that folder's `gitdir` names this
-    /// `.git` back (a relative one is read from the folder). CCwiki's own
-    /// git runs in a worktree unsealed (§5.1) and finds the repository
-    /// through that file, which an agent could rewrite: pointed anywhere
-    /// else, the snapshot, the commit and the push would run on a
-    /// repository and a configuration it chose, or on another job's index
-    /// and branch.
+    /// it, read from the files git itself reads, as it reads them:
+    ///
+    /// - its `.git` names a folder in `<clone>/.git/worktrees/` (a relative
+    ///   name is read from the worktree);
+    /// - that folder's `gitdir` names this `.git` back (a relative one is
+    ///   read from the folder);
+    /// - and its `commondir`, through which git finds the repository
+    ///   itself (its configuration, objects and branches), leads to
+    ///   `<clone>/.git` (`../..` as git writes it, read from the folder; an
+    ///   absolute one as it is).
+    ///
+    /// The three are files, not links or folders, and the folder is a
+    /// folder. CCwiki's own git runs in a worktree unsealed (§5.1) and finds
+    /// the repository through these files, which an agent could rewrite:
+    /// pointed anywhere else, the snapshot, the commit and the push would
+    /// run on a repository and a configuration it chose, or on another
+    /// job's index and branch. No git runs to decide this, since git in the
+    /// worktree would already be reading what is in question.
     static func isWorktree(_ worktree: URL, of clone: URL) -> Bool {
-        let manager = FileManager.default
         let file = worktree.appending(path: ".git").path(percentEncoded: false)
-        guard let attributes = try? manager.attributesOfItem(atPath: file),
-              let type = attributes[.type] as? FileAttributeType, type == .typeRegular,
-              let data = manager.contents(atPath: file),
-              let text = String(data: data, encoding: .utf8)
-        else { return false }
         let prefix = "gitdir: "
-        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard line.hasPrefix(prefix), !line.contains("\n") else { return false }
+        guard let line = pointer(at: file), line.hasPrefix(prefix) else { return false }
         let named = String(line.dropFirst(prefix.count))
         let gitdir = named.hasPrefix("/")
             ? named : worktree.appending(path: named).path(percentEncoded: false)
-        let admin = realPath(gitdir)
         let worktrees = realPath(clone.appending(path: ".git/worktrees").path(percentEncoded: false))
-        guard manager.fileExists(atPath: admin),
-              (admin as NSString).deletingLastPathComponent == worktrees,
-              let backData = manager.contents(atPath: (admin as NSString).appendingPathComponent("gitdir")),
-              let backText = String(data: backData, encoding: .utf8)
+        guard let admin = existingRealPath(gitdir),
+              fileType(at: admin) == FileAttributeType.typeDirectory,
+              (admin as NSString).deletingLastPathComponent == worktrees
         else { return false }
+
         // Git keeps this current through a move or a repair.
-        let back = backText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !back.isEmpty, !back.contains("\n") else { return false }
+        guard let back = pointer(at: (admin as NSString).appendingPathComponent("gitdir"))
+        else { return false }
         let backPath = back.hasPrefix("/") ? back : (admin as NSString).appendingPathComponent(back)
-        return realPath(backPath) == realPath(file)
+        guard realPath(backPath) == realPath(file) else { return false }
+
+        // Git reads a relative `commondir` from the folder, joined as text.
+        guard let common = pointer(at: (admin as NSString).appendingPathComponent("commondir")),
+              let shared = existingRealPath(common.hasPrefix("/") ? common : admin + "/" + common),
+              let own = existingRealPath(clone.appending(path: ".git").path(percentEncoded: false))
+        else { return false }
+        return shared == own
+    }
+
+    /// The path a pointer file holds, as git reads `.git` and `commondir`:
+    /// only line ends come off its end, and a space is part of the path.
+    /// Nil unless `path` is a regular file, not a link or a folder, of one
+    /// line of UTF-8.
+    private static func pointer(at path: String) -> String? {
+        guard fileType(at: path) == FileAttributeType.typeRegular,
+              let data = FileManager.default.contents(atPath: path)
+        else { return nil }
+        var bytes = [UInt8](data)
+        while let last = bytes.last, last == 0x0A || last == 0x0D { bytes.removeLast() }
+        guard !bytes.isEmpty, !bytes.contains(where: { $0 == 0x0A || $0 == 0x0D || $0 == 0 })
+        else { return nil }
+        return String(bytes: bytes, encoding: .utf8)
+    }
+
+    /// What is at `path` itself, a link not followed; nil when nothing is.
+    private static func fileType(at path: String) -> FileAttributeType? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        else { return nil }
+        return attributes[.type] as? FileAttributeType
     }
 
     /// Why CCwiki took no snapshot of a worktree, or handed none over, when
-    /// `isWorktree` says its `.git` leads elsewhere.
+    /// `isWorktree` says its `.git`, or the folder it names, leads
+    /// elsewhere.
     static let redirectedWorktree =
         "The worktree's .git no longer leads to CCwiki's clone, so CCwiki ran no git in it."
 
@@ -840,7 +871,13 @@ struct GitService: Sendable {
     /// Foundation's `resolvingSymlinksInPath` will not do: it takes a
     /// leading `/private` back off.
     static func realPath(_ path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return path }
+        existingRealPath(path) ?? path
+    }
+
+    /// `path` with every symbolic link resolved, or nil when it does not
+    /// exist.
+    private static func existingRealPath(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
         defer { free(resolved) }
         return String(cString: resolved)
     }
