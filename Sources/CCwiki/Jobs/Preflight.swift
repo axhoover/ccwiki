@@ -313,7 +313,8 @@ extension GitHubAuth {
 /// again.
 enum GitHubAccess: Sendable, Equatable {
     case ready
-    /// A timeout, or a network failure.
+    /// A timeout, a network failure, or an error from GitHub other than a
+    /// refused token (a 5xx, a proxy's refusal).
     case offline
     case ghMissing
     case notSignedIn
