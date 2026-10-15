@@ -315,6 +315,47 @@ struct DerivationTests {
         #expect(unused.needs == ["g over a large field"])
     }
 
+    @Test("a precondition on the reverse direction of an equivalence is assumed of a given, in its model only")
+    func reverseDirectionPrecondition() throws {
+        // DLO24's shape: an equivalence in a non-standard model whose reverse
+        // direction needs more of its hypothesis than the node states.
+        let manifest = try Fx.manifest(
+            objects: [Fx.object("r", type: "assumption"), Fx.object("f", type: "assumption"),
+                      Fx.object("d", type: "assumption")],
+            reductions: [Fx.reduction("red-r-eq-f", ["r"], "f", reductionClass: "free", model: "other",
+                                      kind: "equivalence"),
+                         Fx.reduction("red-d-to-f", ["d"], "f")])
+        let notion = "f against adversaries whose advice is fixed before the instance is sampled"
+        let curation = DerivationCuration(
+            equivalences: ["red-r-eq-f": .init(forward: "record", reverse: "record")],
+            requires: [.init(relationID: "red-r-eq-f", isReverse: true, hypothesis: "f",
+                             notion: notion, metBy: [])])
+        let derivation = Derivation(manifest: manifest, curation: curation)
+
+        // Given, with idealised models included: assumed, and scoped.
+        let given = try #require(derivation.answer(from: ["f"], to: "r", options: .all).derived)
+        let assumed = given.fact.assumes.map { $0.notion }
+        #expect(assumed == [notion])
+        #expect(given.fact.models == ["other"])
+        #expect(given.fact.isModelScoped)
+        #expect(given.fact.chainClass == .free)
+        #expect(given.proof.reverseRelationIDs == ["red-r-eq-f"])
+        #expect(derivation.answer(from: ["f"], to: "r", options: .standard).derived == nil)
+
+        // Derived by another step: refused, and named.
+        let refused = try #require(derivation.answer(from: ["d"], to: "r", options: .all).noPath)
+        let step = try #require(refused.refused.first?.step)
+        #expect(step.isReverse)
+        let reasons = refused.refused.first?.reasons ?? []
+        let expectedReasons = [Derivation.Refusal.requires(hypothesis: "f", notion: notion,
+                                                           producedBy: "red-d-to-f")]
+        #expect(reasons == expectedReasons)
+
+        // The forward direction needs nothing.
+        let forward = try #require(derivation.answer(from: ["r"], to: "f", options: .all).derived)
+        #expect(forward.fact.assumes.isEmpty)
+    }
+
     @Test("a weakened fact feeds only the steps that accept it, and blocks no full fact")
     func weakenedFacts() throws {
         let manifest = try Fx.manifest(
@@ -888,15 +929,41 @@ struct DerivationTests {
 
         #expect(curation.refuted.count == 3)
         #expect(curation.settings.count == 2)
-        #expect(curation.quarantine.count == 3)
+        #expect(curation.quarantine.count == 4)
         #expect(curation.equivalences.count == 7)
-        #expect(curation.requires.count == 23)
-        #expect(curation.weakens.count == 2)
+        #expect(curation.requires.count == 26)
+        #expect(curation.weakens.count == 3)
         #expect(curation.statementLint.count == 2)
 
+        // ISIS ⇒ SIS is quarantined left to right only; SIS ⇒ ISIS keeps the
+        // record's class.
         let isis = try #require(curation.equivalences["red-isis-inhomogeneous-sis-to-sis"])
         #expect(!isis.isForwardRecorded)
         #expect(isis.isReverseRecorded)
+        #expect(curation.quarantineDirections["red-isis-inhomogeneous-sis-to-sis"] == false)
+        #expect(curation.quarantineReason("red-isis-inhomogeneous-sis-to-sis", isReverse: false) != nil)
+        #expect(curation.quarantineReason("red-isis-inhomogeneous-sis-to-sis", isReverse: true) == nil)
+        #expect(curation.requirements(on: "red-isis-inhomogeneous-sis-to-sis", isReverse: false).isEmpty)
+        // DLO24's FAC ⇒ RSA is conditional on its preprocessing experiment;
+        // RSA ⇒ FAC is not.
+        let dlo24 = curation.requirements(on: "red-rsa-to-fac-dlo24", isReverse: true).map { $0.hypothesis }
+        #expect(dlo24 == ["fac"])
+        #expect(curation.requirements(on: "red-rsa-to-fac-dlo24", isReverse: false).isEmpty)
+        // GPSW06 needs DBDH; the PRP conversions a superpolynomial domain,
+        // which LR88's PRP has.
+        let gpsw06 = curation.requirements(on: "red-bdh-to-abe-gpsw06", isReverse: false).map { $0.hypothesis }
+        #expect(gpsw06 == ["bdh"])
+        let lr88: Set<String> = ["red-prf-to-prp-lr88"]
+        for relationID in ["red-prp-to-prf", "red-prp-to-invertible-prf"] {
+            let prp = curation.requirements(on: relationID, isReverse: false)
+            #expect(prp.count == 1, "\(relationID)")
+            #expect(prp.first?.hypothesis == "prp", "\(relationID)")
+            #expect(prp.first?.metBy == lr88, "\(relationID)")
+        }
+        // Kil88 concludes static malicious MPC with abort, which nothing
+        // consumes; GPSW06's selective KP-ABE feeds nothing either.
+        #expect(curation.weakens["red-ot-to-mpc-kil88"]?.acceptedBy.isEmpty == true)
+        #expect(curation.weakens["red-bdh-to-abe-gpsw06"]?.acceptedBy.isEmpty == true)
         let kil88 = curation.requirements(on: "red-ot-to-mpc-kil88", isReverse: false)
         #expect(kil88.count == 1)
         #expect(kil88.first?.metBy == ["red-cpir-to-ot-dmo00"])

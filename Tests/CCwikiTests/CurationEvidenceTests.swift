@@ -248,7 +248,7 @@ struct CurationEvidenceTests {
         return try Data(contentsOf: root.appending(path: "Resources/\(DerivationCuration.resourceName)"))
     }
 
-    @Test("the shipped file has 42 entries, each id once, in §2.2's order")
+    @Test("the shipped file has 47 entries, each id once, in §2.2's order")
     func shippedOrder() throws {
         let data = try Self.shippedData()
         let curation = try DerivationCuration.decode(data)
@@ -280,12 +280,16 @@ struct CurationEvidenceTests {
 
         let ids = curation.entries.map { $0.id }
         #expect(ids == expected)
-        #expect(ids.count == 42)
+        #expect(ids.count == 47)
         #expect(Set(ids).count == ids.count, "an id appears twice")
         #expect(ids.first == "refuted:circular-evasive-lwe")
         #expect(ids.contains("requires:red-dlog-to-prg-bm84:dlog"))
         #expect(ids.contains("requires:red-ot-to-mpc-kil88:ot"))
-        #expect(ids.last == "weakens:red-prp-to-invertible-prf")
+        #expect(ids.contains("quarantine:red-isis-inhomogeneous-sis-to-sis"))
+        #expect(ids.contains("requires:red-rsa-to-fac-dlo24~reverse:fac"))
+        #expect(ids.contains("requires:red-bdh-to-abe-gpsw06:bdh"))
+        #expect(!ids.contains("requires:red-isis-inhomogeneous-sis-to-sis:inhomogeneous-sis"))
+        #expect(ids.last == "weakens:red-ot-to-mpc-kil88")
         for entry in curation.entries {
             #expect(curation.entry(entry.key) == entry, "\(entry.id)")
         }
@@ -295,7 +299,7 @@ struct CurationEvidenceTests {
     func shippedCitations() throws {
         let curation = try DerivationCuration.decode(try Self.shippedData())
 
-        // Track A1 cites all 42 entries together, so once one is cited, an
+        // Track A1 cited all the entries together, so once one is cited, an
         // uncited entry is one the review missed.
         let isCited = curation.entries.contains { !$0.cites.isEmpty }
         if isCited {

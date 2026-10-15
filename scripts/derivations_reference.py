@@ -1846,6 +1846,17 @@ GOLDEN_QUERIES = [
     ("bdh-range-query", ["bdh"], "range-query-encryption", False, ["derivable"]),
     ("evasive-lwe-be", ["evasive-lwe"], "be", False, ["derivable"]),
     ("subexp-lpn-crhf", ["subexponential-lpn"], "crhf", False, ["derivable"]),
+    # The PR #9 audit's semantic cases (plans/relations-followups.md §13). A
+    # case a wiki ask would change asserts nothing on a drifted manifest.
+    ("bdh-be", ["bdh"], "be", False, []),
+    ("bdh-pke", ["bdh"], "pke", False, []),
+    ("cdh-prg", ["cdh"], "prg", False, []),
+    ("ot-mpc", ["ot"], "mpc", False, []),
+    ("prp-prf", ["prp"], "prf", False, []),
+    ("sprp-prf", ["strong-pseudorandom-permutation"], "prf", False, []),
+    ("rsa-fac", ["rsa"], "fac", False, ["derivable"]),
+    ("dcr-rsa-all", ["dcr"], "rsa", True, []),
+    ("isis-sis", ["inhomogeneous-sis"], "sis", False, []),
     # R14: refuted starts.
     ("circular-evasive-lwe-pke", ["circular-evasive-lwe"], "pke", False, ["derivable"]),
     ("ssddh-ke", ["ssddh"], "ke", False, ["derivable"]),
@@ -2469,10 +2480,16 @@ def selftest(dv: Derivation) -> bool:
     fe = [r for r in dv.step_index[("red-fe-to-io", False)].requires]
     check("an FE concluded by SW14 never meets FE => iO's precondition",
           fe and all("red-hash-function-and-io-to-fe-sw14" not in r.met_by for r in fe))
-    a = q(["inhomogeneous-sis"], "crhf")
-    check("ISIS => SIS is unstated and assumed", a["derivable"] and a["chainClass"] == "unstated" and a["assumes"])
+    a = q(["inhomogeneous-sis"], "sis")
+    check("ISIS => SIS (left to right) is quarantined, and its row on the pair says so",
+          not a["derivable"]
+          and [(r["edge"], r["reverse"], r["status"]) for r in a["recordedOnPair"]]
+          == [("red-isis-inhomogeneous-sis-to-sis", False, "quarantined")]
+          and any(x["kind"] == "quarantined" for r in a["refusedSteps"] for x in r["reasons"]))
+    check("ISIS => CRHF is not derived", not q(["inhomogeneous-sis"], "crhf")["derivable"])
     a = q(["sis"], "inhomogeneous-sis")
-    check("SIS => ISIS keeps the record's class", a["derivable"] and a["chainClass"] == "fully-black-box")
+    check("SIS => ISIS keeps the record's class", a["derivable"] and a["chainClass"] == "fully-black-box"
+          and a["reverseSteps"] == ["red-isis-inhomogeneous-sis-to-sis"] and not a["assumes"])
     a = q(["circular-evasive-lwe"], "pke")
     check("a refuted start is marked vacuous", a.get("vacuous"))
     r = dv.implied_by("pke")
@@ -2493,14 +2510,63 @@ def selftest(dv: Derivation) -> bool:
     check("no 'strongest' across iPRF notions", a["derivable"] and "strongest" not in a)
     a = q(["ddh"], "prg")
     check("DDH => PRG avoids BM84", a["derivable"] and "red-dlog-to-prg-bm84" not in a["edges"])
+    # The PR #9 audit's semantic cases (plans/relations-followups.md §13).
+    a = q(["cdh"], "prg")
+    check("CDH => PRG is refused at BM84 (no DLOG => OWF on the same group yet: ccw:missing-edge-dlog-to-owf)",
+          not a["derivable"] and any(r["edge"] == "red-dlog-to-prg-bm84"
+                                     and [x["kind"] for x in r["reasons"]] == ["requires"] for r in a["refusedSteps"]))
     a = q(["lwe"], "com")
     check("LWE => COM avoids PKE => COM", a["derivable"] and "red-pke-to-com" not in a["edges"])
-    check("ETDP => MPC is refused at Kil88 (semi-honest EGL OT)", not q(["enhanced-trapdoor-permutation"], "mpc")["derivable"])
+    a = q(["enhanced-trapdoor-permutation"], "mpc")
+    check("ETDP => MPC is refused at Kil88 (semi-honest EGL OT; no compiler yet: "
+          "ccw:missing-edge-ot-semi-honest-to-malicious)",
+          not a["derivable"] and any(r["edge"] == "red-ot-to-mpc-kil88" for r in a["refusedSteps"]))
     a = q(["ddh"], "mpc")
-    check("DDH => MPC holds through DMO00's OT", a["derivable"])
+    check("DDH => MPC holds through DMO00's OT, and only as Kil88's static MPC with abort",
+          a["derivable"] and a["weakened"] and a["weakened"]["edge"] == "red-ot-to-mpc-kil88"
+          and "red-cpir-to-ot-dmo00" in a["edges"])
+    a = q(["ot"], "mpc")
+    check("OT => MPC assumes malicious OT and concludes static MPC with abort only",
+          a["derivable"] and [x["edge"] for x in a["assumes"]] == ["red-ot-to-mpc-kil88"]
+          and a["weakened"] and a["weakened"]["edge"] == "red-ot-to-mpc-kil88")
     a = q(["bdh"], "abe")
-    check("GPSW06 gives only selective KP-ABE", a["derivable"] and a["weakened"])
+    check("GPSW06 gives only selective KP-ABE, and only assuming DBDH (computational BDH does not invoke it)",
+          a["derivable"] and a["weakened"] and a["weakened"]["edge"] == "red-bdh-to-abe-gpsw06"
+          and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-bdh-to-abe-gpsw06", "bdh")])
     check("selective KP-ABE does not feed ABE => IBE", not q(["bdh"], "ibe")["derivable"])
+    a = q(["bdh"], "be")
+    check("selective KP-ABE does not feed ABE => BE",
+          not a["derivable"] and any(r["edge"] == "red-abe-to-be" and "weakened" in [x["kind"] for x in r["reasons"]]
+                                     for r in a["refusedSteps"]))
+    check("BDH => PKE is not derived (selective KP-ABE => PKE awaits ccw:missing-edge-selective-kp-abe-to-pke)",
+          not q(["bdh"], "pke")["derivable"])
+    a = q(["prp"], "prf")
+    check("a bare PRP gives a PRF only assuming a superpolynomial domain",
+          a["derivable"] and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-prp-to-prf", "prp")])
+    a = q(["strong-pseudorandom-permutation"], "prf")
+    check("an sPRP, whose domain may be small, does not meet the PRP => PRF domain condition",
+          not a["derivable"] and any(r["edge"] == "red-prp-to-prf" and [x["kind"] for x in r["reasons"]] == ["requires"]
+                                     for r in a["refusedSteps"]))
+    # HPPY25 (unstated) gives the full iPRF from a PRF first, so LR88's route
+    # shows over the fully black-box steps only (R6).
+    w = dv.restricted("fully-black-box").single("prf").weak.get("invertible-prf")
+    check("LR88's PRP meets the domain condition: PRF => PRP => forward-game iPRF assumes nothing",
+          w is not None and w.weak.edge == "red-prp-to-invertible-prf" and not w.assumes
+          and w.step.hyps == ("prp",) and dv.restricted("fully-black-box").single("prf").facts["prp"].step.edge
+          == "red-prf-to-prp-lr88")
+    a = q(["fac"], "rsa", True)
+    check("FAC => RSA (DLO24, generic ring) only assuming its preprocessing experiment",
+          a["derivable"] and a["models"] == ["other"] and a["reverseSteps"] == ["red-rsa-to-fac-dlo24"]
+          and [(x["edge"], x["hypothesis"]) for x in a["assumes"]] == [("red-rsa-to-fac-dlo24", "fac")]
+          and "before the modulus is sampled" in a["assumes"][0]["notion"])
+    a = q(["dcr"], "rsa", True)
+    check("DCR => FAC => RSA is refused at DLO24: uniform factoring hardness is not its preprocessing notion",
+          not a["derivable"] and any(r["edge"] == "red-rsa-to-fac-dlo24" and r["reverse"]
+                                     and [x["kind"] for x in r["reasons"]] == ["requires"] for r in a["refusedSteps"]))
+    a = q(["rsa"], "fac")
+    check("RSA => FAC stays the ordinary fully black-box standard-model direction (RSA78)",
+          a["derivable"] and a["chainClass"] == "fully-black-box" and a["edges"] == ["red-rsa-to-fac-rsa78"]
+          and not a["assumes"])
     r = dv.implied_by("deniable-encryption")
     check("implied-by pair rows carry models", any(g["models"] for g in r["groups"]))
     r = dv.implied_by("mpc")
@@ -2813,7 +2879,7 @@ def selftest_units() -> bool:
         data = json.load(f)
     entries = curation_entries(data)
     ids = [e["id"] for e in entries]
-    check("42 entries, each id once", len(ids) == 42 and len(set(ids)) == len(ids), len(ids))
+    check("47 entries, each id once", len(ids) == 47 and len(set(ids)) == len(ids), len(ids))
     uncited = [e["id"] for e in entries if not e["cites"]]
     check("every entry cites the wiki", not uncited, uncited)
     bad = [(e["id"], c.get("page")) for e in entries for c in e["cites"]
