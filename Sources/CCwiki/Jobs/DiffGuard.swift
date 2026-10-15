@@ -739,7 +739,10 @@ enum DiffGuard {
     }
 
     /// `relations.json` changed the records of `pages`, sorted, and the
-    /// change leaves them as they were.
+    /// change leaves them as they were. Either they were edited after the
+    /// generator ran, or the base's `relations.json` was already out of
+    /// date; regenerating clears the first and not the second, so the
+    /// message says how to tell them apart.
     private static func relationsStaleMessage(_ pages: [String]) -> String {
         var names = pages.prefix(3).map { "`\($0)`" }
         if pages.count > 3 { names.append("\(pages.count - 3) more") }
@@ -749,8 +752,11 @@ enum DiffGuard {
         let left = pages.count == 1 ? "that page as it was" : "those pages as they were"
         return """
             `relations.json` changed what it records for \(list), but this change leaves \(left), \
-            so the wiki's `generate-relations.mjs --check` fails. In this job's worktree (Open in \
-            Terminal), run `npm ci` and `node scripts/generate-relations.mjs`, then review again.
+            so the wiki's `generate-relations.mjs --check` fails, unless the base's \
+            `relations.json` was already out of date. In this job's worktree (Open in Terminal), \
+            run `npm ci` and `node scripts/generate-relations.mjs`, then review again. If this \
+            warning stays, the base was out of date, and this change brings `relations.json` up \
+            to date.
             """
     }
 
@@ -762,9 +768,12 @@ enum DiffGuard {
     /// with; and, in one finding on `relations.json`, the pages of the
     /// records added, removed or changed since the base that the change
     /// leaves as they were. The generator writes each record from its page
-    /// alone, so a record changes only with its page. A `relations.json`
-    /// that does not read proves nothing; a base that does not read has no
-    /// records.
+    /// alone, so, when the base's `relations.json` is the generator's
+    /// output, a record changes only with its page. (The wiki's PR checks
+    /// are off, so a base can be out of date; then the records of pages the
+    /// change leaves alone change too, and this warns though `--check`
+    /// passes.) A `relations.json` that does not read proves nothing; a
+    /// base that does not read has no records.
     private static func derivedFilesFindings(
         _ files: [InspectedFile], relations: InspectedFile?, manifest: WrittenManifest?
     ) -> [DiffFinding] {
@@ -1680,9 +1689,12 @@ private struct WrittenManifest {
     }
 
     /// The same records, value for value, compared as JSON with sorted
-    /// keys. Records that do not serialize are not the same.
+    /// keys. Records that do not serialize are not the same. (They are
+    /// checked first: on macOS, serializing one that is not JSON raises an
+    /// exception `try?` does not catch.)
     private static func same(_ a: [Record], _ b: [Record]) -> Bool {
-        guard let left = try? JSONSerialization.data(withJSONObject: a, options: [.sortedKeys]),
+        guard JSONSerialization.isValidJSONObject(a), JSONSerialization.isValidJSONObject(b),
+              let left = try? JSONSerialization.data(withJSONObject: a, options: [.sortedKeys]),
               let right = try? JSONSerialization.data(withJSONObject: b, options: [.sortedKeys])
         else { return false }
         return left == right

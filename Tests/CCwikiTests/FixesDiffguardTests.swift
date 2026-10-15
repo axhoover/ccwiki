@@ -233,8 +233,10 @@ struct FixesDiffguardTests {
         #expect(warning.lines == nil)
         #expect(warning.message == "`relations.json` changed what it records for "
             + "`content/Reductions/owf-to-prg-hill99.md`, but this change leaves that page as it was, so the "
-            + "wiki's `generate-relations.mjs --check` fails. In this job's worktree (Open in Terminal), run "
-            + "`npm ci` and `node scripts/generate-relations.mjs`, then review again.")
+            + "wiki's `generate-relations.mjs --check` fails, unless the base's `relations.json` was already "
+            + "out of date. In this job's worktree (Open in Terminal), run `npm ci` and "
+            + "`node scripts/generate-relations.mjs`, then review again. If this warning stays, the base was "
+            + "out of date, and this change brings `relations.json` up to date.")
 
         // Two pages left as they were are both named; a record removed
         // counts as changed.
