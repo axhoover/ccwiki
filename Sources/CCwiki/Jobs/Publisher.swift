@@ -7,9 +7,12 @@ import Foundation
 /// ```
 /// 1. Checking…            snapshot again: the digest must be the reviewed one;
 ///                         DiffGuard; the title and body; git's identity; GitHub
-/// 2. Committing…          git reset --soft <base>; git commit --no-verify
+/// 2. Committing…          git write-tree; its diff from <base> must have the
+///                         reviewed digest; git commit-tree -p <base>; its tree
+///                         and parent checked; git update-ref refs/heads/<branch>
 /// 3. Pushing <branch>…    pushingCommit persisted, then
 ///                         git push --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
+///                         <remote> <commit>:refs/heads/<branch>
 ///                         a refused lease asks GitHub where the branch is (leaseRecovery)
 /// 4. Opening the pull request…
 ///                         gh pr list --head <branch>: edit an open one, else
@@ -21,6 +24,11 @@ import Foundation
 /// pull request is always a draft: never ready for review, never merged,
 /// never set to merge itself. Nothing is ever deleted on GitHub.
 ///
+/// No git hook runs from the first step to the last: every git command
+/// here carries `GitService.hooksOff`. What is pushed is the commit step 2
+/// checked, by name, never HEAD: a commit whose tree is not the reviewed
+/// change is never made into the branch, and nothing is sent.
+///
 /// The caller, `JobCenter.approve`, has saved every editor of the job and
 /// waited for its git queue. Every outcome but `opened` returns the job to
 /// review there, with a notice; this never leaves a job terminal with its
@@ -30,6 +38,8 @@ struct Publisher {
 
     let paths: AppPaths
     let tools: ToolLocator
+    /// The service it was given, with every hook off
+    /// (`GitService.withoutHooks`).
     let git: GitService
     let target: PublishTarget
     /// The local paths no title, body or added line may contain
@@ -38,6 +48,17 @@ struct Publisher {
     /// `CCWIKI_PUBLISH_DRY_RUN=1`: stop after committing, and log the push
     /// and the `gh` commands instead of running them (§6.5).
     var isDryRun = ProcessInfo.processInfo.environment["CCWIKI_PUBLISH_DRY_RUN"] == "1"
+
+    init(
+        paths: AppPaths, tools: ToolLocator, git: GitService, target: PublishTarget,
+        privatePaths: [String] = []
+    ) {
+        self.paths = paths
+        self.tools = tools
+        self.git = git.withoutHooks
+        self.target = target
+        self.privatePaths = privatePaths
+    }
 
     /// How long one `gh` call may take. Generous: a slow network is not a
     /// failure, and the next Approve checks GitHub before doing anything
@@ -51,13 +72,19 @@ struct Publisher {
     ) async -> ApproveResult {
         if let stop = await check(job, reviewed: digest) { return stop }
 
-        guard let committed = await self.commit(job, version: provenance.appVersion) else {
+        let committed: String
+        switch await self.commit(job, version: provenance.appVersion, reviewed: digest) {
+        case .committed(let commit):
+            committed = commit
+        case .notReviewed:
+            return .refused(Self.notReviewed)
+        case .failed:
             return .failed("git could not commit the changes. Nothing was sent.")
         }
         if Task.isCancelled { return .refused(Job.publishingInterrupted) }
 
         if isDryRun {
-            logDryRun(job, provenance: provenance)
+            logDryRun(job, commit: committed, provenance: provenance)
             return .refused("Dry run: committed locally, nothing pushed.")
         }
 
@@ -151,20 +178,33 @@ struct Publisher {
 
     // MARK: 2. Committing
 
-    /// One commit on the base of exactly what is staged, authored by the
-    /// user's own git identity. Whatever the agent committed collapses into
-    /// it, and no hook runs to change the files after they were reviewed.
-    func commit(_ job: Job, version: String) async -> String? {
-        guard let base = job.baseCommit else { return nil }
+    /// One commit on the base of exactly the change whose digest is
+    /// `reviewed`, authored by the user's own git identity
+    /// (`GitService.commitReviewed`). Whatever the agent committed collapses
+    /// into it, no hook runs, and a tree that is not the reviewed change is
+    /// never committed to the branch: that is `notReviewed`, and nothing is
+    /// sent.
+    func commit(_ job: Job, version: String, reviewed digest: String) async
+        -> GitService.ReviewedCommit {
+        guard let base = job.baseCommit else { return .failed }
         step(job, "Committing…")
         let message = Self.commitMessage(
             title: job.pullRequest.title, version: version, jobID: job.id)
-        let commit = await git.commitStaged(in: job.worktree, base: base, message: message)
-        if let commit {
+        let outcome = await git.commitReviewed(
+            in: job.worktree, base: base, branch: job.branch, reviewed: digest, message: message)
+        switch outcome {
+        case .committed(let commit):
             job.append(JobLogEntry(.system, "Committed \(commit.prefix(12)) on \(base.prefix(12))."))
+        case .notReviewed(let why):
+            job.append(JobLogEntry(.error, why))
+        case .failed:
+            break
         }
-        return commit
+        return outcome
     }
+
+    nonisolated static let notReviewed = "What git would have committed is not the change you "
+        + "reviewed, so nothing was sent. Check the diff, then open the pull request again."
 
     // MARK: 3. Pushing
 
@@ -175,8 +215,10 @@ struct Publisher {
         case failed(String)
     }
 
-    /// Pushes `commit` to the job's branch, leasing on the last push it
-    /// confirmed, or on absence before the first. The commit is persisted
+    /// Pushes `commit`, by name and never HEAD, to the job's branch, leasing
+    /// on the last push it confirmed, or on absence before the first.
+    /// Whatever moves HEAD after `commit` was checked, `commit` is what is
+    /// sent, on the first try and the retry alike. The commit is persisted
     /// as `pushingCommit` before anything is sent, so a reply lost to a
     /// crash or a quit is recognised next time; a confirmed push is
     /// persisted as `pushedCommit`.
@@ -191,7 +233,7 @@ struct Publisher {
         job.setPushingCommit(commit)
 
         var expecting = job.pushedCommit
-        var result = await sendPush(job, remote: remote, expecting: expecting)
+        var result = await sendPush(job, commit: commit, remote: remote, expecting: expecting)
         if result.succeeded { return confirmed(job, commit: commit) }
         if Task.isCancelled { return .refused(Job.publishingInterrupted) }
         guard GitService.leaseWasRefused(result.output) else {
@@ -225,7 +267,7 @@ struct Publisher {
                     + "another name for this job's branch. Nothing was sent.")
             }
             let taken = job.branch
-            guard await git.renameBranch(to: renamed, in: job.worktree) else {
+            guard await git.renameBranch(taken, to: renamed, in: job.worktree) else {
                 return .failed("\(taken) was taken on GitHub, and git could not rename this "
                     + "job's branch to \(renamed). Nothing was sent.")
             }
@@ -237,7 +279,7 @@ struct Publisher {
             return .refused(Self.notOurs(job.branch))
         }
 
-        result = await sendPush(job, remote: remote, expecting: expecting)
+        result = await sendPush(job, commit: commit, remote: remote, expecting: expecting)
         if result.succeeded { return confirmed(job, commit: commit) }
         if Task.isCancelled { return .refused(Job.publishingInterrupted) }
         if GitService.leaseWasRefused(result.output) {
@@ -246,15 +288,16 @@ struct Publisher {
         return .failed(Self.pushFailure(job.branch, output: result.output))
     }
 
-    private func sendPush(_ job: Job, remote: String, expecting: String?) async -> Subprocess.Result {
+    private func sendPush(_ job: Job, commit: String, remote: String, expecting: String?) async
+        -> Subprocess.Result {
         let git = self.git
         let worktree = job.worktree
         let branch = job.branch
-        job.append(JobLogEntry(.system, "git "
-            + Self.pushArguments(remote: remote, branch: branch, expecting: expecting)
+        job.append(JobLogEntry(.system, "git " + (GitService.hooksOff + Self.pushArguments(
+            remote: remote, branch: branch, commit: commit, expecting: expecting))
                 .joined(separator: " ")))
         let result = await Subprocess.withDeadline(Self.pushDeadline) {
-            await git.push(in: worktree, to: remote, branch: branch, expecting: expecting)
+            await git.push(commit, in: worktree, to: remote, branch: branch, expecting: expecting)
         }
         return result ?? Subprocess.Result(
             status: -1, stdout: "", stderr: "The push did not finish within three minutes.")
@@ -452,9 +495,9 @@ struct Publisher {
 
     // MARK: The dry run
 
-    private func logDryRun(_ job: Job, provenance: PullRequestDraft.Provenance) {
-        let push = Self.pushArguments(
-            remote: target.pushURL, branch: job.branch, expecting: job.pushedCommit)
+    private func logDryRun(_ job: Job, commit: String, provenance: PullRequestDraft.Provenance) {
+        let push = GitService.hooksOff + Self.pushArguments(
+            remote: target.pushURL, branch: job.branch, commit: commit, expecting: job.pushedCommit)
         let create = Self.createArguments(
             target: target, base: AppPaths.defaultBranch, branch: job.branch,
             title: job.pullRequest.title, bodyFile: "<body>")
@@ -499,10 +542,14 @@ struct Publisher {
         return pushed == nil ? .rename : .refuse
     }
 
-    /// `push --force-with-lease=refs/heads/<branch>:<expecting> <remote>
-    /// HEAD:refs/heads/<branch>`: on absence (`…:`) before the first push.
-    nonisolated static func pushArguments(remote: String, branch: String, expecting: String?) -> [String] {
-        GitService.pushArguments(remote: remote, branch: branch, expecting: expecting)
+    /// `push --no-verify --force-with-lease=refs/heads/<branch>:<expecting>
+    /// <remote> <commit>:refs/heads/<branch>`: on absence (`…:`) before the
+    /// first push, and the checked commit by name, never HEAD.
+    nonisolated static func pushArguments(
+        remote: String, branch: String, commit: String, expecting: String?
+    ) -> [String] {
+        GitService.pushArguments(
+            remote: remote, branch: branch, commit: commit, expecting: expecting)
     }
 
     /// `gh pr create`, always as a draft, against the target repository.

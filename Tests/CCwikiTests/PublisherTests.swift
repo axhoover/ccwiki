@@ -17,14 +17,19 @@ struct PublisherTests {
 
     @Test("the lease is on absence before the first push, and on the last push after")
     func lease() {
-        let first = Publisher.pushArguments(remote: "origin", branch: "x", expecting: nil)
+        let first = Publisher.pushArguments(
+            remote: "origin", branch: "x", commit: "c0ffee", expecting: nil)
         #expect(first.contains("--force-with-lease=refs/heads/x:"))
-        #expect(Array(first.suffix(2)) == ["origin", "HEAD:refs/heads/x"])
-        let next = Publisher.pushArguments(remote: "origin", branch: "x", expecting: "abc123")
+        #expect(Array(first.suffix(2)) == ["origin", "c0ffee:refs/heads/x"],
+                "the commit that was checked, by name")
+        let next = Publisher.pushArguments(
+            remote: "origin", branch: "x", commit: "c0ffee", expecting: "abc123")
         #expect(next.contains("--force-with-lease=refs/heads/x:abc123"))
         for arguments in [first, next] {
             #expect(!arguments.contains("--force") && !arguments.contains("-f"),
                     "never a push without a lease")
+            #expect(!arguments.contains { $0.contains("HEAD") }, "never HEAD, which can move")
+            #expect(arguments.contains("--no-verify"))
         }
     }
 
@@ -153,11 +158,24 @@ struct PublisherTests {
         Publisher(paths: scene.paths, tools: scene.tools, git: scene.git, target: scene.target)
     }
 
-    /// An edit of `content/page.md` to `text`, staged, with a title.
-    static func edit(_ scene: JobScene, _ job: Job, to text: String) async throws {
+    /// An edit of `content/page.md` to `text`, reviewed, with a title: the
+    /// digest of the diff a person would have seen.
+    @discardableResult
+    static func edit(_ scene: JobScene, _ job: Job, to text: String) async throws -> String {
         try scene.write("content/page.md", text, in: job)
-        try #require(await scene.git.stageAll(in: job.worktree))
+        let snapshot = try #require(await ReviewSnapshotter(git: scene.git).snapshot(
+            worktree: job.worktree, base: scene.base, patchFile: job.patchFile))
         job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
+        return snapshot.digest
+    }
+
+    /// `edit`, then the commit Approve makes of it.
+    static func commit(
+        _ scene: JobScene, _ publisher: Publisher, _ job: Job, to text: String
+    ) async throws -> String {
+        let reviewed = try await edit(scene, job, to: text)
+        let outcome = await publisher.commit(job, version: "0.3.0", reviewed: reviewed)
+        return try #require(outcome.commit, "\(outcome)")
     }
 
     @Test("the commit collapses whatever the agent committed into one on the base")
@@ -172,15 +190,32 @@ struct PublisherTests {
                         "--no-verify", "-m", "the agent's own commit"],
             environment: FixtureRepository.environment(date: 1_780_000_200))
         try #require(agent.succeeded, "\(agent.output)")
-        try await Self.edit(scene, job, to: "a\nB\nC")
 
-        let commit = try #require(await Self.publisher(scene).commit(job, version: "0.3.0"))
+        let commit = try await Self.commit(scene, Self.publisher(scene), job, to: "a\nB\nC")
         #expect(await scene.git.resolveCommit("\(commit)^", in: job.worktree) == scene.base)
         let message = await scene.clone.run(["log", "-1", "--format=%B", commit])
         #expect(message.stdout.hasPrefix("[fix] Page: B\n\nOpened with CCwiki 0.3.0 (job \(job.id))."))
         let shown = await scene.git.blob("\(commit):content/page.md", in: job.worktree)
         #expect(shown == Data("a\nB\nC".utf8))
+        #expect(await scene.git.resolveCommit("refs/heads/fix/page", in: job.worktree) == commit)
         #expect(job.state == .publishing("Committing…"))
+    }
+
+    @Test("a commit whose tree is not the reviewed change is not made, and says why")
+    func commitNotReviewed() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        let reviewed = try await Self.edit(scene, job, to: "a\nB\nc")
+        try await Self.edit(scene, job, to: "a\nBB\nc")
+
+        let outcome = await Self.publisher(scene).commit(job, version: "0.3.0", reviewed: reviewed)
+        guard case .notReviewed = outcome else {
+            Issue.record("committed what was not reviewed: \(outcome)")
+            return
+        }
+        #expect(await scene.git.resolveCommit("refs/heads/fix/page", in: job.worktree) == scene.base)
+        #expect(job.log.contains { $0.text.contains("is not the reviewed change") })
     }
 
     @Test("pushes lease on absence first, then on the last push, and record both")
@@ -190,14 +225,12 @@ struct PublisherTests {
         let publisher = Self.publisher(scene)
         let job = try await scene.beginEdit()
 
-        try await Self.edit(scene, job, to: "a\nB\nc")
-        let first = try #require(await publisher.commit(job, version: "0.3.0"))
+        let first = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
         #expect(await publisher.push(job, commit: first) == .pushed)
         #expect(job.pushedCommit == first && job.pushingCommit == nil)
         #expect(await scene.originTip("fix/page") == .at(first))
 
-        try await Self.edit(scene, job, to: "a\nBB\nc")
-        let second = try #require(await publisher.commit(job, version: "0.3.0"))
+        let second = try await Self.commit(scene, publisher, job, to: "a\nBB\nc")
         #expect(await publisher.push(job, commit: second) == .pushed)
         #expect(job.pushedCommit == second)
         #expect(await scene.originTip("fix/page") == .at(second))
@@ -213,15 +246,13 @@ struct PublisherTests {
         let publisher = Self.publisher(scene)
         let job = try await scene.beginEdit()
 
-        try await Self.edit(scene, job, to: "a\nB\nc")
-        let first = try #require(await publisher.commit(job, version: "0.3.0"))
+        let first = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
         #expect(await publisher.push(job, commit: first) == .pushed)
         // The push reached GitHub; the app went away before it heard.
         job.setPushedCommit(nil)
         job.setPushingCommit(first)
 
-        try await Self.edit(scene, job, to: "a\nBB\nc")
-        let second = try #require(await publisher.commit(job, version: "0.3.0"))
+        let second = try await Self.commit(scene, publisher, job, to: "a\nBB\nc")
         #expect(await publisher.push(job, commit: second) == .pushed)
         #expect(await scene.originTip("fix/page") == .at(second))
         #expect(job.branch == "fix/page")
@@ -237,8 +268,7 @@ struct PublisherTests {
         let theirs = try await scene.foreignCommit(on: scene.base)
         try await scene.pushToOrigin(theirs, as: "fix/page")
 
-        try await Self.edit(scene, job, to: "a\nB\nc")
-        let ours = try #require(await publisher.commit(job, version: "0.3.0"))
+        let ours = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
         #expect(await publisher.push(job, commit: ours) == .pushed)
         #expect(job.branch == "fix/page-2")
         #expect(await scene.originTip("fix/page-2") == .at(ours))
@@ -259,14 +289,12 @@ struct PublisherTests {
         let publisher = Self.publisher(scene)
         let job = try await scene.beginEdit()
 
-        try await Self.edit(scene, job, to: "a\nB\nc")
-        let first = try #require(await publisher.commit(job, version: "0.3.0"))
+        let first = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
         #expect(await publisher.push(job, commit: first) == .pushed)
         let theirs = try await scene.foreignCommit(on: first)
         try await scene.pushToOrigin(theirs, as: "fix/page")
 
-        try await Self.edit(scene, job, to: "a\nBB\nc")
-        let second = try #require(await publisher.commit(job, version: "0.3.0"))
+        let second = try await Self.commit(scene, publisher, job, to: "a\nBB\nc")
         #expect(await publisher.push(job, commit: second) == .refused(Publisher.notOurs("fix/page")))
         #expect(await scene.originTip("fix/page") == .at(theirs))
         #expect(job.pushedCommit == first)
@@ -283,8 +311,7 @@ struct PublisherTests {
         let publisher = Publisher(
             paths: scene.paths, tools: scene.tools, git: scene.git, target: nowhere)
         let job = try await scene.beginEdit()
-        try await Self.edit(scene, job, to: "a\nB\nc")
-        let commit = try #require(await publisher.commit(job, version: "0.3.0"))
+        let commit = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
 
         guard case .failed(let message) = await publisher.push(job, commit: commit) else {
             Issue.record("a push to a repository that is not there did not fail")
@@ -294,6 +321,142 @@ struct PublisherTests {
         #expect(message.contains("It may or may not have reached GitHub"))
         #expect(job.pushingCommit == commit && job.pushedCommit == nil,
                 "what was being pushed is remembered for next time")
+    }
+
+    // MARK: No hook, and only the commit that was checked
+
+    @Test("the push names the commit that was checked, whatever moves HEAD after")
+    func pushNamesTheCheckedCommit() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let publisher = Self.publisher(scene)
+        let job = try await scene.beginEdit()
+        let checked = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
+
+        // HEAD, and the branch with it, move once the commit was checked.
+        try scene.write("content/page.md", "a\nunreviewed\nc", in: job)
+        let moved = await Subprocess.run(
+            executable: scene.clone.git,
+            arguments: ["-C", job.worktree.path(percentEncoded: false), "commit", "-q", "-a",
+                        "--no-verify", "-m", "moved"],
+            environment: FixtureRepository.environment(date: 1_780_000_300))
+        try #require(moved.succeeded, "\(moved.output)")
+        let head = try #require(await scene.git.resolveCommit("HEAD", in: job.worktree))
+        #expect(head != checked)
+
+        #expect(await publisher.push(job, commit: checked) == .pushed)
+        #expect(await scene.originTip("fix/page") == .at(checked))
+        #expect(job.pushedCommit == checked)
+        let command = try #require(job.log.last { $0.text.hasPrefix("git ") })
+        #expect(command.text.hasPrefix("git -c core.hooksPath=/dev/null push --no-verify "))
+        #expect(command.text.hasSuffix(" \(checked):refs/heads/fix/page"))
+        #expect(!command.text.contains("HEAD"))
+    }
+
+    /// A `gh` that is signed in, may push, and opens pull request 99.
+    static let gitHubThatOpens = #"""
+        dir=$(dirname "$0")
+        case "$1 $2" in
+        "auth status") exit 0 ;;
+        "api repos/axhoover/cryptology.city") echo true ;;
+        "pr list")
+            if [ -f "$dir/opened" ]; then
+                echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) https://github.com/axhoover/cryptology.city/pull/99"
+            fi ;;
+        "pr create")
+            touch "$dir/opened"
+            echo https://github.com/axhoover/cryptology.city/pull/99 ;;
+        *) echo "unexpected: gh $*" >&2; exit 1 ;;
+        esac
+        exit 0
+        """#
+
+    @Test("Approve runs no hook from staging to the push, and pushes the reviewed tree on the base")
+    func approveRunsNoHook() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { GitHubAuth.invalidate() }
+        let tools = try JobScene.fakeTools([.gh: Self.gitHubThatOpens], in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        await scene.center.refreshReview(job)
+        job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
+        let written = await Subprocess.run(
+            executable: scene.clone.git,
+            arguments: ["-C", job.worktree.path(percentEncoded: false), "write-tree"],
+            environment: FixtureRepository.environment())
+        let reviewedTree = written.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        try #require(written.succeeded && !reviewedTree.isEmpty, "\(written.output)")
+
+        // Hooks everywhere, from now on, in the directory the clone's own
+        // configuration names; post-commit amends HEAD with extra.md.
+        let trap = try await HookTrap.install(beside: scene.clone)
+        let result = await scene.center.approve(job)
+        let ran = trap.ran()
+
+        let url = try #require(URL(string: "https://github.com/axhoover/cryptology.city/pull/99"))
+        #expect(result == .opened(url), "\(result); \(job.log.map(\.text))")
+        #expect(ran.isEmpty, "hooks ran: \(ran)")
+        let commit = try #require(job.pushedCommit)
+        #expect(await scene.originTip("fix/page") == .at(commit))
+        let tree = await scene.clone.run(["rev-parse", "\(commit)^{tree}"])
+        #expect(tree.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == reviewedTree,
+                "the tree that was reviewed")
+        let parents = await scene.clone.run(["rev-list", "--parents", "-n", "1", commit])
+        #expect(parents.stdout == "\(commit) \(scene.base)", "one commit, on the base")
+        #expect(await scene.git.blob("\(commit):extra.md", in: scene.clone.root) == nil)
+        let command = try #require(job.log.last { $0.text.hasPrefix("git ") })
+        #expect(command.text.hasPrefix("git -c core.hooksPath=/dev/null push --no-verify "))
+        #expect(command.text.hasSuffix(" \(commit):refs/heads/fix/page"),
+                "the push names the validated commit")
+
+        // The control: the hooks are live for git's own commands.
+        #expect(await scene.clone.run(["update-ref", "refs/heads/control", scene.base]).succeeded)
+        #expect(trap.ran().contains("reference-transaction"), "\(trap.ran())")
+    }
+
+    @Test("a tree staged after the check is never published: the job goes back to review")
+    func approveRefusesWhatWasNotReviewed() async throws {
+        guard let git = ToolLocator.locate(.git, override: nil) else { return }
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { GitHubAuth.invalidate() }
+        // Asked whether it may push, after the check's snapshot and before
+        // the commit, this gh stages a file nobody reviewed.
+        let tools = try JobScene.fakeTools([.gh: #"""
+            worktree=$(cat "$(dirname "$0")/worktree")
+            case "$1 $2" in
+            "auth status") exit 0 ;;
+            "api repos/axhoover/cryptology.city")
+                printf 'unreviewed\n' > "$worktree/extra.md"
+                GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+                    '\#(git)' -C "$worktree" -c core.hooksPath=/dev/null add extra.md
+                echo true ;;
+            *) echo "unexpected: gh $*" >&2; exit 1 ;;
+            esac
+            exit 0
+            """#], in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try Data(job.worktree.path(percentEncoded: false).utf8)
+            .write(to: directory.appending(path: "worktree"))
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        await scene.center.refreshReview(job)
+        job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
+
+        let result = await scene.center.approve(job)
+        #expect(result == .refused(Publisher.notReviewed), "\(result)")
+        #expect(job.state == .awaitingReview)
+        #expect(job.notice == JobNotice(tone: .warning, text: Publisher.notReviewed))
+        #expect(job.pushingCommit == nil && job.pushedCommit == nil, "no push was even tried")
+        #expect(await scene.originTip("fix/page") == .absent)
+        #expect(await scene.git.resolveCommit("refs/heads/fix/page", in: scene.clone.root)
+            == scene.base, "the branch never moved")
     }
 
     // MARK: Checking, which needs the review model

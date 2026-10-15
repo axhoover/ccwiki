@@ -177,9 +177,12 @@ one on screen, nothing is sent and the new diff is shown. A snapshot that
 finished during the wait was never seen, so it is not what is approved. Then
 DiffGuard, the title and body (`PrivateText`), git's identity and GitHub
 (`GitHubAccess`) are checked, in that order, before anything leaves. The
-commit is `git reset --soft <base>` and `git commit --no-verify`, so whatever
-the agent committed collapses into one commit and no hook rewrites a reviewed
-file.
+commit is made with plumbing, `git write-tree` and `git commit-tree -p
+<base>`, and only once the tree's diff from the base has the reviewed digest,
+so whatever the agent committed collapses into one commit of exactly the
+reviewed change. Every git command from the check to the push runs with
+`-c core.hooksPath=/dev/null`, so no hook runs at all, and the push names
+that commit, never HEAD (plans/corrections.md §6.5).
 
 **No pull request twice, no branch overwritten.** The commit being pushed is
 recorded before the push is sent, and the push leases on the last one GitHub

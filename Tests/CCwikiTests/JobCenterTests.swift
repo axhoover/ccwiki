@@ -175,13 +175,25 @@ struct JobScene {
 
     /// A `claude` that runs `body` with `/bin/sh` in the job's worktree.
     static func fakeClaude(_ body: String, in directory: URL) throws -> ToolLocator {
+        try fakeTools([.claude: body], in: directory)
+    }
+
+    /// Each tool a `/bin/sh` script in `directory` that runs its body: a
+    /// `claude` in the job's worktree, a `gh` wherever CCwiki runs it. None
+    /// reaches the network.
+    static func fakeTools(_ bodies: [ToolLocator.Tool: String], in directory: URL) throws
+        -> ToolLocator {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appending(path: "claude")
-        try Data(("#!/bin/sh\n" + body).utf8).write(to: file)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
-        var tools = ToolLocator(overrides: [.claude: file.path(percentEncoded: false)])
-        tools.locate([.claude])
+        var overrides: [ToolLocator.Tool: String] = [:]
+        for (tool, body) in bodies {
+            let file = directory.appending(path: tool.rawValue)
+            try Data(("#!/bin/sh\n" + body).utf8).write(to: file)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
+            overrides[tool] = file.path(percentEncoded: false)
+        }
+        var tools = ToolLocator(overrides: overrides)
+        tools.locate(Array(bodies.keys))
         return tools
     }
 }

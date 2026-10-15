@@ -51,8 +51,9 @@ struct ReviewSnapshot: Sendable, Equatable {
         return ReviewSnapshot(baseCommit: base, files: files, digest: Self.digest(patch))
     }
 
-    /// Hex SHA-256: what the snapshot taken at Approve is compared with.
-    private static func digest(_ patch: Data) -> String {
+    /// Hex SHA-256: what the snapshot taken at Approve is compared with, and
+    /// what the tree Approve commits must give (`GitService.commitReviewed`).
+    static func digest(_ patch: Data) -> String {
         SHA256.hash(data: patch).map { String(format: "%02x", $0) }.joined()
     }
 }

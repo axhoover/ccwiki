@@ -89,6 +89,29 @@ struct GitReviewIntegrationTests {
             let diff = try #require(await git.stagedDiff(in: worktree, base: base))
             return GitService.fields(nulSeparated: diff.nameStatus)
         }
+
+        /// Stages everything, as a review does, and returns the digest of
+        /// the staged diff: what a person would have reviewed.
+        func review(with git: GitService? = nil) async throws -> String {
+            let git = git ?? self.git
+            try #require(await git.stageAll(in: worktree))
+            let diff = try #require(await git.stagedDiff(in: worktree, base: base))
+            return ReviewSnapshot.digest(diff.patch)
+        }
+
+        /// What is staged, reviewed and then committed as Approve commits it.
+        func commitReviewed(_ message: String) async throws -> String {
+            let reviewed = try await review()
+            let outcome = await git.commitReviewed(
+                in: worktree, base: base, branch: Self.branch, reviewed: reviewed,
+                message: message)
+            return try #require(outcome.commit, "\(outcome)")
+        }
+
+        /// `git rev-parse <revision>` in the worktree.
+        func revParse(_ revision: String) async -> String {
+            await run(["rev-parse", revision]).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 
     static let newPage = "content/References/A - B & é [draft].md"
@@ -273,7 +296,7 @@ struct GitReviewIntegrationTests {
 
     // MARK: Committing and pushing
 
-    @Test("the commit collapses whatever the agent committed into one, of exactly what is staged")
+    @Test("the commit collapses whatever the agent committed into one, of exactly what was reviewed")
     func committing() async throws {
         guard let scene = try await Scene.make() else { return }
         defer { scene.delete() }
@@ -285,17 +308,70 @@ struct GitReviewIntegrationTests {
                                 date: 1_780_000_200).succeeded)
         try scene.write(Self.newPage, Data("new\n".utf8))
         try scene.write(".ccwiki/pull-request.md", Data("# [fix] Page: b\n".utf8))
-        #expect(await git.stageAll(in: scene.worktree))
+        let reviewed = try await scene.review()
+        let tree = await scene.run(GitService.hooksOff + ["write-tree"])
+            .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let commit = try #require(await git.commitStaged(
-            in: scene.worktree, base: scene.base, message: "[fix] Page: b\n\nOpened with CCwiki."))
-        #expect(await git.resolveCommit("HEAD^", in: scene.worktree) == scene.base,
-                "one commit on the base")
+        let outcome = await git.commitReviewed(
+            in: scene.worktree, base: scene.base, branch: Scene.branch, reviewed: reviewed,
+            message: "[fix] Page: b\n\nOpened with CCwiki.")
+        let commit = try #require(outcome.commit, "\(outcome)")
+        #expect(await scene.revParse("\(commit)^{tree}") == tree, "the reviewed tree")
+        #expect(await scene.run(["rev-list", "--parents", "-n", "1", commit]).stdout
+            == "\(commit) \(scene.base)", "one commit, whose only parent is the base")
+        #expect(await scene.revParse("refs/heads/\(Scene.branch)") == commit)
+        #expect(await scene.revParse("HEAD") == commit, "the worktree's HEAD is the branch")
         let files = await scene.run(
             ["-c", "core.quotePath=false", "diff", "--name-only", scene.base, commit])
         #expect(files.stdout.components(separatedBy: "\n").sorted()
             == ["content/page.md", Self.newPage].sorted())
+        let message = await scene.run(["log", "-1", "--format=%B", commit])
+        #expect(message.stdout.trimmingCharacters(in: .newlines)
+            == "[fix] Page: b\n\nOpened with CCwiki.")
         #expect(await git.reflog(of: Scene.branch, in: scene.worktree).contains(commit))
+    }
+
+    @Test("a staged tree that is not the reviewed change is never committed, and the branch stays")
+    func committingSomethingElse() async throws {
+        guard let scene = try await Scene.make() else { return }
+        defer { scene.delete() }
+        let git = scene.git
+
+        try scene.write("content/page.md", Data("a\nB\nc".utf8))
+        let reviewed = try await scene.review()
+        // Staged after the review, as a hook or a straggling process could.
+        try scene.write("extra.md", Data("unreviewed\n".utf8))
+        #expect(await scene.run(GitService.hooksOff + ["add", "extra.md"]).succeeded)
+
+        let outcome = await git.commitReviewed(
+            in: scene.worktree, base: scene.base, branch: Scene.branch, reviewed: reviewed,
+            message: "m")
+        guard case .notReviewed(let why) = outcome else {
+            Issue.record("committed a tree nobody reviewed: \(outcome)")
+            return
+        }
+        #expect(why.contains("is not the reviewed change"))
+        #expect(await scene.revParse("refs/heads/\(Scene.branch)") == scene.base)
+        #expect(await git.reflog(of: Scene.branch, in: scene.worktree)
+            .subtracting([scene.base]).isEmpty, "nothing was ever committed to the branch")
+    }
+
+    @Test("a commit's header gives its tree and its parents, not the message's look-alikes")
+    func commitHeader() {
+        let header = GitService.commitHeader("""
+            tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904
+            parent 1111111111111111111111111111111111111111
+            parent 2222222222222222222222222222222222222222
+            author A <a@ccwiki.invalid> 1780000000 +0000
+            committer A <a@ccwiki.invalid> 1780000000 +0000
+
+            tree in a subject
+            parent 3333333333333333333333333333333333333333
+            """)
+        #expect(header.tree == "4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+        #expect(header.parents == ["1111111111111111111111111111111111111111",
+                                   "2222222222222222222222222222222222222222"])
+        #expect(GitService.commitHeader("").tree == nil)
     }
 
     @Test("leases: the first push on absence, the next expecting it, and a stale one refused")
@@ -307,27 +383,23 @@ struct GitReviewIntegrationTests {
 
         #expect(await git.remoteTip(of: Scene.branch, remote: remote, in: scene.worktree) == .absent)
         try scene.write("content/page.md", Data("a\nB\nc".utf8))
-        #expect(await git.stageAll(in: scene.worktree))
-        let first = try #require(await git.commitStaged(
-            in: scene.worktree, base: scene.base, message: "first"))
+        let first = try await scene.commitReviewed("first")
         let pushed = await git.push(
-            in: scene.worktree, to: remote, branch: Scene.branch, expecting: nil)
+            first, in: scene.worktree, to: remote, branch: Scene.branch, expecting: nil)
         #expect(pushed.succeeded, "\(pushed.output)")
         #expect(await git.remoteTip(of: Scene.branch, remote: remote, in: scene.worktree)
             == .at(first))
 
         try scene.write("content/page.md", Data("a\nBB\nc".utf8))
-        #expect(await git.stageAll(in: scene.worktree))
-        let second = try #require(await git.commitStaged(
-            in: scene.worktree, base: scene.base, message: "second"))
+        let second = try await scene.commitReviewed("second")
 
         let stale = await git.push(
-            in: scene.worktree, to: remote, branch: Scene.branch, expecting: nil)
+            second, in: scene.worktree, to: remote, branch: Scene.branch, expecting: nil)
         #expect(!stale.succeeded, "a lease on absence cannot overwrite a branch that exists")
         #expect(GitService.leaseWasRefused(stale.output), "\(stale.output)")
 
         let again = await git.push(
-            in: scene.worktree, to: remote, branch: Scene.branch, expecting: first)
+            second, in: scene.worktree, to: remote, branch: Scene.branch, expecting: first)
         #expect(again.succeeded, "\(again.output)")
         #expect(await git.remoteHeads(remote: remote, in: scene.worktree)?[Scene.branch] == second)
         #expect(await git.remoteHeads(remote: remote, in: scene.worktree)?["main"] == scene.base)
@@ -341,14 +413,90 @@ struct GitReviewIntegrationTests {
         #expect(await git.remoteHeads(remote: nowhere, in: scene.worktree) == nil)
     }
 
-    @Test("the push arguments lease on absence, then on the commit expected")
+    @Test("the push arguments name the commit, never HEAD, and lease on absence, then on the commit expected")
     func pushArguments() {
-        let first = GitService.pushArguments(remote: "origin", branch: "fix/x", expecting: nil)
+        let first = GitService.pushArguments(
+            remote: "origin", branch: "fix/x", commit: "c0ffee", expecting: nil)
         #expect(first.contains("--force-with-lease=refs/heads/fix/x:"))
-        #expect(first.suffix(2) == ["origin", "HEAD:refs/heads/fix/x"])
-        let next = GitService.pushArguments(remote: "origin", branch: "fix/x", expecting: "abc123")
+        #expect(first.suffix(2) == ["origin", "c0ffee:refs/heads/fix/x"])
+        #expect(first.contains("--no-verify"))
+        let next = GitService.pushArguments(
+            remote: "origin", branch: "fix/x", commit: "c0ffee", expecting: "abc123")
         #expect(next.contains("--force-with-lease=refs/heads/fix/x:abc123"))
         #expect(!next.contains("--force") && !next.contains("-f"))
+        for arguments in [first, next] {
+            #expect(!arguments.contains { $0.contains("HEAD") }, "\(arguments)")
+        }
+        #expect(GitService.hooksOff == ["-c", "core.hooksPath=/dev/null"])
+    }
+
+    // MARK: Hooks
+
+    @Test("no hook runs from staging to the push, and the push sends the reviewed tree on the base")
+    func hooksNeverRun() async throws {
+        guard let scene = try await Scene.make() else { return }
+        defer { scene.delete() }
+        let trap = try await HookTrap.install(beside: scene.clone)
+        defer { trap.delete() }
+        // The user's environment names the hooks too: the command line's
+        // -c is read after it, as after every configuration file.
+        var environment = FixtureRepository.environment()
+        environment["GIT_CONFIG_COUNT"] = "1"
+        environment["GIT_CONFIG_KEY_0"] = "core.hooksPath"
+        environment["GIT_CONFIG_VALUE_0"] = trap.hooks.path(percentEncoded: false)
+        let git = GitService(executable: scene.clone.git, environment: environment)
+        let remote = scene.origin.path(percentEncoded: false)
+
+        try scene.write("content/page.md", Data("a\nB\nc".utf8))
+        let reviewed = try await scene.review(with: git.withoutHooks)
+        let tree = await scene.run(GitService.hooksOff + ["write-tree"])
+            .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outcome = await git.commitReviewed(
+            in: scene.worktree, base: scene.base, branch: Scene.branch, reviewed: reviewed,
+            message: "[fix] Page: B")
+        let commit = try #require(outcome.commit, "\(outcome)")
+        let pushed = await git.push(
+            commit, in: scene.worktree, to: remote, branch: Scene.branch, expecting: nil)
+        #expect(pushed.succeeded, "\(pushed.output)")
+
+        #expect(trap.ran().isEmpty, "hooks ran: \(trap.ran())")
+        #expect(await git.remoteTip(of: Scene.branch, remote: remote, in: scene.worktree)
+            == .at(commit))
+        #expect(await scene.revParse("\(commit)^{tree}") == tree, "the reviewed tree")
+        #expect(await scene.run(["rev-list", "--parents", "-n", "1", commit]).stdout
+            == "\(commit) \(scene.base)")
+        #expect(await git.blob("\(commit):extra.md", in: scene.worktree) == nil)
+
+        // The control: the same hooks are live for git's own commands, and
+        // the sequence Approve used to run is the one the review found.
+        #expect(await scene.run(["reset", "-q", "--soft", scene.base]).succeeded)
+        #expect(await scene.run(["commit", "-q", "--no-verify", "-m", "control"]).succeeded)
+        #expect(trap.ran().contains("post-commit") && trap.ran().contains("reference-transaction"),
+                "\(trap.ran())")
+        #expect(await git.blob("HEAD:extra.md", in: scene.worktree) != nil,
+                "--no-verify still runs post-commit, which amended HEAD")
+    }
+
+    @Test("what is pushed is the commit that was checked, whatever moves HEAD after")
+    func headMovesAfterTheCheck() async throws {
+        guard let scene = try await Scene.make() else { return }
+        defer { scene.delete() }
+        let git = scene.git
+        let remote = scene.origin.path(percentEncoded: false)
+
+        try scene.write("content/page.md", Data("a\nB\nc".utf8))
+        let checked = try await scene.commitReviewed("checked")
+        try scene.write("content/page.md", Data("a\nunreviewed\nc".utf8))
+        #expect(await scene.run(["commit", "-q", "--no-verify", "-a", "-m", "moved"],
+                                date: 1_780_000_300).succeeded)
+        let head = await scene.revParse("HEAD")
+        #expect(head != checked && head.count == checked.count)
+
+        let pushed = await git.push(
+            checked, in: scene.worktree, to: remote, branch: Scene.branch, expecting: nil)
+        #expect(pushed.succeeded, "\(pushed.output)")
+        #expect(await git.remoteTip(of: Scene.branch, remote: remote, in: scene.worktree)
+            == .at(checked))
     }
 
     // MARK: Branches, identity, upstream
@@ -359,7 +507,7 @@ struct GitReviewIntegrationTests {
         defer { scene.delete() }
         let git = scene.git
 
-        #expect(await git.renameBranch(to: "fix/page-2", in: scene.worktree))
+        #expect(await git.renameBranch(Scene.branch, to: "fix/page-2", in: scene.worktree))
         let head = await scene.run(["rev-parse", "--abbrev-ref", "HEAD"])
         #expect(head.stdout == "fix/page-2")
 
@@ -515,6 +663,62 @@ struct ReviewSnapshotIntegrationTests {
 
         await scene.center.refreshReview(job)
         #expect(job.review?.files.map(\.path) == [Self.newPage, "content/page.md"])
+    }
+}
+
+/// Executable hooks in the directory a clone's `core.hooksPath` names, each
+/// leaving a marker when git runs it: what a maintainer's own hooks, or ones
+/// an agent planted, could do between a review and its push (§6.5). The
+/// `post-commit` one also amends HEAD to add `extra.md`, which nobody
+/// reviewed, as in the PR #11 review.
+struct HookTrap {
+    let hooks: URL
+    let markers: URL
+
+    static let names = [
+        "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "post-rewrite",
+        "post-index-change", "post-checkout", "reference-transaction", "pre-push",
+    ]
+
+    /// Every hook in a directory beside `repository`, which its own
+    /// configuration then names as `core.hooksPath`.
+    static func install(beside repository: FixtureRepository) async throws -> HookTrap {
+        let parent = repository.root.deletingLastPathComponent()
+        let name = repository.root.lastPathComponent
+        let trap = HookTrap(
+            hooks: parent.appending(path: name + "-hooks"),
+            markers: parent.appending(path: name + "-hook-markers"))
+        let manager = FileManager.default
+        try manager.createDirectory(at: trap.hooks, withIntermediateDirectories: true)
+        try manager.createDirectory(at: trap.markers, withIntermediateDirectories: true)
+        for hook in names {
+            var script = "#!/bin/sh\ntouch '\(trap.markers.path(percentEncoded: false))/\(hook)'\n"
+            if hook == "post-commit" {
+                script += "printf 'unreviewed\\n' > extra.md\n"
+                    + "git add extra.md\n"
+                    + "git -c core.hooksPath=/dev/null -c commit.gpgsign=false "
+                    + "commit --amend --no-edit --no-verify --quiet\n"
+            }
+            let file = trap.hooks.appending(path: hook)
+            try Data(script.utf8).write(to: file)
+            try manager.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
+        }
+        let configured = await repository.run(
+            ["config", "core.hooksPath", trap.hooks.path(percentEncoded: false)])
+        try #require(configured.succeeded, "git config: \(configured.output)")
+        return trap
+    }
+
+    /// The hooks git has run, by name.
+    func ran() -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(
+            atPath: markers.path(percentEncoded: false))) ?? []).sorted()
+    }
+
+    func delete() {
+        try? FileManager.default.removeItem(at: hooks)
+        try? FileManager.default.removeItem(at: markers)
     }
 }
 

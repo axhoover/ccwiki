@@ -663,8 +663,8 @@ title and body of its own (§6.4).
   resolves `git rev-parse --verify origin/<default>^{commit}`, passes that SHA
   as `baseRef`, and calls `job.setBaseCommit` before the agent starts. Left
   as `origin/main`, a sync during review would move the base: the snapshot
-  would show upstream commits reversed, and Approve's `reset --soft` would
-  commit their reversal.
+  would show upstream commits reversed, and Approve's commit on the base
+  would carry their reversal.
 - **`prompts/ingest.md` Step 6** becomes "Stop and hand over". The agent does
   not commit, push or open a PR. It writes the PR text, using the body
   template in `.github/prompts/paper-submission.md`, to the handover file,
@@ -1118,14 +1118,32 @@ the job read-only), clears `notice`, and calls
    - `GitHubAccess` (§7.1) must be `.ready`, for `PublishTarget.repository`.
      Offline, it returns `.refused("Offline. Nothing was sent; open the pull
      request when you are connected.")`.
-2. **"Committing…"**
-   - `git reset --soft <base>`, which collapses anything the agent committed;
-   - `git commit --no-verify -m …`. A hook that rewrites files would change
-     what was reviewed.
+2. **"Committing…"** (`GitService.commitReviewed`), plumbing only, so that
+   nothing reads HEAD and no `git commit` runs:
+   - `git write-tree`: the tree of what step 1 staged;
+   - `git diff <base> <tree>`, with the options the snapshot's patch uses
+     (`GitService.patchOptions`), must have the reviewed digest. The patch
+     names every changed path with its full blob ids, so a tree whose diff
+     from the base has that digest is the reviewed tree. If it is not,
+     nothing is committed and `.refused(Publisher.notReviewed)` returns the
+     job to review: "What git would have committed is not the change you
+     reviewed, so nothing was sent. Check the diff, then open the pull
+     request again." The transcript says which tree it was;
+   - `git commit-tree -p <base> -m … <tree>` (with `-S` when
+     `commit.gpgSign` is true, as `git commit` would sign), which collapses
+     anything the agent committed: the base is the only parent;
+   - `git cat-file commit`: the commit's tree must be that tree and its only
+     parent the base, or nothing more happens and the job is back in review
+     the same way;
+   - `git update-ref refs/heads/<branch> <commit>`, by name, so the branch's
+     reflog has every Approve's commit (step 3's recovery reads it).
 3. **"Pushing fix/pseudorandom-function…"**
    - persist `pushingCommit` = the new commit;
-   - `git push <PublishTarget.pushURL> HEAD:refs/heads/<branch>
-     --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>`;
+   - `git push --no-verify --recurse-submodules=no
+     --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
+     <PublishTarget.pushURL> <commit>:refs/heads/<branch>`: the commit step 2
+     checked, **by name, never HEAD**, which anything may move after the
+     check, on the first try and on the retry alike;
    - on success, persist `pushedCommit`.
    - **If the lease is refused**, ask GitHub: `git ls-remote <pushURL>
      refs/heads/<branch>`, then `Publisher.leaseRecovery` decides:
@@ -1135,8 +1153,8 @@ the job read-only), clears `notice`, and calls
        as `pushedCommit` and retry once;
      - the tip is unknown and this job has never confirmed a push: someone
        else's branch. Take the next name free both locally and on GitHub,
-       `git branch -m`, log "fix/x was taken on GitHub; using fix/x-2", and
-       retry once;
+       `git branch -m <branch> <new>`, log "fix/x was taken on GitHub; using
+       fix/x-2", and retry once;
      - otherwise refuse: "fix/x on GitHub has commits CCwiki did not push.
        CCwiki will not overwrite them; check the branch on GitHub."
 4. **"Opening the pull request…"**
@@ -1148,6 +1166,18 @@ the job read-only), clears `notice`, and calls
      `pullRequest(createdAfter:in:)` with `job.createdAt − 60 s`.
 5. Prune the worktree and the scratch directory. Delete the local branch,
    never the remote one. The job is `opened(url)`.
+
+**No git hook runs from step 1 to step 5.** `Publisher` keeps its
+`GitService` as `withoutHooks`, so every git command it runs, the staging
+of step 1's snapshot included, starts `git -c core.hooksPath=/dev/null`.
+`--no-verify` is not enough: it skips `pre-commit` and `commit-msg` only,
+and a `post-commit` hook can amend the commit just made (the PR #11 review
+showed one adding an unreviewed file). A `-c` on the command line is read
+after every configuration file and after `GIT_CONFIG_COUNT`, so no
+`core.hooksPath` the clone, a worktree or the user sets can undo it, and
+nothing can be put under `/dev/null` to run. The push carries `--no-verify`
+as well. Step 2 does not depend on this, though: whatever runs, the commit
+pushed is the one whose tree was checked against the reviewed digest.
 
 `CCWIKI_PUBLISH_DRY_RUN=1` stops after step 2, logs the push and `gh`
 commands it would have run, and returns
@@ -2087,14 +2117,18 @@ struct AgentInvocation: Sendable, Equatable {
 @MainActor struct Publisher {
     let paths: AppPaths
     let tools: ToolLocator
-    let git: GitService
+    let git: GitService            // the one given, `withoutHooks` (§6.5)
     let target: PublishTarget
     func publish(_ job: Job, reviewed digest: String,
                  provenance: PullRequestDraft.Provenance) async -> ApproveResult
+    func commit(_ job: Job, version: String, reviewed digest: String) async
+        -> GitService.ReviewedCommit
+    nonisolated static let notReviewed: String
     enum LeaseRecovery: Sendable, Equatable { case retry(expecting: String?), rename, refuse }
     nonisolated static func leaseRecovery(remoteTip: String?, pushing: String?, pushed: String?,
                                           reflog: Set<String>) -> LeaseRecovery
-    nonisolated static func pushArguments(remote: String, branch: String, expecting: String?) -> [String]
+    nonisolated static func pushArguments(remote: String, branch: String, commit: String,
+                                          expecting: String?) -> [String]
     nonisolated static func createArguments(target: PublishTarget, base: String, branch: String,
                                             title: String, bodyFile: String) -> [String]
     nonisolated static func commitMessage(title: String, version: String, jobID: String) -> String
@@ -2116,13 +2150,21 @@ extension GitService {
     /// `git show <spec>`, bytes exact: "<base>:<path>", or ":<path>" for the index.
     func blob(_ spec: String, in directory: URL) async -> Data?
     func revertPath(_ path: String, to base: String, in worktree: URL) async -> Bool
-    func commitStaged(in worktree: URL, base: String, message: String) async -> String?  // the new sha
-    func push(in worktree: URL, to remote: String, branch: String, expecting: String?) async
-        -> Subprocess.Result
+    static let hooksOff: [String]                 // ["-c", "core.hooksPath=/dev/null"]
+    var hooksDisabled: Bool
+    var withoutHooks: GitService { get }
+    static let patchOptions: [String]             // the snapshot's patch and commitReviewed's check
+    enum ReviewedCommit: Sendable, Equatable { case committed(String), notReviewed(String), failed }
+    /// write-tree; its digest checked; commit-tree -p <base>; checked; update-ref (§6.5).
+    func commitReviewed(in worktree: URL, base: String, branch: String, reviewed digest: String,
+                        message: String) async -> ReviewedCommit
+    /// <commit>:refs/heads/<branch>, never HEAD; hooks off.
+    func push(_ commit: String, in worktree: URL, to remote: String, branch: String,
+              expecting: String?) async -> Subprocess.Result
     func remoteTip(of branch: String, remote: String, in directory: URL) async -> RemoteTip
     func remoteHeads(remote: String, in directory: URL) async -> [String: String]?
     func reflog(of branch: String, in directory: URL) async -> Set<String>
-    func renameBranch(to name: String, in worktree: URL) async -> Bool
+    func renameBranch(_ branch: String, to name: String, in worktree: URL) async -> Bool
     func identity(in worktree: URL) async -> (name: String, email: String)?
     func changedPaths(in clone: URL, from base: String, to ref: String, limitedTo paths: [String]) async
         -> Set<String>
@@ -2374,7 +2416,21 @@ merges to `main`.**
 
 **`PublisherTests`** (B)
 - The lease is `--force-with-lease=refs/heads/x:` before the first push,
-  and `:<sha>` after.
+  and `:<sha>` after. The source is `<commit>:refs/heads/x`, never HEAD, and
+  `--no-verify` is there.
+- Against a bare origin: HEAD and the branch moved after the commit was
+  checked, and the push still sends, and logs, the checked commit.
+- Approve end to end, with a `gh` script that is signed in and opens PR 99,
+  and executable `pre-commit`, `prepare-commit-msg`, `commit-msg`,
+  `post-commit` (which amends HEAD with `extra.md`), `post-rewrite`,
+  `post-index-change`, `post-checkout`, `reference-transaction` and
+  `pre-push` hooks in the directory the clone's `core.hooksPath` names: no
+  hook runs; the pushed commit's tree is the reviewed tree, its only parent
+  the base, and the logged push names it. A control shows the hooks run for
+  git's own `update-ref`.
+- A `gh` that stages `extra.md` while it is asked about push rights, after
+  the check's snapshot: `.refused(Publisher.notReviewed)`, the job back in
+  review with that notice, no push tried, the branch never moved.
 - `leaseRecovery`: absent → retry on absence; the tip equal to
   `pushingCommit`, to `pushedCommit`, or in the reflog → retry expecting it;
   unknown with no confirmed push → rename; unknown after a confirmed push →
@@ -2426,8 +2482,13 @@ sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
 7. The patch round-trips: remove the worktree, `addWorktree(…
    resettingBranch:to:)` and `applyPatch` restore a byte-identical tree,
    and `refreshOrphanedWorktrees` never lists the job's worktree.
-8. `commitStaged` collapses an agent commit, and the committed tree contains
-   only the job's change.
+8. `commitReviewed` collapses an agent commit: the commit's tree is the
+   reviewed tree, its only parent the base, and the branch and its reflog
+   name it. A tree staged after the review is `notReviewed`, and the branch
+   stays. With the hooks of `PublisherTests` configured, and named again by
+   `GIT_CONFIG_COUNT`, staging, `commitReviewed` and `push` run none of
+   them; then git's own `reset --soft` and `commit --no-verify`, as Approve
+   used to run them, do run them, and `post-commit` amends HEAD.
 9. The first push with the absence lease succeeds, a second push after an
    edit with `expecting:` succeeds, and a push with a stale lease is refused.
    With `pushedCommit` dropped and `pushingCommit` set, Approve recovers and
