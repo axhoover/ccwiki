@@ -1666,6 +1666,10 @@ struct PaperRecord: Codable, Equatable, Sendable {
     let origin: Origin
     let addedAt: Date
     let bytes: Int64
+    /// New on every keep; the paper window's view identity, since a
+    /// replacement can match the old paper's name, size and second. A record
+    /// from before it existed gets one made from its other fields.
+    let revision: String
 }
 struct PaperStore: Sendable {
     let directory: URL                   // AppPaths.papers, or a temporary one for shots

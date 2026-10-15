@@ -40,17 +40,21 @@ final class JobCenter {
         let privatePaths: [String]
     }
 
-    /// The review as Open Draft PR's click saw it: the digest of the diff
-    /// on screen, nil when none was, and its DiffGuard findings, which the
-    /// question the click asks counted. Approve publishes only that, so a
-    /// refresh that lands while the question is up cannot bring a warning
-    /// nobody was asked about (§6.5 step 1).
+    /// The review as Open Draft PR's click saw it: the snapshot on screen,
+    /// with its tree and the digest of its diff, nil when none was, and its
+    /// DiffGuard findings, which the question the click asks counted.
+    /// Approve publishes only that tree, so a refresh that lands while the
+    /// question is up can bring neither a change nor a warning nobody was
+    /// asked about (§6.5 step 1).
     struct ShownReview: Sendable {
-        let digest: String?
+        let snapshot: ReviewSnapshot?
         let findings: [DiffFinding]
 
+        /// The digest of the diff on screen.
+        var digest: String? { snapshot?.digest }
+
         @MainActor init(of job: Job) {
-            digest = job.review?.digest
+            snapshot = job.review
             findings = job.findings
         }
     }
@@ -534,7 +538,7 @@ final class JobCenter {
             return settle(job, .refused(unsettled))
         }
         return await serially(job) { @MainActor () -> ApproveResult in
-            await self.publish(job, shown: shown.digest, findings: shown.findings)
+            await self.publish(job, shown: shown.snapshot, findings: shown.findings)
         }
     }
 
@@ -544,11 +548,12 @@ final class JobCenter {
         await approve(job, shown: ShownReview(of: job))
     }
 
-    /// `shown` is the digest of the diff on screen when Open Draft PR was
-    /// pressed, or nil when none was, and `findings` that review's
-    /// DiffGuard findings: a warning they lack refuses (§6.5 step 1).
+    /// `shown` is the snapshot on screen when Open Draft PR was pressed, or
+    /// nil when none was: its tree is what is committed, or nothing is.
+    /// `findings` are that review's DiffGuard findings: a warning they lack
+    /// refuses (§6.5 step 1).
     private func publish(
-        _ job: Job, shown: String?, findings: [DiffFinding]
+        _ job: Job, shown: ReviewSnapshot?, findings: [DiffFinding]
     ) async -> ApproveResult {
         guard job.state == .awaitingReview else {
             return .refused("Only a job awaiting review can be published.")
@@ -557,7 +562,7 @@ final class JobCenter {
         guard let git = environment.git else {
             return settle(job, .refused("git was not found. Nothing was sent."))
         }
-        guard let digest = shown else {
+        guard let reviewed = shown else {
             // No diff was on screen: show it before anything is sent.
             await takeSnapshot(job)
             return settle(job, .changedSinceReview)
@@ -576,7 +581,7 @@ final class JobCenter {
         // (`Job.interruptPublishing`).
         let publishing = Task { @MainActor in
             let outcome = await publisher.publish(
-                job, reviewed: digest, findings: findings, provenance: provenance)
+                job, reviewed: reviewed, findings: findings, provenance: provenance)
             self.publishResults[id] = outcome
         }
         job.task = publishing

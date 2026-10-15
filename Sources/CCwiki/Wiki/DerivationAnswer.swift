@@ -314,9 +314,14 @@ extension Derivation {
             let status: RecordedOnPair.Status
             var detail: String?
             var needs: [String] = []
-            if let exclusion = reasons[id] {
+            // A quarantine of one direction leaves the reduction eligible, so
+            // it is not in `excluded`; its row says so all the same.
+            let held = curation.quarantineReason(id, isReverse: !forward)
+            var exclusionOnPair = reasons[id]
+            if exclusionOnPair == nil, held != nil { exclusionOnPair = .quarantined }
+            if let exclusion = exclusionOnPair {
                 status = .excluded(exclusion)
-                detail = curation.quarantine[id]
+                detail = held
             } else if let step, step.isStub, !options.includesIdealisedModels {
                 status = .stub
             } else if let step, !step.isDefault, !options.includesIdealisedModels {
@@ -380,7 +385,7 @@ extension Derivation {
                 if let fact = relaxed.facts[hypothesis] { inputs.append((id: hypothesis, fact: fact)) }
             }
             var reasons: [Refusal] = []
-            if let reason = curation.quarantine[step.relationID] {
+            if let reason = curation.quarantineReason(step.relationID, isReverse: step.isReverse) {
                 reasons.append(.quarantined(reason: reason))
             }
             for input in inputs {

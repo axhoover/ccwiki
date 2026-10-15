@@ -13,6 +13,46 @@ struct GitService: Sendable {
 
     let executable: String
     let environment: [String: String]
+    /// Whether every command carries `hooksOff`. `Publisher` runs on
+    /// `withoutHooks`, so nothing from a review to its push runs a hook.
+    var hooksDisabled = false
+
+    /// `--no-replace-objects -c core.useReplaceRefs=false`, before every
+    /// subcommand this service runs: git reads each object as it is, never
+    /// the one a `refs/replace/` entry substitutes for it. A replacement
+    /// changes what `diff` and `cat-file` show and nothing that `push`
+    /// sends, so a replaced tree could hide a file from the review, and from
+    /// the digest Approve checks, and still reach GitHub (the PR #11 review,
+    /// plans/corrections.md §6.1). The `-c` is read after every
+    /// configuration file, so no `core.useReplaceRefs` the clone or the user
+    /// sets can turn replacements back on.
+    static let realObjects = ["--no-replace-objects", "-c", "core.useReplaceRefs=false"]
+
+    /// `-c core.hooksPath=/dev/null -c core.fsmonitor=false`, before the
+    /// subcommand: git looks for every hook under `/dev/null/`, where
+    /// nothing can exist, so none runs, and asks no file-system monitor,
+    /// which githooks(5) counts as a hook (`fsmonitor-watchman`) but
+    /// `core.fsmonitor` names wherever it likes. `--no-verify` is not
+    /// enough: it skips `pre-commit` and `commit-msg`, and `post-commit`,
+    /// `reference-transaction`, `post-index-change` and the rest still run,
+    /// and a `post-commit` can amend the commit just made. A `-c` on the
+    /// command line is read after every configuration file and after
+    /// `GIT_CONFIG_COUNT`, so nothing the clone, a worktree or the user
+    /// configures can undo it; and `/dev/null`, unlike a directory of
+    /// CCwiki's, is not a place anyone can put a hook.
+    ///
+    /// Programs the configuration names for other purposes still run, by
+    /// design: a credential helper, a GPG or SSH signing program, a clean
+    /// filter. None of them can change which tree is committed: Approve
+    /// checks it by name (`commitReviewed`).
+    static let hooksOff = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+
+    /// This service with every hook off (`hooksOff`).
+    var withoutHooks: GitService {
+        var service = self
+        service.hooksDisabled = true
+        return service
+    }
 
     enum SyncOutcome: Sendable {
         case cloned
@@ -421,7 +461,9 @@ struct GitService: Sendable {
     // A job's worktree is the only place these write. They never touch the
     // reader's clone except to add, prune and delete a job's own worktree and
     // branch. Every read of file contents, `-z` output or a patch goes through
-    // `Subprocess.runData`, so no line splitting touches the bytes (§6.1).
+    // `Subprocess.runData`, so no line splitting touches the bytes (§6.1),
+    // and, like every command here, reads the objects themselves
+    // (`realObjects`).
 
     /// `rev-parse --verify <ref>^{commit}`: the commit `ref` names, in full.
     /// A job's base is recorded as one, never as a ref, so a sync during
@@ -457,62 +499,76 @@ struct GitService: Sendable {
         ]).succeeded
     }
 
-    /// What is staged against `base`, as three byte-exact outputs:
+    /// What is staged, as a tree, and its diff from `base`:
     ///
+    /// - `tree`, `git write-tree`: the staged tree, by name. Everything else
+    ///   here is read from it, never from the index again, so the snapshot
+    ///   is of one immutable tree, and Approve commits that tree or nothing
+    ///   (`commitReviewed`);
     /// - `--name-status -z -M`, for `GitNameStatus.parse`;
     /// - `--numstat -z`, for `GitNameStatus.binaryPaths`. With
     ///   `--no-renames`, so each entry is one path: git otherwise detects
     ///   renames here by default and writes those as two;
-    /// - the patch, `--binary` with full object names and the standard
-    ///   `a/` and `b/` prefixes, whatever the user's configuration says, so
-    ///   it applies again (Restore) and its digest is stable.
+    /// - the patch (`patchOptions`), which applies again (Restore) and whose
+    ///   digest is stable.
     ///
-    /// All three with `--ignore-submodules=none`: `git add -A` stages a
-    /// submodule's new commit whatever `diff.ignoreSubmodules` or a
-    /// submodule's `ignore` says, and the commit carries it, so the review
-    /// must show it too. The patch writes it `--submodule=short`, as one
-    /// that applies again, whatever `diff.submodule` says.
-    ///
-    /// Nil when git fails. `-z`, because reference filenames carry spaces,
-    /// `&` and non-ASCII titles, which git otherwise quotes.
+    /// Each diff has `--ignore-submodules=none`, so a submodule's new commit
+    /// shows whatever `diff.ignoreSubmodules` or `submodule.<name>.ignore`
+    /// say: the wiki has two submodules, and an ingestion agent may run
+    /// `git submodule update --remote`. Nil when git fails. `-z`, because
+    /// reference filenames carry spaces, `&` and non-ASCII titles, which git
+    /// otherwise quotes.
     func stagedDiff(in worktree: URL, base: String) async
-        -> (nameStatus: Data, numstat: Data, patch: Data)? {
+        -> (tree: String, nameStatus: Data, numstat: Data, patch: Data)? {
         let path = worktree.path(percentEncoded: false)
+        let written = await run(["-C", path, "write-tree"])
+        guard written.succeeded, let tree = Self.nonEmpty(written.stdout) else { return nil }
         let nameStatus = await data([
-            "-C", path, "diff", "--cached", "--no-color", "--ignore-submodules=none", "-M",
-            "--name-status", "-z", base,
+            "-C", path, "diff", "--no-color", "--ignore-submodules=none", "-M", "--name-status",
+            "-z", base, tree,
         ])
         guard nameStatus.status == 0 else { return nil }
         let numstat = await data([
-            "-C", path, "diff", "--cached", "--no-color", "--no-textconv", "--no-renames",
-            "--ignore-submodules=none", "--numstat", "-z", base,
+            "-C", path, "diff", "--no-color", "--ignore-submodules=none", "--no-textconv",
+            "--no-renames", "--numstat", "-z", base, tree,
         ])
         guard numstat.status == 0 else { return nil }
-        let patch = await data([
-            "-C", path, "diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv",
-            "--ignore-submodules=none", "--submodule=short",
-            "-M", "--binary", "--full-index", "--src-prefix=a/", "--dst-prefix=b/", base,
-        ])
+        let patch = await data(["-C", path, "diff"] + Self.patchOptions + [base, tree])
         guard patch.status == 0 else { return nil }
-        return (nameStatus.stdout, numstat.stdout, patch.stdout)
+        return (tree, nameStatus.stdout, numstat.stdout, patch.stdout)
     }
 
-    /// `git diff --cached --raw -z --no-renames <base>`: each staged path
-    /// with its old and new modes, for `GitNameStatus.irregularPaths`. A
-    /// symbolic link is staged as a blob holding its target, which the
-    /// other outputs show as one line of text (§6.1). Nil when git fails.
-    func stagedModes(in worktree: URL, base: String) async -> Data? {
+    /// How every patch is written, the reviewed one and the one Approve
+    /// checks a tree against: the same options give the same bytes, and so
+    /// the same digest, for the same change, whatever the user's
+    /// configuration says. Full object names, `--binary`, the standard `a/`
+    /// and `b/` prefixes; every submodule shown (`--ignore-submodules=none`),
+    /// and as its two full commit names (`--submodule=short`), never the
+    /// abbreviated ones `diff.submodule=log` would print.
+    static let patchOptions = [
+        "--no-color", "--no-ext-diff", "--no-textconv",
+        "--ignore-submodules=none", "--submodule=short",
+        "-M", "--binary", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
+    ]
+
+    /// `git diff --raw -z --no-renames <base> <tree>`: each path `tree`
+    /// changes, with its old and new modes, for
+    /// `GitNameStatus.irregularPaths`. A symbolic link is staged as a blob
+    /// holding its target, which the other outputs show as one line of text
+    /// (§6.1). Read from the staged tree, as the rest of the snapshot is
+    /// (`stagedDiff`). Nil when git fails.
+    func stagedModes(in worktree: URL, base: String, tree: String) async -> Data? {
         let result = await data([
             "-C", worktree.path(percentEncoded: false),
-            "diff", "--cached", "--no-color", "--no-renames", "--ignore-submodules=none",
-            "--raw", "-z", base,
+            "diff", "--no-color", "--no-renames", "--ignore-submodules=none",
+            "--raw", "-z", base, tree,
         ])
         return result.status == 0 ? result.stdout : nil
     }
 
-    /// The blob `spec` names, bytes exact: "<commit>:<path>", or ":<path>"
-    /// for the index. Nil when there is no such file, as for a page the
-    /// commit does not have.
+    /// The blob `spec` names, bytes exact: "<commit or tree>:<path>", or
+    /// ":<path>" for the index. Nil when there is no such file, as for a
+    /// page the commit does not have.
     ///
     /// `cat-file blob` prints what `git show` prints for a blob, with no
     /// text conversion, and refuses a tree rather than listing it.
@@ -565,38 +621,139 @@ struct GitService: Sendable {
         return unstaged && !FileManager.default.fileExists(atPath: file.path(percentEncoded: false))
     }
 
-    /// `git reset --soft <base>`, then `git commit --no-verify`: whatever the
-    /// agent committed collapses into one commit of exactly what is staged,
-    /// and no hook can rewrite the files after they were reviewed (§6.5).
-    /// The new commit, or nil.
-    func commitStaged(in worktree: URL, base: String, message: String) async -> String? {
+    /// What `commitReviewed` made, or why it made nothing.
+    enum ReviewedCommit: Sendable, Equatable {
+        /// The commit: its tree is the reviewed one, its one parent is the
+        /// base, and the job's branch names it.
+        case committed(String)
+        /// What git would commit is not what was reviewed: why, for the
+        /// transcript. No branch moved.
+        case notReviewed(String)
+        /// git could not write the tree or the commit, or move the branch.
+        case failed
+
+        var commit: String? {
+            switch self {
+            case .committed(let commit): commit
+            case .notReviewed, .failed: nil
+            }
+        }
+    }
+
+    /// One commit of exactly the change that was reviewed (§6.5). Plumbing,
+    /// every command with `hooksOff` and `realObjects`, and nothing read
+    /// from HEAD:
+    ///
+    /// ```
+    /// git write-tree                                → the tree of what is staged,
+    ///                                                 which must be `reviewedTree`
+    /// git diff <patchOptions> <base> <tree>         → its digest must be `digest`
+    /// git commit-tree -p <base> -m <message> <tree> → the commit
+    /// git cat-file commit <commit>                  → its tree and only parent, checked
+    /// git update-ref refs/heads/<branch> <commit>   → the job's branch, and its reflog
+    /// ```
+    ///
+    /// `reviewedTree` and `digest` are the reviewed snapshot's
+    /// (`ReviewSnapshot`): the tree it was taken of, by name, and the digest
+    /// of that tree's diff from the base. The tree is the binding; the
+    /// digest is a second check, of the real objects, with every submodule
+    /// shown. Whatever the agent committed is collapsed, as the commit's
+    /// only parent is the base. The commit is signed when `commit.gpgSign`
+    /// says so, as `git commit` would sign it; `commit-tree` does not read
+    /// that.
+    func commitReviewed(
+        in worktree: URL, base: String, branch: String, tree reviewedTree: String,
+        digest: String, message: String
+    ) async -> ReviewedCommit {
+        let git = withoutHooks
         let directory = worktree.path(percentEncoded: false)
-        guard await run(["-C", directory, "reset", "--quiet", "--soft", base]).succeeded,
-              await run([
-                  "-C", directory, "commit", "--quiet", "--no-verify", "-m", message,
-              ]).succeeded
-        else { return nil }
-        return await head(in: worktree)
+        // The base in full, as a commit's header names its parent.
+        guard let parent = await git.resolveCommit(base, in: worktree) else { return .failed }
+        let written = await git.run(["-C", directory, "write-tree"])
+        guard written.succeeded, let tree = Self.nonEmpty(written.stdout) else { return .failed }
+        guard tree == reviewedTree else {
+            return .notReviewed("The staged tree \(tree.prefix(12)) is not the reviewed change: "
+                + "the review was of the tree \(reviewedTree.prefix(12)).")
+        }
+
+        let patch = await git.data(["-C", directory, "diff"] + Self.patchOptions + [parent, tree])
+        guard patch.status == 0 else { return .failed }
+        guard ReviewSnapshot.digest(patch.stdout) == digest else {
+            return .notReviewed("The staged tree \(tree.prefix(12)) is not the reviewed change: "
+                + "its diff from \(parent.prefix(12)) has another digest.")
+        }
+
+        let signs = await git.run([
+            "-C", directory, "config", "--type=bool", "--get", "commit.gpgsign",
+        ])
+        let sign = signs.succeeded && Self.nonEmpty(signs.stdout) == "true"
+        let made = await git.run(
+            ["-C", directory, "commit-tree", "-p", parent] + (sign ? ["-S"] : [])
+                + ["-m", message, tree])
+        guard made.succeeded, let commit = Self.nonEmpty(made.stdout) else { return .failed }
+
+        let object = await git.data(["-C", directory, "cat-file", "commit", commit])
+        guard object.status == 0 else { return .failed }
+        let header = Self.commitHeader(String(decoding: object.stdout, as: UTF8.self))
+        guard header.tree == tree, header.parents == [parent] else {
+            let madeTree = header.tree.map { String($0.prefix(12)) } ?? "none"
+            let madeParents = header.parents.isEmpty
+                ? "no parent"
+                : header.parents.map { String($0.prefix(12)) }.joined(separator: " and ")
+            return .notReviewed("git made \(commit.prefix(12)) of the tree \(madeTree) on "
+                + "\(madeParents), not of \(tree.prefix(12)) on \(parent.prefix(12)).")
+        }
+
+        guard await git.run([
+            "-C", directory, "update-ref", "-m", "CCwiki: the reviewed change",
+            "refs/heads/\(branch)", commit,
+        ]).succeeded else { return .failed }
+        return .committed(commit)
     }
 
-    /// Pushes the worktree's HEAD to `branch` on `remote`, leasing on
-    /// `expecting`: the commit the branch must be at, or nil for a branch
-    /// that must not exist yet (§4.4).
-    func push(in worktree: URL, to remote: String, branch: String, expecting: String?) async
-        -> Subprocess.Result {
-        await run(["-C", worktree.path(percentEncoded: false)]
-            + Self.pushArguments(remote: remote, branch: branch, expecting: expecting))
+    /// The tree and the parents a `git cat-file commit` header names, up to
+    /// the blank line before the message.
+    static func commitHeader(_ text: String) -> (tree: String?, parents: [String]) {
+        var tree: String?
+        var parents: [String] = []
+        for line in text.components(separatedBy: "\n") {
+            if line.isEmpty { break }
+            if line.hasPrefix("tree ") {
+                tree = String(line.dropFirst("tree ".count))
+            } else if line.hasPrefix("parent ") {
+                parents.append(String(line.dropFirst("parent ".count)))
+            }
+        }
+        return (tree, parents)
     }
 
-    /// `push --force-with-lease=refs/heads/<branch>:<expected> <remote>
-    /// HEAD:refs/heads/<branch>`. An empty expectation leases on absence, so
-    /// the first push cannot overwrite a branch someone else made. One ref,
-    /// and never a submodule's, whatever `push.recurseSubmodules` says.
-    static func pushArguments(remote: String, branch: String, expecting: String?) -> [String] {
+    /// Pushes `commit`, by name, to `branch` on `remote`, with every hook
+    /// off, leasing on `expecting`: the commit the branch must be at, or
+    /// nil for a branch that must not exist yet (§4.4). Never HEAD, which
+    /// anything may move once the commit was checked.
+    func push(
+        _ commit: String, in worktree: URL, to remote: String, branch: String, expecting: String?
+    ) async -> Subprocess.Result {
+        await withoutHooks.run(["-C", worktree.path(percentEncoded: false)]
+            + Self.pushArguments(
+                remote: remote, branch: branch, commit: commit, expecting: expecting))
+    }
+
+    /// `push --no-verify --no-follow-tags --recurse-submodules=no
+    /// --force-with-lease=refs/heads/<branch>:<expected> <remote>
+    /// <commit>:refs/heads/<branch>`. An empty expectation leases on
+    /// absence, so the first push cannot overwrite a branch someone else
+    /// made. One ref: no tag, whatever `push.followTags` says (on GitHub a
+    /// tag can start a workflow), and never a submodule's, whatever
+    /// `push.recurseSubmodules` says. `--no-verify` as well as `hooksOff`:
+    /// no `pre-push` either way.
+    static func pushArguments(
+        remote: String, branch: String, commit: String, expecting: String?
+    ) -> [String] {
         [
-            "push", "--recurse-submodules=no",
+            "push", "--no-verify", "--no-follow-tags", "--recurse-submodules=no",
             "--force-with-lease=refs/heads/\(branch):\(expecting ?? "")",
-            remote, "HEAD:refs/heads/\(branch)",
+            remote, "\(commit):refs/heads/\(branch)",
         ]
     }
 
@@ -659,9 +816,12 @@ struct GitService: Sendable {
         }.filter { !$0.isEmpty })
     }
 
-    /// Renames the worktree's own branch.
-    func renameBranch(to name: String, in worktree: URL) async -> Bool {
-        await run(["-C", worktree.path(percentEncoded: false), "branch", "-m", name]).succeeded
+    /// Renames `branch`, the job's own, wherever it is checked out: by name,
+    /// as `commitReviewed` moves it by name, not through HEAD.
+    func renameBranch(_ branch: String, to name: String, in worktree: URL) async -> Bool {
+        await run([
+            "-C", worktree.path(percentEncoded: false), "branch", "-m", branch, name,
+        ]).succeeded
     }
 
     /// The name and email a commit here would carry: `GIT_AUTHOR_NAME` and
@@ -858,15 +1018,22 @@ struct GitService: Sendable {
 
     // MARK: Plumbing
 
+    /// What git is given for `arguments`: `realObjects`, then `hooksOff`
+    /// when hooks are disabled, then `arguments`. A transcript shows a
+    /// command this way: what ran, less any `-C <directory>`.
+    func invocation(_ arguments: [String]) -> [String] {
+        Self.realObjects + (hooksDisabled ? Self.hooksOff : []) + arguments
+    }
+
     private func run(_ arguments: [String]) async -> Subprocess.Result {
         await Subprocess.run(
-            executable: executable, arguments: arguments, environment: environment)
+            executable: executable, arguments: invocation(arguments), environment: environment)
     }
 
     /// Run git and keep stdout as bytes (`Subprocess.runData`).
     private func data(_ arguments: [String]) async -> (status: Int32, stdout: Data, stderr: String) {
         await Subprocess.runData(
-            executable: executable, arguments: arguments, environment: environment)
+            executable: executable, arguments: invocation(arguments), environment: environment)
     }
 
     /// Run git, forwarding each line to `onLine` and keeping a copy.
@@ -881,7 +1048,7 @@ struct GitService: Sendable {
         var status: Int32 = -1
         var transcript: [String] = []
         for await line in Subprocess.lines(
-            executable: executable, arguments: arguments,
+            executable: executable, arguments: invocation(arguments),
             currentDirectory: directory, environment: environment
         ) {
             if let exit = line.exitStatus { status = exit; continue }

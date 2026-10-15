@@ -315,6 +315,50 @@ struct DerivationTests {
         #expect(unused.needs == ["g over a large field"])
     }
 
+    @Test("a precondition on the reverse direction of an equivalence is assumed of a given, in its model only")
+    func reverseDirectionPrecondition() throws {
+        // DLO24's shape: an equivalence in a non-standard model whose reverse
+        // direction needs more of its hypothesis than the node states. The
+        // engine supported reverse-direction requirements before the PR #9
+        // audit; this pins them on the shape the audit's entry gives them.
+        let manifest = try Fx.manifest(
+            objects: [Fx.object("r", type: "assumption"), Fx.object("f", type: "assumption"),
+                      Fx.object("d", type: "assumption")],
+            reductions: [Fx.reduction("red-r-eq-f", ["r"], "f", reductionClass: "free", model: "other",
+                                      kind: "equivalence"),
+                         Fx.reduction("red-d-to-f", ["d"], "f")])
+        let notion = "f against adversaries whose advice is fixed before the instance is sampled"
+        let curation = DerivationCuration(
+            equivalences: ["red-r-eq-f": .init(forward: "record", reverse: "record")],
+            requires: [.init(relationID: "red-r-eq-f", isReverse: true, hypothesis: "f",
+                             notion: notion, metBy: [])])
+        let derivation = Derivation(manifest: manifest, curation: curation)
+
+        // Given, with idealised models included: assumed, and scoped.
+        let given = try #require(derivation.answer(from: ["f"], to: "r", options: .all).derived)
+        let assumed = given.fact.assumes.map { $0.notion }
+        #expect(assumed == [notion])
+        #expect(given.fact.models == ["other"])
+        #expect(given.fact.isModelScoped)
+        #expect(given.fact.chainClass == .free)
+        #expect(given.proof.reverseRelationIDs == ["red-r-eq-f"])
+        // Not in the default models: the only step is in model `other`.
+        _ = try #require(derivation.answer(from: ["f"], to: "r", options: .standard).noPath)
+
+        // Derived by another step: refused, and named.
+        let refused = try #require(derivation.answer(from: ["d"], to: "r", options: .all).noPath)
+        let step = try #require(refused.refused.first?.step)
+        #expect(step.isReverse)
+        let reasons = refused.refused.first?.reasons ?? []
+        let expectedReasons = [Derivation.Refusal.requires(hypothesis: "f", notion: notion,
+                                                           producedBy: "red-d-to-f")]
+        #expect(reasons == expectedReasons)
+
+        // The forward direction needs nothing.
+        let forward = try #require(derivation.answer(from: ["r"], to: "f", options: .all).derived)
+        #expect(forward.fact.assumes.isEmpty)
+    }
+
     @Test("a weakened fact feeds only the steps that accept it, and blocks no full fact")
     func weakenedFacts() throws {
         let manifest = try Fx.manifest(
@@ -368,6 +412,70 @@ struct DerivationTests {
         let reasons = answer.refused.first?.reasons ?? []
         let expectedReasons = [Derivation.Refusal.quarantined(reason: reason)]
         #expect(reasons == expectedReasons)
+    }
+
+    @Test("a quarantine of one direction holds back that direction of an equivalence only")
+    func quarantineOneDirection() throws {
+        let manifest = try Fx.manifest(
+            objects: [Fx.object("e", type: "assumption"), Fx.object("f"), Fx.object("g")],
+            reductions: [Fx.reduction("red-e-eq-f", ["e"], "f", kind: "equivalence"),
+                         Fx.reduction("red-f-to-g", ["f"], "g")])
+        let reason = "The Statement does not establish this direction."
+        let json = """
+            { "quarantine": [{ "edge": "red-e-eq-f", "direction": "forward", "reason": "\(reason)" }],
+              "equivalences": { "red-e-eq-f": { "forward": "record", "reverse": "record" } } }
+            """
+        let curation = try DerivationCuration.decode(Data(json.utf8))
+        #expect(curation.quarantineReason("red-e-eq-f", isReverse: false) == reason)
+        #expect(curation.quarantineReason("red-e-eq-f", isReverse: true) == nil)
+        let derivation = Derivation(manifest: manifest, curation: curation)
+
+        // Only the held direction is quarantined, and the reduction is not
+        // excluded: its other direction is still a step.
+        let held = derivation.quarantinedSteps.map { $0.id }
+        #expect(held == ["red-e-eq-f"])
+        #expect(derivation.excluded[.quarantined] == nil)
+        let steps = derivation.steps.map { "\($0.id):\($0.reductionClass)" }
+        #expect(steps == ["red-e-eq-f~reverse:fully-black-box", "red-f-to-g:fully-black-box"])
+
+        // The held direction is named on its pair, with the reason, and
+        // refused on the way.
+        let forward = try #require(derivation.answer(from: ["e"], to: "f", options: .standard).noPath)
+        let rows = forward.recordedOnPair.map { "\($0.relationID):\($0.isReverse):\($0.status.rawValue)" }
+        #expect(rows == ["red-e-eq-f:false:quarantined"])
+        #expect(forward.recordedOnPair.first?.detail == reason)
+        let far = try #require(derivation.answer(from: ["e"], to: "g", options: .standard).noPath)
+        let refused = far.refused.map { $0.step.id }
+        #expect(refused == ["red-e-eq-f"])
+        let reasons = far.refused.first?.reasons ?? []
+        let expectedReasons = [Derivation.Refusal.quarantined(reason: reason)]
+        #expect(reasons == expectedReasons)
+
+        // The other direction takes the record's class.
+        let backward = try #require(derivation.answer(from: ["f"], to: "e", options: .standard).derived)
+        #expect(backward.fact.chainClass == .fullyBlackBox)
+        #expect(backward.proof.reverseRelationIDs == ["red-e-eq-f"])
+        let used = backward.recordedOnPair.map { "\($0.relationID):\($0.isReverse):\($0.status.rawValue)" }
+        #expect(used == ["red-e-eq-f:true:used"])
+        #expect(derivation.invariants().noIneligibleEdges)
+
+        // An implication has one direction: scoping its quarantine to the
+        // other does not resolve.
+        let implication = DerivationCuration(quarantine: ["red-f-to-g": reason],
+                                             quarantineDirections: ["red-f-to-g": true])
+        #expect(implication.unresolved(in: manifest) == ["not an equivalence red-f-to-g"])
+
+        // A misspelt direction reads as forward, as the reference engine
+        // reads it, and does not resolve: it would hold back the forward
+        // direction silently.
+        let misspeltJSON = """
+            { "quarantine": [{ "edge": "red-e-eq-f", "direction": "Reverse", "reason": "\(reason)" }] }
+            """
+        let misspelt = try DerivationCuration.decode(Data(misspeltJSON.utf8))
+        let misspeltIDs: Set<String> = ["red-e-eq-f"]
+        #expect(misspelt.misspeltDirections == misspeltIDs)
+        #expect(misspelt.quarantineReason("red-e-eq-f", isReverse: false) == reason)
+        #expect(misspelt.unresolved(in: manifest) == ["direction red-e-eq-f"])
     }
 
     // MARK: R14
@@ -836,15 +944,41 @@ struct DerivationTests {
 
         #expect(curation.refuted.count == 3)
         #expect(curation.settings.count == 2)
-        #expect(curation.quarantine.count == 3)
+        #expect(curation.quarantine.count == 4)
         #expect(curation.equivalences.count == 7)
-        #expect(curation.requires.count == 23)
-        #expect(curation.weakens.count == 2)
+        #expect(curation.requires.count == 26)
+        #expect(curation.weakens.count == 3)
         #expect(curation.statementLint.count == 2)
 
+        // ISIS ⇒ SIS is quarantined left to right only; SIS ⇒ ISIS keeps the
+        // record's class.
         let isis = try #require(curation.equivalences["red-isis-inhomogeneous-sis-to-sis"])
         #expect(!isis.isForwardRecorded)
         #expect(isis.isReverseRecorded)
+        #expect(curation.quarantineDirections["red-isis-inhomogeneous-sis-to-sis"] == false)
+        #expect(curation.quarantineReason("red-isis-inhomogeneous-sis-to-sis", isReverse: false) != nil)
+        #expect(curation.quarantineReason("red-isis-inhomogeneous-sis-to-sis", isReverse: true) == nil)
+        #expect(curation.requirements(on: "red-isis-inhomogeneous-sis-to-sis", isReverse: false).isEmpty)
+        // DLO24's FAC ⇒ RSA is conditional on its preprocessing experiment;
+        // RSA ⇒ FAC is not.
+        let dlo24 = curation.requirements(on: "red-rsa-to-fac-dlo24", isReverse: true).map { $0.hypothesis }
+        #expect(dlo24 == ["fac"])
+        #expect(curation.requirements(on: "red-rsa-to-fac-dlo24", isReverse: false).isEmpty)
+        // GPSW06 needs DBDH; the PRP conversions a superpolynomial domain,
+        // which LR88's PRP has.
+        let gpsw06 = curation.requirements(on: "red-bdh-to-abe-gpsw06", isReverse: false).map { $0.hypothesis }
+        #expect(gpsw06 == ["bdh"])
+        let lr88: Set<String> = ["red-prf-to-prp-lr88"]
+        for relationID in ["red-prp-to-prf", "red-prp-to-invertible-prf"] {
+            let prp = curation.requirements(on: relationID, isReverse: false)
+            #expect(prp.count == 1, "\(relationID)")
+            #expect(prp.first?.hypothesis == "prp", "\(relationID)")
+            #expect(prp.first?.metBy == lr88, "\(relationID)")
+        }
+        // Kil88 concludes static malicious MPC with abort, which nothing
+        // consumes; GPSW06's selective KP-ABE feeds nothing either.
+        #expect(curation.weakens["red-ot-to-mpc-kil88"]?.acceptedBy.isEmpty == true)
+        #expect(curation.weakens["red-bdh-to-abe-gpsw06"]?.acceptedBy.isEmpty == true)
         let kil88 = curation.requirements(on: "red-ot-to-mpc-kil88", isReverse: false)
         #expect(kil88.count == 1)
         #expect(kil88.first?.metBy == ["red-cpir-to-ot-dmo00"])

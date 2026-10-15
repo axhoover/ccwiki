@@ -156,10 +156,10 @@ redesign, not a refactor.
   wiki Markdown and BibTeX, and the asks for the wiki as a ready-to-apply
   document.
 - [plans/curation-review.md](plans/curation-review.md) — **generated**
-  (`make curation-review WIKI=…`): each of the 42 curation entries beside the
+  (`make curation-review WIKI=…`): each of the 47 curation entries beside the
   wiki text it quotes and its effect on the golden answers. **For the
   maintainer to review.**
-- [plans/wiki-asks.md](plans/wiki-asks.md) — ten things the wiki could record
+- [plans/wiki-asks.md](plans/wiki-asks.md) — twenty-one things the wiki could record
   so the curation can go, page by page, with
   [wiki-asks.inbox.json](plans/wiki-asks.inbox.json) for the wiki's review
   pipeline. The maintainer files them; CCwiki never writes to the wiki.

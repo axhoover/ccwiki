@@ -28,7 +28,7 @@ struct ReviewPayloadTests {
     }
 
     static func snapshot(_ files: ChangedFile...) -> ReviewSnapshot {
-        ReviewSnapshot(baseCommit: "865206d47c53", files: files, digest: "0123")
+        ReviewSnapshot(baseCommit: "865206d47c53", tree: "4b825dc", files: files, digest: "0123")
     }
 
     static func hunk(_ old: Range<Int>, _ new: Range<Int>) -> LineHunk {

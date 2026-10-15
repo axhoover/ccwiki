@@ -40,7 +40,7 @@ struct JobReviewTests {
     }
 
     static func snapshot(_ files: ChangedFile...) -> ReviewSnapshot {
-        ReviewSnapshot(baseCommit: "865206d47c53", files: files, digest: "0123")
+        ReviewSnapshot(baseCommit: "865206d47c53", tree: "4b825dc", files: files, digest: "0123")
     }
 
     static func finding(_ severity: DiffFinding.Severity, rule: DiffFinding.Rule = .largeEdit) -> DiffFinding {

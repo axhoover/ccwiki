@@ -27,7 +27,7 @@ struct CurationReviewTests {
     }
 
     /// The first line's fields, which the generator writes for this test:
-    /// `<!-- curation-review: curation=… manifest=… wiki=… entries=42 quotesMissing=0 -->`.
+    /// `<!-- curation-review: curation=… manifest=… wiki=… entries=47 quotesMissing=0 -->`.
     /// `nil` when the first line is not that comment.
     private static func header(of review: String) -> [String: String]? {
         let opening = "<!-- curation-review: "

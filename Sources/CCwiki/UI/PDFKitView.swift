@@ -12,7 +12,7 @@ import SwiftUI
 /// dropped file: the window does, and keeps it (§2.6).
 ///
 /// Replacing the paper at the same path is a new view: the window keys this
-/// one by the record, not the URL.
+/// one by the record's revision, not the URL (`PaperRecord.revision`).
 struct PDFKitView: NSViewRepresentable {
     let url: URL
     let onPageChange: @MainActor (_ index: Int, _ count: Int) -> Void

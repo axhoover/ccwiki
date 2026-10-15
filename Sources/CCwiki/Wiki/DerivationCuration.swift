@@ -87,8 +87,18 @@ struct DerivationCuration: Sendable {
     private(set) var refuted: [String: Refutation]
     let settings: [String: Setting]
     /// R13: reduction id → why its recorded hypotheses do not match its own
-    /// Statement. A quarantined reduction is never used.
+    /// Statement. A quarantined reduction is never used. Ask a step with
+    /// `quarantineReason(_:isReverse:)`: an entry may hold back one direction
+    /// of an equivalence only.
     let quarantine: [String: String]
+    /// R13: the quarantine entries scoped to one direction of an equivalence,
+    /// reduction id → `true` for the reverse direction, `false` for the
+    /// forward one. A reduction absent here is quarantined whole.
+    let quarantineDirections: [String: Bool]
+    /// R13: the quarantine entries whose `direction` is neither `forward`
+    /// nor `reverse`, by reduction id. Each reads as forward, as the
+    /// reference engine reads it, and `unresolved(in:)` reports it.
+    let misspeltDirections: Set<String>
     let equivalences: [String: Directions]
     /// In the file's order.
     let requires: [Requirement]
@@ -127,6 +137,8 @@ struct DerivationCuration: Sendable {
         refuted: [Refutation] = [],
         settings: [Setting] = [],
         quarantine: [String: String] = [:],
+        quarantineDirections: [String: Bool] = [:],
+        misspeltDirections: Set<String> = [],
         equivalences: [String: Directions] = [:],
         requires: [Requirement] = [],
         weakens: [Weakening] = [],
@@ -150,6 +162,8 @@ struct DerivationCuration: Sendable {
         self.refuted = refutedByObject
         self.settings = settingsByObject
         self.quarantine = quarantine
+        self.quarantineDirections = quarantineDirections
+        self.misspeltDirections = misspeltDirections
         self.equivalences = equivalences
         self.requires = requires
         self.weakens = weakensByRelation
@@ -170,6 +184,17 @@ struct DerivationCuration: Sendable {
     /// The requirements on one direction of one reduction, in the file's order.
     func requirements(on relationID: String, isReverse: Bool) -> [Requirement] {
         requirementsByStep[RequirementKey(relationID: relationID, isReverse: isReverse)] ?? []
+    }
+
+    /// R13: why this direction of the reduction is quarantined, or `nil` when
+    /// it is not. An entry without a direction holds back the whole
+    /// reduction; one with a direction holds back that direction of an
+    /// equivalence alone, and the other stays a step. The reference engine's
+    /// `Curation.quarantined`.
+    func quarantineReason(_ relationID: String, isReverse: Bool) -> String? {
+        guard let reason = quarantine[relationID] else { return nil }
+        if let scoped = quarantineDirections[relationID], scoped != isReverse { return nil }
+        return reason
     }
 
     /// The file's entry for `key`, with its prose and citations.
@@ -287,8 +312,22 @@ struct DerivationCuration: Sendable {
         for raw in dto.settings {
             citations[.setting(objectID: raw.object)] = raw.cites.map { $0.citation }
         }
+        // A quarantine's direction, as the reference engine reads it: absent
+        // (or null) holds back the whole reduction, "reverse" the reverse
+        // direction, anything else the forward one. Anything but "forward"
+        // or "reverse" is misspelt, and `unresolved(in:)` reports it. The
+        // last entry for an edge wins, as it does for the reason: assigning
+        // nil removes it.
+        var quarantineDirections: [String: Bool] = [:]
+        var misspeltDirections: Set<String> = []
         for raw in dto.quarantine {
             citations[.quarantine(relationID: raw.edge)] = raw.cites.map { $0.citation }
+            quarantineDirections[raw.edge] = raw.direction.map { $0 == "reverse" }
+            if let direction = raw.direction, direction != "forward", direction != "reverse" {
+                misspeltDirections.insert(raw.edge)
+            } else {
+                misspeltDirections.remove(raw.edge)
+            }
         }
         for (relationID, raw) in dto.equivalences {
             citations[.equivalence(relationID: relationID)] = raw.cites.map { $0.citation }
@@ -317,6 +356,8 @@ struct DerivationCuration: Sendable {
             },
             quarantine: Dictionary(
                 dto.quarantine.map { ($0.edge, $0.reason) }, uniquingKeysWith: { _, last in last }),
+            quarantineDirections: quarantineDirections,
+            misspeltDirections: misspeltDirections,
             equivalences: dto.equivalences.mapValues {
                 Directions(forward: $0.forward, reverse: $0.reverse)
             },
@@ -339,8 +380,10 @@ struct DerivationCuration: Sendable {
     // MARK: Drift
 
     /// Ids in the file that the manifest no longer resolves: an object or a
-    /// reduction that is gone, an equivalence that is no longer one, or a
-    /// requirement naming a hypothesis its reduction does not have. Sorted.
+    /// reduction that is gone, an equivalence that is no longer one, a
+    /// quarantine whose direction is misspelt or names a direction of an
+    /// implication, or a requirement naming a hypothesis its reduction does
+    /// not have. Sorted.
     /// The corpus test fails on any, because the wiki moved under a reviewed
     /// correction and the correction has to be reviewed again.
     func unresolved(in manifest: RelationsManifest) -> [String] {
@@ -358,6 +401,20 @@ struct DerivationCuration: Sendable {
             if let relation = manifest.reduction(relationID), relation.kind != .equivalence {
                 bad.insert("not an equivalence \(relationID)")
             }
+        }
+        // A quarantine scoped to one direction names a direction of an
+        // equivalence; an implication has only the one. The direction is
+        // "forward" or "reverse": any other value would hold back the
+        // forward direction silently. (A requirement meant for the reverse
+        // direction but misspelt reads as forward too, and then names a
+        // hypothesis its step lacks, which the check below reports.)
+        for relationID in quarantineDirections.keys {
+            if let relation = manifest.reduction(relationID), relation.kind != .equivalence {
+                bad.insert("not an equivalence \(relationID)")
+            }
+        }
+        for relationID in misspeltDirections {
+            bad.insert("direction \(relationID)")
         }
         for requirement in requires {
             guard let relation = manifest.reduction(requirement.relationID) else {
@@ -559,18 +616,22 @@ private struct CurationDTO: Decodable {
         }
     }
 
-    /// `{edge, reason, cites}`: `reason` is the entry's prose. The `evidence`
-    /// key the file had before citations is ignored.
+    /// `{edge, direction, reason, cites}`: `reason` is the entry's prose, and
+    /// `direction`, when present, scopes it to one direction of an
+    /// equivalence. The `evidence` key the file had before citations is
+    /// ignored.
     struct RawQuarantine: Decodable {
         var edge: String
+        var direction: String?
         var reason: String
         var cites: [RawCitation]
 
-        enum CodingKeys: String, CodingKey { case edge, reason, cites }
+        enum CodingKeys: String, CodingKey { case edge, direction, reason, cites }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             edge = try c.decode(String.self, forKey: .edge)
+            direction = try c.decodeIfPresent(String.self, forKey: .direction)
             reason = try c.decode(String.self, forKey: .reason)
             cites = try c.decodeIfPresent([RawCitation].self, forKey: .cites) ?? []
         }

@@ -175,13 +175,25 @@ struct JobScene {
 
     /// A `claude` that runs `body` with `/bin/sh` in the job's worktree.
     static func fakeClaude(_ body: String, in directory: URL) throws -> ToolLocator {
+        try fakeTools([.claude: body], in: directory)
+    }
+
+    /// Each tool a `/bin/sh` script in `directory` that runs its body: a
+    /// `claude` in the job's worktree, a `gh` wherever CCwiki runs it. None
+    /// reaches the network.
+    static func fakeTools(_ bodies: [ToolLocator.Tool: String], in directory: URL) throws
+        -> ToolLocator {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appending(path: "claude")
-        try Data(("#!/bin/sh\n" + body).utf8).write(to: file)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
-        var tools = ToolLocator(overrides: [.claude: file.path(percentEncoded: false)])
-        tools.locate([.claude])
+        var overrides: [ToolLocator.Tool: String] = [:]
+        for (tool, body) in bodies {
+            let file = directory.appending(path: tool.rawValue)
+            try Data(("#!/bin/sh\n" + body).utf8).write(to: file)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
+            overrides[tool] = file.path(percentEncoded: false)
+        }
+        var tools = ToolLocator(overrides: overrides)
+        tools.locate(Array(bodies.keys))
         return tools
     }
 }
@@ -213,6 +225,7 @@ struct JobCenterTests {
     static func snapshot(changing path: String) -> ReviewSnapshot {
         ReviewSnapshot(
             baseCommit: "865206d47c53",
+            tree: "4b825dc",
             files: [ChangedFile(
                 path: path, oldPath: nil, status: .modified, isBinary: false,
                 oldText: "a\n", newText: "b\n", hunks: [LineHunk(old: 0..<1, new: 0..<1)])],
@@ -236,7 +249,8 @@ struct JobCenterTests {
         let edit = try #require(center.job(id: "edit"))
         #expect(center.reviewCount == 1)
 
-        edit.setReview(ReviewSnapshot(baseCommit: "b", files: [], digest: "e"), findings: [])
+        edit.setReview(
+            ReviewSnapshot(baseCommit: "b", tree: "t", files: [], digest: "e"), findings: [])
         #expect(edit.isUntouchedEdit && center.reviewCount == 1)
 
         edit.setReview(Self.snapshot(changing: "content/Primitives/pseudorandom-function.md"),
@@ -876,6 +890,84 @@ struct JobCenterTests {
         #expect(job.state == .awaitingReview)
         #expect(job.notice == JobNotice(
             tone: .warning, text: "The agent pushed fix/page itself, bypassing review."))
+    }
+
+    /// A correction whose agent changes b to B, run while GitHub lists one
+    /// open pull request by the signed-in account, from `head`, opened as
+    /// the tripwire asks: after the job started, whatever the load on the
+    /// machine running the tests. (A pull request from the minute before
+    /// the job is `TripwireTests.lookBackPullRequest`'s.) The `gh` answers
+    /// nothing else. Returns when the job has settled.
+    static func correction(
+        whileListing head: String, isCrossRepository: Bool = false, number: Int
+    ) async throws -> (JobScene, Job)? {
+        let root = JobScene.newRoot()
+        let tools = try JobScene.fakeTools([
+            .claude: #"printf 'a\nB\nc' > content/page.md"# + "\n" + readyForReview,
+            .gh: """
+                case "$1 $2" in
+                "pr list")
+                    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) \(isCrossRepository) \(head) \(TripwireTests.url(number).absoluteString)" ;;
+                *) echo 'error connecting to api.github.com' >&2; exit 1 ;;
+                esac
+                """,
+        ], in: root.appending(path: "tools"))
+        guard let scene = try await JobScene.make(root: root, tools: tools) else {
+            try? FileManager.default.removeItem(at: root)
+            return nil
+        }
+        let job = scene.center.startCorrection(request(scene))
+        await job.task?.value
+        return (scene, job)
+    }
+
+    @Test("a pull request from another branch, opened while the job ran, leaves it in review with its own diff")
+    func tripwireWithAnotherBranchesPullRequest() async throws {
+        guard let (scene, job) = try await Self.correction(
+            whileListing: "manual/B", number: 53)
+        else { return }
+        defer { scene.delete() }
+
+        #expect(job.state == .awaitingReview, "\(job.state)")
+        #expect(job.notice?.tone == .warning)
+        #expect(job.notice?.text.hasPrefix("A pull request from manual/B was opened while the "
+            + "agent ran, and CCwiki did not open it: "
+            + "https://github.com/axhoover/cryptology.city/pull/53.") == true,
+            "\(job.notice?.text ?? "no notice")")
+        #expect(job.log.contains { $0.text == "Opened while the agent ran: "
+            + "https://github.com/axhoover/cryptology.city/pull/53 (from manual/B)" })
+        // The job's own change, from its own worktree, is what waits.
+        #expect(job.review?.files.map(\.path) == ["content/page.md"])
+        #expect(scene.patch(of: job).contains("+B"))
+        #expect(job.log.contains {
+            $0.text.hasPrefix("Awaiting review in Jobs. CCwiki has pushed nothing")
+        })
+    }
+
+    @Test("a pull request from the job's branch name in another repository leaves it in review")
+    func tripwireWithAForksPullRequest() async throws {
+        guard let (scene, job) = try await Self.correction(
+            whileListing: "fix/page", isCrossRepository: true, number: 54)
+        else { return }
+        defer { scene.delete() }
+        #expect(job.branch == "fix/page")
+        #expect(job.state == .awaitingReview, "\(job.state)")
+        #expect(job.notice?.text.hasPrefix(
+            "A pull request from fix/page in another repository was opened") == true)
+        #expect(job.review?.files.map(\.path) == ["content/page.md"])
+    }
+
+    @Test("a pull request from the job's own branch opens the job, and its worktree is kept")
+    func tripwireWithTheJobsOwnPullRequest() async throws {
+        guard let (scene, job) = try await Self.correction(whileListing: "fix/page", number: 52)
+        else { return }
+        defer { scene.delete() }
+        #expect(job.branch == "fix/page")
+        #expect(job.state == .opened(url: TripwireTests.url(52)), "\(job.state)")
+        #expect(job.notice == JobNotice(
+            tone: .warning, text: "The agent opened this pull request itself, bypassing review."))
+        #expect(FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false)),
+                "kept, for inspection")
     }
 
     @Test("Review Anyway is offered for every way an agent job ends but opened and discarded")

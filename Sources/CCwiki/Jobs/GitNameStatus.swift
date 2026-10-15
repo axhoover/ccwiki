@@ -1,6 +1,6 @@
 import Foundation
 
-/// `git diff --cached -M --name-status -z`, `--numstat -z` and `--raw -z`,
+/// `git diff -M --name-status -z <base> <tree>`, `--numstat -z` and `--raw -z`,
 /// parsed (plans/corrections.md §6.1). `-z`, because reference filenames
 /// carry spaces, `&` and non-ASCII titles, which git otherwise quotes. Pure.
 ///

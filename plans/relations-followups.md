@@ -1,7 +1,9 @@
 # Relations follow-ups: refusal, curation review, proof export, wiki asks
 
 **Spec, 2026-10-12, revised the same day after three critics (§11). Nothing
-here is built.** It follows the explorer and the derivation engine
+here is built.** (Built since, on `claude/relations-followups`; §13 records
+the maintainer's audit of the curation on PR #9, 2026-10-15, and the counts
+below that it changed are updated.) It follows the explorer and the derivation engine
 ([relations-explorer.md](relations-explorer.md),
 [derivations.md](derivations.md)), both built. Rule numbers R1–R14 are
 derivations.md §2's. Every number below was computed here with
@@ -194,8 +196,9 @@ The refusal is already worded in each refused-step row
 
 ## 2. Reviewing the curation
 
-The curation has 42 entries: 3 refuted, 2 settings, 3 quarantine,
-7 equivalences, 23 requires, 2 statementLint and 2 weakens. Each one changes
+The curation has 47 entries (42 before the PR #9 audit, §13): 3 refuted,
+2 settings, 4 quarantine, 7 equivalences, 26 requires, 2 statementLint and
+3 weakens. Each one changes
 answers. The maintainer has to read each entry's claim beside the wiki text
 it rests on, and see what it does. Today that means opening the JSON, then
 the page, then running the script by hand.
@@ -217,7 +220,7 @@ residual risk.
 |---|---|---|
 | `refuted` | `{object, source, text, evidence, cites}` | `evidence` |
 | `settings` | `{object, text, evidence, cites}` | `evidence` |
-| `quarantine` | `{edge, reason, cites}`; the old `evidence` key is removed | `reason` |
+| `quarantine` | `{edge, direction?, reason, cites}`; the old `evidence` key is removed; `direction` (`forward` or `reverse`, added 2026-10-15 for the PR #9 audit, §13) holds back one direction of an equivalence only | `reason` |
 | `equivalences` | `{"<edge>": {forward, reverse, note, cites}}` | `note` |
 | `requires` | `{edge, direction?, hypothesis, notion, notionMarkdown?, metBy, evidence, cites}` | `evidence` |
 | `statementLint` | `{"<edge>": {"note": "…", "cites": [ … ]}}`; Phase 0 still decodes the old bare string | `note` |
@@ -287,7 +290,7 @@ and the asks all use them.
 |---|---|---|
 | `refuted` | `refuted:<object>` | `refuted:circular-evasive-lwe` |
 | `settings` | `settings:<object>` | `settings:honest-majority-t-lt-n-over-2` |
-| `quarantine` | `quarantine:<edge>` | `quarantine:red-bdh-to-hve-bw07` |
+| `quarantine` | `quarantine:<edge>`, one per edge, with or without `direction` | `quarantine:red-bdh-to-hve-bw07` |
 | `equivalences` | `equivalences:<edge>` | `equivalences:red-rabin-ot-to-ot` |
 | `requires` | `requires:<edge>:<hypothesis>`, with `~reverse` after the edge for a reverse direction | `requires:red-dlog-to-prg-bm84:dlog` |
 | `statementLint` | `statementLint:<edge>` | `statementLint:red-evasive-lwe-to-abe` |
@@ -341,7 +344,7 @@ rebuilds the engine, and compares, in both model settings:
 - **Backward lists**: for every target, its R11 singles, settings and
   refuted lists, read off the same single-object closures (no pair search,
   so this costs nothing extra).
-- **The 75 golden queries**, through `golden_expect`, which includes each
+- **The 84 golden queries** (72, then 9 for the audit's cases in §13 and 3 for R13's `metBy`), through `golden_expect`, which includes each
   no-path query's completions. A query is listed when its expectation
   differs.
 - **For a `statementLint` entry**: the lint hits that appear without it.
@@ -351,9 +354,9 @@ rebuilds the engine, and compares, in both model settings:
 
 | Entry | Removes | Changes | Backward lists | Vacuous | Golden queries |
 |---|---|---|---|---|---|
-| `requires:red-dlog-to-prg-bm84:dlog` | 32 / 32 | 16 / 30 | 16 / 16 | 0 | `ddh-prg` |
-| `requires:red-ot-to-mpc-kil88:ot` | 6 / 6 | 1 / 1 | 1 / 1 | 0 | `etdp-mpc`, `oihf-mpc`, `rabin-ot-mpc`, `rom-mpc-all` |
-| `weakens:red-bdh-to-abe-gpsw06` | 22 / 3 | 1 / 20 | 22 / 3 | 0 | `bdh-abe`, `bdh-ibe` |
+| `requires:red-dlog-to-prg-bm84:dlog` | 32 / 32 | 16 / 30 | 16 / 16 | 0 | `bdh-pke`, `cdh-prg`, `ddh-prg` |
+| `requires:red-ot-to-mpc-kil88:ot` | 6 / 6 | 1 / 1 | 1 / 1 | 0 | `etdp-mpc`, `oihf-mpc`, `ot-mpc`, `rabin-ot-mpc`, `rom-mpc-all` |
+| `weakens:red-bdh-to-abe-gpsw06` | 22 / 3 | 1 / 20 | 22 / 3 | 0 | `bdh-abe`, `bdh-be`, `bdh-ibe`, `bdh-pke` |
 | `quarantine:red-bdh-to-hve-bw07` | 2 / 2 | 0 / 0 | 2 / 2 | 0 | `bdh-range-query` |
 | `refuted:ssddh` | 0 / 0 | 0 / 0 | 2 / 2 | 2 / 2 | `ssddh-ke` |
 | `settings:honest-majority-t-lt-n-over-2` | 0 / 0 | 0 / 0 | 1 / 1 | 0 | none |
@@ -480,7 +483,7 @@ the verdict that describes the proof shown (`ExplorerResult.Stronger`).
 | established by | a requirement on a proof row's step that the row does not assume; the producer is the step of the child row for that hypothesis | `.requirement(…)` |
 | kept apart | a proof row with a `weakening` | `.weakening(relationID:)` of that row's step |
 | accepted | a proof row whose child row is weakened | `.weakening(relationID:)` of the child's step |
-| unstated direction | a step on an equivalence whose `equivalences` entry marks that direction anything but `record`, when the manifest has no `reverseClass` for it and the reduction is not a stub, whose class R3 leaves unstated both ways (today only ISIS ⇒ SIS) | `.equivalence(relationID:)` |
+| unstated direction | a step on an equivalence whose `equivalences` entry marks that direction anything but `record`, when the manifest has no `reverseClass` for it and the reduction is not a stub, whose class R3 leaves unstated both ways (today none: ISIS ⇒ SIS, the one unstated direction, is quarantined since §13) | `.equivalence(relationID:)` |
 | not used here | a step in `closure.refused` with a `.requires` reason, whose conclusion is an object on the shown proof, and whose (relation, direction) is on **neither** proof | `.requirement(…)` |
 | vacuous | a start with a `refuted` entry, when the manifest records no `refutedBy` on it | `.refuted(objectID:)` |
 | setting | a start with a `settings` entry | `.setting(objectID:)` |
@@ -536,8 +539,8 @@ already states gets no sentence of its own:
 |---|---|---|
 | established by | "Oblivious transfer ⇒ Secure multi-party computation (Kil88, GMW87) needs OT secure against malicious parties (it instantiates Kil88's ideal OT). Private Information Retrieval ⇒ Oblivious transfer (DMO00) establishes it." | DDH ⇒ MPC |
 | not used here | "Not used here: Discrete logarithm ⇒ Pseudorandom generator (BM84) needs DLOG hard in Z_p^* (p prime, g a generator), and the Discrete logarithm here comes from Computational Diffie-Hellman ⇒ Discrete logarithm (folklore)." | DDH ⇒ PRG; LWE ⇒ COM (PKE ⇒ COM) |
-| accepted | "Pseudorandom function § Invertible PRFs ⇒ Pseudorandom function (folklore) accepts what Pseudorandom permutation ⇒ Pseudorandom function § Invertible PRFs (folklore) gives: an invertible PRF for the forward-oracle game only, over a super-polynomial domain." | any chain through PRP ⇒ iPRF ⇒ PRF |
-| unstated direction | "Shortest Integer Solution § ISIS (Inhomogeneous SIS) ⇒ Shortest Integer Solution (folklore) is used with its class unstated: the record's class holds for the other direction only." | ISIS ⇒ CRHF |
+| accepted | "Pseudorandom function § Invertible PRFs ⇒ Pseudorandom function (folklore) accepts what Pseudorandom permutation ⇒ Pseudorandom function § Invertible PRFs (folklore) gives: an invertible PRF for the forward-oracle game only." | any chain through PRP ⇒ iPRF ⇒ PRF |
+| unstated direction | "Shortest Integer Solution § ISIS (Inhomogeneous SIS) ⇒ Shortest Integer Solution (folklore) is used with its class unstated: the record's class holds for the other direction only." | none since §13 (ISIS ⇒ CRHF was it; ISIS ⇒ SIS is now quarantined) |
 
 **Row anatomy.** It reuses `ExplorerRow`; the only new view code is one
 case in `follow`.
@@ -587,7 +590,7 @@ and the explorer is one click away (Show Proof).
 
 | Behaviour | Test |
 |---|---|
-| `cites`, `notionMarkdown` and `reviewedAgainst.wikiCommit` decode; a file without them still decodes; `statementLint` decodes as a bare string and as `{note, cites}`; entry ids and order as §2.2; 42 entries, ids unique | `CurationEvidenceTests` (Phase 0) |
+| `cites`, `notionMarkdown` and `reviewedAgainst.wikiCommit` decode; a file without them still decodes; `statementLint` decodes as a bare string and as `{note, cites}`; entry ids and order as §2.2; 47 entries (42 before §13), ids unique | `CurationEvidenceTests` (Phase 0) |
 | Every bundled entry has a citation; each `page` starts `content/` and ends `.md`; no quote contains `…`; no `notionMarkdown` contains `[[`, `](` or `**` | `CurationEvidenceTests` |
 | Quote matching: CRLF, NFC, whitespace runs, section scoping, a heading inside a fence, the first of two equal headings, frontmatter with `section: null`, a missing section | `CurationQuoteTests` (A2) and Python `--selftest-units` (A1), both reading `Tests/CCwikiTests/Fixtures/quote-cases.json` (A1) |
 | The review document: a quote with `$\ZZ_p^*$`, `**` and `[[a\|b]]` comes out inside a fence unchanged; a cell with `\|` and `*` is escaped; `--selftest` finds non-zero effects for `refuted:ssddh` and `settings:honest-majority-t-lt-n-over-2`, and BM84's 32 removals | Python `--selftest-units` and `--selftest` (A1) |
@@ -1042,17 +1045,19 @@ they name them in `related`.
 | `ffr:schema-convention-10` | a machine-readable refutation marker; ask 2 below picks its option B |
 | `ffr:schema-convention-9` | how a barrier between models is typed; ask 3 |
 | `ffr:schema-convention-14` | honest-majority "settings" as edges from a secure-channels node; CCwiki's two `settings` entries (§4.3) |
-| `ffr:verification-gap-8` | ISIS ⇔ SIS's unproved direction; `equivalences:` and `requires:` on that edge |
+| `ffr:verification-gap-8` | ISIS ⇔ SIS's unproved direction; `equivalences:` and, since §13, `quarantine:` on that edge (with wiki-asks.md ask 21) |
 | `ffr:node-granularity-3` | YZW+19 on a new `subexponential-lpn-above-half` variant |
 | `ffr:node-granularity-11` | AMR25 on a quasi-polynomial low-noise LPN variant |
 | `ffr:missing-edge-4` | a KP-ABE adaptive node; ask 5 |
 | `ffr:content-error-26`, `ffr:verification-gap-29` | Kil88's OT ⇒ MPC and OT ⇒ COM Statements; ask 4 |
-| `fu2:node-granularity-12`, `fu2:node-granularity-13` (round 2, paper section) | Wee22's dropped LWE conjunct; BW07's composite-order hypotheses: the 3 `quarantine` entries |
+| `fu2:node-granularity-12`, `fu2:node-granularity-13` (round 2, paper section) | Wee22's dropped LWE conjunct; BW07's composite-order hypotheses: 3 of the 4 `quarantine` entries |
 
 ### 4.2 The asks
 
 Inbox kinds are the wiki's (`INBOX_KINDS`). "Retires" names the curation
-entries the change makes redundant.
+entries the change makes redundant. These are asks 1–10 as specified;
+[wiki-asks.md](wiki-asks.md) is the current text, with the PR #9 audit's
+asks 11–21 and its extensions of asks 5, 6 and 8 (§13).
 
 **Ask 1. `reverse-class` on every equivalence** (`ccw:schema-reverse-class`,
 `schema-convention`).
@@ -1235,8 +1240,10 @@ node can say that, so CCwiki keeps its four entries.
   Each is a folklore or textbook result that the wiki does not record.
 - **Effect.** Each is measured by adding it alone, as an unstated,
   standard-model, folklore implication, and counting new default derived
-  pairs (of 1,022: measured before R13's `metBy` change moved the default to
-  1,024, and not measured again). All 11 together add **432**.
+  pairs (1,022 when written). All 11 together add **432**. After the PR #9
+  audit (§13) and R13's `metBy` change, the base is 999, DLOG ⇒ OWF is its
+  own ask (wiki-asks.md ask 13), and the other 10 add 372; wiki-asks.md has
+  the counts.
 
   | Edge | Proposed source | New pairs |
   |---|---|---|
@@ -1290,13 +1297,14 @@ node can say that, so CCwiki keeps its four entries.
 
 ### 4.3 What the asks would buy
 
-- **Asks 1–7, with the wiki's own items, retire 35 of the 42 entries and
-  add 1:**
+- **Asks 1–7, with the wiki's own items, retired 35 of the 42 entries and
+  added 1** when written; since the PR #9 audit (§13), asks 1–7, 11, 17,
+  18 and 21 retire 40 of the 47 (wiki-asks.md):
   - 7 equivalences and 3 refuted entries;
-  - 3 quarantine entries, through the wiki's own `fu2:` items;
-  - 2 weakens entries;
-  - 18 of the 23 requires entries (ISIS's through
-    `ffr:verification-gap-8`);
+  - the quarantine entries, through the wiki's own `fu2:` items (and, since
+    §13, ISIS's one direction through ask 21);
+  - the weakens entries (3 since §13);
+  - 18 of the 23 requires entries (21 of 26 since §13);
   - 2 settings entries, through `ffr:schema-convention-14` (option A). The
     honest-majority variants then become conclusions of a new
     `secure-channels-model` node, so CCwiki adds one entry,
@@ -1308,7 +1316,8 @@ node can say that, so CCwiki keeps its four entries.
   renamed to the variant, with one exception: MPC's backward list loses its
   two setting rows, because the honest-majority variants no longer imply
   MPC. Each variant instead lists `secure-channels-model` as its setting.
-- **Asks 8 and 9 add answers:** 432 default pairs from the OWF edges, and
+- **Asks 8 and 9 add answers:** 432 default pairs from the OWF edges when
+  written (373 from ask 8's ten today, 405 with ask 13's DLOG ⇒ OWF), and
   classical lattice chains.
 - **What remains** is 8 entries:
   - 5 requires entries: JLS21's shared prime and Wat09's four;
@@ -2012,3 +2021,102 @@ nowhere in it, and `ExplorerResultTests` checks that.
 
 **The CHANGELOG.** "The topmost unreleased section" is 0.2.0 today. Whether
 the batch ships in 0.2.0 or opens 0.3.0 is the lead's call (corrections §17).
+
+## 13. The PR #9 audit, 2026-10-15: dispositions
+
+The maintainer audited the curation mathematically on PR #9, against head
+`a05275e` and wiki `ab81f02`. The audit examined 19 entries (1, 6, 10,
+12–13, 15–20, 23–24, 30, 32–34 and 41–42 in the review's numbering before
+it); **the other 23 are not certified by it.** Matching quotations do not
+validate a theorem or its encoding in the graph, and this section records
+what the audit changed.
+
+**Decided by the maintainer.** New reductions and nodes the audit asks for
+are filed only as upstream wiki asks (selective KP-ABE ⇒ CPA-PKE, DLOG ⇒
+OWF on the same group family, Haitner's semi-honest-to-malicious OT
+compiler, the adaptive KP-ABE ⇒ BE construction, a separate `dbdh` node:
+[wiki-asks.md](wiki-asks.md) asks 11–15). CCwiki adds no edge of its own,
+so every step it chains stays the wiki's claim. The corrections to the
+wiki's text are asks too (asks 16–21). Everything else is in the curation,
+in its existing schema plus one capability.
+
+**The one new capability.** A `quarantine` entry may carry `direction`
+(`forward` or `reverse`) and then holds back that direction of an
+equivalence only (derivations.md R13, §2a). Both engines implement it
+(Python `Curation.quarantined`, Swift
+`DerivationCuration.quarantineReason(_:isReverse:)`), with
+`selftest_direction_quarantine` and `DerivationTests.quarantineOneDirection`.
+The entry id stays `quarantine:<edge>`.
+
+**The evidence rule's one exception** (derivations.md §2a): where the audit
+corrects a Statement from the paper, an entry may narrow, never widen, what
+the wiki's text allows, quoting the text it narrows; a wiki ask carries the
+correction upstream.
+
+| Audit item | Disposition |
+|---|---|
+| §1 GPSW06: require DBDH, keep the selective KP-ABE restriction | Done: `requires:red-bdh-to-abe-gpsw06:bdh`, DBDH in GPSW06's symmetric prime-order group; nothing concludes `bdh`, so BDH ⇒ ABE now says it assumes DBDH (`bdh-abe`), and computational BDH alone never invokes GPSW06 unqualified. The weakening stays. A `dbdh` node is ask 11 |
+| §1 Selective KP-ABE ⇒ ordinary CPA-PKE | Wiki ask 12, with the audit's construction. BDH ⇒ PKE stays underived until the wiki records it (`bdh-pke`) |
+| §1 Do not whitelist adaptive IBE/BE consumers | Kept: `weakens:red-bdh-to-abe-gpsw06` accepts nothing (`bdh-ibe`, `bdh-be`) |
+| §2 Keep the BM84 guard; correct "uses only the group operation" | Done: the notion and evidence say the recurrence reads residues of $\ZZ_p^*$ as integers, which an arbitrary group's encoding does not supply; the wiki's rationale is ask 16. DDH ⇒ PRG still holds without BM84; the curation does not claim it was lost |
+| §2 DLOG ⇒ OWF on the same group family | Wiki ask 13 (and out of ask 8's list). CDH ⇒ PRG stays refused at BM84 until then (`cdh-prg`) |
+| §3 Haitner's compiler | Wiki ask 14, which asks for the compiled OT's notion to be stand-alone, simulation-based security against a static malicious adversary, the notion Kil88's substitution consumes (and ask 4's `malicious-ot-security` defined in that sense, not by the OT page's game-based definitions). Semi-honest OT ⇒ malicious MPC stays refused (`etdp-mpc`); the mutations `ask-14-etdp-mpc` and `ask-14-etdp-com` replay asks 4 and 14 |
+| §3 Static malicious MPC with abort | Done: `weakens:red-ot-to-mpc-kil88`, accepting nothing. The record has no step that consumes MPC, so it refuses nothing; every answer through Kil88 now says what it concludes (`ot-mpc`, `ddh-mpc`), and the 17 X ⇒ MPC pairs are weakened only. `rabin-ot-mpc` is not one of them: it stays refused at Kil88 (`requires`, since Cre87's Rabin OT is semi-honest), and its golden record changed only in losing the near-miss hint that its host OT derives MPC, which OT now does only weakened and assuming malicious OT. A variant node for it joins ask 5 |
+| §3 Record the malicious upgrade for `metBy`, DMO00 included | Done in both OT requirements' evidence: DMO00 is accepted on its Statement's completeness claim, which includes upgrading its OT to malicious security; the page's account of the upgrade is part of ask 14 |
+| §3 OT ⇒ COM: not both statistical in the real model | Done: the evidence says statistical hiding and binding hold in the OT-hybrid model only; the `com` it concludes is an ordinary commitment. OT ⇒ OWF ⇒ PRG ⇒ COM awaits ask 8's OT row (Hai08, Theorem 4) |
+| §4 Correct DLO24's experiment | Wiki ask 17 |
+| §4 Keep RSA ⇒ FAC; restrict FAC ⇒ RSA to the generic-RSA experiment | Done: `requires:red-rsa-to-fac-dlo24~reverse:fac`, factoring hardness against preprocessing fixed before the modulus is sampled, with the conclusion scoped to DLO24's generic-RSA adversaries; the `free` class no longer stands alone. RSA ⇒ FAC stays RSA78's, fully black-box (`rsa-fac`); FAC ⇒ RSA is conditional (`fac-rsa-all`); DCR ⇒ FAC ⇒ RSA is refused (`dcr-rsa-all`) |
+| §5 \|D\| = λ^ω(1) on both PRP conversions | Done: `requires:red-prp-to-prf:prp` and `requires:red-prp-to-invertible-prf:prp`. LR88's PRP meets it under LR88's own premise (a PRF on $\bits^n$ with $2^n$ superpolynomial, which its bound needs), so DDH ⇒ iPRF is unchanged. The `prf` node does not enforce that premise (a PRF on a polynomial-size domain exists unconditionally), so the acceptance is relative to LR88's theorem, as the evidence says; a large-domain PRF hypothesis for LR88 joins ask 6's PRP row; a bare PRP gives a PRF only assuming it (`prp-prf`), and a strong PRP, whose domain may be small, no longer does (`sprp-prf`). The weakening's notion drops the domain, now an input condition |
+| §5 Keep the strong-iPRF refusal | Kept: the weakening accepts only iPRF ⇒ PRF |
+| §6 BW07: two typed assumptions on one family | Done: the quarantine's reason names cBDH and C3DH on one composite-order family, with subgroup decision from C3DH, and keeps the selective conclusion; quarantine kept. The Statement and the reference's title are ask 18 |
+| §7 Keep SIS ⇒ ISIS; quarantine ISIS ⇒ SIS | Done: `quarantine:red-isis-inhomogeneous-sis-to-sis` (forward only); the circular requirement is gone; the equivalence note states the proved direction's parameters (`isis-sis`, `isis-crhf`, `sis-isis`). Parameters and proof are ask 21 |
+| §8 ABE ⇒ BE | Done: the evidence states the KP construction with membership policies and what selective KP-ABE gives; the requirement stays. The construction is ask 15 |
+| §8 TDP ⇒ NIZK | Done: the notion requires certification for adversarially chosen indices (CL18's certifiable injectivity suffices), not double enhancement alone. The Statement's sentence is ask 19 |
+| §8 Circular evasive LWE | **Partly.** The sentence names the attacked formulation (AMYY25's Assumption 4.1, HLL23's), the sampler class (public-coin) and the theorem (Theorem 4.6, Claim 4.7), says the refutation is conditional on the theorem's base-hardness premise, and says what it does not refute. It does not state the premise: neither the audit nor the wiki says what it is (LWE in which modulus and noise regime, or more), and the papers are out of reach here. The premise awaits ask 20 (`needs_paper`), and so does the wiki's text |
+| Preserve 12–13, 16–19, 20 | Unchanged, byte for byte |
+| Regenerate; quotes; ablations; regressions | Done: golden file (81 queries, 9 new for the audit's cases; 16 patched manifests, 6 new for the asks' positive cases), [curation-review.md](curation-review.md) (47 entries, 117 of 117 quotes), a `--selftest` check per semantic case |
+
+**What it changed in the answers** (default models, single starts): the
+full derived pairs go from 1,022 to 998. Seventeen X ⇒ MPC pairs are kept
+as weakened only (18 weakened-only pairs with BDH ⇒ ABE), and 7 are lost:
+ISIS ⇒ SIS, CRHF and constant-round ZK arguments, and a strong PRP ⇒ PRF,
+iPRF, MAC and SKE. BDH ⇒ ABE and the four PRP pairs now carry an
+assumption. With idealised models, 1,222 → 1,181 full pairs, for the same
+reasons plus ISIS's ROM chains and DCR ⇒ RSA.
+
+**The audit's semantic cases**, as `--selftest` checks and golden queries:
+
+| Case | Today | Becomes |
+|---|---|---|
+| Computational BDH alone cannot invoke GPSW06 unqualified | BDH ⇒ ABE assumes DBDH | with ask 11, BDH stops reaching ABE, and DBDH reaches selective KP-ABE with no extra assumption |
+| Selective KP-ABE reaches ordinary PKE, not adaptive IBE/BE | IBE, BE refused on the weakened ABE; PKE underived | PKE with ask 12 (and 5), assuming DBDH; IBE and BE still underived (mutations `ask-12-*`, +41 pairs) |
+| CDH reaches PRG through DLOG and OWF | refused at BM84 | derived with ask 13, fully black-box and without BM84 (mutation `ask-13-cdh-prg`, +32 pairs) |
+| Semi-honest OT reaches static malicious MPC with abort | refused at Kil88 | derived, weakened, with ask 14 (and 4): ETDP ⇒ MPC is one of 7 new weakened-only pairs, beside 33 new full pairs, ETDP ⇒ COM among them (mutations `ask-14-*`) |
+| A two-point PRP cannot instantiate the PRF conversions | the domain requirement is not met by a bare PRP | — |
+| DLO's preprocessing cannot receive the eventual modulus | FAC ⇒ RSA only assuming DLO24's experiment | ask 17 restates it on the page |
+
+**After the review of these changes** (same day, before merge):
+
+- **Positive cases as mutations.** A golden patch may carry `dropCuration`,
+  the `quarantine`, `requires` or `weakens` entries the ask's re-review
+  would retire (Python `patched_curation`, Swift
+  `GoldenPatch.curation(_:from:)`). Six mutations replay the asks' positive
+  cases on the manifests they would give: asks 5 and 12 (BDH ⇒ PKE assuming
+  DBDH; BDH ⇒ IBE and BE underived), ask 13 (CDH ⇒ PRG), asks 4 and 14
+  (ETDP ⇒ MPC weakened only; ETDP ⇒ COM in full). Each has a `--selftest`
+  check; Swift asserts their answers in exact mode.
+- **Pins.** CI's clone is drifted, so `derivable` is pinned for every audit
+  case except `cdh-prg`: no ask changes the others without first failing
+  `curationResolves`, `curationEdgesUnchanged` or `curationQuotesFound`.
+- **A misspelt direction.** A quarantine `direction` other than `forward`
+  or `reverse` read as forward silently; both engines now report it as
+  `direction <edge>`, and `curationResolves` fails.
+- **The explorer's wording.** The on-pair row and the refusal of a
+  quarantine of one direction say the Statement does not establish that
+  direction, not that the recorded hypotheses differ.
+- **Not done.** A requirement on LR88's own hypothesis (a PRF on $\bits^n$
+  with $2^n$ superpolynomial): it is proposed in ask 6, and the PRP entries'
+  evidence says their acceptance of LR88 is relative to LR88's premise. The
+  vacuous-answer banner says a refuted start "is known to be false (…)",
+  which for circular evasive LWE holds only under AMYY25's premise (above);
+  the entry's own sentence says so, the banner does not yet.

@@ -94,7 +94,7 @@ struct DiffGuardTests {
         target: CorrectionTarget? = DiffGuardTests.target,
         humanVerified: Set<String> = [], upstream: Set<String> = [], privatePaths: [String] = []
     ) -> [DiffFinding] {
-        let snapshot = ReviewSnapshot(baseCommit: "ab81f02", files: files, digest: "")
+        let snapshot = ReviewSnapshot(baseCommit: "ab81f02", tree: "", files: files, digest: "")
         let context = DiffGuard.Context(
             kind: kind, humanVerifiedPaths: humanVerified, changedUpstream: upstream,
             target: target, privatePaths: privatePaths)

@@ -599,7 +599,17 @@ extension ExplorerResult {
             case .complexityClassEndpoint: status = "touches a complexity class, never used"
             case .unresolvedEndpoint: status = "names an object the wiki does not have, never used"
             case .concludesAModel: status = "concludes a model, never used"
-            case .quarantined: status = "not used: its recorded hypotheses do not match its Statement"
+            case .quarantined:
+                // A quarantine of one direction of an equivalence: its
+                // hypotheses match, but its Statement does not establish
+                // this direction (the review's wording, `_description`).
+                if writer.derivation.curation.quarantineDirections[entry.relationID] != nil {
+                    let way = entry.isReverse ? "right to left" : "left to right"
+                    status = "not used \(way): its Statement does not establish that direction; "
+                        + "the other direction is still a step"
+                } else {
+                    status = "not used: its recorded hypotheses do not match its Statement"
+                }
             }
         }
         if !entry.needs.isEmpty {

@@ -765,6 +765,38 @@ struct ExplorerResultTests {
         #expect(refusedTargets == [statement])
     }
 
+    @Test("a quarantine of one direction says its Statement does not establish it, not that its hypotheses differ")
+    func directionQuarantineWording() throws {
+        // A whole reduction held back: its recorded hypotheses do not match.
+        let whole = try Self.adjusted(ExplorerQuery(from: ["bdh"], to: "hve"))
+        let wholeRow = try #require(whole.sections.first { $0.id == "onPair" }?.rows.first)
+        #expect(wholeRow.detail?.hasSuffix("not used: its recorded hypotheses do not match its Statement") == true)
+
+        // ISIS ⇒ SIS held back left to right only, as the shipped curation
+        // holds it: the hypothesis matches, and the direction is unproved.
+        let reason = "The Statement proves SIS ⇒ ISIS only."
+        let relationID = "red-isis-inhomogeneous-sis-to-sis"
+        let curation = DerivationCuration(
+            quarantine: [relationID: reason],
+            quarantineDirections: [relationID: false],
+            equivalences: [relationID: .init(forward: "record", reverse: "record")])
+        let derivation = try AdjustmentsFixture.derivation(curation: curation)
+        let result = Self.compute(ExplorerQuery(from: ["isis"], to: "sis"), over: derivation)
+        let onPair = try #require(result.sections.first { $0.id == "onPair" }?.rows.first)
+        #expect(onPair.detail?.hasSuffix("not used left to right: its Statement does not establish that "
+            + "direction; the other direction is still a step") == true)
+        #expect(onPair.notes == [reason])
+        let refused = try #require(result.sections.first { $0.id == "refused" }?.rows.first)
+        #expect(refused.title.hasPrefix("Not used: the wiki records "))
+        #expect(refused.title.hasSuffix(" as one direction of an equivalence, and its Statement does not "
+            + "establish that direction. " + reason))
+
+        // The other direction is used, and refused nowhere.
+        let backward = Self.compute(ExplorerQuery(from: ["sis"], to: "isis"), over: derivation)
+        let backwardIDs = backward.sections.map { $0.id }
+        #expect(!backwardIDs.contains("refused"))
+    }
+
     @Test("Show It swaps the Adjustments with the proof, and removes or adds the section")
     func adjustmentsFollowTheProofShown() throws {
         let both = Self.compute(ExplorerQuery(from: ["a"], to: "t"),

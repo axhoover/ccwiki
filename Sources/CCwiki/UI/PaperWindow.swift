@@ -158,8 +158,10 @@ struct PaperWindowView: View {
                     pageIndicator = PageIndicator(index: index, count: count)
                 },
                 onZoom: { zoom = $0 })
-            // A replaced paper can keep its file name; the record tells them apart.
-            .id("\(record.fileName) \(record.addedAt.timeIntervalSince1970) \(record.bytes)")
+            // A replaced paper can keep its file name, its size and even its
+            // second; each keep has a revision of its own, so a replacement
+            // is a new view that loads the new file, and nothing else is.
+            .id(Self.documentIdentity(of: record))
             // The title bar's proxy icon: drag the PDF to Mail, ⌘-click for its path.
             .navigationDocument(file)
 
@@ -194,6 +196,12 @@ struct PaperWindowView: View {
             .frame(height: Theme.paperStatusBarHeight)
             .background(.bar)
         }
+    }
+
+    /// What the paper view is keyed by: the keep, not the file. A new keep
+    /// is a new view that loads its file; nothing else reloads it.
+    nonisolated static func documentIdentity(of record: PaperRecord) -> String {
+        record.revision
     }
 
     static func provenance(of record: PaperRecord) -> String {

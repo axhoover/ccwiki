@@ -404,6 +404,7 @@ import Testing
         let snapshotter = ReviewSnapshotter(git: scene.git)
         let before = await snapshotter.review(of: job, clone: scene.paths.clone, privatePaths: [])
         #expect(before?.snapshot.isEmpty == false)
+        let reviewed = try #require(before?.snapshot)
 
         // A copy of the clone, with the base in it, in the agent's own folder.
         let fake = job.worktree.appending(path: ".ccwiki/repo")
@@ -423,7 +424,7 @@ import Testing
         // Said as the reason, not as git failing.
         await scene.center.refreshReview(job)
         #expect(job.log.last?.text == GitService.redirectedWorktree)
-        #expect(await PublisherTests.publisher(scene).check(job, reviewed: "")
+        #expect(await PublisherTests.publisher(scene).check(job, reviewed: reviewed)
             == .failed(GitService.redirectedWorktree + " Nothing was sent."))
     }
 
@@ -528,7 +529,7 @@ import Testing
         try scene.write("content/page.md", "a\nB\nc", in: job)
         job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
         await scene.center.refreshReview(job)
-        let reviewed = try #require(job.review?.digest)
+        let reviewed = try #require(job.review)
         #expect(!job.findings.contains { $0.rule == .changedUpstream })
 
         // A sync brings a commit that changed the same page; nothing takes
@@ -546,7 +547,7 @@ import Testing
                                     "the review shows the new warning")
         #expect(upstream.severity == .warning)
         #expect(first == .refused(Publisher.newWarning(upstream)))
-        #expect(job.review?.digest == reviewed, "the diff itself did not change")
+        #expect(job.review?.digest == reviewed.digest, "the diff itself did not change")
 
         // On screen now: the next Open Draft PR asks about it, and the
         // check goes on past it.
