@@ -154,8 +154,11 @@ not try to be. Measured against all 297 files, it must handle:
   URL's `#fragment` and a quoted `"#P"` are values.
 - values that run on over the indented lines below their key, as js-yaml reads
   them: a plain or quoted scalar, folded (a line break to a space, a blank line
-  to a newline), and a flow sequence, which the wiki's formatter wraps when it
-  is long (`key:` then an indented `[…]`).
+  to a newline, a line break after a double-quoted value's escaping `\` to
+  nothing), and a flow sequence, which the wiki's formatter wraps when it is
+  long (`key:` then an indented `[…]`), its items folded the same way. One
+  edge is left: an escaped space or tab at the end of a double-quoted line
+  (`\ `) is trimmed with the line, so it reads as an escaped line break.
 
 It deliberately **ignores nested mappings**: an indented block under a key is
 skipped, so a nested `status:` can never overwrite the top-level one. A list
