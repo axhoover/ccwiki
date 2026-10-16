@@ -223,6 +223,26 @@ import Testing
         ]))
         #expect(fm.fields["hypotheses"] == .list(["a", "b"]))
         #expect(fm.string("title") == "X")
+
+        // A JSON-style list closes at the margin, which js-yaml reads with
+        // only a warning, and the keys after it are still keys.
+        let json = Self.parse("""
+            aliases: [
+              PRF,
+              "PRFs",
+            ] # the end
+            wrapped:
+              [
+                a, b
+            ]
+            empty: [
+            ]
+            title: X
+            """)
+        #expect(json.fields["aliases"] == .list(["PRF", "PRFs"]))
+        #expect(json.fields["wrapped"] == .list(["a", "b"]))
+        #expect(json.fields["empty"] == .list([]))
+        #expect(json.string("title") == "X")
     }
 
     @Test("a flow list item over several lines folds as a scalar does, blank lines and escapes included")
