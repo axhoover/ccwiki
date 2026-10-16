@@ -192,14 +192,15 @@ struct FixesWikiparseTests {
         #expect(WikiPage.Heading.plainText("AT&amp;T -- x&#97;_y_") == "AT&T — xay")
     }
 
-    @Test("a URL's, an autolink's or an address's text keeps its dashes, as the page keeps them")
-    func headingIDsLeaveLinksAlone() throws {
+    @Test("a URL's, an autolink's or an address's text is educated by itself, as on the site")
+    func headingIDsEducateLinks() throws {
         let headings = [
             "See https://example.com/a--b", "See <https://example.com/a--b>", "See https://example.com/a->b",
             "Mail a--b@example.com", "Mail <a--b@x.com>", "mailto:a--b@x.com", "See //example.com/a--b",
             "x--https://a.com/b--c", "https://x.com -> y", "_https://x.com/a--b_", "*https://x.com/a--b*",
             "[https://x.com/a--b](u) link", "a--b.com/x--y", "<1x--y>", "<javascript:a--b>",
-            #"\https://a--b@c.org"#, "https://[[a]]--b", "a``Σ quotes",
+            #"\https://a--b@c.org"#, "https://[[a]]--b", "a``Σ quotes", "<https://x.org/a->-b",
+            "https://x.org/a...b...", "<https://x.org/``a''>", "https://x.org/a`` b''",
         ]
         let markdown = headings.map { "## " + $0 }.joined(separator: "\n\n") + "\n"
         let script = try MarkdownScript.load()
@@ -210,12 +211,14 @@ struct FixesWikiparseTests {
         let page = WikiPage(path: "Primitives/x.md", text: markdown)
         #expect(page.headings().map(\.id) == rendered)
         #expect(rendered.count == headings.count)
-        #expect(page.headings().first?.id == "see-httpsexamplecoma--b", "the page's id, not see-httpsexamplecomab")
+        #expect(page.headings().first?.id == "see-httpsexamplecomab", "the site's id, not see-httpsexamplecoma--b")
 
         #expect(WikiPage.Heading.plainText("See https://example.com/a--b -> c")
-                == "See https://example.com/a--b → c")
-        #expect(WikiPage.Heading.plainText("See <https://example.com/a--b>") == "See https://example.com/a--b")
-        #expect(WikiPage.Heading.plainText("Mail a--b@example.com -- now") == "Mail a--b@example.com — now")
+                == "See https://example.com/a—b → c")
+        #expect(WikiPage.Heading.plainText("See <https://example.com/a--b>") == "See https://example.com/a—b")
+        #expect(WikiPage.Heading.plainText("Mail a--b@example.com -- now") == "Mail a—b@example.com — now")
+        #expect(WikiPage.Heading.plainText("<https://x.org/a->-b") == "https://x.org/a--b",
+                "the link's text is educated by itself, so no dash across its end")
         #expect(WikiPage.Heading.plainText("[https://x.com/a--b](u)") == "https://x.com/a—b",
                 "a markdown link's text is educated: markdown-it makes no link inside it")
     }

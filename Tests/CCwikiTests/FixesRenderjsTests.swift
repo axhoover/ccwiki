@@ -189,6 +189,19 @@ struct FixesRenderjsTests {
         #expect(html.contains(#"<a class="internal" href="/x">a → b</a>"#))
     }
 
+    @Test("a URL's, an autolink's or an address's text is educated as on the site; its href is not")
+    func linkTextTypography() throws {
+        let html = try render("""
+            ## See https://example.com/a--b
+
+            See https://example.com/a--b... and <https://x.org/p--q> and a--b@x.com -- ok.
+            """)
+        #expect(html.contains(#"<h2 id="see-httpsexamplecomab""#), "rehype-slug reads the educated text")
+        #expect(html.contains(#"<a href="https://example.com/a--b">https://example.com/a—b</a>…"#))
+        #expect(html.contains(#"<a href="https://x.org/p--q">https://x.org/p—q</a>"#))
+        #expect(html.contains(#"<a href="mailto:a--b@x.com">a—b@x.com</a> — ok."#))
+    }
+
     // MARK: Callouts
 
     @Test("a callout's title is its first line, and the lines after it its body")

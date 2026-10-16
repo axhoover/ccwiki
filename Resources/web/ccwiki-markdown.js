@@ -664,8 +664,12 @@
   // quotes, ``` `` ``` and `''` (only two) as “ and ”, `--` (only two) an em
   // dash, and three or more dots an ellipsis. Nothing else, so `---`, `(c)`,
   // `+-` and `..` stay as written and markdown-it's `replacements` is off;
-  // its `smartquotes` stands in for the quotes. Not inside an autolink, a
-  // URL.
+  // its `smartquotes` stands in for the quotes. A link's text too,
+  // whatever made the link: the site's parser makes an autolink, and
+  // remark-gfm a URL or an address, a link with a text node before any of
+  // this runs, and smartypants and the arrows edit every text node, so on
+  // the site `https://x.org/a--b` reads `https://x.org/a—b`. Its href
+  // stays.
 
   var ARROWS = /(-{1,2}>|={1,2}>|<-{1,2}|<={1,2})/g;   // ofm.ts:121
   var ARROW = {
@@ -694,17 +698,14 @@
     md.core.ruler.after("text_join", "ccwiki_typography", eachText(educated));
   }
 
-  /** A core rule that edits the text of every inline block, but not of an
-   *  autolink. */
+  /** A core rule that edits the text of every inline block, each `text`
+   *  token on its own, a link's included. */
   function eachText(edit) {
     return function (state) {
       state.tokens.forEach(function (block) {
         if (block.type !== "inline" || !block.children) return;
-        var autolink = 0;
         block.children.forEach(function (token) {
-          if (token.type === "link_open" && token.info === "auto") autolink++;
-          else if (token.type === "link_close" && token.info === "auto") autolink--;
-          else if (token.type === "text" && !autolink) token.content = edit(token.content);
+          if (token.type === "text") token.content = edit(token.content);
         });
       });
     };

@@ -101,19 +101,23 @@ typography (below): `ccwiki_typography` runs before `ccwiki_heading_ids`, so
 `WikiPage.Heading.plainText` reads a heading the same way (`educated`: the
 same arrows, `--` and `...`, and LaTeX's ``` `` ``` and `''`, with an escaped
 character or a character reference read as the character it stands for),
-and leaves alone what the page leaves alone: math, code, a wikilink, and the
-text of a link markdown-it makes of a URL or an address, which the page's
-typography skips. Those links are markdown-it's autolinks (`<https://…>`,
-`<name@host>`) and what linkify-it finds (`https://…`, `ftp://…`,
-`//host/…`, `mailto:…` and a bare `name@host`; never a `www.` link), so
-`## See https://x.org/a--b` keeps its `--` in the id. `Heading.Linkify` is
-the linkify-it markdown-it 15 bundles, ported, its patterns in ICU's
-syntax, and `plainText` applies it where markdown-it does: at a `://` after
-a scheme's name while it parses, then to each run of text between tokens
-of a heading it finds a link in. So the outline, search, the preview cards
-and DiffGuard name the ids the page has, but for the rare headings listed
-under "Still different" below. `FixesWikiparseTests` checks the two against
-each other; on the wiki at ab81f02 all 2,769 headings of 883 pages agree.
+and leaves alone what the page leaves alone: math, code and a wikilink. The
+text of a link markdown-it makes of a URL or an address is educated too,
+as the site educates a link's text, but by itself, as the page educates
+the `text` token markdown-it makes of it: `## See https://x.org/a--b` reads
+`See https://x.org/a—b` and has the id `see-httpsxorgab`, as on the site,
+while `<https://x.org/a->-b` keeps its `--`, which no one token holds.
+Those links are markdown-it's autolinks (`<https://…>`, `<name@host>`) and
+what linkify-it finds (`https://…`, `ftp://…`, `//host/…`, `mailto:…` and a
+bare `name@host`; never a `www.` link, which markdown-it leaves in the
+text around it). `Heading.Linkify` is the linkify-it markdown-it 15
+bundles, ported, its patterns in ICU's syntax, and `plainText` applies it
+where markdown-it does: at a `://` after a scheme's name while it parses,
+then to each run of text between tokens of a heading it finds a link in.
+So the outline, search, the preview cards and DiffGuard name the ids the
+page has, but for the rare headings listed under "Still different" below.
+`FixesWikiparseTests` checks the two against each other; on the wiki at
+ab81f02 all 2,769 headings of 883 pages agree.
 
 **Options** match the site: `linkify: true` (GFM autolinks), `typographer: true`
 (smartypants), `breaks: false` (`HardLineBreaks` is not configured), and
@@ -126,9 +130,15 @@ script (§5), so markup coming out of the wiki cannot execute.
 OFM's arrows and retext-smartypants' defaults do: `->` → →, `=>` → ⇒ and the
 rest of ofm.ts's arrows, then `--` (only two) → —, three or more dots → …,
 and LaTeX's ``` ``quotes'' ``` → “quotes”. `---`, `(c)`, `+-` and `..` stay
-as written. A wikilink's text is a `text` token between `wikilink_open` and
-`wikilink_close`, so it is educated as the site educates a link's text; the
-preview cards get the same rules.
+as written. A link's text is educated whatever made the link, as on the
+site: every link there holds a text node by the time OFM's arrows and
+smartypants run, and they edit every text node. So a wikilink's text is a
+`text` token between `wikilink_open` and `wikilink_close`, and an
+autolink's, a URL's or an address's text is educated where it stands,
+between markdown-it's `link_open` and `link_close`: `https://x.org/a--b`
+reads `https://x.org/a—b`, its href as written. Each `text` token is
+educated by itself, as the site educates each text node. The preview cards
+get the same rules.
 
 **Callouts** take their title from the marker's line only (math and links
 included) and the lines after it as their body, as ofm.ts does (its text
@@ -234,8 +244,11 @@ one: the regex wants a `|` at the start of the line.
   page; `*` is only deleted here, so one that is not emphasis, which the
   page keeps, shows at an edge of the heading (`## a **` has the id `a-`
   there, `a` here) and before a final `Σ`, and `*emphasis*` right around
-  an address does not set it apart as it does there; and a `[` before a
-  markdown link starts that link's text here.
+  an address does not set it apart as it does there; a `[` before a
+  markdown link starts that link's text here; and after a `[` no `]`
+  closes, markdown-it's backtick cache can leave a pair of backticks
+  unread, so `` ## [ `a--b`c`x `` has no code span there (`a—b`, and an
+  autolink in the backticks is a link) and one here.
 
 **Not** reproduced, deliberately: the SPA router and the graph view.
 
