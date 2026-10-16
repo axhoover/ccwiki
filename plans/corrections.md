@@ -2214,7 +2214,7 @@ enum GitHubAccess: Sendable, Equatable {
     static func classify(ghPresent: Bool, signedIn: Bool?, canPush: Bool?, repository: String) -> GitHubAccess
 }
 extension GitHubAuth {
-    /// `gh auth status`: nil on a timeout, unlike isAuthenticated's false.
+    /// `gh auth status`, asked afresh: nil when gh could not be asked, as isAuthenticated is.
     static func signedIn(tools: ToolLocator) async -> Bool?
 }
 struct AgentInvocation: Sendable, Equatable {
