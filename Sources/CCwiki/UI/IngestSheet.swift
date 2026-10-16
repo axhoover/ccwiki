@@ -193,13 +193,20 @@ struct IngestSheet: View {
                 .font(Theme.Fonts.sectionHeader)
                 .foregroundStyle(.secondary)
             ForEach(blockers, id: \.self) { blocker in
-                // Offline is not a fault (design-system §4b): no triangle.
+                // Offline is not a fault (design-system §4b): no triangle,
+                // and the glyph tertiary, like the status bar's.
                 let offline = blocker == AppModel.gitHubUnreachableBlocker
-                Label(blocker, systemImage: offline ? "wifi.slash" : "exclamationmark.triangle")
-                    .font(Theme.Fonts.meta)
-                    .foregroundStyle(offline
-                        ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
-                    .lineLimit(2)
+                Label {
+                    Text(blocker)
+                } icon: {
+                    Image(systemName: offline ? "wifi.slash" : "exclamationmark.triangle")
+                        .foregroundStyle(offline
+                            ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.orange))
+                }
+                .font(Theme.Fonts.meta)
+                .foregroundStyle(offline
+                    ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                .lineLimit(2)
             }
             Button("Open Settings…") { model.requestSettings() }
                 .buttonStyle(.link)

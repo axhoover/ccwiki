@@ -68,10 +68,15 @@ struct SettingsView: View {
                                 .foregroundStyle(.green)
                                 .font(Theme.Fonts.row)
                         } else if model.isGitHubUnreachable {
-                            // Not knowing is not a fault (design-system §4b).
-                            Label("Offline", systemImage: "wifi.slash")
-                                .foregroundStyle(.secondary)
-                                .font(Theme.Fonts.row)
+                            // Not knowing is not a fault (design-system §4b):
+                            // the glyph tertiary, like the status bar's.
+                            Label {
+                                Text("Offline")
+                            } icon: {
+                                Image(systemName: "wifi.slash").foregroundStyle(.tertiary)
+                            }
+                            .foregroundStyle(.secondary)
+                            .font(Theme.Fonts.row)
                         } else {
                             Label("Not signed in", systemImage: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
