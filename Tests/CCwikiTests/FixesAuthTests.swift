@@ -136,20 +136,103 @@ struct FixesAuthTests {
             == "!/usr/local/bin/gh auth git-credential")
     }
 
-    @Test("CCwiki's own helper is written again when gh has moved; the user's is left alone")
+    @Test("every value is read: gh's helper is written again when it is stale, the user's never")
     func helperRewrites() {
         let helper = GitService.credentialHelper(ghPath: "/opt/homebrew/bin/gh")
-        #expect(GitService.rewritesCredentialHelper("", with: helper))
-        #expect(!GitService.rewritesCredentialHelper(helper, with: helper))
+        let stale = "!/usr/local/bin/gh auth git-credential"
+        func rewrites(_ values: [String]) -> Bool {
+            GitService.rewritesCredentialHelper(values, with: helper)
+        }
+
+        // No helper at all: none, or only git's empty value.
+        #expect(rewrites([]))
+        #expect(rewrites([""]))
+
+        // The user's own, alone.
+        #expect(!rewrites(["store"]))
+        #expect(!rewrites(["osxkeychain"]))
+        #expect(!rewrites(["cache --timeout=1"]))
+        #expect(!rewrites(["/usr/local/share/gcm-core/git-credential-manager"]))
+        #expect(!rewrites(["!/usr/local/bin/my-helper"]))
+        #expect(!rewrites(["", "store"]))
+        #expect(!rewrites(["store", "osxkeychain"]))
+
+        // This gh's, once, beside the user's or not.
+        #expect(!rewrites([helper]))
+        #expect(!rewrites(["store", helper]))
+        #expect(!rewrites([helper, "osxkeychain"]))
+        #expect(!rewrites(["", helper]))
+
+        // A gh that moved, wherever it is among the values.
+        #expect(rewrites([stale]))
+        #expect(rewrites(["store", stale]))
+        #expect(rewrites([stale, "store"]))
+        #expect(rewrites([helper, stale]))
+        #expect(rewrites(["!/a/gh auth git-credential", "!/b/gh auth git-credential"]))
+        #expect(rewrites(["!'/Applications/x y/gh' auth git-credential"]))
+        #expect(rewrites(["store", "!'/Applications/x y/gh' auth git-credential"]))
+
+        // This gh's twice.
+        #expect(rewrites([helper, helper]))
+        #expect(rewrites([helper, "store", helper]))
+
+        // Quoted paths: written unquoted by an earlier CCwiki, and current.
+        let spaced = GitService.credentialHelper(ghPath: "/Users/me/My Tools/gh")
+        #expect(spaced == "!'/Users/me/My Tools/gh' auth git-credential")
         #expect(GitService.rewritesCredentialHelper(
-            "!/usr/local/bin/gh auth git-credential", with: helper))
-        #expect(GitService.rewritesCredentialHelper(
-            "!/Users/me/My Tools/gh auth git-credential",
-            with: GitService.credentialHelper(ghPath: "/Users/me/My Tools/gh")),
+            ["!/Users/me/My Tools/gh auth git-credential"], with: spaced),
             "written unquoted by an earlier CCwiki")
-        #expect(!GitService.rewritesCredentialHelper("osxkeychain", with: helper))
-        #expect(!GitService.rewritesCredentialHelper("store", with: helper))
-        #expect(!GitService.rewritesCredentialHelper("!/usr/local/bin/my-helper", with: helper))
+        #expect(!GitService.rewritesCredentialHelper(["store", spaced], with: spaced))
+        let quote = GitService.credentialHelper(ghPath: "/Users/me/it's/gh")
+        #expect(quote == "!'/Users/me/it'\\''s/gh' auth git-credential")
+        #expect(!GitService.rewritesCredentialHelper([quote], with: quote))
+        #expect(GitService.rewritesCredentialHelper(
+            ["!/Users/me/it's/gh auth git-credential"], with: quote))
+    }
+
+    @Test("a stale gh helper is repaired in place, and the user's beside it stays, in order")
+    func helperRepairedBesideTheUsers() async throws {
+        guard let clone = await FixtureRepository.make() else { return }
+        defer { clone.delete() }
+        let key = "credential.https://github.com.helper"
+        let stale = "!/nowhere/gh auth git-credential"
+        // Never run: what is checked is the config git is left with. The
+        // quote and the space go through git's config file and back.
+        let ghPath = "/nowhere/it's here/gh"
+        let helper = GitService.credentialHelper(ghPath: ghPath)
+
+        func helpers() async -> [String] {
+            let result = await clone.run(["config", "--local", "--get-all", key])
+            return result.succeeded ? result.stdout.components(separatedBy: "\n") : []
+        }
+        func setHelpers(_ values: [String]) async throws {
+            await clone.run(["config", "--local", "--unset-all", key])
+            for value in values {
+                try #require(await clone.run(["config", "--local", "--add", key, value]).succeeded)
+            }
+            try #require(await helpers() == values)
+        }
+
+        // git puts the new helper where the last stale one was.
+        let cases: [(before: [String], after: [String])] = [
+            ([], [helper]),
+            ([""], ["", helper]),
+            (["store"], ["store"]),
+            (["store", stale], ["store", helper]),
+            ([stale, "store"], [helper, "store"]),
+            ([stale, "store", "!'/nowhere/x y/gh' auth git-credential"], ["store", helper]),
+            (["osxkeychain", stale, "cache --timeout=1"],
+             ["osxkeychain", helper, "cache --timeout=1"]),
+        ]
+        for (before, after) in cases {
+            try await setHelpers(before)
+            await clone.service.configureCredentialHelper(clone: clone.root, ghPath: ghPath)
+            #expect(await helpers() == after, "\(before)")
+
+            // Asked again with the same gh, nothing changes.
+            await clone.service.configureCredentialHelper(clone: clone.root, ghPath: ghPath)
+            #expect(await helpers() == after, "\(before)")
+        }
     }
 
     @Test("a helper naming a gh that moved is repaired, and git can run the new one")

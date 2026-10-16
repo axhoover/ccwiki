@@ -146,20 +146,37 @@ struct GitService: Sendable {
     /// path, and one left naming a gh that is gone still counts as
     /// configured (`canAuthenticatePush`), so the push would fail only at
     /// Approve.
+    ///
+    /// The key can hold several values, which git tries in turn, so all of
+    /// them are read (`--get-all`) and `rewritesCredentialHelper` decides.
+    /// The write is `--replace-all` with a value-pattern that matches only
+    /// CCwiki's kind of helper: git removes every value it matches, puts
+    /// the new helper where the last of them was, and leaves the user's
+    /// values where they are. With none to match, git adds the helper
+    /// after the key's last value. So `store` and a stale gh become
+    /// `store` and this gh, and a stale gh and `store` become this gh and
+    /// `store`. A value the user set is never written over.
     func configureCredentialHelper(clone: URL, ghPath: String) async {
         let key = "credential.https://github.com.helper"
         let existing = await run([
-            "-C", clone.path(percentEncoded: false), "config", "--local", "--get", key,
+            "-C", clone.path(percentEncoded: false), "config", "--local", "--get-all", key,
         ])
-        let current = existing.succeeded
-            ? existing.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        // Exit 1 with no output is no values. Any other failure is read the
+        // same: the write matches only CCwiki's kind, so it cannot cost the
+        // user a helper.
+        let values = existing.succeeded
+            ? existing.stdout.components(separatedBy: "\n") : []
         let helper = Self.credentialHelper(ghPath: ghPath)
-        guard Self.rewritesCredentialHelper(current, with: helper) else { return }
+        guard Self.rewritesCredentialHelper(values, with: helper) else { return }
 
-        // `--replace-all`: a plain set refuses a key with several values.
+        // `rewritesCredentialHelper`'s rule as a regular expression, which
+        // git matches against each value; `.*` is the path, quoted or not.
+        // It starts with `^`: one that starts with `!` would match every
+        // value that does not match the rest.
+        let pattern = "^!.* auth git-credential$"
         _ = await run([
             "-C", clone.path(percentEncoded: false),
-            "config", "--local", "--replace-all", key, helper,
+            "config", "--local", "--replace-all", key, helper, pattern,
         ])
     }
 
@@ -170,13 +187,23 @@ struct GitService: Sendable {
         "!\(shellQuoted(ghPath)) auth git-credential"
     }
 
-    /// Whether the clone's helper is to be written: there is none, or it is
-    /// CCwiki's own `gh auth git-credential` naming another gh (one since
-    /// moved, or a path written unquoted). One the user set is theirs.
-    static func rewritesCredentialHelper(_ current: String, with helper: String) -> Bool {
-        if current.isEmpty { return true }
-        let isGitCredential = current.hasPrefix("!") && current.hasSuffix(" auth git-credential")
-        return isGitCredential && current != helper
+    /// Whether the clone's helper is to be written, given every value of
+    /// the key in the order git lists them. CCwiki's kind of helper is a
+    /// value that starts with `!` and ends with ` auth git-credential`,
+    /// naming any gh; any other value is one the user set, and is theirs.
+    ///
+    /// Written when no value names a helper: there are none, or each is
+    /// empty (git's "forget the helpers listed before this one"). Written
+    /// when there is a value of CCwiki's kind and they are anything but
+    /// `helper` once: a gh since moved, a path written unquoted, or
+    /// `helper` twice. Otherwise not: they are exactly `helper`, or there
+    /// are none of them and the user has set a helper of their own.
+    static func rewritesCredentialHelper(_ values: [String], with helper: String) -> Bool {
+        if values.allSatisfy(\.isEmpty) { return true }
+        let gitCredential = values.filter {
+            $0.hasPrefix("!") && $0.hasSuffix(" auth git-credential")
+        }
+        return !gitCredential.isEmpty && gitCredential != [helper]
     }
 
     /// `text` as one word to `sh`: unchanged when every character is one
