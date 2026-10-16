@@ -449,8 +449,11 @@ final class Job: Identifiable {
     private(set) var baseCommit: String?
     private(set) var review: ReviewSnapshot?
     private(set) var findings: [DiffFinding]
-    private(set) var pushingCommit: String?  // persisted before each push is sent
+    private(set) var pushingCommit: String?  // persisted before each push is sent; the next push overwrites it
     private(set) var pushedCommit: String?   // persisted once the push is confirmed
+    /// Every push sent, or set out to be sent, with its repository and branch:
+    /// persisted before it is sent, never dropped (§6.5 step 3).
+    private(set) var pushAttempts: [PushAttempt]
     private(set) var notice: JobNotice?      // the last publish result, or the tripwire (§5.5)
     private(set) var needsRestore: Bool      // restored without its worktree; Restore applies patchFile
     /// Edited in the review. Persisted at most once a second, and before Approve.
@@ -465,6 +468,8 @@ final class Job: Identifiable {
     var detail: String                   // "Lines 42–44, in “Security”", or the source URL
     var statusLabel: String              // state.label, adjusted per kind (§4.1)
     var canEdit: Bool                    // state == .awaitingReview && !needsRestore
+    var hasTriedToPush: Bool             // pushedCommit, pushingCommit or any attempt: Discard asks GitHub,
+                                         // and closing an untouched edit keeps it
     var canRunAgain: Bool                // ingestion or correction, ended failed, cancelled or aborted
     var submission: IngestSubmission?    // for the code that already reads it
 
@@ -477,6 +482,7 @@ final class Job: Identifiable {
     func setReview(_ snapshot: ReviewSnapshot, findings: [DiffFinding])
     func setPushingCommit(_ sha: String?)
     func setPushedCommit(_ sha: String?)
+    func recordPushAttempt(_ attempt: PushAttempt)   // added once, and the record written
     func setNotice(_ notice: JobNotice?)
     func setNeedsRestore(_ flag: Bool)
     func append(_ entry: JobLogEntry)    // also written to logFile, as a system line
@@ -495,6 +501,13 @@ struct JobNotice: Codable, Sendable, Equatable {
     let text: String
 }
 
+/// One push CCwiki sent, or set out to send, and where it went (§6.5 step 3).
+struct PushAttempt: Codable, Sendable, Hashable {
+    let repository: String               // PublishTarget.repository: "axhoover/cryptology.city"
+    let branch: String                   // "fix/x"
+    let commit: String
+}
+
 struct JobRecord: Codable, Sendable {
     let id: String
     let kind: JobKind
@@ -507,12 +520,14 @@ struct JobRecord: Codable, Sendable {
     let pullRequest: PullRequestDraft?
     let pushingCommit: String?
     let pushedCommit: String?
+    let pushAttempts: [PushAttempt]      // empty in a record written before attempts were kept
     let notice: JobNotice?
 }
 extension JobRecord {
     /// In an extension, so the memberwise init `Job.record` uses survives.
     /// A record written before 0.3 has `submission` and no `kind`: it decodes
     /// as .ingestion(submission), with createdAt = submission.submittedAt.
+    /// One written before push attempts were kept decodes with none.
     private enum LegacyKeys: String, CodingKey { case submission }
     init(from decoder: Decoder) throws
 }
@@ -568,9 +583,9 @@ and the integrator deletes it there (§17).
 | Risk | Guard |
 |---|---|
 | Open Draft PR pressed twice | `approve` acts only from `awaitingReview`. The button is disabled while `publishing` |
-| A crash, a quit or a lost reply between the push and the PR | `pushingCommit` is persisted before the push. `publishing` comes back as review. A refused lease asks GitHub where the branch is and recovers (§6.5 step 3). Before creating a PR, publishing looks for an **open PR whose head is the job's branch in R itself** (`gh pr list --repo R --head <branch> --state open`, a fork's branch of the same name left out; §6.5 step 4); if one exists, it updates it (`gh pr edit`) instead of opening another |
+| A crash, a quit or a lost reply between the push and the PR | `pushingCommit`, and each send as a `PushAttempt` bound to the repository and the branch it goes to, are persisted before the push; attempts are never dropped. `publishing` comes back as review. A refused lease asks GitHub where the branch is and recovers (§6.5 step 3). Before creating a PR, publishing looks for an **open PR whose head is the job's branch in R itself** (`gh pr list --repo R --head <branch> --state open`, a fork's branch of the same name left out; §6.5 step 4); if one exists, it updates it (`gh pr edit`) instead of opening another |
 | Pushing again after edits | `--force-with-lease=refs/heads/<branch>:<pushedCommit>`. The first push leases on absence (`…:`), so it cannot overwrite a branch someone else made |
-| The branch name already on GitHub, unfetched | The lease refuses; `git ls-remote` shows a tip CCwiki never made; the job takes the next free name and says so (§6.5 step 3) |
+| The branch name already on GitHub, unfetched | The lease refuses; `git ls-remote` shows a tip this job neither confirmed nor recorded as an attempt for that repository and branch, the job's own base included; the job takes the next free name and says so (§6.5 step 3) |
 | Two corrections of one page | Edit Page… on a page whose `edit` job can still be edited opens that job's editor, at the new lines, with no alert. Any other job on the page asks first (§7.1). DiffGuard's `changedUpstream` catches the rest at Approve |
 | The agent pushing or opening a PR itself | The seal makes it unlikely, not impossible (§5.1). The tripwire looks afterwards (§5.5) |
 | An issue sent twice | Open Issue is disabled while `gh` runs. A retry first searches for the sheet's hidden marker (§8.2) |
@@ -1206,10 +1221,18 @@ is also written to the job's log file.
    - `git cat-file commit`: the commit's tree must be that tree and its only
      parent the base, or nothing more happens and the job is back in review
      the same way;
-   - `git update-ref refs/heads/<branch> <commit>`, by name, so the branch's
-     reflog has every Approve's commit (step 3's recovery reads it).
+   - `git update-ref refs/heads/<branch> <commit>`, by name.
 3. **"Pushing fix/pseudorandom-function…"**
+   - a `pushingCommit` that no recorded attempt names (a record written
+     before attempts were kept) is first recorded as an attempt for the
+     job's branch and `PublishTarget.repository`, so the push it was making
+     is not lost when the next line overwrites it;
    - persist `pushingCommit` = the new commit;
+   - before each send, the first and the retry alike, record and persist
+     the attempt `PushAttempt(repository: PublishTarget.repository,
+     branch: <the branch it is sent to>, commit:)`. Attempts are
+     deduplicated and never dropped: not by a new Approve, a retry, a
+     rename or a relaunch;
    - `git --no-replace-objects -c core.useReplaceRefs=false -c
      core.hooksPath=/dev/null -c core.fsmonitor=false push --no-verify
      --no-follow-tags --recurse-submodules=no
@@ -1224,15 +1247,25 @@ is also written to the job's log file.
    - **If the lease is refused**, ask GitHub: `git ls-remote <pushURL>
      refs/heads/<branch>`, then `Publisher.leaseRecovery` decides:
      - the branch is absent: retry, leasing on absence;
-     - the tip is `pushingCommit`, `pushedCommit`, or any commit in the local
-       branch's reflog (every Approve's commit is there): it is ours. Adopt it
-       as `pushedCommit` and retry once;
-     - the tip is unknown and this job has never confirmed a push: someone
-       else's branch. Take the next name free both locally and on GitHub,
-       `git branch -m <branch> <new>`, log "fix/x was taken on GitHub; using
-       fix/x-2", and retry once;
+     - the tip is `pushedCommit`, or a commit recorded as an attempt for
+       this very repository and branch (the push being made is one, and so
+       is an earlier one whose reply was lost to a crash or a quit, even
+       across a relaunch): it is ours. Retry once, leasing on it;
+     - the tip is anything else and this job has never confirmed a push:
+       someone else's branch. Take the next name free both locally and on
+       GitHub, `git branch -m <branch> <new>`, log "fix/x was taken on
+       GitHub; using fix/x-2", and retry once, recording the attempt for the
+       new name first;
      - otherwise refuse: "fix/x on GitHub has commits CCwiki did not push.
        CCwiki will not overwrite them; check the branch on GitHub."
+
+     The local branch's reflog is not evidence, and is never read: it has
+     the job's base, which anyone may push as the job's branch name after
+     the job took it, and any commit the branch was moved through. A
+     branch someone else made at the base is therefore renamed from, and
+     the pull request lookup in step 4 never meets the pull request they
+     may have opened from it. Nor is an attempt for another branch (the one
+     a rename left) or another repository (a Dev build pointed at a fork).
 4. **"Opening the pull request…"** The body is written to
    `<scratch>/pull-request-body.md` first.
    - `gh pr list --repo R --head <branch> --state open --json
@@ -1300,8 +1333,10 @@ red. `changedSinceReview` reads "The files changed since you reviewed them.
 Check the new diff, then open the pull request." Publishing never leaves a
 job terminal and its work stranded.
 
-**Discard…** first asks GitHub, when the job has pushed or tried to: `gh pr
-list --repo R --head <branch> --state open`. Then it confirms, per kind:
+**Discard…** first asks GitHub, when the job has pushed or tried to
+(`Job.hasTriedToPush`: a `pushedCommit`, a `pushingCommit` or any recorded
+attempt): `gh pr list --repo R --head <branch> --state open`. Then it
+confirms, per kind:
 
 - correction: "Discard this correction?" — "Its worktree and changes are
   deleted. The transcript is kept.";
@@ -1569,7 +1604,9 @@ this file in Jobs." with **Use Reverted File** and **Keep My Version**.
 
 **Closing an editor** saves. If the job is an `edit` job whose snapshot is
 empty, closing discards it, with no dialog: an untouched edit leaves nothing
-behind. Otherwise the job stays in Jobs, awaiting review. A window whose job
+behind. One that has pushed or tried to (`Job.hasTriedToPush`) is never
+untouched: its branch may be on GitHub. Otherwise the job stays in Jobs,
+awaiting review. A window whose job
 is opened, discarded or gone closes itself.
 
 **Quitting** with unsaved text: `applicationShouldTerminate` returns
@@ -2114,10 +2151,11 @@ final class JobCenter {
     /// `shown`: the snapshot (tree and digest) and findings Open Draft PR's click saw.
     func approve(_ job: Job, shown: ShownReview) async -> ApproveResult
     func approve(_ job: Job) async -> ApproveResult   // the review on screen now
-    /// The open PR on the job's branch, if any: for Discard's dialog.
+    /// The open PR on the job's branch, if any: for Discard's dialog. Asked
+    /// only when `job.hasTriedToPush`.
     func openPullRequest(for job: Job) async -> URL?
     func discard(_ job: Job) async
-    /// Closing an untouched edit's last editor.
+    /// Closing an untouched edit's last editor; never one that `hasTriedToPush`.
     func discardIfUntouched(_ job: Job) async
 
     func clearFinishedJobs()
@@ -2257,8 +2295,12 @@ struct AgentInvocation: Sendable, Equatable {
         -> GitService.ReviewedCommit
     nonisolated static let notReviewed: String
     enum LeaseRecovery: Sendable, Equatable { case retry(expecting: String?), rename, refuse }
-    nonisolated static func leaseRecovery(remoteTip: String?, pushing: String?, pushed: String?,
-                                          reflog: Set<String>) -> LeaseRecovery
+    /// Absent → retry on absence; `pushed`, or an attempt for exactly this
+    /// repository and branch → retry expecting it; else rename before the
+    /// first confirmed push, refuse after (§6.5 step 3).
+    nonisolated static func leaseRecovery(remoteTip: String?, pushed: String?,
+                                          attempts: [PushAttempt], repository: String,
+                                          branch: String) -> LeaseRecovery
     nonisolated static func pushArguments(remote: String, branch: String, commit: String,
                                           expecting: String?) -> [String]
     nonisolated static func createArguments(target: PublishTarget, base: String, branch: String,
@@ -2300,7 +2342,6 @@ extension GitService {
               expecting: String?) async -> Subprocess.Result
     func remoteTip(of branch: String, remote: String, in directory: URL) async -> RemoteTip
     func remoteHeads(remote: String, in directory: URL) async -> [String: String]?
-    func reflog(of branch: String, in directory: URL) async -> Set<String>
     func renameBranch(_ branch: String, to name: String, in worktree: URL) async -> Bool
     func identity(in worktree: URL) async -> (name: String, email: String)?
     func changedPaths(in clone: URL, from base: String, to ref: String, limitedTo paths: [String]) async
@@ -2594,9 +2635,21 @@ merges to `main`.**
   review shows it, DiffGuard blocks it, and Approve refuses with nothing
   pushed.
 - `leaseRecovery`: absent → retry on absence; the tip equal to
-  `pushingCommit`, to `pushedCommit`, or in the reflog → retry expecting it;
-  unknown with no confirmed push → rename; unknown after a confirmed push →
-  refuse.
+  `pushedCommit`, or to an attempt for this repository and this branch →
+  retry expecting it; anything else with no confirmed push → rename;
+  anything else after a confirmed push → refuse. An attempt for another
+  branch (the one a rename left) or another repository never makes a tip
+  ours.
+- Against a bare origin, a branch someone else makes at the job's base
+  after the job took the name (the base is in the local reflog), with
+  pull request 7 open from it: Approve, through a `gh` script, renames to
+  `fix/page-2`, opens its pull request from there, never edits 7, and their
+  ref stays at the base. The same rename for a tip the local branch was
+  moved through but CCwiki never sent, and for a tip CCwiki sent only to
+  another branch or repository. A lost reply is still recovered from the
+  recorded attempt: in the same launch; after a relaunch with a failed push
+  between, so `pushingCommit` no longer names it; and from a record written
+  before attempts were kept, whose `pushingCommit` becomes an attempt.
 - The create arguments include `--draft`, `--repo`, `--head`, `--base` and
   `--body-file`, and never `--ready`, `merge` or `--auto`.
 - The commit message.
@@ -2645,8 +2698,7 @@ sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
    resettingBranch:to:)` and `applyPatch` restore a byte-identical tree,
    and `refreshOrphanedWorktrees` never lists the job's worktree.
 8. `commitReviewed` collapses an agent commit: the commit's tree is the
-   reviewed tree, its only parent the base, and the branch and its reflog
-   name it. A tree staged after the review is `notReviewed`, by its tree,
+   reviewed tree, its only parent the base, and the branch names it. A tree staged after the review is `notReviewed`, by its tree,
    and by its digest when given its own tree, and the branch stays. With
    the hooks of `HookTrap` (in `GitReviewIntegrationTests.swift`; Publisher
    tests use it too) in the clone's own `.git/hooks` with nothing
@@ -2663,8 +2715,9 @@ sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
    sends no tag; git's own push of the same commit does.
 9. The first push with the absence lease succeeds, a second push after an
    edit with `expecting:` succeeds, and a push with a stale lease is refused.
-   With `pushedCommit` dropped and `pushingCommit` set, Approve recovers and
-   pushes. With the branch taken in `origin` by another commit, it renames.
+   With `pushedCommit` dropped and the attempt recorded, Approve recovers
+   and pushes, after a relaunch too. With the branch taken in `origin` by
+   another commit, the job's base included, it renames.
 10. The sealed environment makes a plain `git push origin` fail.
 
 `gh` is not exercised. Its argument builders are covered above.

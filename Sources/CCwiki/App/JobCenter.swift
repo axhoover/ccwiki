@@ -647,7 +647,7 @@ final class JobCenter {
     /// The open PR on the job's branch, if any: for Discard's dialog. Asked
     /// of GitHub only when the job has pushed, or tried to.
     func openPullRequest(for job: Job) async -> URL? {
-        guard job.pushedCommit != nil || job.pushingCommit != nil else { return nil }
+        guard job.hasTriedToPush else { return nil }
         let environment = self.environment()
         guard let gh = environment.tools.path(for: .gh) else { return nil }
         let arguments = Publisher.listArguments(target: environment.target, branch: job.branch)
@@ -685,12 +685,11 @@ final class JobCenter {
     /// worktree holds now: its branch may be on GitHub, and only its record
     /// says so. It stays in Jobs, where Discard… names the branch.
     func discardIfUntouched(_ job: Job) async {
-        guard job.kind.tag == .edit, job.state == .awaitingReview,
-              job.pushedCommit == nil, job.pushingCommit == nil
+        guard job.kind.tag == .edit, job.state == .awaitingReview, !job.hasTriedToPush
         else { return }
         await serially(job) { @MainActor in
             guard job.kind.tag == .edit, job.state == .awaitingReview, !job.needsRestore,
-                  job.pushedCommit == nil, job.pushingCommit == nil,
+                  !job.hasTriedToPush,
                   let base = job.baseCommit, let git = self.environment().git,
                   FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false)),
                   await git.stageAll(in: job.worktree),

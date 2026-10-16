@@ -554,13 +554,16 @@ struct DiscardRequest: Identifiable {
     @MainActor
     static func prepare(for job: Job, in center: JobCenter) async -> DiscardRequest {
         var openPullRequest: URL?
-        if job.pushingCommit != nil || job.pushedCommit != nil {
+        if job.hasTriedToPush {
             openPullRequest = await center.openPullRequest(for: job)
         }
+        // A recorded attempt is a push that may have landed, as an
+        // unconfirmed `pushingCommit` is.
         return DiscardRequest(
             jobID: job.id,
             question: JobReview.discardQuestion(
-                kind: job.kind.tag, branch: job.branch, pushingCommit: job.pushingCommit,
+                kind: job.kind.tag, branch: job.branch,
+                pushingCommit: job.pushingCommit ?? job.pushAttempts.last?.commit,
                 pushedCommit: job.pushedCommit, openPullRequest: openPullRequest))
     }
 }

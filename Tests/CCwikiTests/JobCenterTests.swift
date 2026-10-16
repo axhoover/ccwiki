@@ -603,8 +603,13 @@ struct JobCenterTests {
         pushed.setPushedCommit(scene.base)
         let pushing = try await scene.beginEdit()
         pushing.setPushingCommit(scene.base)
+        // Only an attempt recorded: it counts as trying to push.
+        let attempted = try await scene.beginEdit()
+        attempted.recordPushAttempt(PushAttempt(
+            repository: scene.target.repository, branch: attempted.branch, commit: scene.base))
+        #expect(attempted.hasTriedToPush && attempted.pushingCommit == nil)
 
-        for job in [pushed, pushing] {
+        for job in [pushed, pushing, attempted] {
             await scene.center.discardIfUntouched(job)
             #expect(scene.center.job(id: job.id) === job)
             #expect(job.state == .awaitingReview)

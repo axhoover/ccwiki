@@ -376,7 +376,8 @@ struct TripwireTests {
             let record = JobRecord(
                 id: id, kind: .edit(target), branch: branch, state: .awaitingReview,
                 createdAt: Self.started, startedAt: nil, finishedAt: nil, baseCommit: nil,
-                pullRequest: nil, pushingCommit: nil, pushedCommit: nil, notice: nil)
+                pullRequest: nil, pushingCommit: nil, pushedCommit: nil, pushAttempts: [],
+                notice: nil)
             try JSONEncoder().encode(record).write(to: logs.appending(path: "\(id).json"))
         }
         try Data("not a record".utf8).write(to: logs.appending(path: "broken.json"))

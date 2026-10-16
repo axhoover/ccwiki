@@ -209,6 +209,19 @@ struct JobNotice: Codable, Sendable, Equatable {
     let text: String
 }
 
+/// One push CCwiki sent, or set out to send, for a job: the commit, and
+/// where it went (plans/corrections.md §6.5). Recorded, and the job's
+/// record written, before the push is sent, so a push whose reply was lost
+/// to a crash or a quit is recognised afterwards. Only an attempt for the
+/// same repository and branch makes a tip there CCwiki's own.
+struct PushAttempt: Codable, Sendable, Hashable {
+    /// `PublishTarget.repository`: "axhoover/cryptology.city".
+    let repository: String
+    /// "fix/x", not "refs/heads/fix/x".
+    let branch: String
+    let commit: String
+}
+
 // MARK: - Job
 
 /// One job: an ingestion, a correction or an edit. Its state, its
@@ -254,10 +267,16 @@ final class Job: Identifiable {
     private(set) var review: ReviewSnapshot?
     private(set) var findings: [DiffFinding] = []
     /// Persisted before each push is sent, so a crash between the push and
-    /// the PR is recoverable (§4.4).
+    /// the PR is recoverable (§4.4). The next push overwrites it.
     private(set) var pushingCommit: String?
     /// Persisted once a push is confirmed.
     private(set) var pushedCommit: String?
+    /// Every push CCwiki sent, or set out to send, for this job, each with
+    /// the repository and the branch it went to: persisted before it is
+    /// sent, and never dropped, whatever a later Approve, retry, rename or
+    /// relaunch does. With `pushedCommit`, all that makes a tip on GitHub
+    /// this job's own (§6.5 step 3).
+    private(set) var pushAttempts: [PushAttempt] = []
     /// The last publish result, or the tripwire's finding (§5.5).
     private(set) var notice: JobNotice?
     /// Restored without its worktree: Restore applies `patchFile`.
@@ -332,6 +351,7 @@ final class Job: Identifiable {
         self.pullRequest = record.pullRequest ?? PullRequestDraft(title: "", body: "")
         self.pushingCommit = record.pushingCommit
         self.pushedCommit = record.pushedCommit
+        self.pushAttempts = record.pushAttempts
         self.notice = record.notice
 
         let restored = Self.restoration(
@@ -390,7 +410,7 @@ final class Job: Identifiable {
             id: id, kind: kind, branch: branch, state: state, createdAt: createdAt,
             startedAt: startedAt, finishedAt: finishedAt, baseCommit: baseCommit,
             pullRequest: pullRequest, pushingCommit: pushingCommit,
-            pushedCommit: pushedCommit, notice: notice)
+            pushedCommit: pushedCommit, pushAttempts: pushAttempts, notice: notice)
     }
 
     private func persist() {
@@ -477,6 +497,14 @@ final class Job: Identifiable {
     /// Whether an editor may write into the worktree.
     var canEdit: Bool { state == .awaitingReview && !needsRestore }
 
+    /// Whether CCwiki has pushed this job's branch, or tried to: a push
+    /// confirmed, one sent and never confirmed, or any recorded attempt.
+    /// Such a job may have a branch, and a pull request, on GitHub, and
+    /// only its record says so.
+    var hasTriedToPush: Bool {
+        pushedCommit != nil || pushingCommit != nil || !pushAttempts.isEmpty
+    }
+
     /// An agent job that ended without a review can be submitted again.
     var canRunAgain: Bool {
         guard kind.tag != .edit else { return false }
@@ -538,6 +566,12 @@ final class Job: Identifiable {
 
     func setPushedCommit(_ sha: String?) {
         pushedCommit = sha
+        persist()
+    }
+
+    /// Adds `attempt`, once, and writes the record: before the push is sent.
+    func recordPushAttempt(_ attempt: PushAttempt) {
+        if !pushAttempts.contains(attempt) { pushAttempts.append(attempt) }
         persist()
     }
 
@@ -662,12 +696,14 @@ struct JobRecord: Codable, Sendable {
     let pullRequest: PullRequestDraft?
     let pushingCommit: String?
     let pushedCommit: String?
+    /// Empty in a record written before attempts were kept.
+    let pushAttempts: [PushAttempt]
     let notice: JobNotice?
 
     /// Spelled out, so the decoder below and the synthesized encoder agree.
     enum CodingKeys: String, CodingKey {
         case id, kind, branch, state, createdAt, startedAt, finishedAt, baseCommit
-        case pullRequest, pushingCommit, pushedCommit, notice
+        case pullRequest, pushingCommit, pushedCommit, pushAttempts, notice
     }
 }
 
@@ -677,7 +713,8 @@ extension JobRecord {
 
     /// In an extension, so the memberwise init `Job.record` uses survives.
     /// A record from before 0.3 decodes as `.ingestion(submission)`, with
-    /// `createdAt` its `submittedAt`; the fields it never had are nil.
+    /// `createdAt` its `submittedAt`; the fields it never had are nil, and
+    /// a record from before push attempts were kept has none.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let kind: JobKind
@@ -701,12 +738,14 @@ extension JobRecord {
         let pullRequest = try container.decodeIfPresent(PullRequestDraft.self, forKey: .pullRequest)
         let pushingCommit = try container.decodeIfPresent(String.self, forKey: .pushingCommit)
         let pushedCommit = try container.decodeIfPresent(String.self, forKey: .pushedCommit)
+        let pushAttempts = try container.decodeIfPresent(
+            [PushAttempt].self, forKey: .pushAttempts) ?? []
         let notice = try container.decodeIfPresent(JobNotice.self, forKey: .notice)
         self.init(
             id: id, kind: kind, branch: branch, state: state, createdAt: createdAt,
             startedAt: startedAt, finishedAt: finishedAt, baseCommit: baseCommit,
             pullRequest: pullRequest, pushingCommit: pushingCommit,
-            pushedCommit: pushedCommit, notice: notice)
+            pushedCommit: pushedCommit, pushAttempts: pushAttempts, notice: notice)
     }
 }
 

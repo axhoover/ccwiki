@@ -109,25 +109,77 @@ struct PublisherTests {
 
     // MARK: Recovering a refused lease
 
+    /// An attempt to push `commit` to `branch` in the target repository, or
+    /// in `repository`.
+    static func attempt(
+        _ commit: String, to branch: String = "fix/x",
+        in repository: String = "axhoover/cryptology.city"
+    ) -> PushAttempt {
+        PushAttempt(repository: repository, branch: branch, commit: commit)
+    }
+
+    /// `leaseRecovery` for fix/x in the target repository.
+    static func recovery(tip: String?, pushed: String?, attempts: [PushAttempt])
+        -> Publisher.LeaseRecovery {
+        Publisher.leaseRecovery(
+            remoteTip: tip, pushed: pushed, attempts: attempts,
+            repository: "axhoover/cryptology.city", branch: "fix/x")
+    }
+
     @Test("a refused lease: absent retries on absence; ours retries expecting it")
     func recoveryOurs() {
-        #expect(Publisher.leaseRecovery(remoteTip: nil, pushing: "c1", pushed: "c0", reflog: [])
+        #expect(Self.recovery(tip: nil, pushed: "c0", attempts: [Self.attempt("c1")])
             == .retry(expecting: nil))
-        #expect(Publisher.leaseRecovery(remoteTip: "c1", pushing: "c1", pushed: nil, reflog: [])
-            == .retry(expecting: "c1"))
-        #expect(Publisher.leaseRecovery(remoteTip: "c0", pushing: "c1", pushed: "c0", reflog: [])
-            == .retry(expecting: "c0"))
-        #expect(Publisher.leaseRecovery(
-            remoteTip: "c-old", pushing: "c2", pushed: nil, reflog: ["c-old", "c2"])
-            == .retry(expecting: "c-old"), "every Approve's commit is in the reflog")
+        #expect(Self.recovery(tip: nil, pushed: nil, attempts: [])
+            == .retry(expecting: nil), "absent is absent, whoever asks")
+        #expect(Self.recovery(tip: "c1", pushed: nil, attempts: [Self.attempt("c1")])
+            == .retry(expecting: "c1"), "the push being made")
+        #expect(Self.recovery(tip: "c0", pushed: "c0", attempts: [])
+            == .retry(expecting: "c0"), "the last confirmed push, in a record without attempts")
+        #expect(Self.recovery(
+            tip: "c-old", pushed: nil, attempts: [Self.attempt("c-old"), Self.attempt("c2")])
+            == .retry(expecting: "c-old"), "an earlier push whose reply was lost")
+        #expect(Self.recovery(
+            tip: "c-old", pushed: "c1",
+            attempts: [Self.attempt("c1"), Self.attempt("c-old"), Self.attempt("c2")])
+            == .retry(expecting: "c-old"), "after a confirmed push too")
     }
 
     @Test("a refused lease: someone else's branch is renamed from, or refused after a push")
     func recoveryTheirs() {
+        #expect(Self.recovery(tip: "theirs", pushed: nil, attempts: [Self.attempt("c1")])
+            == .rename)
+        #expect(Self.recovery(tip: "theirs", pushed: nil, attempts: []) == .rename)
+        #expect(Self.recovery(
+            tip: "theirs", pushed: "c1", attempts: [Self.attempt("c1"), Self.attempt("c2")])
+            == .refuse)
+    }
+
+    @Test("a refused lease: only an attempt for this repository and this branch makes a tip ours")
+    func recoveryElsewhere() {
+        let elsewhere = [
+            Self.attempt("c1", to: "fix/x-2"),
+            Self.attempt("c1", to: "fix/y"),
+            Self.attempt("c1", to: "fix/x", in: "someone/fork"),
+            Self.attempt("c1", to: "fix/x", in: "axhoover/ccwiki"),
+        ]
+        for attempt in elsewhere {
+            let before = [Self.attempt("c0"), attempt, Self.attempt("c2")]
+            #expect(Self.recovery(tip: "c1", pushed: nil, attempts: Array(before.dropFirst()))
+                == .rename, "\(attempt)")
+            #expect(Self.recovery(tip: "c1", pushed: "c0", attempts: before)
+                == .refuse, "\(attempt)")
+        }
+        // The branch a rename left: an attempt for fix/x says nothing of
+        // fix/x-2, and one for fix/x-2 nothing of fix/x.
+        let renamed = [Self.attempt("c1"), Self.attempt("c2", to: "fix/x-2")]
         #expect(Publisher.leaseRecovery(
-            remoteTip: "theirs", pushing: "c1", pushed: nil, reflog: ["c1"]) == .rename)
+            remoteTip: "c1", pushed: nil, attempts: renamed,
+            repository: "axhoover/cryptology.city", branch: "fix/x-2") == .rename)
         #expect(Publisher.leaseRecovery(
-            remoteTip: "theirs", pushing: "c2", pushed: "c1", reflog: ["c1", "c2"]) == .refuse)
+            remoteTip: "c2", pushed: nil, attempts: renamed,
+            repository: "axhoover/cryptology.city", branch: "fix/x-2") == .retry(expecting: "c2"))
+        #expect(Self.recovery(tip: "c2", pushed: nil, attempts: renamed) == .rename)
     }
 
     // MARK: Confirming the pull request
@@ -239,6 +291,33 @@ struct PublisherTests {
 
         let onDisk = try JSONDecoder().decode(JobRecord.self, from: Data(contentsOf: job.recordFile))
         #expect(onDisk.pushedCommit == second)
+        #expect(onDisk.pushAttempts == [
+            Self.attempt(first, in: scene), Self.attempt(second, in: scene),
+        ], "each push, recorded before it was sent, and kept")
+    }
+
+    /// An attempt to push `commit` to `branch` in the scene's target.
+    static func attempt(_ commit: String, to branch: String = "fix/page", in scene: JobScene)
+        -> PushAttempt {
+        PushAttempt(repository: scene.target.repository, branch: branch, commit: commit)
+    }
+
+    /// Every commit the job's branch has pointed at, from git's reflog:
+    /// what a refused lease's recovery once took for CCwiki's own.
+    static func reflog(_ scene: JobScene, _ job: Job) async -> [String] {
+        let result = await agent(
+            scene, job, ["log", "--walk-reflogs", "--format=%H", "refs/heads/\(job.branch)", "--"])
+        return result.stdout.split(separator: "\n").map(String.init)
+    }
+
+    /// A publisher whose pushes, to the scene's repository by name, never
+    /// arrive: the origin it names is not there.
+    static func offline(_ scene: JobScene) -> Publisher {
+        let nowhere = PublishTarget(
+            repository: scene.target.repository,
+            pushURL: scene.root.appending(path: "no-such-origin.git").absoluteString,
+            isDevBuild: true, isOverridden: true)
+        return Publisher(paths: scene.paths, tools: scene.tools, git: scene.git, target: nowhere)
     }
 
     @Test("a push whose reply was lost is recognised as ours, and pushed over")
@@ -259,6 +338,84 @@ struct PublisherTests {
         #expect(await scene.originTip("fix/page") == .at(second))
         #expect(job.branch == "fix/page")
         #expect(job.pushedCommit == second)
+        #expect(job.log.contains {
+            $0.text == "fix/page is at \(first.prefix(12)) on GitHub, which CCwiki pushed."
+        })
+        #expect(job.pushAttempts == [Self.attempt(first, in: scene), Self.attempt(second, in: scene)])
+    }
+
+    @Test("a push whose reply was lost is recognised after a relaunch, with a failed push since")
+    func lostReplyAcrossARelaunch() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let publisher = Self.publisher(scene)
+        let job = try await scene.beginEdit()
+
+        let first = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
+        #expect(await publisher.push(job, commit: first) == .pushed)
+        // The push reached GitHub; the app went away before it heard.
+        job.setPushedCommit(nil)
+        job.setPushingCommit(first)
+        // The next Approve's push never arrived, so pushingCommit now names
+        // a commit GitHub does not have: only the attempt remembers first.
+        let offline = Self.offline(scene)
+        let second = try await Self.commit(scene, offline, job, to: "a\nBB\nc")
+        guard case .failed = await offline.push(job, commit: second) else {
+            Issue.record("a push to a repository that is not there did not fail")
+            return
+        }
+        #expect(job.pushingCommit == second && job.pushedCommit == nil)
+        #expect(await scene.originTip("fix/page") == .at(first))
+
+        // The job comes back from its record alone.
+        let center = scene.relaunched()
+        let restored = try #require(center.job(id: job.id))
+        #expect(restored !== job)
+        #expect(restored.pushAttempts == [
+            Self.attempt(first, in: scene), Self.attempt(second, in: scene),
+        ])
+        #expect(restored.pushingCommit == second && restored.pushedCommit == nil)
+
+        let third = try await Self.commit(scene, publisher, restored, to: "a\nBBB\nc")
+        #expect(await publisher.push(restored, commit: third) == .pushed)
+        #expect(await scene.originTip("fix/page") == .at(third))
+        #expect(restored.branch == "fix/page", "recognised as ours, not renamed from")
+        #expect(restored.pushedCommit == third)
+        #expect(restored.log.contains {
+            $0.text == "fix/page is at \(first.prefix(12)) on GitHub, which CCwiki pushed."
+        })
+    }
+
+    @Test("the push a record from before attempts were kept was making is recognised after a relaunch")
+    func lostReplyInAnOldRecord() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let publisher = Self.publisher(scene)
+        let job = try await scene.beginEdit()
+
+        // What the last release did: persist pushingCommit, push, and lose
+        // the reply. Its record names no attempts.
+        let first = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
+        job.setPushingCommit(first)
+        let sent = await scene.git.push(
+            first, in: job.worktree, to: scene.target.pushURL, branch: job.branch, expecting: nil)
+        try #require(sent.succeeded, "\(sent.output)")
+        let data = try Data(contentsOf: job.recordFile)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["pushAttempts"] = nil
+        try JSONSerialization.data(withJSONObject: object).write(to: job.recordFile)
+
+        let center = scene.relaunched()
+        let restored = try #require(center.job(id: job.id))
+        #expect(restored.pushAttempts.isEmpty && restored.pushingCommit == first)
+
+        let second = try await Self.commit(scene, publisher, restored, to: "a\nBB\nc")
+        #expect(await publisher.push(restored, commit: second) == .pushed)
+        #expect(await scene.originTip("fix/page") == .at(second))
+        #expect(restored.branch == "fix/page")
+        #expect(restored.pushAttempts == [
+            Self.attempt(first, in: scene), Self.attempt(second, in: scene),
+        ], "the old record's push is kept, as an attempt on its branch, before the new one")
     }
 
     @Test("a branch someone else made is left alone: the job takes the next free name")
@@ -282,6 +439,118 @@ struct PublisherTests {
                         "rev-parse", "--abbrev-ref", "HEAD"],
             environment: FixtureRepository.environment())
         #expect(head.stdout == "fix/page-2")
+        #expect(job.pushAttempts == [
+            Self.attempt(ours, in: scene), Self.attempt(ours, to: "fix/page-2", in: scene),
+        ], "the retry after the rename is recorded with the branch it went to")
+    }
+
+    /// A `gh` that is signed in and may push, with someone else's pull
+    /// request 7 open from fix/page, and that opens pull request 99 from
+    /// any other branch. It notes the branch of each pull request it opens
+    /// in `created`, and each pull request it edits in `edited`.
+    static let gitHubWithTheirs = #"""
+        dir=$(dirname "$0")
+        case "$1 $2" in
+        "auth status") exit 0 ;;
+        "api repos/axhoover/cryptology.city") echo true ;;
+        "pr list")
+            if [ "$6" = fix/page ]; then
+                echo "2026-10-01T09:00:00Z https://github.com/axhoover/cryptology.city/pull/7"
+            elif grep -qxF -- "$6" "$dir/created" 2>/dev/null; then
+                echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) https://github.com/axhoover/cryptology.city/pull/99"
+            fi ;;
+        "pr create")
+            echo "$9" >> "$dir/created"
+            echo https://github.com/axhoover/cryptology.city/pull/99 ;;
+        "pr edit")
+            echo "$3" >> "$dir/edited" ;;
+        *) echo "unexpected: gh $*" >&2; exit 1 ;;
+        esac
+        exit 0
+        """#
+
+    @Test("a branch made at the job's base after it started is someone else's: renamed from, and their PR untouched")
+    func takenAtTheBase() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { GitHubAuth.invalidate() }
+        let tools = try JobScene.fakeTools([.gh: Self.gitHubWithTheirs], in: directory)
+        guard let scene = try await JobScene.make(tools: tools) else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        #expect(job.branch == "fix/page")
+        // The job's branch was made at the base, so the base is in its reflog.
+        #expect(await Self.reflog(scene, job).contains(scene.base))
+        // Then someone else makes fix/page on GitHub at that same base, and
+        // opens pull request 7 from it.
+        try await scene.pushToOrigin(scene.base, as: "fix/page")
+
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        await scene.center.refreshReview(job)
+        job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
+        let result = await scene.center.approve(job)
+
+        let url = try #require(URL(string: "https://github.com/axhoover/cryptology.city/pull/99"))
+        #expect(result == .opened(url), "\(result); \(job.log.map(\.text))")
+        #expect(job.branch == "fix/page-2")
+        let commit = try #require(job.pushedCommit)
+        #expect(await scene.originTip("fix/page-2") == .at(commit))
+        #expect(await scene.originTip("fix/page") == .at(scene.base), "their branch is untouched")
+        #expect(job.log.contains { $0.text == "fix/page was taken on GitHub; using fix/page-2." })
+        let created = try? String(contentsOf: directory.appending(path: "created"), encoding: .utf8)
+        #expect(created == "fix/page-2\n", "the pull request is opened from the job's own branch")
+        #expect(!FileManager.default.fileExists(
+            atPath: directory.appending(path: "edited").path(percentEncoded: false)),
+            "their pull request is never edited")
+    }
+
+    @Test("a commit the job's branch was moved through, never pushed by CCwiki, does not make a branch ours")
+    func takenAtACommitInTheReflog() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let publisher = Self.publisher(scene)
+        let job = try await scene.beginEdit()
+        // Someone's commit, which the job's branch is moved through (an
+        // agent's reset, say), and which they push as fix/page.
+        let theirs = try await scene.foreignCommit(on: scene.base)
+        #expect(await Self.agent(scene, job, ["update-ref", "refs/heads/fix/page", theirs]).succeeded)
+        try await scene.pushToOrigin(theirs, as: "fix/page")
+
+        let ours = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
+        #expect(await Self.reflog(scene, job).contains(theirs), "their commit is in the reflog")
+        #expect(await publisher.push(job, commit: ours) == .pushed)
+        #expect(job.branch == "fix/page-2")
+        #expect(await scene.originTip("fix/page-2") == .at(ours))
+        #expect(await scene.originTip("fix/page") == .at(theirs), "their branch is untouched")
+    }
+
+    @Test("an attempt for another branch, or another repository, does not make a branch ours")
+    func attemptedElsewhere() async throws {
+        let elsewhere = [
+            (repository: "axhoover/cryptology.city", branch: "fix/other"),
+            (repository: "someone/fork", branch: "fix/page"),
+        ]
+        for place in elsewhere {
+            guard let scene = try await JobScene.make() else { return }
+            defer { scene.delete() }
+            let publisher = Self.publisher(scene)
+            let job = try await scene.beginEdit()
+            // The job's first commit was sent elsewhere, its reply lost, and
+            // someone has since pushed that commit as fix/page here.
+            let first = try await Self.commit(scene, publisher, job, to: "a\nB\nc")
+            job.recordPushAttempt(PushAttempt(
+                repository: place.repository, branch: place.branch, commit: first))
+            job.setPushingCommit(first)
+            try await scene.pushToOrigin(first, as: "fix/page")
+
+            let second = try await Self.commit(scene, publisher, job, to: "a\nBB\nc")
+            #expect(await publisher.push(job, commit: second) == .pushed, "\(place)")
+            #expect(job.branch == "fix/page-2", "\(place)")
+            #expect(await scene.originTip("fix/page-2") == .at(second), "\(place)")
+            #expect(await scene.originTip("fix/page") == .at(first),
+                    "that branch is untouched: \(place)")
+        }
     }
 
     @Test("commits someone else pushed after ours are never overwritten")
@@ -323,6 +592,8 @@ struct PublisherTests {
         #expect(message.contains("It may or may not have reached GitHub"))
         #expect(job.pushingCommit == commit && job.pushedCommit == nil,
                 "what was being pushed is remembered for next time")
+        #expect(job.pushAttempts == [Self.attempt(commit, in: scene)],
+                "and where it went, recorded before it was sent")
     }
 
     // MARK: No hook, and only the commit that was checked
