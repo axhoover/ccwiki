@@ -1567,6 +1567,7 @@ func noteVisited(_ path: String)                     // recents and lastPage
 func documentRequest(_ document: Document) -> RenderRequest
 var quickSwitcherExcludedPath: String?
 func refreshQuickSwitcher()
+func dismissQuickSwitchers(except id: UUID)          // one switcher up at a time (§1.6)
 var ingestSheetTarget: UUID? { get }                 // IngestSheetTarget.window
 var pendingDroppedPDF: URL?
 func requestIngestSheet(in session: UUID?)
@@ -1964,6 +1965,9 @@ fixture transport, and keep it in a temporary library.
 - **Per window.**
   - ⌘F's bar and its matches stay with their tab.
   - Text size changes every tab.
+  - With the quick switcher open in one window and something typed in it,
+    ⌘O in another window closes the first switcher and opens the second
+    empty, leaving out the second window's page.
 - **Papers.**
   - The paper window opens at the trailing edge, no taller than the screen,
     and tiles beside the reader (on macOS 15, Window ▸ Move & Resize ▸ Left
