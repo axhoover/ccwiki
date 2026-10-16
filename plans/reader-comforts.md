@@ -1400,6 +1400,10 @@ enum ShowPaperCommand {
     @MainActor static func perform(_ page: WikiPage, model: AppModel,
                                    openWindow: OpenWindowAction)
 }
+enum IngestCommand {                                 // §1.5, §1.8
+    @MainActor static func perform(in session: UUID?, model: AppModel,
+                                   openWindow: OpenWindowAction)
+}
 ```
 
 **Track A:**
@@ -1515,6 +1519,8 @@ final class ReaderSession: Identifiable {
     func preferencesDidChange()
     var restorationState: ReaderSessionState { get }
     func handleOpenURL(_ url: URL)                   // ccwiki:// or a PDF
+    nonisolated static func stagesOpenedPDF(sheet: UUID?, window: UUID,
+                                            isStarted: Bool, hasPendingPDF: Bool) -> Bool  // §1.3
 
     func open(_ location: Location, recordHistory: Bool = true)
     func open(_ location: Location, _ disposition: LinkDisposition, find: [String]? = nil)
