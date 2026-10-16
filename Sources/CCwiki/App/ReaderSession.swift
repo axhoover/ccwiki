@@ -581,8 +581,10 @@ final class ReaderSession: Identifiable {
     }
 
     /// ⌘O. The query is app-wide; the page left out of the list is this
-    /// window's (§1.6).
+    /// window's (§1.6), so a switcher up in another window closes first:
+    /// two at once would share one query and fight over the left-out page.
     func presentQuickSwitcher() {
+        model.dismissQuickSwitchers(except: id)
         model.quickSwitcherExcludedPath = location.path
         model.quickSwitcherQuery = ""
         model.refreshQuickSwitcher()

@@ -1711,6 +1711,15 @@ final class AppModel {
             : 0
     }
 
+    /// Closes every quick switcher but `id`'s. The query, results and left-out
+    /// page are app-wide, so only one switcher is up at a time
+    /// (plans/reader-comforts.md §1.6).
+    func dismissQuickSwitchers(except id: UUID) {
+        for session in sessions.values where session.id != id {
+            session.quickSwitcherPresented = false
+        }
+    }
+
     /// A reader opened `path`: it is the page read last, for the next cold
     /// start, and the most recent of the recent pages, whichever window
     /// opened it.
