@@ -262,6 +262,17 @@
   // addresses (its `linkify` core rule links those after the inline parse).
   var SITE_WWW = /(^|[\s*_~(])www\.[A-Za-z0-9_-]/i;
 
+  // What micromark counts as punctuation next to a `~`
+  // (micromark-util-character 2.0.1, the site's): ASCII punctuation and
+  // Unicode's P. Built at run time, as SITE_TAG is; without it, ASCII only.
+  var SITE_PUNCTUATION = (function () {
+    try {
+      return new RegExp("^(?:[!-\\/:-@\\[-`{-~]|\\p{P})$", "u");
+    } catch (e) {
+      return /^[!-\/:-@\[-`{-~]$/;
+    }
+  })();
+
   /** Obsidian's other names for a callout (ofm.ts:71). */
   var CALLOUT_ALIASES = {
     summary: "abstract", tldr: "abstract", hint: "tip", important: "tip",
@@ -335,12 +346,13 @@
    *  more for where the node ends. micromark ends that node where it parses
    *  anything but text; markdown-it's inline parser reads the line as it
    *  would (escapes and entities are text; a link, an image, math, code,
-   *  emphasis, an autolink, HTML or a wikilink is not). Then OFM's splits,
-   *  and remark-gfm's literal links, end it sooner. */
+   *  emphasis, an autolink, HTML or a wikilink is not). Then remark-gfm's
+   *  single-`~` strikethrough and literal links, and OFM's splits, end it
+   *  sooner. */
   function siteTextNode(md, line, env) {
     var tokens = [];
     md.inline.parse(line, md, scratchEnv(env), tokens);
-    var text = "", at = [], pos = 0;
+    var text = "", at = [], written = [], pos = 0;
     for (var i = 0; i < tokens.length; i++) {
       var token = tokens[i];
       if (token.type !== "text" && token.type !== "text_special") break;
@@ -348,6 +360,7 @@
       // escape or an entity, decoded, its source in `markup`.
       for (var k = 0; k < token.content.length; k++) {
         at.push(token.type === "text" ? pos + k : pos);
+        written.push(token.type === "text");
       }
       text += token.content;
       pos += token.type === "text" ? token.content.length : token.markup.length;
@@ -355,6 +368,8 @@
     at.push(pos);
 
     var end = text.length;
+    var strike = singleTildeStrike(line, text, at, written);
+    if (strike >= 0) end = Math.min(end, strike);
     var www = SITE_WWW.exec(text);
     if (www) end = Math.min(end, www.index + www[1].length);
     var emails = (md.linkify && md.linkify.match(text)) || [];
@@ -375,6 +390,40 @@
       SITE_TAG.lastIndex = hash + 1;
     }
     return { text: text, at: at.slice(0, text.length + 1) };
+  }
+
+  /** Where in `text` (`siteTextNode`'s, with `at` and which of its
+   *  characters are `written` as in the line) the site starts a
+   *  strikethrough markdown-it does not make, or -1. remark-gfm's
+   *  micromark-extension-gfm-strikethrough 2.0.0 takes a lone `~` as a
+   *  marker (`singleTilde`, on by default) and pairs it as CommonMark pairs
+   *  emphasis: a `~` opens before a letter, or before punctuation after a
+   *  space or punctuation, closes the other way round, and closes the
+   *  nearest open one before it. An escaped `~`, or one next to another, is
+   *  no such marker; `~~` is markdown-it's own. Only a closing `~` in `text`
+   *  is looked for. */
+  function singleTildeStrike(line, text, at, written) {
+    function side(character) {
+      if (character === "" || /^\s$/.test(character)) return "space";
+      return SITE_PUNCTUATION.test(character) ? "punctuation" : "other";
+    }
+    var open = [], first = -1;
+    for (var k = 0; k < text.length; k++) {
+      if (text.charAt(k) !== "~" || !written[k]) continue;
+      var p = at[k];
+      if ((k > 0 && written[k - 1] && text.charAt(k - 1) === "~") || line.charAt(p + 1) === "~") continue;
+      var before = side(Array.from(line.slice(Math.max(0, p - 2), p)).pop() || "");
+      var after = side(Array.from(line.slice(p + 1, p + 3))[0] || "");
+      var opens = after === "other" || (after === "punctuation" && before !== "other");
+      var closes = before === "other" || (before === "punctuation" && after !== "other");
+      if (closes && open.length) {
+        var opener = open.pop();
+        if (first < 0 || opener < first) first = opener;
+      } else if (opens) {
+        open.push(k);
+      }
+    }
+    return first;
   }
 
   /** `env` for a parse whose tokens are thrown away: the footnote plugin

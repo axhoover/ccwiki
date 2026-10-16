@@ -200,6 +200,10 @@ struct FixesRenderjsTests {
             > [!note|wide] A wide one
 
             > [!note] A -> B [x]
+
+            > [!note] a ~b~ [x] c
+
+            > [!note] a ~b [x] c
             """)
         #expect(html.contains(#"<div class="callout-title" data-source-lines="0-1">, the bound holds.</div>"#),
                 "the site takes `] As shown in [HLL23` for metadata")
@@ -212,6 +216,10 @@ struct FixesRenderjsTests {
                 "metadata after a | is not the title")
         #expect(html.contains(#"<div class="callout-title" data-source-lines="8-9">A → B [x]</div>"#),
                 "OFM's arrow splits the site's text node too")
+        #expect(html.contains(#"<div class="callout-title" data-source-lines="10-11">a ~b~ [x] c</div>"#),
+                "remark-gfm's single-tilde strikethrough ends the site's text node before [x]")
+        #expect(html.contains(#"<div class="callout-title" data-source-lines="12-13">c</div>"#),
+                "a lone ~ that closes nothing does not")
     }
 
     // MARK: Comments

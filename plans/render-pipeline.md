@@ -149,8 +149,14 @@ or an entity (a link, an image, math, a code span, emphasis, an autolink, HTML,
 a wikilink, a footnote reference); then, as on the site, at the first of OFM's
 own splits (ofm.ts:239: a wikilink, a `==highlight==`, an arrow, a tag that is
 not all digits and slashes), and at a `www.` link or an email address, which
-remark-gfm links and markdown-it's inline parse does not. The title is the rest
-of the line, as written, and with nothing left it is the type, capitalised.
+remark-gfm links and markdown-it's inline parse does not. It ends, too, at a
+lone `~` that opens a strikethrough: remark-gfm's
+(micromark-extension-gfm-strikethrough 2.0.0, `singleTilde` on by default)
+takes one, and pairs it with a later one as CommonMark pairs emphasis, where
+markdown-it takes only `~~`; a closing `~` is looked for in the node only. So
+`> [!note] a ~b~ [x] c` is titled `a ~b~ [x] c`, and `> [!note] a ~b [x] c`,
+whose `~` closes nothing, `c`. The title is the rest of the line, as written,
+and with nothing left it is the type, capitalised.
 
 **The site's text transform** (ofm.ts:179) runs before the parse here too:
 `%%` comments are deleted, and in a table each wikilink's pipes are escaped,
@@ -191,6 +197,10 @@ one: the regex wants a `|` at the start of the line.
   its target, as `WikiPage.Heading.plainText` reads it; the site slugs the
   text the link shows, which for `[[page#Section]]` is `Section`, and which
   smartypants has educated. No heading in the wiki holds a wikilink
+  (2026-10).
+- The site strikes out text between single tildes (`a ~b~ c`), as
+  remark-gfm does by default; markdown-it strikes only `~~b~~`, so `~b~`
+  reads as written here. No page in the wiki has such a pair outside math
   (2026-10).
 - `Heading.plainText`, and a preview card's wikilink alias
   (`PreviewExcerpt`), decode the character references
