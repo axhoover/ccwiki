@@ -355,7 +355,7 @@ rebuilds the engine, and compares, in both model settings:
 | Entry | Removes | Changes | Backward lists | Vacuous | Golden queries |
 |---|---|---|---|---|---|
 | `requires:red-dlog-to-prg-bm84:dlog` | 32 / 32 | 16 / 30 | 16 / 16 | 0 | `bdh-pke`, `cdh-prg`, `ddh-prg` |
-| `requires:red-ot-to-mpc-kil88:ot` | 6 / 6 | 1 / 1 | 1 / 1 | 0 | `etdp-mpc`, `oihf-mpc`, `ot-mpc`, `rabin-ot-mpc`, `rom-mpc-all` |
+| `requires:red-ot-to-mpc-kil88:ot` | 5 / 5 | 2 / 2 | 1 / 1 | 0 | `ddh-etdp-mpc`, `ddh-ot-mpc`, `etdp-mpc`, `oihf-mpc`, `ot-mpc`, `rabin-ot-mpc`, `rom-mpc-all`, `spir-mpc` |
 | `weakens:red-bdh-to-abe-gpsw06` | 22 / 3 | 1 / 20 | 22 / 3 | 0 | `bdh-abe`, `bdh-be`, `bdh-ibe`, `bdh-pke` |
 | `quarantine:red-bdh-to-hve-bw07` | 2 / 2 | 0 / 0 | 2 / 2 | 0 | `bdh-range-query` |
 | `refuted:ssddh` | 0 / 0 | 0 / 0 | 2 / 2 | 2 / 2 | `ssddh-ke` |
@@ -1221,7 +1221,7 @@ node can say that, so CCwiki keeps its four entries.
 
 - **Need.** The KEM + SKE ⇒ PKE Statement says "a one-time-secure SKE (the
   DEM)", but the hypothesis is the whole `ske` node. So KEM alone never
-  gives PKE: the 15 pairs under CS03 in R11 are a record gap
+  gives PKE: the 14 pairs under CS03 in R11 are a record gap
   (derivations.md §2 R11).
 - **Change.**
   - Add the heading "One-time security" on `symmetric-key-encryption.md`,
@@ -1317,7 +1317,7 @@ node can say that, so CCwiki keeps its four entries.
   two setting rows, because the honest-majority variants no longer imply
   MPC. Each variant instead lists `secure-channels-model` as its setting.
 - **Asks 8 and 9 add answers:** 432 default pairs from the OWF edges when
-  written (373 from ask 8's ten today, 405 with ask 13's DLOG ⇒ OWF), and
+  written (372 from ask 8's ten today, 404 with ask 13's DLOG ⇒ OWF), and
   classical lattice chains.
 - **What remains** is 8 entries:
   - 5 requires entries: JLS21's shared prime and Wat09's four;
@@ -2061,7 +2061,7 @@ correction upstream.
 | §2 Keep the BM84 guard; correct "uses only the group operation" | Done: the notion and evidence say the recurrence reads residues of $\ZZ_p^*$ as integers, which an arbitrary group's encoding does not supply; the wiki's rationale is ask 16. DDH ⇒ PRG still holds without BM84; the curation does not claim it was lost |
 | §2 DLOG ⇒ OWF on the same group family | Wiki ask 13 (and out of ask 8's list). CDH ⇒ PRG stays refused at BM84 until then (`cdh-prg`) |
 | §3 Haitner's compiler | Wiki ask 14, which asks for the compiled OT's notion to be stand-alone, simulation-based security against a static malicious adversary, the notion Kil88's substitution consumes (and ask 4's `malicious-ot-security` defined in that sense, not by the OT page's game-based definitions). Semi-honest OT ⇒ malicious MPC stays refused (`etdp-mpc`); the mutations `ask-14-etdp-mpc` and `ask-14-etdp-com` replay asks 4 and 14 |
-| §3 Static malicious MPC with abort | Done: `weakens:red-ot-to-mpc-kil88`, accepting nothing. The record has no step that consumes MPC, so it refuses nothing; every answer through Kil88 now says what it concludes (`ot-mpc`, `ddh-mpc`), and the 17 X ⇒ MPC pairs are weakened only. `rabin-ot-mpc` is not one of them: it stays refused at Kil88 (`requires`, since Cre87's Rabin OT is semi-honest), and its golden record changed only in losing the near-miss hint that its host OT derives MPC, which OT now does only weakened and assuming malicious OT. A variant node for it joins ask 5 |
+| §3 Static malicious MPC with abort | Done: `weakens:red-ot-to-mpc-kil88`, accepting nothing. The record has no step that consumes MPC, so it refuses nothing; every answer through Kil88 now says what it concludes (`ot-mpc`, `ddh-mpc`), and the 17 X ⇒ MPC pairs (18 since R13's `metBy`, which adds SPIR ⇒ MPC) are weakened only. `rabin-ot-mpc` is not one of them: it stays refused at Kil88 (`requires`, since Cre87's Rabin OT is semi-honest), and its golden record changed only in losing the near-miss hint that its host OT derives MPC, which OT now does only weakened and assuming malicious OT. A variant node for it joins ask 5 |
 | §3 Record the malicious upgrade for `metBy`, DMO00 included | Done in both OT requirements' evidence: DMO00 is accepted on its Statement's completeness claim, which includes upgrading its OT to malicious security; the page's account of the upgrade is part of ask 14 |
 | §3 OT ⇒ COM: not both statistical in the real model | Done: the evidence says statistical hiding and binding hold in the OT-hybrid model only; the `com` it concludes is an ordinary commitment. OT ⇒ OWF ⇒ PRG ⇒ COM awaits ask 8's OT row (Hai08, Theorem 4) |
 | §4 Correct DLO24's experiment | Wiki ask 17 |
@@ -2082,7 +2082,11 @@ as weakened only (18 weakened-only pairs with BDH ⇒ ABE), and 7 are lost:
 ISIS ⇒ SIS, CRHF and constant-round ZK arguments, and a strong PRP ⇒ PRF,
 iPRF, MAC and SKE. BDH ⇒ ABE and the four PRP pairs now carry an
 assumption. With idealised models, 1,222 → 1,181 full pairs, for the same
-reasons plus ISIS's ROM chains and DCR ⇒ RSA.
+reasons plus ISIS's ROM chains and DCR ⇒ RSA. Since then, R13's `metBy`
+lets SPIR meet both OT requirements through DMO00 (SPIR ⇒ cPIR ⇒ OT), which
+adds SPIR ⇒ COM in full and SPIR ⇒ MPC weakened only: today there are 999
+full pairs (1,182 with idealised models) and 19 weakened-only, 18 of them
+X ⇒ MPC.
 
 **The audit's semantic cases**, as `--selftest` checks and golden queries:
 
@@ -2091,7 +2095,7 @@ reasons plus ISIS's ROM chains and DCR ⇒ RSA.
 | Computational BDH alone cannot invoke GPSW06 unqualified | BDH ⇒ ABE assumes DBDH | with ask 11, BDH stops reaching ABE, and DBDH reaches selective KP-ABE with no extra assumption |
 | Selective KP-ABE reaches ordinary PKE, not adaptive IBE/BE | IBE, BE refused on the weakened ABE; PKE underived | PKE with ask 12 (and 5), assuming DBDH; IBE and BE still underived (mutations `ask-12-*`, +41 pairs) |
 | CDH reaches PRG through DLOG and OWF | refused at BM84 | derived with ask 13, fully black-box and without BM84 (mutation `ask-13-cdh-prg`, +32 pairs) |
-| Semi-honest OT reaches static malicious MPC with abort | refused at Kil88 | derived, weakened, with ask 14 (and 4): ETDP ⇒ MPC is one of 7 new weakened-only pairs, beside 33 new full pairs, ETDP ⇒ COM among them (mutations `ask-14-*`) |
+| Semi-honest OT reaches static malicious MPC with abort | refused at Kil88 | derived, weakened, with ask 14 (and 4): ETDP ⇒ MPC is one of 6 new weakened-only pairs, beside 32 new full pairs, ETDP ⇒ COM among them (mutations `ask-14-*`) |
 | A two-point PRP cannot instantiate the PRF conversions | the domain requirement is not met by a bare PRP | — |
 | DLO's preprocessing cannot receive the eventual modulus | FAC ⇒ RSA only assuming DLO24's experiment | ask 17 restates it on the page |
 

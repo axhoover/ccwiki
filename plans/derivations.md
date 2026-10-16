@@ -405,7 +405,7 @@ labelled *related by the page, not by a recorded reduction*:
 | Sections of the **target** that are derived | anything ⇒ Hash function: its section *Preimage resistance (one-wayness)* (`owf`) is |
 | The **target's host** is derived | never when the host is a premise (TDP ⇒ ETDP used to suggest "TDP ⇒ TDP"), and never beside a recorded or non-redundant derived barrier, since a section is usually the stronger notion |
 | Sections of a **start** that derive the target | LPN ⇒ PKE: *Low-noise LPN* and *Mid-noise LPN* each do; LWE ⇒ Ring LWE: *Rank-1 module LWE* does |
-| The **host of a start** derives the target | Rabin OT ⇒ MPC: OT does, assuming malicious security (R13) |
+| The **host of a start** derives the target | Strong PRP ⇒ PRF: PRP does, assuming a superpolynomial domain (R13); ISIS ⇒ CRHF: SIS does. Like every hint, it reads full facts only: Rabin OT ⇒ MPC used to suggest OT, which since Kil88's weakening reaches MPC only weakened, so it now has none |
 
 ### R10. The no-path answer
 
@@ -477,11 +477,17 @@ In this order:
   edge itself, with its tags.
 - Caps: 40 single rows and 12 pairs per group, with totals.
 
-PKE, default filter: **27 single objects; 39 pairs in 5 groups**: SW14
-`{owf, io}` 21, CS03 `{kem, ske}` 15, Wat09, GHJS25 and GHJS25 1 each.
-CS03's 15 are a record gap, not a joint requirement: its Statement needs only
-a one-time DEM, so KEM alone gives PKE. NIZK has 8 single objects and 116
-pairs (SW14 87, KMY20 29), all in the CRS model and some quantum.
+PKE, default filter: **27 single objects; 38 pairs in 5 groups**: SW14
+`{owf, io}` 21, CS03 `{kem, ske}` 14, Wat09, GHJS25 and GHJS25 1 each.
+CS03's 14 are a record gap, not a joint requirement: its Statement needs only
+a one-time DEM, so KEM alone gives PKE. They were 15, and the pairs 39,
+until the PR #9 audit's two PRP domain requirements,
+`requires:red-prp-to-prf:prp` and `requires:red-prp-to-invertible-prf:prp`,
+stopped a strong PRP reaching SKE: strong PRP + KEM no longer gives PKE.
+It takes both: without either one, a strong PRP reaches PRF, and so SKE,
+through the other conversion (PRP ⇒ PRF, or PRP ⇒ iPRF ⇒ PRF). NIZK has 8
+single objects and 116 pairs (SW14 87, KMY20 29), all in the CRS model and
+some quantum.
 
 ### R12. Derived barriers
 
@@ -601,8 +607,13 @@ full ones and adds none (1,084 → 999, of which 44 carry an assumption): 66
 are removed, and 19 are kept apart as weakened only (BDH ⇒ ABE, and the 18
 starts that reach MPC only as Kil88's static MPC with abort). The biggest
 losses are BDH (26: selective ABE, BM84 on BDH's group) and CDH (16: BM84
-needs Z_p^\*, and the record has no DLOG ⇒ OWF, wiki ask 13). Everything
-removed is listed by `--report`.
+needs Z_p^\*, and the record has no DLOG ⇒ OWF, wiki ask 13). `--report`
+prints only the total, 66 removed from 17 starts.
+[curation-review.md](curation-review.md) (`--curation-report`) gives each
+entry's own effect, measured by taking that one entry out: the pairs that
+come back without it, the first 8 where there are more. A pair that two
+entries each block is in neither list, since taking one out leaves the
+other.
 
 ### R14. Refuted assumptions and settings
 

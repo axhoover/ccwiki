@@ -322,10 +322,12 @@ its worktree and is never offered.
 ### The review
 
 A job enters review with a **snapshot** (`ReviewSnapshotter`, corrections.md
-§6.1): everything in the worktree but `.ccwiki/` is staged, and git is asked,
-as bytes, for the name-status, the binary files, the patch and each changed
-file's old and new text (the new from the index, so what is shown is exactly
-what was digested). The patch is written to `logs/<id>.patch`, beside the
+§6.1): everything in the worktree but `.ccwiki/` is staged and written as a
+tree (`git write-tree`), and git is asked, as bytes, for that tree's
+name-status, binary files and patch against the base, and each changed
+file's old and new text (the new from the staged tree, by name, never from
+the index again, so what is shown is exactly what was digested and what
+Approve commits). The patch is written to `logs/<id>.patch`, beside the
 transcript and outside Caches, at every snapshot: a worktree deleted with
 Caches comes back with Restore, which makes it again at the base and applies
 the patch. It builds the worktree in the job's scratch directory and moves it

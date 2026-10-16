@@ -568,7 +568,7 @@ and the integrator deletes it there (§17).
 | Risk | Guard |
 |---|---|
 | Open Draft PR pressed twice | `approve` acts only from `awaitingReview`. The button is disabled while `publishing` |
-| A crash, a quit or a lost reply between the push and the PR | `pushingCommit` is persisted before the push. `publishing` comes back as review. A refused lease asks GitHub where the branch is and recovers (§6.5 step 3). Before creating a PR, publishing looks for an **open PR whose head is the job's branch** (`gh pr list --head`); if one exists, it updates it (`gh pr edit`) instead of opening another |
+| A crash, a quit or a lost reply between the push and the PR | `pushingCommit` is persisted before the push. `publishing` comes back as review. A refused lease asks GitHub where the branch is and recovers (§6.5 step 3). Before creating a PR, publishing looks for an **open PR whose head is the job's branch in R itself** (`gh pr list --repo R --head <branch> --state open`, a fork's branch of the same name left out; §6.5 step 4); if one exists, it updates it (`gh pr edit`) instead of opening another |
 | Pushing again after edits | `--force-with-lease=refs/heads/<branch>:<pushedCommit>`. The first push leases on absence (`…:`), so it cannot overwrite a branch someone else made |
 | The branch name already on GitHub, unfetched | The lease refuses; `git ls-remote` shows a tip CCwiki never made; the job takes the next free name and says so (§6.5 step 3) |
 | Two corrections of one page | Edit Page… on a page whose `edit` job can still be edited opens that job's editor, at the new lines, with no alert. Any other job on the page asks first (§7.1). DiffGuard's `changedUpstream` catches the rest at Approve |
@@ -577,8 +577,8 @@ and the integrator deletes it there (§17).
 | Text lost when an editor or the app closes | Autosave, 0.5 s after typing stops and on close. `approve`, `revert`, `refreshReview` and `restoreWorktree` first await `JobCenter.flushEdits`, which saves every open editor of the job. A quit with unsaved text returns `.terminateLater` until `flushAllEditors()` finishes. An editor writes only while its job is `awaitingReview`. An editor whose text did not reach the disk (a conflict nobody settled, or a failed write) disables Open Draft PR, and `approve` asks `unsettledEdits` again after its own flush and refuses: publishing would send the file without that text and close the editor |
 | Two git commands in one worktree at once | One serial queue per job (§6.1). Two `git add -A` runs would collide on `index.lock` |
 | CCwiki changing a file under an open editor (Revert File, Restore) | `JobCenter.onFilesChanged` reloads the editor: silently if nothing is unsaved, otherwise with the choice "CCwiki reverted this file in Jobs." Use Reverted File, or Keep My Version |
-| The worktree deleted (Caches cleared by hand; the maintainer has done this before, update-integrity.md) | Every snapshot also writes `git diff --cached --binary <base>`, byte for byte, to `logs/<id>.patch` in Application Support. Restore runs `git worktree prune`, `git worktree add -B <branch> <path> <base>`, then `git apply --index`. An empty patch applies as nothing; a missing one is said to be missing, and git is not asked |
-| Approving a diff that changed after it was shown | The snapshot carries a SHA-256 of the staged patch. Approve snapshots again and compares the two. If they differ, it shows the new diff and sends nothing |
+| The worktree deleted (Caches cleared by hand; the maintainer has done this before, update-integrity.md) | Every snapshot also writes its patch, `git diff <patchOptions> <base> <tree>` (the staged tree's diff, the one digested; §6.1), byte for byte, to `logs/<id>.patch` in Application Support. Restore builds the worktree aside, at `<scratch>/restoring`: `git worktree prune`, `git worktree add -B <branch> <scratch>/restoring <base>`, `git apply --index --whitespace=nowarn <patch>` there, then `git worktree move` to the job's worktree path, so a Restore cut short leaves no worktree without its changes. An empty patch applies as nothing; a missing one is said to be missing, and git is not asked |
+| Approving a diff that changed after it was shown | The snapshot carries its tree, by name, and a SHA-256 of that tree's patch. Approve snapshots again and compares both. If either differs, it shows the new diff and sends nothing |
 | The file edited outside CCwiki while the editor is open | Before each save, the editor compares the file on disk with what it last wrote. If they differ, it asks: Keep My Version, or Use the File on Disk |
 | Discard by mistake | A confirmation dialog. The patch file stays in `logs/` until Clear Finished, and the transcript stays as it does today |
 
@@ -1228,15 +1228,32 @@ is also written to the job's log file.
        fix/x-2", and retry once;
      - otherwise refuse: "fix/x on GitHub has commits CCwiki did not push.
        CCwiki will not overwrite them; check the branch on GitHub."
-4. **"Opening the pull request…"**
-   - `gh pr list --repo R --head <branch> --state open --json url,createdAt`.
-   - If one exists: `gh pr edit <url> --title … --body-file …`.
+4. **"Opening the pull request…"** The body is written to
+   `<scratch>/pull-request-body.md` first.
+   - `gh pr list --repo R --head <branch> --state open --json
+     url,createdAt,isCrossRepository --jq '.[] | select(.isCrossRepository
+     | not) | "\(.createdAt) \(.url)"'` (`Publisher.listArguments`): the
+     open PRs from the branch in R itself, one `<createdAt> <url>` line
+     each. `--head` matches a branch's name alone, so a PR from a fork's
+     branch of the same name would match too; it is left out, so CCwiki
+     never edits a stranger's PR or takes it for its own.
+   - If one is listed: `gh pr edit <url> --title … --body-file …`, on the
+     newest.
    - Otherwise: `gh pr create --repo R --draft --base <default> --head
-     <branch> --title … --body-file …`.
-   - Confirm with `gh pr list`, using today's
-     `pullRequest(createdAfter:in:)` with `job.createdAt − 60 s`.
-5. Prune the worktree and the scratch directory. Delete the local branch,
-   never the remote one. The job is `opened(url)`.
+     <branch> --title … --body-file …`, `<default>` being the last path
+     component of what `git symbolic-ref --short refs/remotes/origin/HEAD`
+     prints in the clone (`origin/main` gives `main`), or `main` when that
+     fails (`GitService.defaultBranch`).
+   - Confirm with the same `gh pr list`, using today's
+     `pullRequest(createdAfter:in:)` with `job.createdAt − 60 s`. If that
+     finds none and `gh pr create` succeeded, the URL `gh` printed is
+     taken, and the log says GitHub could not be asked to confirm it.
+5. The job is `opened(url)`. Then `git worktree remove <worktree> --force`
+   in the clone (`git worktree prune` when that fails), the scratch
+   directory deleted, and, only if `git worktree remove` succeeded, `git
+   branch -D <branch>`: the local branch, never the remote one. When the
+   remove fails, the branch is kept even if the prune clears the worktree's
+   record, and the log says "Could not remove the worktree at <path>."
 
 **No git hook runs from step 1 to step 5.** `Publisher` keeps its
 `GitService` as `withoutHooks`, so every git command it runs, the staging
