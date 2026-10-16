@@ -146,6 +146,58 @@ struct FixesJobsTests {
         #expect(!job.log.contains { $0.text.hasPrefix("Tripwire:") })
     }
 
+    @Test("after Clear Finished, a dropped job's pull request is CCwiki's own; a fork's on its branch name is not")
+    func tripwirePullRequestsAfterClearFinished() async throws {
+        let root = JobScene.newRoot()
+        // While the agent runs, GitHub lists two open pull requests from
+        // fix/other: CCwiki's for the job below, from the target repository,
+        // and one from a fork's branch of the same name.
+        let tools = try JobScene.fakeTools([
+            .claude: #"printf 'a\nB\nc' > content/page.md"# + "\n" + JobCenterTests.readyForReview,
+            .gh: """
+                case "$1 $2" in
+                "pr list")
+                    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                    echo "$now false fix/other \(TripwireTests.url(41).absoluteString)"
+                    echo "$now true fix/other \(TripwireTests.url(42).absoluteString)" ;;
+                *) echo 'error connecting to api.github.com' >&2; exit 1 ;;
+                esac
+                """,
+        ], in: root.appending(path: "tools"))
+        guard let scene = try await JobScene.make(root: root, tools: tools) else {
+            try? FileManager.default.removeItem(at: root)
+            return
+        }
+        defer { scene.delete() }
+
+        // That job: an edit of another page, its pull request open.
+        let opened = JobRecordTests.record(
+            "20261001-090000-000-edit-other", kind: .edit(scene.correctionTarget("other.md")),
+            state: .opened(url: TripwireTests.url(41)))
+        try #require(opened.branch == "fix/other")
+        try JobRecordTests.write(opened, in: scene.paths)
+        let center = scene.relaunched()
+        try #require(center.job(id: opened.id) != nil)
+
+        // Clear Finished drops it, record and all, before the agent exits.
+        let job = center.startCorrection(JobCenterTests.request(scene))
+        center.clearFinishedJobs()
+        #expect(center.job(id: opened.id) == nil)
+        #expect(center.otherJobBranches(excluding: job.id) == ["fix/other"])
+
+        await job.task?.value
+        #expect(job.branch == "fix/page")
+        #expect(job.state == .awaitingReview, "\(job.state)")
+        #expect(job.notice == JobNotice(tone: .warning, text:
+            "A pull request from fix/other in another repository was opened while the agent ran, "
+            + "and CCwiki did not open it: https://github.com/axhoover/cryptology.city/pull/42. "
+            + "Look at it on GitHub to see whether the agent made it; CCwiki has sent nothing "
+            + "from this job."), "\(job.notice?.text ?? "no notice")")
+        #expect(job.log.contains { $0.text == "Opened while the agent ran: "
+            + "\(TripwireTests.url(42).absoluteString) (from fix/other in another repository)" })
+        #expect(!job.log.contains { $0.text.contains(TripwireTests.url(41).absoluteString) })
+    }
+
     // MARK: Review Anyway
 
     @Test("Review Anyway on a worktree without changes says so in the transcript, and is withdrawn")
