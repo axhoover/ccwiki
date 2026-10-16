@@ -20,7 +20,8 @@ import Foundation
 /// - values that run on over the indented lines below their key: a plain or
 ///   quoted scalar, folded as YAML folds it, or a flow sequence, as the wiki's
 ///   formatter wraps a long one (`key:` then an indented `[…]`), whose items
-///   fold the same way. Blank lines and comments inside a block sequence do
+///   fold the same way, and whose closing `]` may sit at the margin, as in a
+///   JSON-style list. Blank lines and comments inside a block sequence do
 ///   not end it.
 ///
 /// Deliberately *not* handled, because misreading them is worse than ignoring
@@ -257,17 +258,20 @@ struct Frontmatter: Equatable, Sendable {
 
     /// A flow sequence from the `[` that starts `first`, the rest of its
     /// line, running on over the following lines indented past `indent`
-    /// until its brackets close. Commas inside quotes or nested brackets do
-    /// not split it, a `#` after whitespace comments out the rest of a line,
-    /// and a quote opens a quoted item only at the item's start, so
-    /// `[it's, b]` is two items, as in YAML. An item over several lines
-    /// folds as a scalar does: a line break to a space, each blank line to
-    /// a newline, and a double-quoted item's escaped line break (`\` at the
-    /// end of the line) to nothing. Nil when the brackets never close, or
-    /// more than a comment follows them. Known edge, as in `quotedScalar`:
-    /// an escaped space or tab at the end of a double-quoted line (`\ `) is
-    /// trimmed with the line, so it reads as an escaped line break, where
-    /// YAML keeps the escaped space or tab and folds the break as usual.
+    /// until its brackets close. A line that starts with `]` may sit at the
+    /// margin, as a JSON-style list's closing bracket does; an item or a
+    /// comment there leaves the list unclosed. Commas inside quotes or nested
+    /// brackets do not split it, a `#` after whitespace comments out the
+    /// rest of a line, and a quote opens a quoted item only at the item's
+    /// start, so `[it's, b]` is two items, as in YAML. An item over several
+    /// lines folds as a scalar does: a line break to a space, each blank
+    /// line to a newline, and a double-quoted item's escaped line break (`\`
+    /// at the end of the line) to nothing. Nil when the brackets never
+    /// close, or more than a comment follows them. Known edge, as in
+    /// `quotedScalar`: an escaped space or tab at the end of a double-quoted
+    /// line (`\ `) is trimmed with the line, so it reads as an escaped line
+    /// break, where YAML keeps the escaped space or tab and folds the break
+    /// as usual.
     private static func flowSequence(
         _ first: String, _ lines: [String], from start: Int, indent: Int
     ) -> (items: [String], next: Int)? {
@@ -339,7 +343,14 @@ struct Frontmatter: Equatable, Sendable {
                 blankLines += 1
                 next += 1
             }
-            guard next < lines.count, indentation(lines[next]) > indent else { return nil }
+            // js-yaml reads an open flow collection's lines at any indentation
+            // (a short one is only a "deficient indentation" warning), so a
+            // JSON-style closing `]` at the margin still closes the list. Any
+            // other line there, an item included, leaves it unclosed, so the
+            // next key and the closing `---` are never read into it.
+            guard next < lines.count,
+                  indentation(lines[next]) > indent || lines[next].hasPrefix("]")
+            else { return nil }
             line = Array(lines[next].trimmingCharacters(in: .whitespaces))
             k = 0
             next += 1

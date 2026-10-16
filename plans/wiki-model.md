@@ -156,9 +156,15 @@ not try to be. Measured against all 297 files, it must handle:
   them: a plain or quoted scalar, folded (a line break to a space, a blank line
   to a newline, a line break after a double-quoted value's escaping `\` to
   nothing), and a flow sequence, which the wiki's formatter wraps when it is
-  long (`key:` then an indented `[…]`), its items folded the same way. One
-  edge is left: an escaped space or tab at the end of a double-quoted line
-  (`\ `) is trimmed with the line, so it reads as an escaped line break.
+  long (`key:` then an indented `[…]`), its items folded the same way. A
+  JSON-style list's closing `]` may sit at the margin, which js-yaml reads
+  with only a "deficient indentation" warning; no other line there continues
+  a list, so the next key and the closing `---` are never read into one. Two
+  edges are left: an escaped space or tab at the end of a double-quoted line
+  (`\ `) is trimmed with the line, so it reads as an escaped line break, and a
+  list with any other line at the margin, an item or a comment, is not read:
+  one opened on its key's line is kept as written (`[`, or `[a,`), and the
+  wrapped form (`key:` then an indented `[`) is null.
 
 It deliberately **ignores nested mappings**: an indented block under a key is
 skipped, so a nested `status:` can never overwrite the top-level one. A list
