@@ -4,9 +4,9 @@ import Testing
 
 /// The review and Approve against what git can stage besides text pages: a
 /// submodule's commit, a symbolic link, a worktree's `.git` or `commondir`
-/// rewritten, and a warning a sync brings after the review
-/// (plans/corrections.md §5.1, §6.1, §6.2, §6.5). Against real git in
-/// temporary repositories; nothing touches the network.
+/// rewritten, and a warning a sync brings, or a change a refresh shows,
+/// after the review (plans/corrections.md §5.1, §6.1, §6.2, §6.5). Against
+/// real git in temporary repositories; nothing touches the network.
 @MainActor
 @Suite struct FixesPublishTests {
 
@@ -594,6 +594,36 @@ import Testing
         #expect(result == .refused(Publisher.newWarning(upstream)), "\(result)")
         #expect(job.state == .awaitingReview)
         #expect(job.notice == JobNotice(tone: .warning, text: Publisher.newWarning(upstream)))
+        #expect(await scene.originTip(job.branch) == .absent, "nothing was pushed")
+    }
+
+    @Test("Approve publishes the tree its click saw: a diff a refresh showed since is not sent")
+    func approveTakesTheClicksTree() async throws {
+        guard let scene = try await JobScene.make() else { return }
+        defer { scene.delete() }
+        let job = try await scene.beginEdit()
+        try scene.write("content/page.md", "a\nB\nc", in: job)
+        job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
+        await scene.center.refreshReview(job)
+
+        // The click, which saw this tree.
+        let shown = JobCenter.ShownReview(of: job)
+        let clicked = try #require(shown.snapshot)
+
+        // While the question is up, the file changes again, and a refresh
+        // shows the new diff.
+        try scene.write("content/page.md", "a\nBB\nc", in: job)
+        await scene.center.refreshReview(job)
+        let refreshed = try #require(job.review)
+        #expect(refreshed.tree != clicked.tree, "the second write changed the staged tree")
+
+        // Confirming that question approves the tree it asked about, which
+        // the worktree no longer holds, so nothing is sent.
+        let result = await scene.center.approve(job, shown: shown)
+        #expect(result == .changedSinceReview, "\(result)")
+        #expect(job.state == .awaitingReview)
+        #expect(job.notice == JobNotice(tone: .warning, text: JobCenter.changedSinceReview))
+        #expect(job.review?.tree == refreshed.tree, "the review shows the new diff")
         #expect(await scene.originTip(job.branch) == .absent, "nothing was pushed")
     }
 }
