@@ -217,8 +217,9 @@ agent starts and again after it exits, and asks `gh` for pull requests opened
 meanwhile; anything CCwiki did not make is named in an orange notice. Only a
 pull request from the job's own branch in the target repository makes the job
 `opened`; one from any other branch, which may be the maintainer's own from
-Terminal, is named with where to look, and the job still goes to review with
-its own diff (corrections.md §5.5). Other jobs' branches
+Terminal, is named with where to look, and the job ends as the agent's result
+says, in review with its own diff when it changed something (corrections.md
+§5.5). Other jobs' branches
 are CCwiki's own, but never this job's: a branch name is used again once its
 local branch is gone, so an old record can carry it. The review is the gate.
 

@@ -361,7 +361,7 @@ the rows marked so.
 
 - **Need.** The KEM + SKE ⇒ PKE Statement says "a one-time-secure SKE (the
   DEM)", but the hypothesis is the whole `ske` node. So KEM alone never
-  gives PKE: the 15 pairs under CS03 in the backward list are a record gap
+  gives PKE: the 14 pairs under CS03 in the backward list are a record gap
   (derivations.md R11).
 - **Change.**
   - Add the heading "One-time security" on `symmetric-key-encryption.md`,

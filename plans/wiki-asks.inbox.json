@@ -170,7 +170,7 @@
     "content/Reductions/prg-to-ske-one-time.md (new)"
    ],
    "proposed_action": "(1) symmetric-key-encryption.md: add the heading 'One-time security' with the variant `ske-one-time`. (2) kem-and-ske-to-pke.md: `hypotheses: [kem, ske-one-time]` (node refinement; the id stays). (3) Two new folklore pages: ske-to-ske-one-time.md, `hypotheses: [ske]`, `conclusion: ske-one-time`; and prg-to-ske-one-time.md, `hypotheses: [prg]`, `conclusion: ske-one-time` (a pseudorandom pad; encrypt-then-MAC with a one-time MAC for the CCA notion).",
-   "rationale": "The Statement says 'a one-time-secure SKE (the DEM)', so the record asks for more than the theorem uses: KEM alone never gives PKE, and the 15 pairs that reach PKE through CS03 all need a second object for SKE. With ccw:missing-edge-owf's KEM ⇒ OWF, KEM would derive PKE. Retires no CCwiki curation entry.",
+   "rationale": "The Statement says 'a one-time-secure SKE (the DEM)', so the record asks for more than the theorem uses: KEM alone never gives PKE, and the 14 pairs that reach PKE through CS03 all need a second object for SKE. With ccw:missing-edge-owf's KEM ⇒ OWF, KEM would derive PKE. Retires no CCwiki curation entry.",
    "related": [
     "ccw:missing-edge-owf"
    ],

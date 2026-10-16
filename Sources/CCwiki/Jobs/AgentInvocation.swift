@@ -369,7 +369,8 @@ struct AgentRun {
             // repository, that CCwiki did not open: the change is already on
             // GitHub, and there is nothing to review. The worktree stays, for
             // inspection. Any other pull request is only the notice's, and
-            // the job goes on to review with its own diff.
+            // the job ends as the agent's result says: in review with its
+            // own diff when it changed something.
             await cleanUp(keep: true)
             job.setState(.opened(url: url))
             return
