@@ -101,19 +101,24 @@ typography (below): `ccwiki_typography` runs before `ccwiki_heading_ids`, so
 `WikiPage.Heading.plainText` reads a heading the same way (`educated`: the
 same arrows, `--` and `...`, and LaTeX's ``` `` ``` and `''`, with an escaped
 character or a character reference read as the character it stands for),
-and leaves alone what the page leaves alone: math, code, a wikilink, and the
-text of a link markdown-it makes of a URL or an address, which the page's
-typography skips. Those links are markdown-it's autolinks (`<https://…>`,
-`<name@host>`) and what linkify-it finds (`https://…`, `ftp://…`,
-`//host/…`, `mailto:…` and a bare `name@host`; never a `www.` link), so
-`## See https://x.org/a--b` keeps its `--` in the id. `Heading.Linkify` is
-the linkify-it markdown-it 15 bundles, ported, its patterns in ICU's
-syntax, and `plainText` applies it where markdown-it does: at a `://` after
-a scheme's name while it parses, then to each run of text between tokens
-of a heading it finds a link in. So the outline, search, the preview cards
-and DiffGuard name the ids the page has, but for the rare headings listed
-under "Still different" below. `FixesWikiparseTests` checks the two against
-each other; on the wiki at ab81f02 all 2,769 headings of 883 pages agree.
+and leaves alone what the page leaves alone: math, code and a wikilink. The
+text of a link markdown-it makes of a URL or an address is educated too,
+as the site educates a link's text, but by itself, as the page educates
+the `text` token markdown-it makes of it: `## See https://x.org/a--b` reads
+`See https://x.org/a—b` and has the id `see-httpsxorgab`, as on the site,
+while `<https://x.org/a->-b` keeps its `--`, which no one token holds.
+Those links are markdown-it's autolinks (`<https://…>`, `<name@host>`) and
+what linkify-it finds (`https://…`, `ftp://…`, `//host/…`, `mailto:…` and a
+bare `name@host`; never a `www.` link, which markdown-it leaves in the
+text around it). `Heading.Linkify` is the linkify-it markdown-it 15
+bundles, ported, its patterns in ICU's syntax, and `plainText` applies it
+where markdown-it does: at a `://` after a scheme's name while it parses,
+then to each run of text between tokens of a heading it finds a link in.
+So search, relation labels, the preview cards and DiffGuard name the ids
+the page has, but for the rare headings listed under "Still different"
+below; the outline takes its headings and ids from the render.
+`FixesWikiparseTests` checks the two against each other; on the wiki at
+ab81f02 all 2,769 headings of 883 pages agree.
 
 **Options** match the site: `linkify: true` (GFM autolinks), `typographer: true`
 (smartypants), `breaks: false` (`HardLineBreaks` is not configured), and
@@ -126,9 +131,15 @@ script (§5), so markup coming out of the wiki cannot execute.
 OFM's arrows and retext-smartypants' defaults do: `->` → →, `=>` → ⇒ and the
 rest of ofm.ts's arrows, then `--` (only two) → —, three or more dots → …,
 and LaTeX's ``` ``quotes'' ``` → “quotes”. `---`, `(c)`, `+-` and `..` stay
-as written. A wikilink's text is a `text` token between `wikilink_open` and
-`wikilink_close`, so it is educated as the site educates a link's text; the
-preview cards get the same rules.
+as written. A link's text is educated whatever made the link, as on the
+site: every link there holds a text node by the time OFM's arrows and
+smartypants run, and they edit every text node. So a wikilink's text is a
+`text` token between `wikilink_open` and `wikilink_close`, and an
+autolink's, a URL's or an address's text is educated where it stands,
+between markdown-it's `link_open` and `link_close`: `https://x.org/a--b`
+reads `https://x.org/a—b`, its href as written. Each `text` token is
+educated by itself, as the site educates each text node. The preview cards
+get the same rules.
 
 **Callouts** take their title from the marker's line only (math and links
 included) and the lines after it as their body, as ofm.ts does (its text
@@ -161,7 +172,18 @@ and with nothing left it is the type, capitalised.
 **The site's text transform** (ofm.ts:179) runs before the parse here too:
 `%%` comments are deleted, and in a table each wikilink's pipes are escaped,
 so `[[slug|Name]]` stays one cell (and `\|` in a table's math keeps its
-backslash). A wikilink shows its alias decoded (`IND\$-CPA` reads
+backslash). Those escapes count on markdown-it's cell split to take one
+backslash off again, so they stay only on the lines markdown-it splits into
+cells (`splitRowsOnly`, from a block parse of the escaped text). Rows the
+site's regex finds that make no table (a header with another number of
+cells than the line under it, or rows that continue a list item's or a
+quote's paragraph) are a paragraph's lines, where the site decodes each `\|`
+it added; here they are put back as written, so their links resolve and
+their math reads as written. A row put back that would make a table of its
+own keeps its escapes, and the tables stay the site's (see "Still
+different" below).
+
+A wikilink shows its alias decoded (`IND\$-CPA` reads
 `IND$-CPA`); without one, `[[page#Heading]]` shows `Heading` (in a table,
 `page`, as the site's `#` escape there leaves it) and `[[page]]` the last
 segment of the target. A link preview card shows a wikilink's text by the
@@ -172,7 +194,7 @@ block is shown as written, its cells never split, so it gets the site's edit
 exactly (ofm.ts:196: in each link, the first `#` and each unescaped `|`
 escaped) and nothing more: `| $\|x\|$ | [[a\|b]] |` in a fence reads as
 written, and `[[a|b]]` reads `[[a\|b]]`, as the site's code block shows it.
-Which lines those are comes from a block parse of its own (`verbatimLines`),
+Which lines those are comes from a block parse of its own (`linesInBlocks`),
 whose tokens and `env` are thrown away. An indented code block never holds
 one: the regex wants a `|` at the start of the line.
 
@@ -193,6 +215,24 @@ one: the regex wants a `|` at the start of the line.
   code block, `[[https://x|y]]` reads `[y](https://x)`); the reader shows
   code as written, but for a table in it (above), where the table's escapes
   stop the rewrite of every link but an external one.
+- A header row the site's regex escapes into a paragraph (without the
+  escape, its link's `|` ends a cell, and the row has as many cells as the
+  line under it) keeps its escape here, with the rows that table would
+  take: they are a paragraph's lines as on the site, but their wikilinks
+  show as broken and `\|` in their math as `\\|`. No page in the wiki has
+  one (2026-10).
+- The site's CrawlLinks (`prettyLinks`, on by default; links.ts:136-147)
+  cuts the text of every internal link that is one plain text node not
+  starting with `#` to its `path.basename`: a wikilink's alias and the
+  heading `[[page#Heading]]` shows, and a markdown link's text, not only a
+  target without an alias. So `[[p-poly|P/poly]]` and
+  `[[p-to-p-poly|P ⊆ P/poly]]` read `poly` there. The reader and the preview
+  cards (`PreviewExcerpt`) keep that text whole, as written; only a target
+  without an alias is cut to its last segment. The wiki at ab81f02 has 6
+  such links: Reductions/p-to-p-poly.md:20, Reductions/bpp-to-p-poly.md:22,
+  Complexity/polynomial-time.md:28,
+  Complexity/bounded-error-probabilistic-polynomial-time.md:45 and
+  Complexity/p-poly.md:44-45.
 - A wikilink in a heading counts towards the id as its alias, decoded, or as
   its target, as `WikiPage.Heading.plainText` reads it; the site slugs the
   text the link shows, which for `[[page#Section]]` is `Section`, and which
@@ -207,7 +247,7 @@ one: the regex wants a `|` at the start of the line.
   `MarkdownLinkParser.unescape` knows (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
   `&apos;`, `&nbsp;` and numeric ones); markdown-it decodes every HTML5 name,
   and makes an invalid code point U+FFFD. So `## A &mdash; B` has another id
-  in the outline than on the page, and `[[x|a &mdash; b]]` reads
+  in search than on the page, and `[[x|a &mdash; b]]` reads
   `a &mdash; b` on a card and `a — b` on the page. No heading or alias in
   the wiki holds one.
 - Other headings `Heading.plainText` reads otherwise than the page, none of
@@ -217,8 +257,22 @@ one: the regex wants a `|` at the start of the line.
   page; `*` is only deleted here, so one that is not emphasis, which the
   page keeps, shows at an edge of the heading (`## a **` has the id `a-`
   there, `a` here) and before a final `Σ`, and `*emphasis*` right around
-  an address does not set it apart as it does there; and a `[` before a
-  markdown link starts that link's text here.
+  an address does not set it apart as it does there; a `[` before a
+  markdown link starts that link's text here; and after a `[` no `]`
+  closes, markdown-it's backtick cache can leave a pair of backticks
+  unread, so `` ## [ `a--b`c`x `` has no code span there (`a—b`, and an
+  autolink in the backticks is a link) and one here.
+- Which lines are headings: `WikiPage.headings()`, and the same loops in
+  `PreviewExcerpt` (the preview cards), `DiffGuard.headingsByAnchor` and
+  `CorrectionTarget.headingLine`, read ATX lines outside fences and `%%`
+  comments. A setext heading, or a heading inside a blockquote, a callout or
+  a list item, has an id on the page but none in search, relation labels,
+  the preview cards or DiffGuard, and it moves the ids of later headings
+  with the same text (`Security\n---\n\n## Security` is `security-1` on the
+  page, `security` here). An ATX-looking line inside an HTML block or `$$`
+  display math is a heading here but not on the page. The outline is not
+  affected: it takes its headings from the render. None of these is in the
+  wiki at ab81f02.
 
 **Not** reproduced, deliberately: the SPA router and the graph view.
 

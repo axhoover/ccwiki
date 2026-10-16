@@ -218,8 +218,11 @@ struct WikiPage: Identifiable, Sendable {
     /// per-document *deduplicating* `GithubSlugger`, so a second `## Syntax`
     /// becomes `syntax-1`.
     ///
-    /// The webview computes the same ids independently when it renders; this
-    /// copy exists so the outline can be shown before (and without) a render.
+    /// The webview computes the same ids independently when it renders, and
+    /// the outline takes its headings from that render. This copy is for
+    /// what reads a page without rendering it: search and relation labels.
+    /// Only ATX lines outside fences and `%%` comments count (see
+    /// plans/render-pipeline.md, "Still different from the site").
     func headings() -> [Heading] {
         var slugger = GithubSlugger()
         var result: [Heading] = []
@@ -257,9 +260,9 @@ extension WikiPage.Heading {
     /// `IND$-CPA`), or its target without the anchor; a markdown link is its
     /// text; math and code keep their source, losing only their delimiters;
     /// a link markdown-it makes of a URL or an address (`https://…`,
-    /// `<https://…>`, `name@host`) is that text as written; a backslash
-    /// escape or a character reference is the character it stands for; and
-    /// emphasis loses its markers.
+    /// `<https://…>`, `name@host`) is that text, educated on its own; a
+    /// backslash escape or a character reference is the character it stands
+    /// for; and emphasis loses its markers.
     ///
     /// Underscores need the care, because github-slugger keeps `_`: only a
     /// pair markdown-it reads as emphasis goes, so `_k_` reads `k` while
@@ -267,8 +270,10 @@ extension WikiPage.Heading {
     ///
     /// The rest of the text is educated as the page educates it before the
     /// ids are made (`educated`): `## A -> B` reads `A → B`, and its id is
-    /// `a--b`, not `a---b`. A URL's or an address's text is not, there or
-    /// here: `## See https://x.org/a--b` keeps its `--`.
+    /// `a--b`, not `a---b`. A URL's or an address's text is educated too, as
+    /// the site's smartypants educates a link's text, but by itself, as the
+    /// page educates its token: `## See https://x.org/a--b` reads
+    /// `See https://x.org/a—b`, and `<https://x.org/a->-b` keeps its `--`.
     static func plainText(_ markdown: String) -> String {
         // Text that is already final (a link's display text, a math or code
         // span, an escape) stands in as one private-use scalar while the
@@ -438,7 +443,7 @@ extension WikiPage.Heading {
             }
             // markdown-it's autolink rule: `<https://…>` or `<name@host>`, up
             // to the next `<` or `>` in the markdown. A link's text, which
-            // the page never educates.
+            // the page educates by itself.
             if c == "<" {
                 let rest = source(i..<scalars.count) as NSString
                 let close = rest.length > 1
@@ -449,7 +454,7 @@ extension WikiPage.Heading {
                 if close != NSNotFound, rest.character(at: close) == 0x3E {
                     let url = rest.substring(with: NSRange(location: 1, length: close - 1))
                     if Linkify.isAutolink(url), let count = scalarCount(from: i, utf16Length: close + 1) {
-                        masked.append(contentsOf: protect(url).unicodeScalars)
+                        masked.append(contentsOf: protect(Self.educatedLinkText(url)).unicodeScalars)
                         consume(i..<(i + count))
                         i += count
                         runStart = i
@@ -470,7 +475,7 @@ extension WikiPage.Heading {
                     scheme: String(String.UnicodeScalarView(scalars[start..<i]))),
                    let count = scalarCount(from: start, utf16Length: url.utf16.count) {
                     masked.removeLast(i - start)
-                    masked.append(contentsOf: protect(url, wordLike: true).unicodeScalars)
+                    masked.append(contentsOf: protect(Self.educatedLinkText(url), wordLike: true).unicodeScalars)
                     consume(start..<(start + count))
                     i = start + count
                     runStart = i
@@ -537,7 +542,7 @@ extension WikiPage.Heading {
         // markdown-it's linkify core rule: in a heading linkify-it finds a
         // link in, each run of text between tokens (not a link's text) takes
         // the links linkify-it finds in it, save one at its start right after
-        // an escape. Their text is never educated either.
+        // an escape. Each link's text is educated by itself.
         if !Linkify.links(in: markdown).isEmpty {
             var linkified = String.UnicodeScalarView()
             var run = String.UnicodeScalarView()
@@ -558,7 +563,8 @@ extension WikiPage.Heading {
                 for link in links {
                     linkified.append(contentsOf: ns.substring(
                         with: NSRange(location: taken, length: link.location - taken)).unicodeScalars)
-                    linkified.append(contentsOf: protect(ns.substring(with: link)).unicodeScalars)
+                    linkified.append(
+                        contentsOf: protect(Self.educatedLinkText(ns.substring(with: link))).unicodeScalars)
                     taken = NSMaxRange(link)
                 }
                 linkified.append(contentsOf: ns.substring(from: taken).unicodeScalars)
@@ -584,11 +590,8 @@ extension WikiPage.Heading {
             plain = String(linkified)
         }
 
-        // ccwiki_backticks, on the text between tokens before they join:
-        // ``this'' reads “this”.
-        plain = plain
-            .replacingOccurrences(of: "(^|[^`])``(?!`)", with: "$1\u{201C}", options: .regularExpression)
-            .replacingOccurrences(of: "(^|[^'])''(?!')", with: "$1\u{201D}", options: .regularExpression)
+        // ccwiki_backticks, on the text between tokens before they join.
+        plain = Self.latexQuotes(plain)
 
         // markdown-it joins an escape or a reference to the text either side
         // (`text_join`) before the page educates it: `\->` is an arrow.
@@ -684,6 +687,20 @@ extension WikiPage.Heading {
             .replacingOccurrences(of: #"\.{3,}"#, with: "…", options: .regularExpression)
     }
 
+    /// `ccwiki_backticks`: LaTeX's quotes, ``this'' reading “this”.
+    private static func latexQuotes(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "(^|[^`])``(?!`)", with: "$1\u{201C}", options: .regularExpression)
+            .replacingOccurrences(of: "(^|[^'])''(?!')", with: "$1\u{201D}", options: .regularExpression)
+    }
+
+    /// The text of a link markdown-it makes of a URL or an address, as the
+    /// page shows it: a `text` token of its own, which `ccwiki_backticks`
+    /// and then `ccwiki_typography` edit as they edit any other.
+    private static func educatedLinkText(_ text: String) -> String {
+        educated(latexQuotes(text))
+    }
+
     /// ofm.ts:121, and what each arrow becomes.
     private static let arrowPattern = try! NSRegularExpression(
         pattern: "(-{1,2}>|={1,2}>|<-{1,2}|<={1,2})")
@@ -708,11 +725,13 @@ extension WikiPage.Heading {
 extension WikiPage.Heading {
     /// linkify-it as markdown-it 15 bundles it, which `ccwiki-markdown.js`
     /// turns on: the URLs and addresses markdown-it makes links of, so that
-    /// `plainText` leaves their text as written, as the page does. Its
-    /// schemes `http:`, `https:`, `ftp:`, `//` and `mailto:`, and a bare
-    /// `name@host`; no `www.` or bare-domain links, and no `user@` in a URL.
-    /// Its patterns are linkify-it's, in ICU's syntax; one is nil only if
-    /// ICU rejected it. Offsets are UTF-16, as linkify-it's are.
+    /// `plainText` reads each one's text as the page does, as a token of its
+    /// own: educated by itself, and out of reach of the emphasis, spans and
+    /// escapes around it. Its schemes `http:`, `https:`, `ftp:`, `//` and
+    /// `mailto:`, and a bare `name@host`; no `www.` or bare-domain links,
+    /// and no `user@` in a URL. Its patterns are linkify-it's, in ICU's
+    /// syntax; one is nil only if ICU rejected it. Offsets are UTF-16, as
+    /// linkify-it's are.
     enum Linkify {
         /// linkify-it's `match`: the links it finds in `text`, in order.
         static func links(in text: String) -> [NSRange] {
