@@ -708,7 +708,7 @@ struct GitService: Sendable {
     /// git diff <patchOptions> <base> <tree>         → its digest must be `digest`
     /// git commit-tree -p <base> -m <message> <tree> → the commit
     /// git cat-file commit <commit>                  → its tree and only parent, checked
-    /// git update-ref refs/heads/<branch> <commit>   → the job's branch, and its reflog
+    /// git update-ref refs/heads/<branch> <commit>   → the job's branch
     /// ```
     ///
     /// `reviewedTree` and `digest` are the reviewed snapshot's
@@ -858,20 +858,6 @@ struct GitService: Sendable {
             refs[fields[1].trimmingCharacters(in: .whitespaces)] = String(fields[0])
         }
         return refs
-    }
-
-    /// Every commit the local `branch` has pointed at. Each Approve's commit
-    /// is among them, which is how a push CCwiki made is recognised after its
-    /// reply was lost (§6.5).
-    func reflog(of branch: String, in directory: URL) async -> Set<String> {
-        let result = await run([
-            "-C", directory.path(percentEncoded: false),
-            "log", "--walk-reflogs", "--format=%H", "refs/heads/\(branch)", "--",
-        ])
-        guard result.succeeded else { return [] }
-        return Set(result.stdout.split(separator: "\n").map {
-            $0.trimmingCharacters(in: .whitespaces)
-        }.filter { !$0.isEmpty })
     }
 
     /// Renames `branch`, the job's own, wherever it is checked out: by name,

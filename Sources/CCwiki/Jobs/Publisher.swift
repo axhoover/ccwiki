@@ -13,13 +13,17 @@ import Foundation
 ///                         diff from <base> must have the reviewed digest;
 ///                         git commit-tree -p <base>; its tree and parent
 ///                         checked; git update-ref refs/heads/<branch>
-/// 3. Pushing <branch>…    pushingCommit persisted, then
+/// 3. Pushing <branch>…    pushingCommit, and the attempt (repository, branch,
+///                         commit), persisted before each send, then
 ///                         git --no-replace-objects -c core.useReplaceRefs=false
 ///                         -c core.hooksPath=/dev/null -c core.fsmonitor=false
 ///                         push --no-verify --no-follow-tags --recurse-submodules=no
 ///                         --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
 ///                         <remote> <commit>:refs/heads/<branch>
-///                         a refused lease asks GitHub where the branch is (leaseRecovery)
+///                         a refused lease asks GitHub where the branch is
+///                         (leaseRecovery): a tip this job confirmed, or recorded
+///                         as an attempt for that repository and branch, is
+///                         pushed over; any other is someone else's
 /// 4. Opening the pull request…
 ///                         gh pr list --head <branch>: edit an open one, else
 ///                         gh pr create --draft, then confirm with gh pr list
@@ -257,9 +261,10 @@ struct Publisher {
     /// on the last push it confirmed, or on absence before the first.
     /// Whatever moves HEAD after `commit` was checked, `commit` is what is
     /// sent, on the first try and the retry alike. The commit is persisted
-    /// as `pushingCommit` before anything is sent, so a reply lost to a
-    /// crash or a quit is recognised next time; a confirmed push is
-    /// persisted as `pushedCommit`.
+    /// as `pushingCommit`, and each send as a `PushAttempt` for the
+    /// target's repository and the branch it goes to, before anything is
+    /// sent, so a reply lost to a crash or a quit is recognised next time;
+    /// a confirmed push is persisted as `pushedCommit`.
     ///
     /// A refused lease means the branch on GitHub is not where this job
     /// left it. GitHub is asked where it is, and `leaseRecovery` decides:
@@ -268,6 +273,15 @@ struct Publisher {
     func push(_ job: Job, commit: String) async -> PushOutcome {
         let remote = target.pushURL
         step(job, "Pushing \(job.branch)…")
+        // A record written before attempts were kept has only the commit
+        // its last push was sending, which this overwrites, and the one it
+        // confirmed: those pushes went to this branch, and are taken to have
+        // gone to this repository.
+        for earlier in [job.pushingCommit, job.pushedCommit].compactMap({ $0 })
+        where !job.pushAttempts.contains(where: { $0.commit == earlier }) {
+            job.recordPushAttempt(PushAttempt(
+                repository: target.repository, branch: job.branch, commit: earlier))
+        }
         job.setPushingCommit(commit)
 
         var expecting = job.pushedCommit
@@ -290,9 +304,9 @@ struct Publisher {
         case .at(let found):
             tip = found
         }
-        let reflog = await git.reflog(of: job.branch, in: job.worktree)
         switch Self.leaseRecovery(
-            remoteTip: tip, pushing: job.pushingCommit, pushed: job.pushedCommit, reflog: reflog) {
+            remoteTip: tip, pushed: job.pushedCommit, attempts: job.pushAttempts,
+            repository: target.repository, branch: job.branch) {
         case .retry(let expected):
             if let expected, expected != job.pushedCommit {
                 job.append(JobLogEntry(.system,
@@ -326,11 +340,15 @@ struct Publisher {
         return .failed(Self.pushFailure(job.branch, output: result.output))
     }
 
+    /// One send of `commit` to the job's branch as it is now, recorded as an
+    /// attempt, and the record written, before anything leaves.
     private func sendPush(_ job: Job, commit: String, remote: String, expecting: String?) async
         -> Subprocess.Result {
         let git = self.git
         let worktree = job.worktree
         let branch = job.branch
+        job.recordPushAttempt(PushAttempt(
+            repository: target.repository, branch: branch, commit: commit))
         job.append(JobLogEntry(.system, "git " + git.invocation(Self.pushArguments(
             remote: remote, branch: branch, commit: commit, expecting: expecting))
                 .joined(separator: " ")))
@@ -562,22 +580,33 @@ struct Publisher {
     }
 
     /// What to do when GitHub refused a push's lease (§6.5 step 3), given
-    /// where the branch is there:
+    /// where `branch` is there, in `repository`:
     ///
     /// - absent: push again, leasing on absence;
-    /// - at `pushing`, `pushed`, or any commit in the local branch's reflog
-    ///   (every Approve's commit is there): ours, so push again expecting it;
-    /// - anywhere else, and this job never confirmed a push: someone else's
-    ///   branch, so take another name;
-    /// - anywhere else after a confirmed push: refuse.
+    /// - at a commit `attempts` records for this very `repository` and
+    ///   `branch` (the push being made is one, the confirmed one `pushed`
+    ///   is another, and so is one whose reply was lost): ours, so push
+    ///   again expecting it;
+    /// - anywhere else, and this job never confirmed a push to this
+    ///   `repository` and `branch`: someone else's branch, so take another
+    ///   name;
+    /// - anywhere else after a confirmed push here: refuse.
+    ///
+    /// The local branch's reflog is no evidence: it has the job's base,
+    /// which anyone may push as that branch, and whatever else the branch
+    /// was moved through. An attempt for another branch, the one a rename
+    /// left, or for another repository, says nothing about this one, and
+    /// nor does a push confirmed there.
     nonisolated static func leaseRecovery(
-        remoteTip: String?, pushing: String?, pushed: String?, reflog: Set<String>
+        remoteTip: String?, pushed: String?, attempts: [PushAttempt],
+        repository: String, branch: String
     ) -> LeaseRecovery {
-        guard let tip = remoteTip else { return .retry(expecting: nil) }
-        if tip == pushing || tip == pushed || reflog.contains(tip) {
-            return .retry(expecting: tip)
+        func isHere(_ commit: String) -> Bool {
+            attempts.contains(PushAttempt(repository: repository, branch: branch, commit: commit))
         }
-        return pushed == nil ? .rename : .refuse
+        guard let tip = remoteTip else { return .retry(expecting: nil) }
+        if isHere(tip) { return .retry(expecting: tip) }
+        return pushed.map(isHere) == true ? .refuse : .rename
     }
 
     /// `push --no-verify --no-follow-tags --recurse-submodules=no

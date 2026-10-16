@@ -385,8 +385,7 @@ final class EditorSession {
             // Only an edit that never reached GitHub leaves nothing behind;
             // one with a branch there waits in Jobs for its Discard, which
             // says what stays on GitHub.
-            if isClosing, isLastEditor, isEdit, !hasUnsavedText,
-               job.pushingCommit == nil, job.pushedCommit == nil {
+            if isClosing, isLastEditor, isEdit, !hasUnsavedText, !job.hasTriedToPush {
                 await model.jobCenter.discardIfUntouched(job)
             }
         }

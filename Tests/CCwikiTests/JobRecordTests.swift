@@ -50,6 +50,7 @@ struct JobRecordTests {
         #expect(record.baseCommit == nil)
         #expect(record.pullRequest == nil)
         #expect(record.pushingCommit == nil && record.pushedCommit == nil && record.notice == nil)
+        #expect(record.pushAttempts.isEmpty)
 
         let running = try JSONDecoder().decode(JobRecord.self, from: Data(Self.legacyRunning.utf8))
         #expect(running.state == .running)
@@ -70,7 +71,7 @@ struct JobRecordTests {
                 state: .awaitingReview, createdAt: Self.created, startedAt: nil, finishedAt: nil,
                 baseCommit: "865206d47c53",
                 pullRequest: PullRequestDraft(title: "[fix] Pseudorandom function", body: "Why."),
-                pushingCommit: "abc", pushedCommit: nil,
+                pushingCommit: "abc", pushedCommit: nil, pushAttempts: Self.attempts,
                 notice: JobNotice(tone: .warning, text: "The files changed since you reviewed them."))
             let decoded = try JSONDecoder().decode(
                 JobRecord.self, from: JSONEncoder().encode(record))
@@ -80,8 +81,44 @@ struct JobRecordTests {
             #expect(decoded.baseCommit == "865206d47c53")
             #expect(decoded.pullRequest == record.pullRequest)
             #expect(decoded.pushingCommit == "abc" && decoded.pushedCommit == nil)
+            #expect(decoded.pushAttempts == Self.attempts, "in order, each with where it went")
             #expect(decoded.notice == record.notice)
         }
+    }
+
+    /// Two attempts, the second after a rename.
+    static let attempts = [
+        PushAttempt(repository: "axhoover/cryptology.city", branch: "fix/pseudorandom-function",
+                    commit: "abc"),
+        PushAttempt(repository: "axhoover/cryptology.city", branch: "fix/pseudorandom-function-2",
+                    commit: "abc"),
+    ]
+
+    @Test("a record written before push attempts were kept decodes with none, and keeps what it was pushing")
+    func recordWithoutAttempts() throws {
+        let record = JobRecord(
+            id: "job", kind: .edit(Self.target), branch: "fix/pseudorandom-function",
+            state: .awaitingReview, createdAt: Self.created, startedAt: nil, finishedAt: nil,
+            baseCommit: "865206d47c53", pullRequest: nil, pushingCommit: "abc",
+            pushedCommit: "def", pushAttempts: Self.attempts, notice: nil)
+        // The record as the last release wrote it: every field but this one.
+        let data = try JSONEncoder().encode(record)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let named = object.removeValue(forKey: "pushAttempts") != nil
+        #expect(named, "a record names its attempts")
+        let old = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(JobRecord.self, from: old)
+        #expect(decoded.pushAttempts.isEmpty)
+        #expect(decoded.pushingCommit == "abc" && decoded.pushedCommit == "def")
+        #expect(decoded.branch == "fix/pseudorandom-function")
+        #expect(decoded.kind == .edit(Self.target))
+
+        let paths = try Self.temporaryPaths()
+        defer { try? FileManager.default.removeItem(at: paths.support) }
+        let job = Job(restoring: decoded, paths: paths, worktreeExists: true, patchExists: false)
+        #expect(job.pushAttempts.isEmpty && job.pushingCommit == "abc")
+        #expect(job.hasTriedToPush)
     }
 
     @Test("every state round-trips, and the old ones keep their labels")
@@ -409,7 +446,7 @@ struct JobRecordTests {
             id: id, kind: kind, branch: kind.branchPrefix + kind.slug, state: state,
             createdAt: id == "newer" ? created.addingTimeInterval(60) : created,
             startedAt: nil, finishedAt: nil, baseCommit: "865206d47c53", pullRequest: nil,
-            pushingCommit: nil, pushedCommit: nil, notice: nil)
+            pushingCommit: nil, pushedCommit: nil, pushAttempts: [], notice: nil)
     }
 
     static func write(_ record: JobRecord, in paths: AppPaths) throws {
