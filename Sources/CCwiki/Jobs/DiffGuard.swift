@@ -82,16 +82,9 @@ enum DiffGuard {
         // (A correction's agent cannot run it; `relationsJSONByHand` asks.)
         let relations = files.first { $0.file.path == relationsJSON && $0.file.status != .deleted }
         let relationsRegenerated = relations != nil
-        let stalePages = files.filter {
-            $0.file.isMarkdown && $0.file.path.hasPrefix(contentPrefix) && staleDerivedFiles($0)
-        }
-        // What it wrote is read only when a rule needs it: a page edited
-        // after it ran, and a region gone, are its doing only if its
-        // records say so.
-        let needsManifest = relationsRegenerated
-            && (!stalePages.isEmpty || files.contains { !$0.removedRegions.isEmpty })
-        let manifest: WrittenManifest? = needsManifest
-            ? relations?.file.newText.flatMap(WrittenManifest.init(json:)) : nil
+        // What it wrote: a region gone is its doing only if its records say
+        // so, and they say whether a page was edited after it ran.
+        let manifest: WrittenManifest? = relations?.file.newText.flatMap(WrittenManifest.init(json:))
         // The generator drops a region only from an object page it leaves
         // with no relation (generate-relations.mjs 320–336).
         let scriptRemovals = Set(files.filter { file in
@@ -115,8 +108,7 @@ enum DiffGuard {
             }
         }
         findings += scopeFindings(files, context: context, scriptRemovals: scriptRemovals)
-        findings += derivedFilesFindings(
-            stalePages, relationsRegenerated: relationsRegenerated, manifest: manifest)
+        findings += derivedFilesFindings(files, relations: relations, manifest: manifest)
         return ordered(findings)
     }
 
@@ -280,12 +272,16 @@ enum DiffGuard {
                 found.append(finding(.generatedRegionEdited, path, lines: lines, message))
             } else if !region.hasGeneratorShape {
                 // The lint's checksum trims; the generator's `--check`
-                // compares bytes (generate-relations.mjs 309–336).
+                // compares bytes (generate-relations.mjs 309–336). The blank
+                // lines may be intact, with a space added at an edge of the
+                // section, so the message names the whole layout.
                 let message = """
                     The whitespace in the “Participates in” section on \(lines.label) was changed \
                     by hand. Its checksum still matches, but the wiki's \
-                    `generate-relations.mjs --check` fails; restore one blank line after the BEGIN \
-                    marker and one before the END marker.
+                    `generate-relations.mjs --check` fails; restore the layout the script writes: \
+                    one blank line after the BEGIN marker, one before the END marker, and no other \
+                    whitespace at either end of the section (or run \
+                    `node scripts/generate-relations.mjs`).
                     """
                 found.append(finding(.generatedRegionEdited, path, lines: lines, message))
             } else if relationsRegenerated {
@@ -742,17 +738,72 @@ enum DiffGuard {
         """
     }
 
-    /// The pages whose change touches what the generator reads (see
-    /// `staleDerivedFiles`). With `relations.json` regenerated, only those
-    /// its records no longer match, because they were edited after it ran:
-    /// the generator rewrites a page's record and the regions it feeds in
-    /// one run. A `relations.json` that does not read proves nothing.
+    /// `relations.json` changed the records of `pages`, sorted, and the
+    /// change leaves them as they were. Either they were edited after the
+    /// generator ran, or the base's `relations.json` was already out of
+    /// date; regenerating clears the first and not the second, so the
+    /// message says how to tell them apart.
+    private static func relationsStaleMessage(_ pages: [String]) -> String {
+        var names = pages.prefix(3).map { "`\($0)`" }
+        if pages.count > 3 { names.append("\(pages.count - 3) more") }
+        let list = names.count > 1
+            ? names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+            : names.joined()
+        let left = pages.count == 1 ? "that page as it was" : "those pages as they were"
+        return """
+            `relations.json` changed what it records for \(list), but this change leaves \(left), \
+            so the wiki's `generate-relations.mjs --check` fails, unless the base's \
+            `relations.json` was already out of date. In this job's worktree (Open in Terminal), \
+            run `npm ci` and `node scripts/generate-relations.mjs`, then review again. If this \
+            warning stays, the base was out of date, and this change brings `relations.json` up \
+            to date.
+            """
+    }
+
+    /// Without a regenerated `relations.json`, the pages whose change
+    /// touches what the generator reads (`staleDerivedFiles`). With one, its
+    /// records are compared with the pages instead, since a page edited
+    /// after the generator ran may have been edited back to the base, and
+    /// so look unchanged: each page in the diff its new records disagree
+    /// with; and, in one finding on `relations.json`, the pages of the
+    /// records added, removed or changed since the base that the change
+    /// leaves as they were. The generator writes each record from its page
+    /// alone, so, when the base's `relations.json` is the generator's
+    /// output, a record changes only with its page. (The wiki's PR checks
+    /// are off, so a base can be out of date; then the records of pages the
+    /// change leaves alone change too, and this warns though `--check`
+    /// passes.) A `relations.json` that does not read proves nothing; a
+    /// base that does not read has no records.
     private static func derivedFilesFindings(
-        _ stalePages: [InspectedFile], relationsRegenerated: Bool, manifest: WrittenManifest?
+        _ files: [InspectedFile], relations: InspectedFile?, manifest: WrittenManifest?
     ) -> [DiffFinding] {
-        stalePages
-            .filter { !relationsRegenerated || !(manifest?.matches($0) ?? false) }
+        let pages = files.filter { readsAsGeneratorInput($0) }
+        guard let relations, let manifest else {
+            return pages.filter { staleDerivedFiles($0) }
+                .map { finding(.derivedFilesStale, $0.file.path, derivedFilesMessage) }
+        }
+        var found = pages.filter { !manifest.matches($0) }
             .map { finding(.derivedFilesStale, $0.file.path, derivedFilesMessage) }
+
+        // The pages in the diff were compared above; one CCwiki could not
+        // read, or a template, blocks on its own.
+        let base = relations.file.oldText.flatMap(WrittenManifest.init(json:))
+        let inDiff = Set(files.flatMap { file in
+            [file.file.path] + (file.file.oldPath.map { [$0] } ?? [])
+        })
+        let untouched = manifest.changedPages(since: base).subtracting(inDiff).sorted()
+        if !untouched.isEmpty {
+            found.append(finding(.derivedFilesStale, relationsJSON, relationsStaleMessage(untouched)))
+        }
+        return found
+    }
+
+    /// A page the generator reads: a Markdown file under `content/` but not
+    /// `content/Templates/` (generate-relations.mjs 74–75), whose text
+    /// CCwiki could read.
+    private static func readsAsGeneratorInput(_ file: InspectedFile) -> Bool {
+        file.file.isMarkdown && file.file.path.hasPrefix(contentPrefix)
+            && !file.file.path.hasPrefix(contentPrefix + "Templates/") && !file.file.isBinary
     }
 
     /// The change touches what the generator reads: a reduction or barrier
@@ -1196,7 +1247,7 @@ private enum YAMLValue: Equatable {
 
 /// Frontmatter lines, read as js-yaml reads the forms the wiki writes,
 /// for the rules that must agree with the lint and the generator:
-/// `Frontmatter` keeps a quoted key's quotes and a plain value's comment.
+/// `Frontmatter` keeps a quoted key's quotes.
 private enum YAMLLine {
 
     /// Plain scalars js-yaml reads as null.
@@ -1610,6 +1661,43 @@ private struct WrittenManifest {
             actual[key] = text
         }
         return expected == .mapping(actual)
+    }
+
+    // MARK: What changed since the base
+
+    /// The pages of the records added, removed or changed since `base`,
+    /// matched by id within each list: a changed record names its page on
+    /// both sides. Without a base, every record is added.
+    func changedPages(since base: WrittenManifest?) -> Set<String> {
+        let lists: [(old: [Record], new: [Record])] = [
+            (base?.objects ?? [], objects),
+            (base?.reductions ?? [], reductions),
+            (base?.barriers ?? [], barriers),
+        ]
+        var pages: Set<String> = []
+        for (old, new) in lists {
+            let before = Dictionary(grouping: old) { $0["id"] as? String }
+            let after = Dictionary(grouping: new) { $0["id"] as? String }
+            for id in Set(before.keys).union(after.keys) {
+                let was = before[id] ?? []
+                let now = after[id] ?? []
+                guard !Self.same(was, now) else { continue }
+                pages.formUnion((was + now).compactMap { $0["page"] as? String })
+            }
+        }
+        return pages
+    }
+
+    /// The same records, value for value, compared as JSON with sorted
+    /// keys. Records that do not serialize are not the same. (They are
+    /// checked first: on macOS, serializing one that is not JSON raises an
+    /// exception `try?` does not catch.)
+    private static func same(_ a: [Record], _ b: [Record]) -> Bool {
+        guard JSONSerialization.isValidJSONObject(a), JSONSerialization.isValidJSONObject(b),
+              let left = try? JSONSerialization.data(withJSONObject: a, options: [.sortedKeys]),
+              let right = try? JSONSerialization.data(withJSONObject: b, options: [.sortedKeys])
+        else { return false }
+        return left == right
     }
 
     // MARK: A region the generator writes

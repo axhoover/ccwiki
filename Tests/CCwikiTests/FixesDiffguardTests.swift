@@ -27,19 +27,34 @@ struct FixesDiffguardTests {
         return String(decoding: data, as: UTF8.self) + "\n"
     }
 
-    /// `relations.json` changed, from no records to `new`.
-    static func relations(_ new: String) throws -> ChangedFile {
-        DiffGuardTests.modified(relationsPath, old: try manifest(), new: new)
+    /// `relations.json` changed, from `old`, or no records, to `new`.
+    static func relations(_ new: String, old: String? = nil) throws -> ChangedFile {
+        DiffGuardTests.modified(relationsPath, old: try old ?? manifest(), new: new)
     }
 
     /// The record generate-relations.mjs (152–172) writes for
-    /// `DiffGuardTests.reduction`, which has no title, status or rationale.
-    static func reductionRecord(class reductionClass: String = "fully-black-box") -> [String: Any] {
-        [
+    /// `DiffGuardTests.reduction`, which has no title, status or rationale,
+    /// or for the page given `title`.
+    static func reductionRecord(class reductionClass: String = "fully-black-box", title: String? = nil)
+        -> [String: Any] {
+        var record: [String: Any] = [
             "id": "red-owf-to-prg-hill99", "kind": "construction", "hypotheses": ["owf"],
             "conclusion": "prg", "class": reductionClass, "model": "standard",
             "source": ["[[HILL99]]"], "via": [String](), "heuristic": false, "securityLoss": "",
             "page": reductionPath, "slug": "owf-to-prg-hill99", "graphSlug": "Reductions/owf-to-prg-hill99",
+        ]
+        if let title { record["title"] = title }
+        return record
+    }
+
+    /// The record generate-relations.mjs (114–125) writes for a primitive
+    /// page with an id and nothing else the record copies: titled by its
+    /// slug.
+    static func objectRecord(_ id: String, page: String) -> [String: Any] {
+        let slug = ((page as NSString).lastPathComponent as NSString).deletingPathExtension
+        return [
+            "id": id, "kind": "object", "type": "primitive", "page": page, "slug": slug,
+            "graphSlug": "Primitives/\(slug)", "title": slug, "aliases": [String](), "unlisted": false,
         ]
     }
 
@@ -140,14 +155,147 @@ struct FixesDiffguardTests {
         #expect(try stale("  weak-prf: \"#weak-prfs\"\n", "", records: Self.prfRecords()))
     }
 
+    /// The fixture's region rewritten as the generator would write it, its
+    /// checksum to match.
+    static func withRegion(_ page: String, _ rewrite: (String) -> String) throws -> String {
+        let begin = try #require(page.range(of: DiffGuardTests.beginMarker))
+        let end = try #require(page.range(of: DiffGuardTests.endMarker))
+        let inner = rewrite(String(page[begin.upperBound..<end.lowerBound]))
+        return String(page[..<begin.lowerBound])
+            + "<!-- BEGIN GENERATED participates-in \(DiffGuard.regionChecksum(inner)) -->"
+            + inner + String(page[end.lowerBound...])
+    }
+
+    /// The fixture's region with the page titled "Pseudorandom functions".
+    static func retitledRegion(_ page: String) throws -> String {
+        try withRegion(page) {
+            $0.replacingOccurrences(of: "Pseudorandom function**", with: "Pseudorandom functions**")
+        }
+    }
+
+    static let owfPath = "content/Primitives/one-way-function.md"
+
+    /// An endpoint of `DiffGuardTests.reduction`, its region listing the
+    /// reduction as `listed`, as the generator writes it.
+    static func owfPage(listing listed: String) -> String {
+        "---\ntype: primitive\nid: owf\n---\n\n# OWF\n\nA function.\n\n"
+            + DiffGuardTests.region(
+                "## Participates in\n\n**Builds on one-way-function**\n\n- [[owf-to-prg-hill99|\(listed)]]")
+            + "\n"
+    }
+
+    @Test("derivedFilesStale: a page set back after the generator ran warns, though only its region changed")
+    func setBackAfterTheGenerator() throws {
+        // Its title set to "Pseudorandom functions", the generator run, and
+        // the title set back: the record and the region still have the new
+        // one, and the page's own change is the region the script wrote.
+        let page = try DiffGuardTests.fixture("pseudorandom-function.md")
+        let region = try Self.retitledRegion(page)
+        #expect(region != page)
+        let json = try Self.relations(
+            try Self.manifest(objects: Self.prfRecords(title: "Pseudorandom functions")),
+            old: try Self.manifest(objects: Self.prfRecords()))
+        let findings = DiffGuardTests.check([DiffGuardTests.modified(old: page, new: region), json])
+        #expect(findings.map(\.rule) == [.derivedFilesStale, .regionRegenerated])
+        let warning = try #require(findings.first)
+        #expect(warning.severity == .warning)
+        #expect(warning.path == DiffGuardTests.pagePath)
+        #expect(warning.message.hasPrefix("The “Participates in” sections and `relations.json` are now out of date"))
+
+        // The region set back too: only relations.json is left to say so.
+        let alone = DiffGuardTests.check([json])
+        #expect(alone.map(\.rule) == [.derivedFilesStale])
+        #expect(alone.first?.path == Self.relationsPath)
+        #expect(alone.first?.message.hasPrefix(
+            "`relations.json` changed what it records for `content/Primitives/pseudorandom-function.md`, "
+                + "but this change leaves that page as it was") == true)
+    }
+
+    @Test("derivedFilesStale: a reduction set back after the generator ran, and so not in the diff, warns on relations.json")
+    func reductionSetBack() throws {
+        // Its title set, the generator run (its record and its endpoint's
+        // region list it by that title), and the title taken out again: the
+        // page has left the diff.
+        let owf = Self.objectRecord("owf", page: Self.owfPath)
+        let files = [
+            DiffGuardTests.modified(
+                Self.owfPath, old: Self.owfPage(listing: "red-owf-to-prg-hill99"),
+                new: Self.owfPage(listing: "OWF ⇒ PRG")),
+            try Self.relations(
+                try Self.manifest(objects: [owf], reductions: [Self.reductionRecord(title: "OWF ⇒ PRG")]),
+                old: try Self.manifest(objects: [owf], reductions: [Self.reductionRecord()])),
+        ]
+        let findings = DiffGuardTests.ingest(files)
+        #expect(findings.map(\.rule) == [.derivedFilesStale, .regionRegenerated])
+        let warning = try #require(findings.first)
+        #expect(warning.severity == .warning)
+        #expect(warning.path == Self.relationsPath)
+        #expect(warning.lines == nil)
+        #expect(warning.message == "`relations.json` changed what it records for "
+            + "`content/Reductions/owf-to-prg-hill99.md`, but this change leaves that page as it was, so the "
+            + "wiki's `generate-relations.mjs --check` fails, unless the base's `relations.json` was already "
+            + "out of date. In this job's worktree (Open in Terminal), run `npm ci` and "
+            + "`node scripts/generate-relations.mjs`, then review again. If this warning stays, the base was "
+            + "out of date, and this change brings `relations.json` up to date.")
+
+        // Two pages left as they were are both named; a record removed
+        // counts as changed.
+        let both = try Self.relations(
+            try Self.manifest(objects: Self.prfRecords(title: "PRF")),
+            old: try Self.manifest(objects: Self.prfRecords(), reductions: [Self.reductionRecord()]))
+        let named = DiffGuardTests.ingest([both])
+        #expect(named.map(\.rule) == [.derivedFilesStale])
+        let message = try #require(named.first?.message)
+        #expect(message.hasPrefix(
+            "`relations.json` changed what it records for `content/Primitives/pseudorandom-function.md` and "
+                + "`content/Reductions/owf-to-prg-hill99.md`, but this change leaves those pages as they were"))
+    }
+
+    @Test("derivedFilesStale: not when the pages and the records regenerated from them agree")
+    func regeneratedInStep() throws {
+        // The object page's new title, in its frontmatter, its record and
+        // its region.
+        let page = try DiffGuardTests.fixture("pseudorandom-function.md")
+        let retitled = try Self.retitledRegion(page)
+            .replacingOccurrences(of: "title: Pseudorandom function\n", with: "title: Pseudorandom functions\n")
+        let json = try Self.relations(
+            try Self.manifest(objects: Self.prfRecords(title: "Pseudorandom functions")),
+            old: try Self.manifest(objects: Self.prfRecords()))
+        let object = DiffGuardTests.check([DiffGuardTests.modified(old: page, new: retitled), json])
+        #expect(object.map(\.rule) == [.regionRegenerated])
+
+        // The reduction's new title, in its page, its record and its
+        // endpoint's region.
+        let titled = DiffGuardTests.reduction.replacingOccurrences(
+            of: "id: red-owf-to-prg-hill99\n", with: "id: red-owf-to-prg-hill99\ntitle: OWF ⇒ PRG\n")
+        #expect(titled != DiffGuardTests.reduction)
+        let owf = Self.objectRecord("owf", page: Self.owfPath)
+        let files = [
+            DiffGuardTests.modified(Self.reductionPath, old: DiffGuardTests.reduction, new: titled),
+            DiffGuardTests.modified(
+                Self.owfPath, old: Self.owfPage(listing: "red-owf-to-prg-hill99"),
+                new: Self.owfPage(listing: "OWF ⇒ PRG")),
+            try Self.relations(
+                try Self.manifest(objects: [owf], reductions: [Self.reductionRecord(title: "OWF ⇒ PRG")]),
+                old: try Self.manifest(objects: [owf], reductions: [Self.reductionRecord()])),
+        ]
+        #expect(DiffGuardTests.ingest(files).map(\.rule) == [.regionRegenerated])
+    }
+
     // MARK: Regions as the generator writes them
 
-    @Test("a region whose blank lines were changed by hand blocks, though its checksum matches")
+    @Test("a region whose whitespace was changed by hand blocks, though its checksum matches")
     func regionShape() throws {
         let page = try DiffGuardTests.fixture("pseudorandom-function.md")
         let begin = DiffGuardTests.beginMarker
         let end = DiffGuardTests.endMarker
-        for (old, new) in [(begin + "\n\n", begin + "\n"), ("\n\n" + end, "\n" + end), ("PRF]]\n\n" + end, "PRF]]  \n\n" + end)] {
+        // A blank line gone at either end; or both kept, and a space at an
+        // edge of the section, after its last bullet or before its heading.
+        let edits = [
+            (begin + "\n\n", begin + "\n"), ("\n\n" + end, "\n" + end), ("PRF]]\n\n" + end, "PRF]]  \n\n" + end),
+            (begin + "\n\n## Participates in", begin + "\n\n  ## Participates in"),
+        ]
+        for (old, new) in edits {
             let changed = page.replacingOccurrences(of: old, with: new)
             #expect(changed != page)
             let file = DiffGuardTests.modified(old: page, new: changed)
@@ -159,6 +307,10 @@ struct FixesDiffguardTests {
                 #expect(blocked.lines?.first == 153)
                 #expect(blocked.message.hasPrefix("The whitespace in the “Participates in” section on lines 153–"))
                 #expect(blocked.message.contains("`generate-relations.mjs --check` fails"))
+                #expect(blocked.message.hasSuffix(
+                    "restore the layout the script writes: one blank line after the BEGIN marker, one before "
+                        + "the END marker, and no other whitespace at either end of the section (or run "
+                        + "`node scripts/generate-relations.mjs`)."))
                 #expect(DiffGuardTests.finding(.regionRegenerated, in: findings) == nil)
             }
         }
@@ -218,8 +370,11 @@ struct FixesDiffguardTests {
             ])
         }
 
-        // Nothing relates to it: the generator dropped it.
-        let unrelated = try Self.relations(try Self.manifest(objects: Self.prfRecords(), reductions: [other]))
+        // Nothing relates to it: the generator dropped it. The base had the
+        // other reduction's record too, so its page need not be in the diff.
+        let unrelated = try Self.relations(
+            try Self.manifest(objects: Self.prfRecords(), reductions: [other]),
+            old: try Self.manifest(reductions: [other]))
         #expect(DiffGuardTests.ingest([file, unrelated]).map(\.rule) == [.regionRegenerated])
 
         // A relations.json that does not read proves nothing.
