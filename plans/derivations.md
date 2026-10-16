@@ -481,10 +481,13 @@ PKE, default filter: **27 single objects; 38 pairs in 5 groups**: SW14
 `{owf, io}` 21, CS03 `{kem, ske}` 14, Wat09, GHJS25 and GHJS25 1 each.
 CS03's 14 are a record gap, not a joint requirement: its Statement needs only
 a one-time DEM, so KEM alone gives PKE. They were 15, and the pairs 39,
-until the PR #9 audit's `requires:red-prp-to-prf:prp` stopped a strong PRP
-reaching SKE: strong PRP + KEM no longer gives PKE. NIZK has 8 single
-objects and 116 pairs (SW14 87, KMY20 29), all in the CRS model and some
-quantum.
+until the PR #9 audit's two PRP domain requirements,
+`requires:red-prp-to-prf:prp` and `requires:red-prp-to-invertible-prf:prp`,
+stopped a strong PRP reaching SKE: strong PRP + KEM no longer gives PKE.
+It takes both: without either one, a strong PRP reaches PRF, and so SKE,
+through the other conversion (PRP ⇒ PRF, or PRP ⇒ iPRF ⇒ PRF). NIZK has 8
+single objects and 116 pairs (SW14 87, KMY20 29), all in the CRS model and
+some quantum.
 
 ### R12. Derived barriers
 
