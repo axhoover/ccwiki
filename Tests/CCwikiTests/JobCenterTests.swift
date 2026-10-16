@@ -600,7 +600,9 @@ struct JobCenterTests {
         // push was lost; the maintainer reverted everything and closed the
         // editor. The branch may be on GitHub, and only the record says so.
         let pushed = try await scene.beginEdit()
-        pushed.setPushedCommit(scene.base)
+        pushed.setConfirmedPush(PushAttempt(
+            repository: scene.target.repository, branch: pushed.branch, commit: scene.base))
+        #expect(pushed.pushedCommit == scene.base)
         let pushing = try await scene.beginEdit()
         pushing.setPushingCommit(scene.base)
         // Only an attempt recorded: it counts as trying to push.

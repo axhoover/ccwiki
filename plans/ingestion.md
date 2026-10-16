@@ -195,14 +195,17 @@ all, and the push names that commit, never HEAD, with no tag
 (plans/corrections.md §6.1, §6.5).
 
 **No pull request twice, no branch overwritten.** Each push is recorded, with
-the repository and the branch it goes to, before it is sent, and the push
-leases on the last one GitHub confirmed, or on absence before the first. A
-refused lease asks GitHub where the branch is: a commit CCwiki confirmed, or
-recorded as sent to that very repository and branch (a push whose reply a
-crash lost is one), is pushed over; a branch someone else made is left alone,
-even one made at the job's own base, and the job takes the next free name;
-commits someone else added after CCwiki's are never overwritten. The local
-branch's reflog is no evidence of what CCwiki pushed. Before opening a pull request, CCwiki asks for an open one from
+the repository and the branch it goes to, before it is sent, and so is the
+one GitHub confirmed. The push leases on that confirmed one only when it went
+to the same repository and branch, and on absence otherwise: before the
+first, and after a Dev build's target or the branch changed. A refused lease
+asks GitHub where the branch is: a commit recorded as sent to that very
+repository and branch (a push whose reply a crash lost is one) is pushed
+over; a branch someone else made is left alone, even one made at the job's
+own base or at a commit this job pushed elsewhere, and the job takes the next
+free name; commits someone else added after CCwiki's are never overwritten.
+The local branch's reflog is no evidence of what CCwiki pushed, and nor is a
+record that names a pushed commit without saying where it went. Before opening a pull request, CCwiki asks for an open one from
 the branch, in the repository itself (a fork's branch of the same name is not
 ours), and updates it instead. A push that fails may still have landed, and
 the notice says so; the next one's lease finds out. A publish a quit

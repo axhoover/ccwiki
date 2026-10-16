@@ -50,7 +50,7 @@ struct JobRecordTests {
         #expect(record.baseCommit == nil)
         #expect(record.pullRequest == nil)
         #expect(record.pushingCommit == nil && record.pushedCommit == nil && record.notice == nil)
-        #expect(record.pushAttempts.isEmpty)
+        #expect(record.pushAttempts.isEmpty && record.confirmedPush == nil)
 
         let running = try JSONDecoder().decode(JobRecord.self, from: Data(Self.legacyRunning.utf8))
         #expect(running.state == .running)
@@ -72,6 +72,7 @@ struct JobRecordTests {
                 baseCommit: "865206d47c53",
                 pullRequest: PullRequestDraft(title: "[fix] Pseudorandom function", body: "Why."),
                 pushingCommit: "abc", pushedCommit: nil, pushAttempts: Self.attempts,
+                confirmedPush: nil,
                 notice: JobNotice(tone: .warning, text: "The files changed since you reviewed them."))
             let decoded = try JSONDecoder().decode(
                 JobRecord.self, from: JSONEncoder().encode(record))
@@ -82,8 +83,45 @@ struct JobRecordTests {
             #expect(decoded.pullRequest == record.pullRequest)
             #expect(decoded.pushingCommit == "abc" && decoded.pushedCommit == nil)
             #expect(decoded.pushAttempts == Self.attempts, "in order, each with where it went")
+            #expect(decoded.confirmedPush == nil)
             #expect(decoded.notice == record.notice)
         }
+    }
+
+    @Test("a confirmed push round-trips with where it went, and comes back on the job")
+    func confirmedPushRoundTrips() throws {
+        let confirmed = Self.attempts[1]
+        let record = JobRecord(
+            id: "job", kind: .edit(Self.target), branch: "fix/pseudorandom-function-2",
+            state: .awaitingReview, createdAt: Self.created, startedAt: nil, finishedAt: nil,
+            baseCommit: "865206d47c53", pullRequest: nil, pushingCommit: nil,
+            pushedCommit: confirmed.commit, pushAttempts: Self.attempts,
+            confirmedPush: confirmed, notice: nil)
+        let data = try JSONEncoder().encode(record)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let written = try #require(object["confirmedPush"] as? [String: String])
+        #expect(written == [
+            "repository": "axhoover/cryptology.city", "branch": "fix/pseudorandom-function-2",
+            "commit": "abc",
+        ], "where it went, with the commit")
+
+        let decoded = try JSONDecoder().decode(JobRecord.self, from: data)
+        #expect(decoded.confirmedPush == confirmed)
+        #expect(decoded.pushedCommit == "abc" && decoded.pushAttempts == Self.attempts)
+
+        let paths = try Self.temporaryPaths()
+        defer { try? FileManager.default.removeItem(at: paths.support) }
+        let job = Job(restoring: decoded, paths: paths, worktreeExists: true, patchExists: false)
+        #expect(job.confirmedPush == confirmed && job.pushedCommit == "abc")
+        #expect(job.hasTriedToPush && !job.hasPushWithoutDestination)
+        #expect(job.record.confirmedPush == confirmed, "and is written again")
+
+        // Cleared, the commit goes with it.
+        job.setConfirmedPush(nil)
+        #expect(job.confirmedPush == nil && job.pushedCommit == nil)
+        let unset = try #require(try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(job.record)) as? [String: Any])
+        #expect(!unset.keys.contains("confirmedPush"), "nil is left out")
     }
 
     /// Two attempts, the second after a rename.
@@ -94,22 +132,27 @@ struct JobRecordTests {
                     commit: "abc"),
     ]
 
-    @Test("a record written before push attempts were kept decodes with none, and keeps what it was pushing")
+    @Test("a record written before pushes were kept with where they went decodes with none, and keeps what it was pushing")
     func recordWithoutAttempts() throws {
+        let confirmed = PushAttempt(
+            repository: "axhoover/cryptology.city", branch: "fix/pseudorandom-function",
+            commit: "def")
         let record = JobRecord(
             id: "job", kind: .edit(Self.target), branch: "fix/pseudorandom-function",
             state: .awaitingReview, createdAt: Self.created, startedAt: nil, finishedAt: nil,
             baseCommit: "865206d47c53", pullRequest: nil, pushingCommit: "abc",
-            pushedCommit: "def", pushAttempts: Self.attempts, notice: nil)
-        // The record as the last release wrote it: every field but this one.
+            pushedCommit: "def", pushAttempts: Self.attempts, confirmedPush: confirmed,
+            notice: nil)
+        // The record as the last release wrote it: every field but these.
         let data = try JSONEncoder().encode(record)
         var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let named = object.removeValue(forKey: "pushAttempts") != nil
-        #expect(named, "a record names its attempts")
+        let namedAttempts = object.removeValue(forKey: "pushAttempts") != nil
+        let namedConfirmed = object.removeValue(forKey: "confirmedPush") != nil
+        #expect(namedAttempts && namedConfirmed, "a record names its attempts and its confirmed push")
         let old = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(JobRecord.self, from: old)
-        #expect(decoded.pushAttempts.isEmpty)
+        #expect(decoded.pushAttempts.isEmpty && decoded.confirmedPush == nil)
         #expect(decoded.pushingCommit == "abc" && decoded.pushedCommit == "def")
         #expect(decoded.branch == "fix/pseudorandom-function")
         #expect(decoded.kind == .edit(Self.target))
@@ -118,7 +161,32 @@ struct JobRecordTests {
         defer { try? FileManager.default.removeItem(at: paths.support) }
         let job = Job(restoring: decoded, paths: paths, worktreeExists: true, patchExists: false)
         #expect(job.pushAttempts.isEmpty && job.pushingCommit == "abc")
+        #expect(job.confirmedPush == nil && job.pushedCommit == "def",
+                "the commit stays, for the review and Discard; where it went is not invented")
         #expect(job.hasTriedToPush)
+        #expect(job.hasPushWithoutDestination, "a push with nowhere to say it went")
+    }
+
+    @Test("a record with attempts and no confirmed push decodes without one, and its attempts still say where")
+    func recordWithAttemptsAndNoConfirmedPush() throws {
+        // As the first release that kept attempts wrote it, after a push.
+        let record = JobRecord(
+            id: "job", kind: .edit(Self.target), branch: "fix/pseudorandom-function-2",
+            state: .awaitingReview, createdAt: Self.created, startedAt: nil, finishedAt: nil,
+            baseCommit: "865206d47c53", pullRequest: nil, pushingCommit: nil,
+            pushedCommit: "abc", pushAttempts: Self.attempts, confirmedPush: nil, notice: nil)
+        let data = try JSONEncoder().encode(record)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(!object.keys.contains("confirmedPush"))
+
+        let decoded = try JSONDecoder().decode(JobRecord.self, from: data)
+        #expect(decoded.confirmedPush == nil && decoded.pushAttempts == Self.attempts)
+
+        let paths = try Self.temporaryPaths()
+        defer { try? FileManager.default.removeItem(at: paths.support) }
+        let job = Job(restoring: decoded, paths: paths, worktreeExists: true, patchExists: false)
+        #expect(job.confirmedPush == nil && job.pushedCommit == "abc")
+        #expect(!job.hasPushWithoutDestination, "its attempts say where each push went")
     }
 
     @Test("every state round-trips, and the old ones keep their labels")
@@ -446,7 +514,8 @@ struct JobRecordTests {
             id: id, kind: kind, branch: kind.branchPrefix + kind.slug, state: state,
             createdAt: id == "newer" ? created.addingTimeInterval(60) : created,
             startedAt: nil, finishedAt: nil, baseCommit: "865206d47c53", pullRequest: nil,
-            pushingCommit: nil, pushedCommit: nil, pushAttempts: [], notice: nil)
+            pushingCommit: nil, pushedCommit: nil, pushAttempts: [], confirmedPush: nil,
+            notice: nil)
     }
 
     static func write(_ record: JobRecord, in paths: AppPaths) throws {
