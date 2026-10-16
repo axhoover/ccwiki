@@ -259,8 +259,8 @@ struct Frontmatter: Equatable, Sendable {
     /// A flow sequence from the `[` that starts `first`, the rest of its
     /// line, running on over the following lines indented past `indent`
     /// until its brackets close. A line that starts with `]` may sit at the
-    /// margin, as a JSON-style list's closing bracket does; an item there
-    /// leaves the brackets unclosed. Commas inside quotes or nested
+    /// margin, as a JSON-style list's closing bracket does; an item or a
+    /// comment there leaves the list unclosed. Commas inside quotes or nested
     /// brackets do not split it, a `#` after whitespace comments out the
     /// rest of a line, and a quote opens a quoted item only at the item's
     /// start, so `[it's, b]` is two items, as in YAML. An item over several
