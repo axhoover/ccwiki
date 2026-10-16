@@ -738,26 +738,44 @@ enum DiffGuard {
         """
     }
 
-    /// `relations.json` changed the records of `pages`, sorted, and the
-    /// change leaves them as they were. Either they were edited after the
-    /// generator ran, or the base's `relations.json` was already out of
-    /// date; regenerating clears the first and not the second, so the
-    /// message says how to tell them apart.
-    private static func relationsStaleMessage(_ pages: [String]) -> String {
-        var names = pages.prefix(3).map { "`\($0)`" }
-        if pages.count > 3 { names.append("\(pages.count - 3) more") }
-        let list = names.count > 1
-            ? names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
-            : names.joined()
-        let left = pages.count == 1 ? "that page as it was" : "those pages as they were"
+    /// `relations.json` changed the records of `pages`, or what the regions
+    /// of `sections` show, each sorted, and the change leaves them as they
+    /// were. Either they were edited after the generator ran, or the base's
+    /// `relations.json` was already out of date; regenerating clears the
+    /// first and not the second, so the message says how to tell them
+    /// apart.
+    private static func relationsStaleMessage(pages: [String], sections: [String]) -> String {
+        var changed: [String] = []
+        if !pages.isEmpty { changed.append("what it records for \(listed(pages))") }
+        if !sections.isEmpty {
+            changed.append(sections.count == 1
+                ? "what the “Participates in” section of \(listed(sections)) shows"
+                : "what the “Participates in” sections of \(listed(sections)) show")
+        }
+        let left = switch (pages.count, sections.count) {
+        case (0, 1): "that section as it was"
+        case (0, _): "those sections as they were"
+        case (1, 0): "that page as it was"
+        case (_, 0): "those pages as they were"
+        default: "them as they were"
+        }
         return """
-            `relations.json` changed what it records for \(list), but this change leaves \(left), \
-            so the wiki's `generate-relations.mjs --check` fails, unless the base's \
+            `relations.json` changed \(changed.joined(separator: ", and ")), but this change leaves \
+            \(left), so the wiki's `generate-relations.mjs --check` fails, unless the base's \
             `relations.json` was already out of date. In this job's worktree (Open in Terminal), \
             run `npm ci` and `node scripts/generate-relations.mjs`, then review again. If this \
             warning stays, the base was out of date, and this change brings `relations.json` up \
             to date.
             """
+    }
+
+    /// Up to three paths, then "and 4 more".
+    private static func listed(_ paths: [String]) -> String {
+        var names = paths.prefix(3).map { "`\($0)`" }
+        if paths.count > 3 { names.append("\(paths.count - 3) more") }
+        return names.count > 1
+            ? names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+            : names.joined()
     }
 
     /// Without a regenerated `relations.json`, the pages whose change
@@ -767,13 +785,16 @@ enum DiffGuard {
     /// so look unchanged: each page in the diff its new records disagree
     /// with; and, in one finding on `relations.json`, the pages of the
     /// records added, removed or changed since the base that the change
-    /// leaves as they were. The generator writes each record from its page
+    /// leaves as they were, and the pages whose “Participates in” section
+    /// it leaves as it was though the records changed what it shows
+    /// (`staleSections`). The generator writes each record from its page
     /// alone, so, when the base's `relations.json` is the generator's
-    /// output, a record changes only with its page. (The wiki's PR checks
-    /// are off, so a base can be out of date; then the records of pages the
-    /// change leaves alone change too, and this warns though `--check`
-    /// passes.) A `relations.json` that does not read proves nothing; a
-    /// base that does not read has no records.
+    /// output, a record changes only with its page; but a section shows
+    /// other pages' records, as an endpoint's lists a reduction by its
+    /// title. (The wiki's PR checks are off, so a base can be out of date;
+    /// then the records of pages the change leaves alone change too, and
+    /// this warns though `--check` passes.) A `relations.json` that does not
+    /// read proves nothing; a base that does not read has no records.
     private static func derivedFilesFindings(
         _ files: [InspectedFile], relations: InspectedFile?, manifest: WrittenManifest?
     ) -> [DiffFinding] {
@@ -791,11 +812,36 @@ enum DiffGuard {
         let inDiff = Set(files.flatMap { file in
             [file.file.path] + (file.file.oldPath.map { [$0] } ?? [])
         })
-        let untouched = manifest.changedPages(since: base).subtracting(inDiff).sorted()
-        if !untouched.isEmpty {
-            found.append(finding(.derivedFilesStale, relationsJSON, relationsStaleMessage(untouched)))
+        let untouched = manifest.changedPages(since: base).subtracting(inDiff)
+        // A page the change leaves whole is named once, for its records.
+        let sections = staleSections(files, manifest: manifest, base: base, inDiff: inDiff)
+            .subtracting(untouched)
+        if !untouched.isEmpty || !sections.isEmpty {
+            found.append(finding(.derivedFilesStale, relationsJSON,
+                relationsStaleMessage(pages: untouched.sorted(), sections: sections.sorted())))
         }
         return found
+    }
+
+    /// The object pages whose “Participates in” section the new records
+    /// change from the base's records (`WrittenManifest.sectionsChanged`),
+    /// and that the change leaves as it was: not in the diff, or in it with
+    /// its regions as they were at the base, unless the generator writes
+    /// none there and the page has none. So a reduction's `class` changed
+    /// concerns no section, and its `model` changed only the model page's.
+    /// A page renamed, deleted or unreadable blocks on its own.
+    private static func staleSections(
+        _ files: [InspectedFile], manifest: WrittenManifest, base: WrittenManifest?, inDiff: Set<String>
+    ) -> Set<String> {
+        let byPath = Dictionary(files.map { ($0.file.path, $0) }, uniquingKeysWith: { first, _ in first })
+        let stale = manifest.sectionsChanged(since: base).filter { entry in
+            guard let file = byPath[entry.key] else { return !inDiff.contains(entry.key) }
+            guard readsAsGeneratorInput(file), let new = file.new else { return false }
+            let regions = new.regions.regions.map(\.text)
+            if regions.isEmpty, entry.value.isEmpty { return false }
+            return regions == (file.old?.regions.regions.map(\.text) ?? [])
+        }
+        return Set(stale.keys)
     }
 
     /// A page the generator reads: a Markdown file under `content/` but not
@@ -1704,36 +1750,165 @@ private struct WrittenManifest {
 
     /// Whether the generator writes a region on this page, and so
     /// `--check` fails without one: an object page, by its `type:` and
-    /// `id`, that something relates to (generate-relations.mjs 320–336). It
+    /// `id`, that something relates to (generate-relations.mjs 320–336): an
+    /// edge on the id or one of its variants, a reduction proved in the
+    /// model its page defines, or one whose `via` links to its page. It
     /// drops the region from one nothing relates to, and passes over a page
     /// that is not an object page.
     func expectsRegion(on page: InspectedText) -> Bool {
         guard let type = page.type, Self.objectTypes.contains(type) else { return false }
         switch page.yamlValue("id") {
-        case .scalar(let id, _): return !id.isEmpty && hasRelations(id)
+        case .scalar(let id, _): return !id.isEmpty && !Participation(self).lines(for: id).isEmpty
         case .unread: return true
         case .absent, .null, .sequence, .mapping: return false
         }
     }
 
-    /// participates-in.mjs 91–131: an edge on the id or one of its
-    /// variants, a reduction proved in the model its page defines, or one
-    /// whose `via` links to its page.
-    private func hasRelations(_ id: String) -> Bool {
-        let variants = objects.filter { $0["kind"] as? String == "variant" && $0["of"] as? String == id }
-        let ends = Set(variants.compactMap { $0["id"] as? String }).union([id])
-        let meets = { (edge: Record) -> Bool in
-            Self.strings(edge["hypotheses"]).contains(where: ends.contains)
-                || (edge["conclusion"] as? String).map(ends.contains) == true
+    /// Each object page's section, by its path: the lines `Participation`
+    /// gives for the id its record holds, none where the generator writes
+    /// no region.
+    func sections() -> [String: [String]] {
+        let participation = Participation(self)
+        var sections: [String: [String]] = [:]
+        for object in objects where object["kind"] as? String == "object" {
+            guard let id = object["id"] as? String, let page = object["page"] as? String else { continue }
+            sections[page] = participation.lines(for: id)
         }
-        if reductions.contains(where: meets) || barriers.contains(where: meets) { return true }
-        let inModel = reductions.contains { reduction in
-            (reduction["model"] as? String).flatMap { model in Self.modelPages[model] } == id
+        return sections
+    }
+
+    /// The pages with an object record on both sides whose section is not
+    /// the base's, with their new lines. Without a base, none.
+    func sectionsChanged(since base: WrittenManifest?) -> [String: [String]] {
+        guard let base else { return [:] }
+        let before = base.sections()
+        return sections().filter { entry in before[entry.key].map { $0 != entry.value } ?? false }
+    }
+
+    /// participates-in.mjs 47–156 over the records: the lines of the
+    /// section the generator writes on an object page, blank ones left out.
+    /// Every link is written `[[target|text]]`, its text trimmed, nothing is
+    /// escaped, and the edges are sorted by id in Swift's order, not
+    /// `localeCompare`'s: not the region's text, but enough to tell whether
+    /// two graphs give a page the same region.
+    private struct Participation {
+
+        /// An edge as a section reads it.
+        struct Edge {
+            let id: String
+            /// `edgeLink`.
+            let link: String
+            let hypotheses: [String]
+            /// None, or the one.
+            let conclusion: [String]
+            /// The id of the page its `model` is defined on.
+            let modelPage: String?
+            /// The ids of the pages its `via` links to.
+            let viaPages: Set<String>
+            /// A barrier's " — circumvented by …"; empty for a reduction.
+            let circumvention: String
         }
-        if inModel { return true }
-        let pages = pageIDsBySlug()
-        return reductions.contains { reduction in
-            Self.strings(reduction["via"]).contains { Self.linkedPage($0, in: pages) == id }
+
+        /// Each sorted by id, as `byId` sorts them.
+        private let reductions: [Edge]
+        private let barriers: [Edge]
+        /// Each object and variant, by its id.
+        private let objects: [String: Record]
+        /// The ids of each page's variants, by the page's id.
+        private let variants: [String: Set<String>]
+
+        init(_ manifest: WrittenManifest) {
+            var objects: [String: Record] = [:]
+            var variants: [String: Set<String>] = [:]
+            for object in manifest.objects {
+                guard let id = object["id"] as? String else { continue }
+                objects[id] = object
+                if object["kind"] as? String == "variant", let page = object["of"] as? String, !page.isEmpty {
+                    variants[page, default: []].insert(id)
+                }
+            }
+            let pageIDs = manifest.pageIDsBySlug()
+            // `reductionById`, for the reductions a barrier names.
+            var links: [String: String] = [:]
+            for reduction in manifest.reductions {
+                guard let id = reduction["id"] as? String else { continue }
+                links[id] = Participation.link(reduction["slug"], reduction["title"], or: id)
+            }
+            func edge(_ record: Record) -> Edge {
+                let id = record["id"] as? String ?? ""
+                let around = WrittenManifest.strings(record["circumventedBy"]).compactMap { links[$0] }
+                return Edge(
+                    id: id,
+                    link: Participation.link(record["slug"], record["title"], or: id),
+                    hypotheses: WrittenManifest.strings(record["hypotheses"]),
+                    conclusion: (record["conclusion"] as? String).map { [$0] } ?? [],
+                    modelPage: (record["model"] as? String).flatMap { WrittenManifest.modelPages[$0] },
+                    viaPages: Set(WrittenManifest.strings(record["via"]).compactMap { link in
+                        WrittenManifest.linkedPage(link, in: pageIDs)
+                    }),
+                    circumvention: around.isEmpty ? "" : " — circumvented by " + around.joined(separator: ", "))
+            }
+            self.reductions = manifest.reductions.map { edge($0) }.sorted { $0.id < $1.id }
+            self.barriers = manifest.barriers.map { edge($0) }.sorted { $0.id < $1.id }
+            self.objects = objects
+            self.variants = variants
+        }
+
+        /// The section on the page whose id is `id`: under each heading
+        /// that has any, its lines. None when nothing relates to the page.
+        func lines(for id: String) -> [String] {
+            let own = variants[id] ?? []
+            // How an edge meets the page through `ends`: nil when it does
+            // not, "" through the page's own id, and otherwise the variants
+            // it meets.
+            func meet(_ ends: [String]) -> String? {
+                if ends.contains(id) { return "" }
+                let met = Set(ends.filter { own.contains($0) }).sorted()
+                return met.isEmpty ? nil : " (via \(met.map { variantLink($0) }.joined(separator: ", ")))"
+            }
+            func matching(_ edges: [Edge], _ ends: (Edge) -> [String]) -> [(id: String, row: String)] {
+                edges.compactMap { edge in
+                    meet(ends(edge)).map { note in (id: edge.id, row: edge.link + note + edge.circumvention) }
+                }
+            }
+            let asHypothesis = matching(reductions) { $0.hypotheses }
+            let asConclusion = matching(reductions) { $0.conclusion }
+            let barriersMet = matching(barriers) { $0.hypotheses + $0.conclusion }
+            // No reduction is listed twice: Proved in skips what Builds on
+            // or Produces lists, and Used via skips all three.
+            var listed = Set((asHypothesis + asConclusion).map { $0.id })
+            let inModel = reductions.filter { $0.modelPage == id && !listed.contains($0.id) }
+            listed.formUnion(inModel.map { $0.id })
+            let usedVia = reductions.filter { $0.viaPages.contains(id) && !listed.contains($0.id) }
+
+            let title = objects[id]?["title"] as? String ?? id
+            let sections: [(heading: String, rows: [String])] = [
+                ("Builds on \(title)", asHypothesis.map { $0.row }),
+                ("Produces \(title)", asConclusion.map { $0.row }),
+                ("Barriers", barriersMet.map { $0.row }),
+                ("Proved in the \(title)", inModel.map { $0.link }),
+                ("Used via \(title)", usedVia.map { $0.link }),
+            ]
+            var lines: [String] = []
+            for section in sections where !section.rows.isEmpty {
+                lines.append("**\(section.heading)**")
+                lines += section.rows.map { "- " + $0 }
+            }
+            return lines
+        }
+
+        /// `linkTo`, for a variant: its page's slug and its anchor.
+        private func variantLink(_ id: String) -> String {
+            let variant = objects[id]
+            let target = (variant?["slug"] as? String ?? "") + (variant?["anchor"] as? String ?? "")
+            return Participation.link(target, variant?["title"], or: id)
+        }
+
+        /// markdown-text.mjs `link`, as a wikilink: the title, or the id
+        /// when it is empty, trimmed.
+        static func link(_ target: Any?, _ title: Any?, or id: String) -> String {
+            let text = (title as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
+            return "[[\(target as? String ?? "")|\(text.trimmingCharacters(in: .whitespacesAndNewlines))]]"
         }
     }
 
