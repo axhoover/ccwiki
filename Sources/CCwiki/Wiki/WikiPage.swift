@@ -218,8 +218,11 @@ struct WikiPage: Identifiable, Sendable {
     /// per-document *deduplicating* `GithubSlugger`, so a second `## Syntax`
     /// becomes `syntax-1`.
     ///
-    /// The webview computes the same ids independently when it renders; this
-    /// copy exists so the outline can be shown before (and without) a render.
+    /// The webview computes the same ids independently when it renders, and
+    /// the outline takes its headings from that render. This copy is for
+    /// what reads a page without rendering it: search and relation labels.
+    /// Only ATX lines outside fences and `%%` comments count (see
+    /// plans/render-pipeline.md, "Still different from the site").
     func headings() -> [Heading] {
         var slugger = GithubSlugger()
         var result: [Heading] = []

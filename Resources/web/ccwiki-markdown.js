@@ -915,7 +915,10 @@
   /** What a wikilink shows: its alias; else its heading, which ofm.ts:218
    *  makes the alias of `[[page#Heading]]` (one `#` off), except on a page
    *  in a table, where the site escapes the `#` first; else the last
-   *  segment of its target, Quartz's prettyLinks default. */
+   *  segment of its target, as the site's prettyLinks (links.ts:136) cuts
+   *  it. prettyLinks cuts an alias or a heading to its last `/` segment
+   *  too (`[[p-poly|P/poly]]` reads `poly` there); here they stay whole
+   *  (plans/render-pipeline.md, "Still different from the site"). */
   function displayText(meta) {
     if (meta.alias) return meta.alias;
     if (meta.anchor && !(meta.inTable && meta.target)) return meta.anchor.replace(/^#/, "").trim();

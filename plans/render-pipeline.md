@@ -114,8 +114,9 @@ text around it). `Heading.Linkify` is the linkify-it markdown-it 15
 bundles, ported, its patterns in ICU's syntax, and `plainText` applies it
 where markdown-it does: at a `://` after a scheme's name while it parses,
 then to each run of text between tokens of a heading it finds a link in.
-So the outline, search, the preview cards and DiffGuard name the ids the
-page has, but for the rare headings listed under "Still different" below.
+So search, relation labels, the preview cards and DiffGuard name the ids
+the page has, but for the rare headings listed under "Still different"
+below; the outline takes its headings and ids from the render.
 `FixesWikiparseTests` checks the two against each other; on the wiki at
 ab81f02 all 2,769 headings of 883 pages agree.
 
@@ -220,6 +221,18 @@ one: the regex wants a `|` at the start of the line.
   take: they are a paragraph's lines as on the site, but their wikilinks
   show as broken and `\|` in their math as `\\|`. No page in the wiki has
   one (2026-10).
+- The site's CrawlLinks (`prettyLinks`, on by default; links.ts:136-147)
+  cuts the text of every internal link that is one plain text node not
+  starting with `#` to its `path.basename`: a wikilink's alias and the
+  heading `[[page#Heading]]` shows, and a markdown link's text, not only a
+  target without an alias. So `[[p-poly|P/poly]]` and
+  `[[p-to-p-poly|P ⊆ P/poly]]` read `poly` there. The reader and the preview
+  cards (`PreviewExcerpt`) keep that text whole, as written; only a target
+  without an alias is cut to its last segment. The wiki at ab81f02 has 6
+  such links: Reductions/p-to-p-poly.md:20, Reductions/bpp-to-p-poly.md:22,
+  Complexity/polynomial-time.md:28,
+  Complexity/bounded-error-probabilistic-polynomial-time.md:45 and
+  Complexity/p-poly.md:44-45.
 - A wikilink in a heading counts towards the id as its alias, decoded, or as
   its target, as `WikiPage.Heading.plainText` reads it; the site slugs the
   text the link shows, which for `[[page#Section]]` is `Section`, and which
@@ -234,7 +247,7 @@ one: the regex wants a `|` at the start of the line.
   `MarkdownLinkParser.unescape` knows (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
   `&apos;`, `&nbsp;` and numeric ones); markdown-it decodes every HTML5 name,
   and makes an invalid code point U+FFFD. So `## A &mdash; B` has another id
-  in the outline than on the page, and `[[x|a &mdash; b]]` reads
+  in search than on the page, and `[[x|a &mdash; b]]` reads
   `a &mdash; b` on a card and `a — b` on the page. No heading or alias in
   the wiki holds one.
 - Other headings `Heading.plainText` reads otherwise than the page, none of
@@ -249,6 +262,17 @@ one: the regex wants a `|` at the start of the line.
   closes, markdown-it's backtick cache can leave a pair of backticks
   unread, so `` ## [ `a--b`c`x `` has no code span there (`a—b`, and an
   autolink in the backticks is a link) and one here.
+- Which lines are headings: `WikiPage.headings()`, and the same loops in
+  `PreviewExcerpt` (the preview cards), `DiffGuard.headingsByAnchor` and
+  `CorrectionTarget.headingLine`, read ATX lines outside fences and `%%`
+  comments. A setext heading, or a heading inside a blockquote, a callout or
+  a list item, has an id on the page but none in search, relation labels,
+  the preview cards or DiffGuard, and it moves the ids of later headings
+  with the same text (`Security\n---\n\n## Security` is `security-1` on the
+  page, `security` here). An ATX-looking line inside an HTML block or `$$`
+  display math is a heading here but not on the page. The outline is not
+  affected: it takes its headings from the render. None of these is in the
+  wiki at ab81f02.
 
 **Not** reproduced, deliberately: the SPA router and the graph view.
 
