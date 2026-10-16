@@ -5,6 +5,32 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-16 — Lease recovery from recorded attempts, after the maintainer's review
+
+The maintainer found, with real git, that `Publisher.leaseRecovery` took
+any commit in the local branch's reflog as CCwiki's own. The reflog holds
+the job's base, so a branch someone else created at the base after the job
+took its name was force-updated by the retry, and the pull request lookup
+could then adopt their pull request.
+
+- **Attempts, not the reflog.** Before each send, the first and a retry
+  after a rename alike, the job records a `PushAttempt` (the target's
+  repository, the branch it is sent to, the commit) in its persisted
+  record. Attempts are never dropped.
+- **Recovery.** A refused lease retries only when GitHub's tip is a
+  recorded attempt for that very repository and branch, a confirmed push
+  included. Otherwise the job takes the next free name if it never
+  confirmed a push there, and refuses if it did. `GitService.reflog` is
+  gone.
+- **A lost reply** is still recovered, from the attempt, across a
+  relaunch too. A record written before attempts were kept has its
+  `pushingCommit` and `pushedCommit` recorded as attempts for its branch.
+- **Tests,** with real git and bare origins: a branch someone made at the
+  base, and one at a commit in the reflog, are renamed from and left
+  untouched; a lost reply is retried in the same launch, after a relaunch,
+  and from an old record; an attempt for another branch or repository
+  authorizes nothing.
+
 ## 2026-10-16 — #11 inside #12, and round 2 of the bug hunt
 
 **#11 and #12 together.** On re-review the maintainer found that #12 could
