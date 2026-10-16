@@ -76,6 +76,11 @@ prompt so the agent does not repeat the work:
 - Does the proposed key match `^[A-Za-z][A-Za-z+]*\d{2}[a-z]?$`?
 - Is `vendor/cryptobib/crypto.bib` present?
 - Are `git`, `gh`, `claude` and `node` all resolvable? (`ToolLocator`.)
+- Is `gh` signed in to github.com (`GitHubAuth.isAuthenticated`), may that
+  account push to the wiki, and can CCwiki's clone authenticate a push? A
+  GitHub that could not be asked (offline, a timeout, a 5xx) blocks the job
+  as "GitHub could not be reached", never as signed out, and the sheet says
+  "Offline." ([corrections.md](corrections.md) §7.1).
 
 ## 4. Post-flight: the diff ceiling
 

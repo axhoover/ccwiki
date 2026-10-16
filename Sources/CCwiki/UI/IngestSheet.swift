@@ -193,9 +193,12 @@ struct IngestSheet: View {
                 .font(Theme.Fonts.sectionHeader)
                 .foregroundStyle(.secondary)
             ForEach(blockers, id: \.self) { blocker in
-                Label(blocker, systemImage: "exclamationmark.triangle")
+                // Offline is not a fault (design-system §4b): no triangle.
+                let offline = blocker == AppModel.gitHubUnreachableBlocker
+                Label(blocker, systemImage: offline ? "wifi.slash" : "exclamationmark.triangle")
                     .font(Theme.Fonts.meta)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(offline
+                        ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
                     .lineLimit(2)
             }
             Button("Open Settings…") { model.requestSettings() }

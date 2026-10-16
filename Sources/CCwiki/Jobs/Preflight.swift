@@ -38,12 +38,15 @@ enum Preflight {
     /// (`PublishTarget.repository`). The agent no longer pushes, but CCwiki
     /// does once the change is approved, and a credential needed at the end
     /// is checked at the beginning (plans/corrections.md §5.3).
+    /// `isGitHubUnreachable` is gh's "could not ask", which is offline,
+    /// never signed out (§7.1).
     static func run(
         submission: IngestSubmission,
         index: WikiIndex?,
         paths: AppPaths,
         tools: ToolLocator,
         isGitHubAuthenticated: Bool,
+        isGitHubUnreachable: Bool = false,
         canPush: Bool = true,
         hasPushRights: Bool? = nil,
         repository: String = AppPaths.repositorySlug
@@ -61,7 +64,15 @@ enum Preflight {
 
         // 2. GitHub auth. The pull request opens only after review, and
         //    finding then that it cannot is a miserable way to learn this.
-        if tools.path(for: .gh) != nil, !isGitHubAuthenticated {
+        //    A GitHub that could not be asked is not a "no": `gh auth
+        //    login` cannot bring a network back.
+        if tools.path(for: .gh) != nil, isGitHubUnreachable {
+            findings.append(PreflightFinding(
+                level: .blocking,
+                title: "GitHub could not be reached",
+                detail: "Offline, or GitHub did not answer, so CCwiki could not ask whether gh "
+                    + "is signed in. Run the job again once you are connected."))
+        } else if tools.path(for: .gh) != nil, !isGitHubAuthenticated {
             findings.append(PreflightFinding(
                 level: .blocking,
                 title: "GitHub CLI is not authenticated",
@@ -178,15 +189,31 @@ enum Preflight {
 /// portal or a slow network held the first window hostage.
 enum GitHubAuth {
 
-    nonisolated(unsafe) private static var cached: Bool?
-    private static let lock = NSLock()
+    /// The definite answer, behind a lock: gh is asked from any task.
+    final class Cache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var answer: Bool?
+
+        var value: Bool? {
+            get { lock.withLock { answer } }
+            set { lock.withLock { answer = newValue } }
+        }
+    }
+
+    /// One for the app, shared by every task. A test scopes its own with
+    /// `$cache.withValue`, so tests running in parallel never see each
+    /// other's answers. Child tasks and `Task {}` inherit the scope; only
+    /// a detached task falls back to the app's.
+    @TaskLocal static var cache: Cache = Cache()
 
     /// How long to wait on each of gh's answers before treating it as none.
     static let deadline: Duration = .seconds(15)
 
     /// The cached answer, or `signedIn`'s, which caches only a definite one.
-    /// False, and not cached, when gh could not be asked (no gh, no network,
-    /// no answer before the deadline), so the next ask tries again.
+    /// Nil, and not cached, when gh could not be asked (no gh, no network,
+    /// no answer before the deadline), so the next ask tries again, and an
+    /// unreachable GitHub reads as offline, not as signed out
+    /// (plans/corrections.md §7.1).
     ///
     /// Not a bare `gh auth status`: that asks every host and account gh
     /// knows, and exits 1 when any of them has a problem (an expired
@@ -194,26 +221,27 @@ enum GitHubAuth {
     /// account's revoked token), and it reports a connection that fails at
     /// once as an invalid token. Either way a signed-in user read as signed
     /// out, cached for the session, Re-check included.
-    static func isAuthenticated(tools: ToolLocator) async -> Bool {
+    static func isAuthenticated(tools: ToolLocator) async -> Bool? {
         if let known = cachedAnswer { return known }
-        return await signedIn(tools: tools) ?? false
+        return await signedIn(tools: tools)
     }
 
     /// The definite answer last cached, if any.
-    static var cachedAnswer: Bool? {
-        lock.withLock { cached }
-    }
+    static var cachedAnswer: Bool? { cache.value }
 
     /// Whether the signed-in account may push to `repository`, asked of
     /// GitHub itself. `nil` when it could not be asked — no `gh`, no network,
-    /// or no answer before the deadline.
+    /// or no answer before the deadline. github.com by name: left to gh,
+    /// the host is its default, which is an Enterprise host when that is
+    /// the only one signed in.
     static func canPush(tools: ToolLocator, repository: String) async -> Bool? {
         guard let gh = tools.path(for: .gh) else { return nil }
         let environment = tools.childEnvironment()
         let result = await Subprocess.withDeadline(deadline) {
             await Subprocess.run(
                 executable: gh,
-                arguments: ["api", "repos/\(repository)", "--jq", ".permissions.push"],
+                arguments: ["api", "repos/\(repository)", "--hostname", "github.com",
+                            "--jq", ".permissions.push"],
                 environment: environment)
         }
         guard let result, result.succeeded else { return nil }
@@ -221,18 +249,14 @@ enum GitHubAuth {
     }
 
     /// Call after the user has been told to run `gh auth login`.
-    static func invalidate() {
-        lock.lock()
-        defer { lock.unlock() }
-        cached = nil
-    }
+    static func invalidate() { cache.value = nil }
 }
 
 extension GitHubAuth {
-    /// `gh auth status`: nil on a timeout, unlike `isAuthenticated`'s false,
-    /// so an unreachable GitHub reads as offline, not as signed out
-    /// (plans/corrections.md §7.1). Nil, too, without `gh`: it could not be
-    /// asked, and `GitHubAccess.classify` says gh is missing.
+    /// `gh auth status`, asked afresh: nil on a timeout, so an unreachable
+    /// GitHub reads as offline, not as signed out (plans/corrections.md
+    /// §7.1). Nil, too, without `gh`: it could not be asked, and
+    /// `GitHubAccess.classify` says gh is missing.
     ///
     /// Not cached, so signing in mid-session is seen at the next ask; a
     /// definite answer refreshes `isAuthenticated`'s cache.
@@ -241,7 +265,10 @@ extension GitHubAuth {
     /// fails at once (no network, DNS) as an invalid token, and so is an
     /// error from GitHub's API (a 502 or 503). So when it fails in words
     /// that are not a network's, one cheap API call that needs both the
-    /// network and a valid token decides between them (`verdict`).
+    /// network and a github.com token decides between them (`verdict`):
+    /// `gh api user`. Not `rate_limit`, which GitHub answers without a
+    /// token, so an account signed in only to an Enterprise host read as
+    /// signed in to github.com.
     static func signedIn(tools: ToolLocator) async -> Bool? {
         guard let gh = tools.path(for: .gh) else { return nil }
         let environment = tools.childEnvironment()
@@ -257,17 +284,13 @@ extension GitHubAuth {
         }
         var probe: Subprocess.Result?
         if needsProbe(status) {
-            probe = await ask([
-                "api", "--hostname", "github.com", "rate_limit", "--jq", ".rate.limit",
-            ])
+            probe = await ask(["api", "--hostname", "github.com", "user", "--jq", ".login"])
         }
         let answer = verdict(status: status, probe: probe)
 
         // A "no" from a cancelled task is not an answer either: its `gh`
         // was stopped, not refused.
-        if let answer, !Task.isCancelled {
-            lock.withLock { cached = answer }
-        }
+        if let answer, !Task.isCancelled { cache.value = answer }
         return answer
     }
 
@@ -290,7 +313,8 @@ extension GitHubAuth {
     }
 
     /// gh's refusal of the token: exit 4, which is gh's for "no
-    /// credentials" (its message names `gh auth login`), or GitHub's 401.
+    /// credentials" (its message names `gh auth login`), or GitHub's 401,
+    /// for a bad token or none at all ("Requires authentication").
     static func isSignedOut(_ result: Subprocess.Result) -> Bool {
         if result.status == 4 { return true }
         let lowered = (result.stdout + "\n" + result.stderr).lowercased()
