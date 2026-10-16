@@ -11,25 +11,49 @@ The maintainer found, with real git, that `Publisher.leaseRecovery` took
 any commit in the local branch's reflog as CCwiki's own. The reflog holds
 the job's base, so a branch someone else created at the base after the job
 took its name was force-updated by the retry, and the pull request lookup
-could then adopt their pull request.
+could then adopt their pull request. Their follow-up found that the first
+push still leased on `pushedCommit` wherever the target now was: after a
+Dev build's target override moved to a fork whose `fix/page` happened to
+be at that commit, the first push succeeded and overwrote it, and the
+scoped recovery never ran. An old record's unscoped commits were also
+recorded as attempts for whatever the target was now.
 
 - **Attempts, not the reflog.** Before each send, the first and a retry
   after a rename alike, the job records a `PushAttempt` (the target's
   repository, the branch it is sent to, the commit) in its persisted
   record. Attempts are never dropped.
+- **The confirmed push says where it went.** A confirmed push is kept as
+  `confirmedPush`, a `PushAttempt`, with `pushedCommit` set with it for
+  the banner and Discard (`Job.setConfirmedPush`). The first send leases
+  on it only when it went to this repository and branch
+  (`Publisher.initialLease`), and on absence otherwise, so a branch
+  already there is refused and recovery decides.
 - **Recovery.** A refused lease retries only when GitHub's tip is a
-  recorded attempt for that very repository and branch, a confirmed push
-  included. Otherwise the job takes the next free name if it never
-  confirmed a push there, and refuses if it did. `GitService.reflog` is
-  gone.
-- **A lost reply** is still recovered, from the attempt, across a
-  relaunch too. A record written before attempts were kept has its
-  `pushingCommit` and `pushedCommit` recorded as attempts for its branch.
-- **Tests,** with real git and bare origins: a branch someone made at the
-  base, and one at a commit in the reflog, are renamed from and left
-  untouched; a lost reply is retried in the same launch, after a relaunch,
-  and from an old record; an attempt for another branch or repository
-  authorizes nothing.
+  recorded attempt for that very repository and branch (the confirmed
+  push there is one). Otherwise the job refuses if its confirmed push went
+  to that repository and branch, and takes the next free name if not.
+  `GitService.reflog` is gone.
+- **A lost reply** is still recovered, from the attempt, in the same
+  launch and across a relaunch.
+- **Old records authorize nothing.** A record with no attempts and no
+  `confirmedPush`, only a `pushingCommit` or a `pushedCommit`, cannot say
+  where that push went (`Job.hasPushWithoutDestination`). Nothing is
+  invented for it: its next Approve leases on absence, and a branch
+  already there, even its own lost push, is renamed from, never pushed
+  over; the transcript says "CCwiki cannot tell where this job's earlier
+  push went, so it leaves fix/x on GitHub as it is and uses fix/x-2."
+  Only Dev builds wrote such records.
+- **Tests,** with real git and bare origins, and a second bare repository
+  standing in for a fork with its own `PublishTarget`: a branch someone
+  made at the base, and one at a commit in the reflog, are renamed from
+  and left untouched; a push confirmed on the origin, then Approve to a
+  fork whose `fix/page` is at that commit, renames and leaves both alone;
+  an attempt or a confirmed push for another branch or repository
+  authorizes nothing; an old record is renamed from, after a change of
+  target and on its own lost push; a lost reply is retried in the same
+  launch and after a relaunch; with nothing changed, the next push leases
+  on the confirmed one. Pure tests cover `initialLease`, `leaseRecovery`,
+  and records with and without `confirmedPush`.
 
 ## 2026-10-16 — #11 inside #12, and round 2 of the bug hunt
 
