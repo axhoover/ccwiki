@@ -80,6 +80,9 @@ path from the vault root.
 3. fp is empty                        → same-page anchor, stop
 4. transformInternalLink(fp + anchor) → a RelativeURL rooted at "."
 5. strip the leading "." and split off the anchor again → targetCanonical
+   a relative target (../Primitives/prf) is left as ./Primitives/prf: drop
+   its leading "." and ".." segments, as the site's URL resolution from the
+   root does, and skip step 6 → Primitives/prf
 6. matches = allSlugs where lastSegment == targetCanonical  (exact, CASE-SENSITIVE)
    exactly one → that slug;  otherwise → targetCanonical itself
 7. slug → file, in order:
@@ -138,18 +141,29 @@ not try to be. Measured against all 297 files, it must handle:
   inside the value (every `source:` URL, every `cryptobib_key`). Splitting on
   the last, or refusing colons, breaks all of them.
 - block sequences (`aliases:` then `  - item`, or `- item` flush left, as
-  js-yaml also reads it) and the inline empty `[]`.
+  js-yaml also reads it), blank lines and comments between items included,
+  and flow sequences (`[a, "b, c"]`, the empty `[]`).
 - literal block scalars (`bibtex: |`) on 43 pages, newlines preserved.
 - double- and single-quoted scalars, unquoted only when both ends match — so
   `title: "#P"`, `title: P/poly` and `title: Impagliazzo's Five Worlds` all
   survive intact.
-- full-line `#` comments, which `content/Templates/Reference.md` teaches agents
-  to write.
+- comments: full-line `#` comments, which `content/Templates/Reference.md`
+  teaches agents to write, and a trailing `# comment` after a value or a list
+  item, which the relation templates and CONTRIBUTING's examples write on most
+  keys. As in YAML, a comment starts at a `#` after a space or tab, so `C#`, a
+  URL's `#fragment` and a quoted `"#P"` are values.
+- values that run on over the indented lines below their key, as js-yaml reads
+  them: a plain or quoted scalar, folded (a line break to a space, a blank line
+  to a newline, a line break after a double-quoted value's escaping `\` to
+  nothing), and a flow sequence, which the wiki's formatter wraps when it is
+  long (`key:` then an indented `[…]`), its items folded the same way. One
+  edge is left: an escaped space or tab at the end of a double-quoted line
+  (`\ `) is trimmed with the line, so it reads as an escaped line break.
 
 It deliberately **ignores nested mappings**: an indented block under a key is
-skipped, so a nested `status:` can never overwrite the top-level one. It also
-never strips a trailing `# comment` from a value, because doing so would mangle
-`"#P"` and every URL with a fragment.
+skipped, so a nested `status:` can never overwrite the top-level one. A list
+item that is a mapping (`- kind: …` in `consequences`) is kept as its first
+line, as written, and the lines under it are skipped.
 
 Two schema notes that matter for the UI:
 

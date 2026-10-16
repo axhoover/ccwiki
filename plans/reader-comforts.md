@@ -279,7 +279,10 @@ window forward with
 `makeKeyAndOrderFront`. While the sheet is up, a second request only brings
 its window forward, and the other windows' drop targets refuse PDFs, as does
 `onOpenURL` for a PDF from Finder: the sheet up reads none, so one staged for
-it would wait and join the next ingestion. The
+it would wait and join the next ingestion. A sheet pinned to a window that
+has not started is not up yet, as a waiting request is when the window a PDF
+opens claims it, so that window stages the PDF for it
+(`ReaderSession.stagesOpenedPDF`). The
 bookkeeping is the pure `IngestSheetTarget` (§4.6).
 
 ### 1.4 Opening a page elsewhere
@@ -344,14 +347,15 @@ today, so it lands on the match.
 
 `CCwikiCommands` reads `@FocusedValue(\.readerSession)` for everything about
 a page. It keeps `@FocusedValue(\.appModel)` for app-wide items, so those
-stay enabled exactly when they are today: when a reader window is key.
+stay enabled exactly when they are today: when a reader window is key,
+except Ingest a Paper, which takes the app's own model (below).
 
 | Command | Keys | Goes to | Enabled when |
 |---|---|---|---|
 | New Window | ⌘N | `openWindow(id:value:)` | always |
 | New Tab | ⌘T | the same, as a tab of the key reader window | always; with no reader key, a window |
 | Quick Switcher… | ⌘O | `session.presentQuickSwitcher()` | a reader is key |
-| Ingest a Paper… | ⇧⌘N | `model.requestIngestSheet(in: session.id)` | a reader is key (today) |
+| Ingest a Paper… | ⇧⌘N | `IngestCommand.perform`: `model.requestIngestSheet(in: session?.id)`, with the app's own model, then a reader window if none is open | always, as the Jobs window's button offers it |
 | Find on Page, Next, Previous | ⌘F ⌘G ⇧⌘G | `\.findAction`, from that window's `ReaderView` | as today |
 | Find in All Pages… | ⇧⌘F | `session.grepPresented` | a reader is key |
 | Search the Wiki… | ⌘S | `\.searchAction`, `session.searchPresented` | as today |
@@ -395,7 +399,7 @@ them, one click away (§7).
   query is app-wide. The quick switcher leaves out the page on screen in the
   window that presented it: `session.presentQuickSwitcher()` sets
   `model.quickSwitcherExcludedPath`, which `refreshQuickSwitcher()` reads on
-  every keystroke.
+  every keystroke. Presenting one closes any other window's switcher.
 - **Status bar.** The sync state, warnings, job count and update progress are
   the same in every window. `lastRenderError` is the window's own.
 - **Find.** The find bar's text and state are `@State` in `ReaderView`,
@@ -501,7 +505,10 @@ follows the key reader.
   counted by the registry, one per tab.
 - **Jobs.** New Ingestion Job… calls `model.requestIngestSheet(in: nil)`.
   The sheet appears on the active reader window, which comes forward. With
-  no reader open it waits for the next one, as today.
+  no reader open, Jobs opens one, which claims the request and shows the
+  sheet (`IngestCommand`, as the explorer opens one for a page). As there,
+  `mainWindowCount` counts a window only once it claims its session, so a
+  second click before then opens a second reader, without the sheet.
 - **A paper window's Show Reference Page** is an explicit Show, so it must
   be seen. `model.revealInReader(_:)` prefers a reader tab already showing
   that page, else the active reader, opens the page there and brings that
@@ -1560,6 +1567,7 @@ func noteVisited(_ path: String)                     // recents and lastPage
 func documentRequest(_ document: Document) -> RenderRequest
 var quickSwitcherExcludedPath: String?
 func refreshQuickSwitcher()
+func dismissQuickSwitchers(except id: UUID)          // one switcher up at a time (§1.6)
 var ingestSheetTarget: UUID? { get }                 // IngestSheetTarget.window
 var pendingDroppedPDF: URL?
 func requestIngestSheet(in session: UUID?)
@@ -1961,6 +1969,9 @@ fixture transport, and keep it in a temporary library.
 - **Per window.**
   - ⌘F's bar and its matches stay with their tab.
   - Text size changes every tab.
+  - With the quick switcher open in one window and something typed in it,
+    ⌘O in another window closes the first switcher and opens the second
+    empty, leaving out the second window's page.
 - **Papers.**
   - The paper window opens at the trailing edge, no taller than the screen,
     and tiles beside the reader (on macOS 15, Window ▸ Move & Resize ▸ Left

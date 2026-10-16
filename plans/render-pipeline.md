@@ -95,13 +95,130 @@ than the wart.
 
 **Heading ids** use the deduplicating `GithubSlugger`, computed from the
 heading's plain text with math reduced to its source — because `rehype-slug` runs
-before `rehype-katex` in the site's chain.
+before `rehype-katex` in the site's chain. The text is read after the site's
+typography (below): `ccwiki_typography` runs before `ccwiki_heading_ids`, so
+`## A -> B` reads `A → B` and its id is `a--b`, as rehype-slug has it.
+`WikiPage.Heading.plainText` reads a heading the same way (`educated`: the
+same arrows, `--` and `...`, and LaTeX's ``` `` ``` and `''`, with an escaped
+character or a character reference read as the character it stands for),
+and leaves alone what the page leaves alone: math, code, a wikilink, and the
+text of a link markdown-it makes of a URL or an address, which the page's
+typography skips. Those links are markdown-it's autolinks (`<https://…>`,
+`<name@host>`) and what linkify-it finds (`https://…`, `ftp://…`,
+`//host/…`, `mailto:…` and a bare `name@host`; never a `www.` link), so
+`## See https://x.org/a--b` keeps its `--` in the id. `Heading.Linkify` is
+the linkify-it markdown-it 15 bundles, ported, its patterns in ICU's
+syntax, and `plainText` applies it where markdown-it does: at a `://` after
+a scheme's name while it parses, then to each run of text between tokens
+of a heading it finds a link in. So the outline, search, the preview cards
+and DiffGuard name the ids the page has, but for the rare headings listed
+under "Still different" below. `FixesWikiparseTests` checks the two against
+each other; on the wiki at ab81f02 all 2,769 headings of 883 pages agree.
 
 **Options** match the site: `linkify: true` (GFM autolinks), `typographer: true`
 (smartypants), `breaks: false` (`HardLineBreaks` is not configured), and
 `html: true` — the corpus contains exactly one raw HTML block and the website
 renders it. Passing it through is safe here because the CSP forbids inline
 script (§5), so markup coming out of the wiki cannot execute.
+
+**Typography** is the site's, not markdown-it's: its `smartquotes` stays, its
+`replacements` is off, and `ccwiki_backticks` and `ccwiki_typography` do what
+OFM's arrows and retext-smartypants' defaults do: `->` → →, `=>` → ⇒ and the
+rest of ofm.ts's arrows, then `--` (only two) → —, three or more dots → …,
+and LaTeX's ``` ``quotes'' ``` → “quotes”. `---`, `(c)`, `+-` and `..` stay
+as written. A wikilink's text is a `text` token between `wikilink_open` and
+`wikilink_close`, so it is educated as the site educates a link's text; the
+preview cards get the same rules.
+
+**Callouts** take their title from the marker's line only (math and links
+included) and the lines after it as their body, as ofm.ts does (its text
+transform ends the paragraph after a `> [!type]` line, ofm.ts:187), and map
+Obsidian's other names (`caution` is a warning, `summary` an abstract).
+
+The marker is ofm.ts:147's regex as the site has it,
+`^\[\!([\w-]+)\|?(.+?)?\]([+-]?)`, matched against what the site matches it
+against (ofm.ts:477): the first line of the first text node of the
+blockquote's first paragraph, decoded. `(.+?)?` runs on to the first `]` in
+that text after the marker's own, and the text up to it is metadata: on the
+site and here, `> [!note] As shown in [HLL23], …` is titled `, …`. A
+`[[link]]`, math or code before any such `]` ends the text node first, and the
+marker ends at its own `]`. `siteTextNode` finds the node: markdown-it's inline
+parser reads the line, without the core rules and with a copy of the
+footnotes, and the node ends at the first token that is not text, an escape
+or an entity (a link, an image, math, a code span, emphasis, an autolink, HTML,
+a wikilink, a footnote reference); then, as on the site, at the first of OFM's
+own splits (ofm.ts:239: a wikilink, a `==highlight==`, an arrow, a tag that is
+not all digits and slashes), and at a `www.` link or an email address, which
+remark-gfm links and markdown-it's inline parse does not. It ends, too, at a
+lone `~` that opens a strikethrough: remark-gfm's
+(micromark-extension-gfm-strikethrough 2.0.0, `singleTilde` on by default)
+takes one, and pairs it with a later one as CommonMark pairs emphasis, where
+markdown-it takes only `~~`; a closing `~` is looked for in the node only. So
+`> [!note] a ~b~ [x] c` is titled `a ~b~ [x] c`, and `> [!note] a ~b [x] c`,
+whose `~` closes nothing, `c`. The title is the rest of the line, as written,
+and with nothing left it is the type, capitalised.
+
+**The site's text transform** (ofm.ts:179) runs before the parse here too:
+`%%` comments are deleted, and in a table each wikilink's pipes are escaped,
+so `[[slug|Name]]` stays one cell (and `\|` in a table's math keeps its
+backslash). A wikilink shows its alias decoded (`IND\$-CPA` reads
+`IND$-CPA`); without one, `[[page#Heading]]` shows `Heading` (in a table,
+`page`, as the site's `#` escape there leaves it) and `[[page]]` the last
+segment of the target. A link preview card shows a wikilink's text by the
+same rule (`PreviewExcerpt`).
+
+A table the site's regex finds inside fenced code, display math or an HTML
+block is shown as written, its cells never split, so it gets the site's edit
+exactly (ofm.ts:196: in each link, the first `#` and each unescaped `|`
+escaped) and nothing more: `| $\|x\|$ | [[a\|b]] |` in a fence reads as
+written, and `[[a|b]]` reads `[[a\|b]]`, as the site's code block shows it.
+Which lines those are comes from a block parse of its own (`verbatimLines`),
+whose tokens and `env` are thrown away. An indented code block never holds
+one: the regex wants a `|` at the start of the line.
+
+**Still different from the site**, known and left so:
+
+- A callout's `+` or `-` (folded) is not honoured: the reader has no control to
+  unfold it.
+- A line after the marker line that continues its paragraph without a `>`
+  is the callout's body here; the site's forced break ends the blockquote
+  before it. A callout the site does not break (nested in another blockquote,
+  or with its `>` indented) takes only its first line as its title here; the
+  site adds the paragraph's later inline markup to the title.
+- The site builds a callout's title as HTML before smartypants runs, so its
+  quotes and dashes stay straight there; here the title is ordinary inline
+  text, and educated.
+- In code, the site's text transform rewrites wikilinks too
+  (`[[page#Some Heading]]` reads `[[page#some-heading|Some Heading]]` in a
+  code block, `[[https://x|y]]` reads `[y](https://x)`); the reader shows
+  code as written, but for a table in it (above), where the table's escapes
+  stop the rewrite of every link but an external one.
+- A wikilink in a heading counts towards the id as its alias, decoded, or as
+  its target, as `WikiPage.Heading.plainText` reads it; the site slugs the
+  text the link shows, which for `[[page#Section]]` is `Section`, and which
+  smartypants has educated. No heading in the wiki holds a wikilink
+  (2026-10).
+- The site strikes out text between single tildes (`a ~b~ c`), as
+  remark-gfm does by default; markdown-it strikes only `~~b~~`, so `~b~`
+  reads as written here. No page in the wiki has such a pair outside math
+  (2026-10).
+- `Heading.plainText`, and a preview card's wikilink alias
+  (`PreviewExcerpt`), decode the character references
+  `MarkdownLinkParser.unescape` knows (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
+  `&apos;`, `&nbsp;` and numeric ones); markdown-it decodes every HTML5 name,
+  and makes an invalid code point U+FFFD. So `## A &mdash; B` has another id
+  in the outline than on the page, and `[[x|a &mdash; b]]` reads
+  `a &mdash; b` on a card and `a — b` on the page. No heading or alias in
+  the wiki holds one.
+- Other headings `Heading.plainText` reads otherwise than the page, none of
+  them in the wiki: a link's text there is markdown-it's, which decodes
+  percent-escapes and punycode (`## https://x.org/%41` reads
+  `https://x.org/A` there); inline HTML and an image are no text on the
+  page; `*` is only deleted here, so one that is not emphasis, which the
+  page keeps, shows at an edge of the heading (`## a **` has the id `a-`
+  there, `a` here) and before a final `Σ`, and `*emphasis*` right around
+  an address does not set it apart as it does there; and a `[` before a
+  markdown link starts that link's text here.
 
 **Not** reproduced, deliberately: the SPA router and the graph view.
 
@@ -127,14 +244,18 @@ failed one, which leaves no `.ps-root`.) A failed block replaces its box with
 a `pre.pseudocode-error`.
 
 Per-block facts live on the box: `data-source` (the source with
-`\algname{…}` removed, for copying) and `data-oracle-split`. Never put a
-`data-*` attribute on the `<pre>`: `pseudocode.renderElement` copies the
-element's `dataset` into its renderer options.
+`\algname{…}` removed, for copying), `data-oracle-split`, and
+`data-algname` (the first `\algname{…}`, trimmed and lowercased; absent
+without one). Never put a `data-*` attribute on the `<pre>`:
+`pseudocode.renderElement` copies the element's `dataset` into its renderer
+options.
 
-`groupGames` then puts a Game block and the blocks straight after it side by
-side. The game takes the width it needs and the oracle column keeps a 12rem
-minimum; `% oracle-split: N` in the game's source fixes the oracles' share at
-N% (quartz pseudocode.ts:245), through a `split` class and an
+`groupGames` then puts a block whose `\algname` is Game and the blocks
+straight after it that have another `\algname` side by side, as quartz
+pseudocode.ts:209 decides it (a block with none ends the group; the caption
+plays no part). The game takes the width it needs and the oracle column
+keeps a 12rem minimum; `% oracle-split: N` in the game's source fixes the
+oracles' share at N% (quartz pseudocode.ts:245), through a `split` class and an
 `--oracle-share` property so the narrow-window rules can still override it.
 Anything else added inside a box must not widen it, or it moves the split;
 the copy buttons (see "Copying LaTeX") are the case in point.
@@ -251,6 +372,9 @@ page, the relation-meta line spliced under the H1. A core rule,
   `renderPseudocode` moves it onto the `.pseudocode-container` (or the
   `pre.pseudocode-error`) as `data-source-lines`.
 - An `html_block` carries its map, but raw HTML has nowhere to show it.
+- `%%` comments are deleted before the parse, so a comment over several
+  lines moves the lines after it; `ccwiki_comment_lines`, just before
+  `ccwiki_source_lines`, maps every token back to the lines it was handed.
 
 `SourceLineMap` (Swift) maps a rendered range to the file: past the
 frontmatter, and around the spliced lines, which map to the frontmatter they

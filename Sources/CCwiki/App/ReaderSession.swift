@@ -301,7 +301,10 @@ final class ReaderSession: Identifiable {
             // on any window is refused (§1.3): its window comes forward. The
             // sheet up now reads no PDF, so one left for it would wait and
             // join the next, unrelated, ingestion.
-            guard model.ingestSheetTarget == nil else {
+            guard Self.stagesOpenedPDF(
+                sheet: model.ingestSheetTarget, window: id, isStarted: isStarted,
+                hasPendingPDF: model.pendingDroppedPDF != nil)
+            else {
                 model.requestIngestSheet(in: id)
                 return
             }
@@ -313,6 +316,20 @@ final class ReaderSession: Identifiable {
             of: CCwikiURL.internalString(for: url)) {
             navigate(to: destination)
         }
+    }
+
+    /// Whether a PDF from outside is staged for the ingest sheet: with no
+    /// sheet asked for, or with one pinned to this window that is not up
+    /// yet. That is a request made with no reader open, which the window a
+    /// PDF from Finder opens claims before it is handed the PDF. The window
+    /// has not started, so its views, and the sheet with them, have not
+    /// appeared, and the sheet opens holding the PDF, unless one already
+    /// waits for it. A sheet up, here or in another window, gets none.
+    nonisolated static func stagesOpenedPDF(
+        sheet: UUID?, window: UUID, isStarted: Bool, hasPendingPDF: Bool
+    ) -> Bool {
+        guard let sheet else { return true }
+        return sheet == window && !isStarted && !hasPendingPDF
     }
 
     // MARK: What the model tells it
@@ -564,8 +581,10 @@ final class ReaderSession: Identifiable {
     }
 
     /// ⌘O. The query is app-wide; the page left out of the list is this
-    /// window's (§1.6).
+    /// window's (§1.6), so a switcher up in another window closes first:
+    /// two at once would share one query and fight over the left-out page.
     func presentQuickSwitcher() {
+        model.dismissQuickSwitchers(except: id)
         model.quickSwitcherExcludedPath = location.path
         model.quickSwitcherQuery = ""
         model.refreshQuickSwitcher()

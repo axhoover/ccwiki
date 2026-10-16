@@ -9,10 +9,19 @@ import Foundation
 /// - `key: scalar`, splitting on the **first** colon (345 lines carry a colon
 ///   inside the value — every `source:` URL and every `cryptobib_key`)
 /// - block sequences (`aliases:` then `  - item`, or `- item` flush left) and
-///   the inline empty `[]`
+///   flow sequences (`[a, "b, c"]`, the empty `[]`)
 /// - literal block scalars (`bibtex: |`), preserving interior newlines
 /// - double- and single-quoted scalars, unquoted only when both ends match
-/// - full-line `#` comments (taught to agents by `Templates/Reference.md`)
+/// - comments: full-line `#` comments (taught to agents by
+///   `Templates/Reference.md`), and a trailing `# comment` after a value,
+///   which the templates write on most keys. As in YAML, a comment starts at
+///   a `#` after whitespace, so `C#`, a URL's `#fragment` and a quoted `"#P"`
+///   are values.
+/// - values that run on over the indented lines below their key: a plain or
+///   quoted scalar, folded as YAML folds it, or a flow sequence, as the wiki's
+///   formatter wraps a long one (`key:` then an indented `[…]`), whose items
+///   fold the same way. Blank lines and comments inside a block sequence do
+///   not end it.
 ///
 /// Deliberately *not* handled, because misreading them is worse than ignoring
 /// them: nested mappings (an indented block under a key is skipped, so a nested
@@ -96,11 +105,15 @@ struct Frontmatter: Equatable, Sendable {
 
             guard let colon = line.firstIndex(of: ":") else { i += 1; continue }
             let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
-            let rest = String(line[line.index(after: colon)...])
+            var rest = String(line[line.index(after: colon)...])
                 .trimmingCharacters(in: .whitespaces)
+            // `key: # note` has nothing on its line: a value never starts
+            // with `#`, so this one is a comment and the value is below.
+            if rest.hasPrefix("#") { rest = "" }
 
-            if ["|", "|-", "|+", ">", ">-", ">+"].contains(rest) {
-                let folded = rest.hasPrefix(">")
+            let header = Self.plainValue(rest)
+            if Self.isBlockScalarHeader(header) {
+                let folded = header.hasPrefix(">")
                 let (value, next) = Self.blockScalar(lines, from: i + 1, folded: folded)
                 fm.fields[key] = .string(value)
                 i = next
@@ -108,20 +121,24 @@ struct Frontmatter: Equatable, Sendable {
             }
 
             if rest.isEmpty {
-                let (items, next) = Self.blockSequence(lines, from: i + 1)
-                fm.fields[key] = items.isEmpty ? .null : .list(items)
+                let (value, next) = Self.nestedValue(lines, from: i + 1)
+                fm.fields[key] = value
                 i = next
-                continue
-            }
-
-            if rest == "[]" {
-                fm.fields[key] = .list([])
-            } else if rest.hasPrefix("["), rest.hasSuffix("]") {
-                fm.fields[key] = .list(Self.flowSequence(rest))
+            } else if rest.hasPrefix("[") {
+                if let flow = Self.flowSequence(rest, lines, from: i + 1, indent: 0) {
+                    fm.fields[key] = .list(flow.items)
+                    i = flow.next
+                } else {
+                    // Brackets that never close, or text after them: not
+                    // YAML, so kept as written.
+                    fm.fields[key] = .string(Self.plainValue(rest))
+                    i += 1
+                }
             } else {
-                fm.fields[key] = .string(Self.unquote(Self.quotedValue(rest) ?? rest))
+                let (value, next) = Self.scalar(rest, lines, from: i + 1, indent: 0)
+                fm.fields[key] = .string(value)
+                i = next
             }
-            i += 1
         }
 
         guard found else { return Frontmatter(bodyStart: text.startIndex) }
@@ -175,66 +192,253 @@ struct Frontmatter: Equatable, Sendable {
         return (folded ? dedented.joined(separator: " ") : dedented.joined(separator: "\n"), i)
     }
 
-    /// A block sequence: consecutive `  - item` lines, or consecutive
-    /// `- item` lines flush left, which YAML also allows under a key (and
-    /// js-yaml, so the site, reads). The first item decides which; a flush
-    /// item has to be `- ` or a bare `-`, so the closing `---` never is one.
+    /// The value of a `key:` with nothing after it, read from the lines below
+    /// it, past any blank lines and comments: a block sequence, a flow
+    /// sequence or a scalar on the next line (as the wiki's formatter wraps
+    /// a long value), or null. A nested mapping, an anchor, a tag or anything
+    /// else this parser does not read is null, and the main loop skips its
+    /// indented lines.
+    private static func nestedValue(_ lines: [String], from start: Int) -> (Value, Int) {
+        var first = start
+        while first < lines.count, isBlankOrComment(lines[first]) { first += 1 }
+        guard first < lines.count else { return (.null, start) }
+        let line = lines[first]
+        let text = line.trimmingCharacters(in: .whitespaces)
+        if isItem(text) {
+            let (items, next) = blockSequence(lines, from: first)
+            return (items.isEmpty ? .null : .list(items), next)
+        }
+        // Flush left, it is the next key (or the closing `---`).
+        guard indentation(line) > 0, let lead = text.first else { return (.null, start) }
+        if lead == "[" {
+            guard let flow = flowSequence(text, lines, from: first + 1, indent: 0)
+            else { return (.null, start) }
+            return (.list(flow.items), flow.next)
+        }
+        if "&*!|>%@`{}],".contains(lead) || isMappingEntry(text) { return (.null, start) }
+        let (value, next) = scalar(text, lines, from: first + 1, indent: 0)
+        return (.string(value), next)
+    }
+
+    /// A block sequence: `  - item` lines, or `- item` lines flush left,
+    /// which YAML also allows under a key (and js-yaml, so the site, reads).
+    /// The first item, at `start`, sets the column of the dashes. Blank lines
+    /// and comments between items do not end it. A line indented past the
+    /// dashes continues its item's scalar, or belongs to an item that is a
+    /// mapping (`- kind: …` in `consequences`), which is kept as written and
+    /// its lines skipped. A flush item has to be `- ` or a bare `-`, so the
+    /// closing `---` never is one.
     private static func blockSequence(_ lines: [String], from start: Int) -> ([String], Int) {
-        let isFlushItem: (String) -> Bool = { $0.hasPrefix("- ") || $0.trimmedTrailing == "-" }
-        let flush = start < lines.count && isFlushItem(lines[start])
         var items: [String] = []
+        var dashes: Int?
         var i = start
         while i < lines.count {
             let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-            let isItem = flush
-                ? isFlushItem(lines[i])
-                : (lines[i].hasPrefix(" ") || lines[i].hasPrefix("\t")) && trimmed.hasPrefix("-")
-            guard isItem else { break }
-            let item = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
-            items.append(unquote(item))
-            i += 1
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            let indent = indentation(lines[i])
+            if let dashes, indent > dashes { i += 1; continue }
+            guard isItem(trimmed), dashes == nil || indent == dashes else { break }
+            dashes = indent
+
+            var item = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
+            // `- # note` is an empty item.
+            if item.hasPrefix("#") { item = "" }
+            if item.isEmpty || isMappingEntry(item) {
+                items.append(item)
+                i += 1
+            } else {
+                let (value, next) = scalar(item, lines, from: i + 1, indent: indent)
+                items.append(value)
+                i = next
+            }
         }
         return (items, i)
     }
 
-    /// `[a, "b, c"]` — split on commas that are not inside quotes.
-    private static func flowSequence(_ s: String) -> [String] {
-        let inner = s.dropFirst().dropLast()
+    /// A flow sequence from the `[` that starts `first`, the rest of its
+    /// line, running on over the following lines indented past `indent`
+    /// until its brackets close. Commas inside quotes or nested brackets do
+    /// not split it, a `#` after whitespace comments out the rest of a line,
+    /// and a quote opens a quoted item only at the item's start, so
+    /// `[it's, b]` is two items, as in YAML. An item over several lines
+    /// folds as a scalar does: a line break to a space, each blank line to
+    /// a newline, and a double-quoted item's escaped line break (`\` at the
+    /// end of the line) to nothing. Nil when the brackets never close, or
+    /// more than a comment follows them. Known edge, as in `quotedScalar`:
+    /// an escaped space or tab at the end of a double-quoted line (`\ `) is
+    /// trimmed with the line, so it reads as an escaped line break, where
+    /// YAML keeps the escaped space or tab and folds the break as usual.
+    private static func flowSequence(
+        _ first: String, _ lines: [String], from start: Int, indent: Int
+    ) -> (items: [String], next: Int)? {
         var items: [String] = []
         var current = ""
+        var depth = 1
         var quote: Character?
+        var line = Array(first)
+        var k = 1  // past the opening `[`
+        var next = start
 
-        for c in inner {
-            if let q = quote {
-                if c == q { quote = nil }
-                current.append(c)
-            } else if c == "\"" || c == "'" {
-                quote = c
-                current.append(c)
-            } else if c == "," {
-                items.append(unquote(current.trimmingCharacters(in: .whitespaces)))
-                current = ""
-            } else {
-                current.append(c)
+        while true {
+            while k < line.count {
+                let c = line[k]
+                if let open = quote {
+                    current.append(c)
+                    if open == "\"", c == "\\", k + 1 < line.count {
+                        // The escaped character, a quote included.
+                        current.append(line[k + 1])
+                        k += 2
+                        continue
+                    }
+                    if c == open {
+                        // `''` inside single quotes is an escaped quote.
+                        if open == "'", k + 1 < line.count, line[k + 1] == "'" {
+                            current.append("'")
+                            k += 2
+                            continue
+                        }
+                        quote = nil
+                    }
+                    k += 1
+                    continue
+                }
+                // A comment runs to the end of the line.
+                if c == "#", k == 0 || line[k - 1] == " " || line[k - 1] == "\t" { break }
+
+                if c == "[" || c == "{" {
+                    depth += 1
+                    current.append(c)
+                } else if c == "]" || c == "}" {
+                    depth -= 1
+                    guard depth == 0 else { current.append(c); k += 1; continue }
+                    let tail = String(line[(k + 1)...]).trimmingCharacters(in: .whitespaces)
+                    guard c == "]", tail.isEmpty || tail.hasPrefix("#") else { return nil }
+                    let last = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !last.isEmpty { items.append(unquote(last)) }
+                    return (items, next)
+                } else if c == ",", depth == 1 {
+                    items.append(unquote(current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    current = ""
+                } else if c == "\"" || c == "'",
+                          "[{,".contains(current.last(where: { !$0.isWhitespace }) ?? ",") {
+                    quote = c
+                    current.append(c)
+                } else {
+                    current.append(c)
+                }
+                k += 1
             }
+
+            // The line ends inside the brackets: the sequence runs on, and
+            // an item folds as a scalar does. A line break is a space, or
+            // nothing after an escaping `\` in double quotes; one followed
+            // by blank lines is a newline for each instead. Between items
+            // the breaks are only whitespace, which the item's trim drops.
+            var blankLines = 0
+            while next < lines.count, lines[next].trimmingCharacters(in: .whitespaces).isEmpty {
+                blankLines += 1
+                next += 1
+            }
+            guard next < lines.count, indentation(lines[next]) > indent else { return nil }
+            line = Array(lines[next].trimmingCharacters(in: .whitespaces))
+            k = 0
+            next += 1
+            if quote == "\"", current.reversed().prefix(while: { $0 == "\\" }).count % 2 == 1 {
+                // An escaped line break joins the lines without a space.
+                current.removeLast()
+            } else {
+                current = current.trimmedTrailing
+                if blankLines == 0 { current += " " }
+            }
+            current += String(repeating: "\n", count: blankLines)
         }
-        let last = current.trimmingCharacters(in: .whitespaces)
-        if !last.isEmpty { items.append(unquote(last)) }
-        return items
     }
 
-    /// Strips quotes only when the value both starts and ends with the same
-    /// quote character. Never strips a trailing `# comment`: doing so would
-    /// mangle `title: "#P"` and every `source:` URL with a fragment.
-    /// `"Foo" # note` → `"Foo"`: a quoted scalar followed only by a comment.
-    ///
-    /// A trailing `# comment` is otherwise left alone on purpose (see
-    /// `unquote`): `#P` and URL fragments are real values. After a closing
-    /// quote there is no such ambiguity, so the comment can go. Returns nil
-    /// when `s` is not a quoted scalar with only a comment after it.
-    static func quotedValue(_ s: String) -> String? {
-        guard let quote = s.first, quote == "\"" || quote == "'" else { return nil }
-        var index = s.index(after: s.startIndex)
+    /// A scalar whose text on its own line is `first`, running on over the
+    /// following lines indented past `indent`, as YAML lets it. A quoted one
+    /// ends at its closing quote; a plain one at a comment, a blank line
+    /// before an outdented one, or a `key:` line, which cannot continue it.
+    /// Lines fold as YAML folds them: a line break to a space, each blank
+    /// line to a newline. Returns the value and the line after it.
+    private static func scalar(
+        _ first: String, _ lines: [String], from start: Int, indent: Int
+    ) -> (String, Int) {
+        if let quote = first.first, quote == "\"" || quote == "'" {
+            return quotedScalar(first, quote: quote, lines, from: start, indent: indent)
+        }
+        var value = plainValue(first)
+        // A comment ends the scalar.
+        guard value == first else { return (value, start) }
+
+        var next = start
+        var blankLines = 0
+        var i = start
+        while i < lines.count {
+            let text = lines[i].trimmingCharacters(in: .whitespaces)
+            if text.isEmpty { blankLines += 1; i += 1; continue }
+            guard indentation(lines[i]) > indent, !text.hasPrefix("#"), !isMappingEntry(text)
+            else { break }
+            let piece = plainValue(text)
+            value += blankLines > 0 ? String(repeating: "\n", count: blankLines) : " "
+            value += piece
+            blankLines = 0
+            i += 1
+            next = i
+            if piece != text { break }
+        }
+        return (value, next)
+    }
+
+    /// A quoted scalar that starts `first`. One that closes on its own line
+    /// loses its quotes and any comment after them. One that does not runs
+    /// on, line by line, to the line holding its closing quote. A quoted
+    /// scalar that never closes, or closes with more than a comment after
+    /// it, is not YAML and is kept as written.
+    private static func quotedScalar(
+        _ first: String, quote: Character, _ lines: [String], from start: Int, indent: Int
+    ) -> (String, Int) {
+        if let value = quotedValue(first) { return (unquote(value), start) }
+        let asWritten = (unquote(first), start)
+        guard closingQuote(quote, in: first, from: first.index(after: first.startIndex)) == nil
+        else { return asWritten }
+
+        var text = first.trimmedTrailing
+        var blankLines = 0
+        var i = start
+        while i < lines.count {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { blankLines += 1; i += 1; continue }
+            guard indentation(lines[i]) > indent else { break }
+            if blankLines > 0 {
+                text += String(repeating: "\n", count: blankLines)
+            } else if quote == "\"", text.reversed().prefix(while: { $0 == "\\" }).count % 2 == 1 {
+                // An escaped line break joins the lines without a space.
+                text.removeLast()
+            } else {
+                text += " "
+            }
+            blankLines = 0
+            i += 1
+            // The quote is open at the start of every line: had the line
+            // before closed it, the scan would have stopped there.
+            guard let close = closingQuote(quote, in: line, from: line.startIndex) else {
+                text += line
+                continue
+            }
+            let tail = line[line.index(after: close)...].trimmingCharacters(in: .whitespaces)
+            guard tail.isEmpty || tail.hasPrefix("#") else { return asWritten }
+            return (unquote(text + String(line[...close])), i)
+        }
+        return asWritten
+    }
+
+    /// The quote that closes a `quote`-quoted scalar in `s`, scanning from
+    /// `start`, which is inside the quotes: `\"` is an escaped quote in
+    /// double quotes and `''` in single quotes. Nil when `s` ends first.
+    private static func closingQuote(
+        _ quote: Character, in s: String, from start: String.Index
+    ) -> String.Index? {
+        var index = start
         while index < s.endIndex {
             let c = s[index]
             if quote == "\"", c == "\\" {
@@ -250,15 +454,81 @@ struct Frontmatter: Equatable, Sendable {
                     index = s.index(after: next)
                     continue
                 }
-                let tail = s[next...].trimmingCharacters(in: .whitespaces)
-                guard tail.isEmpty || tail.hasPrefix("#") else { return nil }
-                return String(s[...index])
+                return index
             }
             index = s.index(after: index)
         }
         return nil
     }
 
+    /// `"Foo" # note` → `"Foo"`: a quoted scalar followed only by a comment.
+    /// Returns nil when `s` is not a quoted scalar with at most a comment
+    /// after it, so `"#P"` keeps its `#`.
+    static func quotedValue(_ s: String) -> String? {
+        guard let quote = s.first, quote == "\"" || quote == "'",
+              let close = closingQuote(quote, in: s, from: s.index(after: s.startIndex))
+        else { return nil }
+        let tail = s[s.index(after: close)...].trimmingCharacters(in: .whitespaces)
+        guard tail.isEmpty || tail.hasPrefix("#") else { return nil }
+        return String(s[...close])
+    }
+
+    /// `implication # a note` → `implication`: a plain (unquoted) scalar
+    /// without its trailing comment. As in YAML, a comment starts at a `#`
+    /// after a space or tab; one anywhere else is text, so `C#` and a URL's
+    /// `#fragment` survive. A `'` in a plain scalar is text, so quotes are
+    /// not tracked.
+    static func plainValue(_ s: String) -> String {
+        var previous: Character?
+        for index in s.indices {
+            let c = s[index]
+            if c == "#", previous == " " || previous == "\t" {
+                return String(s[..<index]).trimmedTrailing
+            }
+            previous = c
+        }
+        return s
+    }
+
+    /// `key: value` or `key:`: a mapping entry, which a plain scalar never
+    /// is, since YAML ends one at `: `. A quoted key counts too.
+    private static func isMappingEntry(_ s: String) -> Bool {
+        if let quote = s.first, quote == "\"" || quote == "'" {
+            guard let close = closingQuote(quote, in: s, from: s.index(after: s.startIndex))
+            else { return false }
+            return s[s.index(after: close)...].trimmingCharacters(in: .whitespaces).hasPrefix(":")
+        }
+        let plain = plainValue(s)
+        return plain.hasSuffix(":") || plain.contains(": ") || plain.contains(":\t")
+    }
+
+    /// `|` or `>`, with YAML's optional chomping and indentation indicators
+    /// (`|-`, `>+`, `|2`): the header of a block scalar, whose lines are
+    /// never read as a plain scalar's.
+    private static func isBlockScalarHeader(_ s: String) -> Bool {
+        guard let first = s.first, first == "|" || first == ">" else { return false }
+        let indicators = s.dropFirst()
+        return indicators.count <= 2 && indicators.allSatisfy { "+-123456789".contains($0) }
+    }
+
+    /// `- item`, or a bare `-`: a block sequence entry, trimmed. `-x` is a
+    /// scalar.
+    private static func isItem(_ trimmed: String) -> Bool {
+        trimmed == "-" || trimmed.hasPrefix("- ") || trimmed.hasPrefix("-\t")
+    }
+
+    private static func isBlankOrComment(_ line: String) -> Bool {
+        let text = line.trimmingCharacters(in: .whitespaces)
+        return text.isEmpty || text.hasPrefix("#")
+    }
+
+    /// The spaces and tabs a line starts with.
+    private static func indentation(_ line: String) -> Int {
+        line.prefix { $0 == " " || $0 == "\t" }.count
+    }
+
+    /// Strips quotes only when the value both starts and ends with the same
+    /// quote character, reading the escapes between them.
     static func unquote(_ s: String) -> String {
         guard s.count >= 2, let first = s.first, let last = s.last,
               first == last, first == "\"" || first == "'"
