@@ -163,7 +163,8 @@ import Testing
         let patch = String(decoding: diff.patch, as: UTF8.self)
         #expect(patch.contains("+Subproject commit \(scene.later)"),
                 "written short, as a patch that applies again: \(patch)")
-        let modes = try #require(await git.stagedModes(in: scene.worktree, base: scene.base))
+        let modes = try #require(await git.stagedModes(
+            in: scene.worktree, base: scene.base, tree: diff.tree))
         #expect(GitNameStatus.irregularPaths(rawZ: modes) == [SubmoduleScene.path])
 
         let snapshot = try #require(await ReviewSnapshotter(git: git).snapshot(
