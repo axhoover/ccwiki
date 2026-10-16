@@ -99,11 +99,21 @@ before `rehype-katex` in the site's chain. The text is read after the site's
 typography (below): `ccwiki_typography` runs before `ccwiki_heading_ids`, so
 `## A -> B` reads `A → B` and its id is `a--b`, as rehype-slug has it.
 `WikiPage.Heading.plainText` reads a heading the same way (`educated`: the
-same arrows, `--` and `...`, outside math, code and wikilinks, with an
-escaped character or a character reference read as the character it stands
-for), so the outline, search, the preview cards and DiffGuard name the ids
-the page has. `FixesWikiparseTests` checks the two against each
-other; on the wiki at ab81f02 all 2,769 headings of 883 pages agree.
+same arrows, `--` and `...`, and LaTeX's ``` `` ``` and `''`, with an escaped
+character or a character reference read as the character it stands for),
+and leaves alone what the page leaves alone: math, code, a wikilink, and the
+text of a link markdown-it makes of a URL or an address, which the page's
+typography skips. Those links are markdown-it's autolinks (`<https://…>`,
+`<name@host>`) and what linkify-it finds (`https://…`, `ftp://…`,
+`//host/…`, `mailto:…` and a bare `name@host`; never a `www.` link), so
+`## See https://x.org/a--b` keeps its `--` in the id. `Heading.Linkify` is
+the linkify-it markdown-it 15 bundles, ported, its patterns in ICU's
+syntax, and `plainText` applies it where markdown-it does: at a `://` after
+a scheme's name while it parses, then to each run of text between tokens
+of a heading it finds a link in. So the outline, search, the preview cards
+and DiffGuard name the ids the page has, but for the rare headings listed
+under "Still different" below. `FixesWikiparseTests` checks the two against
+each other; on the wiki at ab81f02 all 2,769 headings of 883 pages agree.
 
 **Options** match the site: `linkify: true` (GFM autolinks), `typographer: true`
 (smartypants), `breaks: false` (`HardLineBreaks` is not configured), and
@@ -182,11 +192,23 @@ one: the regex wants a `|` at the start of the line.
   text the link shows, which for `[[page#Section]]` is `Section`, and which
   smartypants has educated. No heading in the wiki holds a wikilink
   (2026-10).
-- `Heading.plainText` decodes the character references
+- `Heading.plainText`, and a preview card's wikilink alias
+  (`PreviewExcerpt`), decode the character references
   `MarkdownLinkParser.unescape` knows (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
   `&apos;`, `&nbsp;` and numeric ones); markdown-it decodes every HTML5 name,
-  and makes an invalid code point U+FFFD, so `## A &mdash; B` has another id
-  in the outline than on the page. No heading in the wiki holds one.
+  and makes an invalid code point U+FFFD. So `## A &mdash; B` has another id
+  in the outline than on the page, and `[[x|a &mdash; b]]` reads
+  `a &mdash; b` on a card and `a — b` on the page. No heading or alias in
+  the wiki holds one.
+- Other headings `Heading.plainText` reads otherwise than the page, none of
+  them in the wiki: a link's text there is markdown-it's, which decodes
+  percent-escapes and punycode (`## https://x.org/%41` reads
+  `https://x.org/A` there); inline HTML and an image are no text on the
+  page; `*` is only deleted here, so one that is not emphasis, which the
+  page keeps, shows at an edge of the heading (`## a **` has the id `a-`
+  there, `a` here) and before a final `Σ`, and `*emphasis*` right around
+  an address does not set it apart as it does there; and a `[` before a
+  markdown link starts that link's text here.
 
 **Not** reproduced, deliberately: the SPA router and the graph view.
 

@@ -192,6 +192,34 @@ struct FixesWikiparseTests {
         #expect(WikiPage.Heading.plainText("AT&amp;T -- x&#97;_y_") == "AT&T — xay")
     }
 
+    @Test("a URL's, an autolink's or an address's text keeps its dashes, as the page keeps them")
+    func headingIDsLeaveLinksAlone() throws {
+        let headings = [
+            "See https://example.com/a--b", "See <https://example.com/a--b>", "See https://example.com/a->b",
+            "Mail a--b@example.com", "Mail <a--b@x.com>", "mailto:a--b@x.com", "See //example.com/a--b",
+            "x--https://a.com/b--c", "https://x.com -> y", "_https://x.com/a--b_", "*https://x.com/a--b*",
+            "[https://x.com/a--b](u) link", "a--b.com/x--y", "<1x--y>", "<javascript:a--b>",
+            #"\https://a--b@c.org"#, "https://[[a]]--b", "a``Σ quotes",
+        ]
+        let markdown = headings.map { "## " + $0 }.joined(separator: "\n\n") + "\n"
+        let script = try MarkdownScript.load()
+        let toc = try script.json(
+            "(function () { var env = { links: {} }; md.render(" + MarkdownScript.literal(markdown)
+                + ", env); return env.toc.map(function (h) { return h.id; }); })()")
+        let rendered = try #require(toc as? [String])
+        let page = WikiPage(path: "Primitives/x.md", text: markdown)
+        #expect(page.headings().map(\.id) == rendered)
+        #expect(rendered.count == headings.count)
+        #expect(page.headings().first?.id == "see-httpsexamplecoma--b", "the page's id, not see-httpsexamplecomab")
+
+        #expect(WikiPage.Heading.plainText("See https://example.com/a--b -> c")
+                == "See https://example.com/a--b → c")
+        #expect(WikiPage.Heading.plainText("See <https://example.com/a--b>") == "See https://example.com/a--b")
+        #expect(WikiPage.Heading.plainText("Mail a--b@example.com -- now") == "Mail a--b@example.com — now")
+        #expect(WikiPage.Heading.plainText("[https://x.com/a--b](u)") == "https://x.com/a—b",
+                "a markdown link's text is educated: markdown-it makes no link inside it")
+    }
+
     @Test("a wikilink inside math is the math's source, never a placeholder")
     func wikilinkInsideMath() {
         #expect(WikiPage.Heading.plainText("Bound on $[[a]]$") == "Bound on [[a]]")
