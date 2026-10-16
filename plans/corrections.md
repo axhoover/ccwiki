@@ -831,7 +831,8 @@ two things:
    and is not the branch of another CCwiki job, was pushed while the agent
    ran. The job's own branch gives the notice "The agent pushed fix/… itself,
    bypassing review." Any other gives "<branch> was pushed to GitHub while
-   the agent ran, and CCwiki did not push it." The job still goes to review.
+   the agent ran, and CCwiki did not push it." The job then ends as the
+   table above says.
 2. **Pull requests.** `gh pr list --repo R --author @me --state open --json
    url,createdAt,headRefName,isCrossRepository`, keeping PRs created at or
    after `startedAt − 60 s`, but for those from another CCwiki job's branch
@@ -846,10 +847,9 @@ two things:
    names it and says where to look: "A pull request from manual/b was opened
    while the agent ran, and CCwiki did not open it: <url>. Look at it on
    GitHub to see whether the agent made it; CCwiki has sent nothing from
-   this job." The job goes on to the hand-over
-   and to `awaitingReview` with its own diff. (Fixed after the PR #11
-   review, which found that the newest unrelated PR used to complete the
-   job and skip its review.)
+   this job." The job then ends as the table above says, as if no pull
+   request had been found. (Fixed after the PR #11 review, which found that
+   the newest unrelated PR used to complete the job and skip its review.)
 
 If GitHub cannot be reached, the log says the tripwire did not run. The
 contract's own branch name, `paper-submission/<KEY>-<slug>`, is covered by
