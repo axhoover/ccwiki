@@ -19,8 +19,9 @@ import Foundation
 ///   are values.
 /// - values that run on over the indented lines below their key: a plain or
 ///   quoted scalar, folded as YAML folds it, or a flow sequence, as the wiki's
-///   formatter wraps a long one (`key:` then an indented `[…]`). Blank lines
-///   and comments inside a block sequence do not end it.
+///   formatter wraps a long one (`key:` then an indented `[…]`), whose items
+///   fold the same way. Blank lines and comments inside a block sequence do
+///   not end it.
 ///
 /// Deliberately *not* handled, because misreading them is worse than ignoring
 /// them: nested mappings (an indented block under a key is skipped, so a nested
@@ -259,8 +260,14 @@ struct Frontmatter: Equatable, Sendable {
     /// until its brackets close. Commas inside quotes or nested brackets do
     /// not split it, a `#` after whitespace comments out the rest of a line,
     /// and a quote opens a quoted item only at the item's start, so
-    /// `[it's, b]` is two items, as in YAML. Nil when the brackets never
-    /// close, or more than a comment follows them.
+    /// `[it's, b]` is two items, as in YAML. An item over several lines
+    /// folds as a scalar does: a line break to a space, each blank line to
+    /// a newline, and a double-quoted item's escaped line break (`\` at the
+    /// end of the line) to nothing. Nil when the brackets never close, or
+    /// more than a comment follows them. Known edge, as in `quotedScalar`:
+    /// an escaped space or tab at the end of a double-quoted line (`\ `) is
+    /// trimmed with the line, so it reads as an escaped line break, where
+    /// YAML keeps the escaped space or tab and folds the break as usual.
     private static func flowSequence(
         _ first: String, _ lines: [String], from start: Int, indent: Int
     ) -> (items: [String], next: Int)? {
@@ -306,11 +313,11 @@ struct Frontmatter: Equatable, Sendable {
                     guard depth == 0 else { current.append(c); k += 1; continue }
                     let tail = String(line[(k + 1)...]).trimmingCharacters(in: .whitespaces)
                     guard c == "]", tail.isEmpty || tail.hasPrefix("#") else { return nil }
-                    let last = current.trimmingCharacters(in: .whitespaces)
+                    let last = current.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !last.isEmpty { items.append(unquote(last)) }
                     return (items, next)
                 } else if c == ",", depth == 1 {
-                    items.append(unquote(current.trimmingCharacters(in: .whitespaces)))
+                    items.append(unquote(current.trimmingCharacters(in: .whitespacesAndNewlines)))
                     current = ""
                 } else if c == "\"" || c == "'",
                           "[{,".contains(current.last(where: { !$0.isWhitespace }) ?? ",") {
@@ -323,15 +330,27 @@ struct Frontmatter: Equatable, Sendable {
             }
 
             // The line ends inside the brackets: the sequence runs on, and
-            // the line break folds to a space.
+            // an item folds as a scalar does. A line break is a space, or
+            // nothing after an escaping `\` in double quotes; one followed
+            // by blank lines is a newline for each instead. Between items
+            // the breaks are only whitespace, which the item's trim drops.
+            var blankLines = 0
             while next < lines.count, lines[next].trimmingCharacters(in: .whitespaces).isEmpty {
+                blankLines += 1
                 next += 1
             }
             guard next < lines.count, indentation(lines[next]) > indent else { return nil }
             line = Array(lines[next].trimmingCharacters(in: .whitespaces))
             k = 0
             next += 1
-            current = current.trimmedTrailing + " "
+            if quote == "\"", current.reversed().prefix(while: { $0 == "\\" }).count % 2 == 1 {
+                // An escaped line break joins the lines without a space.
+                current.removeLast()
+            } else {
+                current = current.trimmedTrailing
+                if blankLines == 0 { current += " " }
+            }
+            current += String(repeating: "\n", count: blankLines)
         }
     }
 

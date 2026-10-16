@@ -225,6 +225,52 @@ import Testing
         #expect(fm.string("title") == "X")
     }
 
+    @Test("a flow list item over several lines folds as a scalar does, blank lines and escapes included")
+    func multiLineFlowItems() {
+        let fm = Self.parse(#"""
+            plain: [a long
+              item, b]
+            blank: [abc
+
+              def, x]
+            blanks: [abc
+
+
+              def, x]
+            single: ['it''s
+
+              long', x]
+            escaped: ["abc\
+              def", x]
+            escapedBlank: ["abc\
+
+              def", x]
+            spaced: ["abc \
+              def", "two
+              lines"]
+            gaps: [abc
+
+              , "x"
+
+              ]
+            title: X
+            """#)
+        #expect(fm.fields["plain"] == .list(["a long item", "b"]))
+        // A blank line inside an item is a newline, and the break before
+        // it is nothing.
+        #expect(fm.fields["blank"] == .list(["abc\ndef", "x"]))
+        #expect(fm.fields["blanks"] == .list(["abc\n\ndef", "x"]))
+        #expect(fm.fields["single"] == .list(["it's\nlong", "x"]))
+        // An escaped line break joins the lines without a space; a space
+        // before the `\` is text.
+        #expect(fm.fields["escaped"] == .list(["abcdef", "x"]))
+        #expect(fm.fields["escapedBlank"] == .list(["abc\ndef", "x"]))
+        #expect(fm.fields["spaced"] == .list(["abc def", "two lines"]))
+        // Between items, blank lines are only whitespace.
+        #expect(fm.fields["gaps"] == .list(["abc", "x"]))
+        #expect(fm.string("title") == "X")
+    }
+
     @Test("what is not YAML, or is a nested mapping, reads as it did")
     func notYAML() {
         let page = WikiPage(path: "Primitives/x.md", text: """
