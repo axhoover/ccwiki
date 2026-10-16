@@ -1,7 +1,8 @@
 # Corrections, and a review step before anything reaches GitHub
 
 **Spec, 2026-10-11; revised 2026-10-12 after three critics (Review notes,
-§16). Nothing here is built.**
+§16); built on `claude/page-corrections`, 2026-10-12. §6.2 is DiffGuard as
+built.**
 
 This covers two requests in [roadmap.md](roadmap.md): §1, a human step
 between the agent and GitHub, and §3, correcting a page from the reader. It
@@ -58,7 +59,7 @@ checked against a clone at `ab81f02`.
 | How are issues created and previewed? | `gh issue create --repo … --title … --body-file …`. The sheet is the preview: one Body editor holding the exact text sent, with the footer CCwiki adds shown beneath it. A GitHub permalink to the lines at the reader's commit shows as a code snippet | §8.2 |
 | What does DiffGuard check? | Nineteen rules, in three severities. **Blocking**, for what the wiki forbids outright: any path outside `content/` (an allow-list), a rename or deletion, a binary, a hand-edited generated region, relation fields on an object page, math in a wikilink, a local path or a token. Approve stays disabled. **Warnings** need a confirmation. **Notes** inform. A pure function, tested rule by rule | §6.2 |
 | What may the correction agent touch? | One page, named in the prompt. Tools: `Read`, `Edit`, `Write`, `Glob`, `Grep`; no `Bash` at all. Every agent job runs **sealed**: no `gh` credentials and no push credentials in its environment. That stops a confused agent, not a determined one: ingestion keeps `node`. A tripwire after each run looks for any push or PR CCwiki did not make | §5 |
-| How are duplicate PRs and lost edits prevented? | Duplicates: a state machine, a lease on every push recorded before it is sent, a recovery path when the lease is refused, and a check for an open PR on the branch before creating one. Lost edits: the editors are flushed before Approve and before quit, a patch backup outside Caches, one git queue per job, and a digest that makes Approve commit only the diff that was reviewed | §4.4 |
+| How are duplicate PRs and lost edits prevented? | Duplicates: a state machine, a lease on every push recorded before it is sent, a recovery path when the lease is refused, and a check for an open PR on the branch before creating one. Lost edits: the editors are flushed before Approve and before quit, a patch backup outside Caches, one git queue per job, and the reviewed tree, by name, with the digest of its diff, so that Approve commits only what was reviewed | §4.4, §6.5 |
 | What does CCwiki Dev do? | It targets the **same repository** and **says so**: in the review and the issue sheet before anything is sent, and in a footer on every PR and issue body. `CCWIKI_TARGET_REPO=owner/name` points a Dev build at a fork for testing; the release ignores it | §10 |
 | Which model? | `claude --model sonnet` by default for corrections, set in Settings → Jobs. Ingestion keeps the CLI's default | §5.4 |
 
@@ -536,7 +537,7 @@ and the integrator deletes it there (§17).
 | At quit | At the next launch |
 |---|---|
 | `queued`, `preparing`, `running` | A normal quit has cancelled them (`cancelled`). After a crash: `failed("Interrupted — CCwiki quit while this job was running.")`, as today. Review Anyway is offered if the worktree holds changes |
-| `awaitingReview`, worktree present | `awaitingReview`. The transcript is replayed and the snapshot recomputed when the job is first shown |
+| `awaitingReview`, worktree present | `awaitingReview`. The transcript is replayed when the job is first shown. The snapshot is recomputed then, and for every review still without one once git is found (`JobCenter.refreshMissingReviews`): a window macOS restores asks before the tools are known |
 | `awaitingReview`, worktree gone, patch present | `awaitingReview` with `needsRestore`. The review shows "The worktree is gone. CCwiki kept your changes." with a Restore button (§4.4) |
 | `awaitingReview`, both gone | `failed("The worktree and the saved changes are both gone.")` |
 | `publishing` | A normal quit has already returned it to `awaitingReview` (§4.1). After a crash, the same, with the same log line |
@@ -547,9 +548,15 @@ and the integrator deletes it there (§17).
   publishing, closes itself (SWIFTUI-RULES §6.5).
 - **The PR title and body** are in the record; **text typed into an
   editor** is in the worktree (§7.5).
-- `refreshOrphanedWorktrees` treats every non-terminal job as known, as it
-  already does. Because a quit no longer cancels a review, a worktree awaiting
-  review is never offered for pruning under Left Behind.
+- `refreshOrphanedWorktrees` treats as known every job that owns its
+  worktree (`JobCenter.ownsWorktree`): every non-terminal job, as it already
+  did, and every failed, aborted or cancelled one that Review Anyway may still
+  take to review, a job a quit cancelled included. Because a quit no longer
+  cancels a review, a worktree awaiting review is never offered for pruning
+  under Left Behind, and neither is one Review Anyway offers. It becomes a
+  stray only once Clear Finished drops its job, which looks for strays again.
+  Review Anyway looks again too, and `pruneOrphan` refuses a path whose last
+  component is a job that owns it, whatever a list drawn earlier shows.
 - **Reset Clone** (Settings → Storage) is refused while any job is not
   terminal: "Publish or discard the 2 jobs in Jobs first." Their worktrees
   live in the clone's `.git`.
@@ -565,10 +572,10 @@ and the integrator deletes it there (§17).
 | Two corrections of one page | Edit Page… on a page whose `edit` job can still be edited opens that job's editor, at the new lines, with no alert. Any other job on the page asks first (§7.1). DiffGuard's `changedUpstream` catches the rest at Approve |
 | The agent pushing or opening a PR itself | The seal makes it unlikely, not impossible (§5.1). The tripwire looks afterwards (§5.5) |
 | An issue sent twice | Open Issue is disabled while `gh` runs. A retry first searches for the sheet's hidden marker (§8.2) |
-| Text lost when an editor or the app closes | Autosave, 0.5 s after typing stops and on close. `approve`, `revert`, `refreshReview` and `restoreWorktree` first await `JobCenter.flushEdits`, which saves every open editor of the job. A quit with unsaved text returns `.terminateLater` until `flushAllEditors()` finishes. An editor writes only while its job is `awaitingReview` |
+| Text lost when an editor or the app closes | Autosave, 0.5 s after typing stops and on close. `approve`, `revert`, `refreshReview` and `restoreWorktree` first await `JobCenter.flushEdits`, which saves every open editor of the job. A quit with unsaved text returns `.terminateLater` until `flushAllEditors()` finishes. An editor writes only while its job is `awaitingReview`. An editor whose text did not reach the disk (a conflict nobody settled, or a failed write) disables Open Draft PR, and `approve` asks `unsettledEdits` again after its own flush and refuses: publishing would send the file without that text and close the editor |
 | Two git commands in one worktree at once | One serial queue per job (§6.1). Two `git add -A` runs would collide on `index.lock` |
 | CCwiki changing a file under an open editor (Revert File, Restore) | `JobCenter.onFilesChanged` reloads the editor: silently if nothing is unsaved, otherwise with the choice "CCwiki reverted this file in Jobs." Use Reverted File, or Keep My Version |
-| The worktree deleted (Caches cleared by hand; the maintainer has done this before, update-integrity.md) | Every snapshot also writes `git diff --cached --binary <base>`, byte for byte, to `logs/<id>.patch` in Application Support. Restore runs `git worktree prune`, `git worktree add -B <branch> <path> <base>`, then `git apply --index` |
+| The worktree deleted (Caches cleared by hand; the maintainer has done this before, update-integrity.md) | Every snapshot also writes `git diff --cached --binary <base>`, byte for byte, to `logs/<id>.patch` in Application Support. Restore runs `git worktree prune`, `git worktree add -B <branch> <path> <base>`, then `git apply --index`. An empty patch applies as nothing; a missing one is said to be missing, and git is not asked |
 | Approving a diff that changed after it was shown | The snapshot carries a SHA-256 of the staged patch. Approve snapshots again and compares the two. If they differ, it shows the new diff and sends nothing |
 | The file edited outside CCwiki while the editor is open | Before each save, the editor compares the file on disk with what it last wrote. If they differ, it asks: Keep My Version, or Use the File on Disk |
 | Discard by mistake | A confirmation dialog. The patch file stays in `logs/` until Clear Finished, and the transcript stays as it does today |
@@ -582,7 +589,7 @@ and the integrator deletes it there (§17).
 Today the ingestion agent pushes and opens the PR itself, with `Bash(git:*)`
 and `Bash(gh:*)` allowed. Under the new rule, a prompt that says "do not
 push" is not enough. PROBLEMS.md makes the point twice: a warning is not a
-fix. So every agent run, ingestion and correction, gets three layers:
+fix. So every agent run, ingestion and correction, gets four layers:
 
 1. **The allow-list leaves out `gh` and every git command that writes.** The
    ingestion agent no longer commits, so its `Bash(git:*)` becomes the
@@ -609,6 +616,18 @@ fix. So every agent run, ingestion and correction, gets three layers:
    Requires git ≥ 2.31 (Apple's is 2.39). Fetching public submodules over
    HTTPS still works, and the runner does that before the agent starts
    anyway.
+4. **Nothing of the user's own Claude configuration.** `claude -p` would
+   otherwise load the allow rules and hooks in `~/.claude/settings.json`,
+   and every MCP server the user has added, and `--allowedTools` only adds
+   to those rules. A user allow rule such as `Bash(git:*)`, or a GitHub MCP
+   server whose tools are pre-approved and which carries its own token,
+   would reach past the other three layers: the deny-list covers only
+   `Bash(...)`, and the environment does not reach a server's token. So both
+   agents run with `--strict-mcp-config` and no `--mcp-config`, which loads
+   no MCP server, and `--setting-sources project`, which loads only the
+   settings checked into the wiki itself, if it has any: rules reviewed in
+   its own repository. Both flags are to be confirmed on the first live job
+   (§13).
 
 **What the seal is, and is not.** It stops a confused agent and an accident:
 a plain `git push` or `gh pr create` fails, and the integration test proves
@@ -644,8 +663,8 @@ title and body of its own (§6.4).
   resolves `git rev-parse --verify origin/<default>^{commit}`, passes that SHA
   as `baseRef`, and calls `job.setBaseCommit` before the agent starts. Left
   as `origin/main`, a sync during review would move the base: the snapshot
-  would show upstream commits reversed, and Approve's `reset --soft` would
-  commit their reversal.
+  would show upstream commits reversed, and Approve's commit on the base
+  would carry their reversal.
 - **`prompts/ingest.md` Step 6** becomes "Stop and hand over". The agent does
   not commit, push or open a PR. It writes the PR text, using the body
   template in `.github/prompts/paper-submission.md`, to the handover file,
@@ -698,39 +717,47 @@ claude -p "<prompts/correct.md, composed>"
   `content/`. Path-scoped rules (`Edit(./content/<path>)`) would enforce it
   up front; §13 says when.
 - **Never on a generated passage.** Route b is refused for a target whose
-  region is `generated` or `frontmatter` (§8.1). Fixing either means changing
-  a reduction page's frontmatter and regenerating, and this agent cannot run
-  the generator.
+  region is `generated` or `frontmatter` (§8.1), each with its own text. A
+  "Participates in" section is rebuilt from the reduction pages; the
+  relation line under a reduction or barrier page's title is drawn from that
+  page's own frontmatter. Fixing either means changing frontmatter and
+  regenerating `relations.json`, and this agent cannot run the generator.
 
 `prompts/correct.md` follows `ingest.md`'s rule: **house style is not
 compiled in.** It points the agent at the worktree's own `CLAUDE.md`
 ("Writing Style", "Content Conventions", "Citations"), at `macros.ts` before
 it touches math, and at `schema/README.md` on a reduction or barrier page.
-In full, less the explanatory comment:
+In full, as `prompts/correct.md` has it, less its title and the comment
+that explains the placeholders:
 
 `````markdown
 You are correcting one page of the cryptology.city wiki, in a git worktree
-that belongs to you alone.
+that belongs to you alone: `{{WORKTREE}}`.
 
-Page: `{{PAGE_PATH}}` ({{PAGE_URL}}), {{LINES}}{{SECTION}}.
+Page: `{{PAGE_PATH}}`{{#PAGE_URL}} ({{PAGE_URL}}){{/PAGE_URL}}, {{LINES}}{{SECTION}}.
 
+{{#QUOTE}}
 The reader quoted, as rendered:
 
 > {{QUOTE}}
 
+{{/QUOTE}}
+{{#EXCERPT}}
 The source of those lines:
 
 {{FENCE}}
 {{EXCERPT}}
 {{FENCE}}
 
+{{/EXCERPT}}
 What the reader says is wrong:
 
 > {{REQUEST}}
 
 1. Read `CLAUDE.md` § Writing Style, § Content Conventions and § Citations,
    and `macros.ts` if you will touch math. They are the rules; this prompt
-   restates none of them.
+   restates none of them. On a page under `content/Reductions/` or
+   `content/Barriers/`, read `schema/README.md` too.
 2. Read the page. Decide whether the reader is right. If the page is right,
    or the fix needs a source you cannot check from the repository, abort.
 3. Make the smallest edit that does what was asked, in `{{PAGE_PATH}}` only.
@@ -740,19 +767,26 @@ What the reader says is wrong:
 4. Do not commit, push, or open anything. CCwiki shows your edit to a
    maintainer, who approves it. Write nothing except the page and the file
    in step 5.
-5. Write `.ccwiki/pull-request.md`: the first line `# [fix] <page title>: <what
-   changed>`, then two or three sentences saying what you changed and why.
-   No recap, no adjectives.
+5. Write `.ccwiki/pull-request.md`: the first line
+   `# [fix] {{PAGE_TITLE}}: <what changed>`, then two or three sentences
+   saying what you changed and why. No recap, no adjectives, and no local
+   paths: it is published as written.
 
 To abort, change nothing and print a block that starts `ABORTED:` with the
 reason and what a human would need to check. An abort is a good outcome.
 `````
 
 The placeholders are filled by `PromptComposer.composeCorrection`. As with
-ingestion, the template's leading HTML comment is stripped. `{{FENCE}}` is a
-run of backticks one longer than the longest run inside the excerpt, and
-never shorter than three, so a pseudocode fence in the excerpt cannot close
-it early. The quote and the request are prefixed with `> ` line by line.
+ingestion, everything up to the end of the leading HTML comment, the title
+included, is cut before anything is filled in. `{{#NAME}}…{{/NAME}}` keeps
+what it wraps only when NAME has a value: a whole-page target has no quote
+and no excerpt, so the prompt shows neither, and `{{LINES}}` reads "the
+whole page". `{{PAGE_URL}}` is the page on cryptology.city with the section
+as its anchor. `{{FENCE}}` is a run of backticks one longer than the longest
+run inside the excerpt, and never shorter than three, so a pseudocode fence
+in the excerpt cannot close it early. The quote and the request continue the
+template's `> ` on every line after the first. Filling is one pass, so a
+value holding `{{`, as LaTeX does, arrives as it was.
 
 ### 5.5 Outcomes, and the tripwire
 
@@ -763,7 +797,8 @@ it early. The quote and the request are prefixed with `> ` line by line.
 | No changes, no abort | `failed("The agent finished without changing anything.")` | pruned |
 | Error, or out of turns | `failed`, with Review Anyway if the worktree holds changes | kept |
 | Cancelled | `cancelled` | kept |
-| The tripwire finds a PR | `opened(url)`, with an orange notice | kept, for inspection |
+| The tripwire finds a PR from the job's own branch, in the target repository | `opened(url)`, with an orange notice | kept, for inspection |
+| The tripwire finds any other PR | as the rows above say, with an orange notice naming it | as the rows above say |
 
 **The tripwire.** Before the agent starts, the runner records `git ls-remote
 --heads <PublishTarget.pushURL>`. After it exits, unless cancelled, it checks
@@ -775,12 +810,23 @@ two things:
    bypassing review." Any other gives "<branch> was pushed to GitHub while
    the agent ran, and CCwiki did not push it." The job still goes to review.
 2. **Pull requests.** `gh pr list --repo R --author @me --state open --json
-   url,createdAt,headRefName`, keeping PRs created at or after `startedAt −
-   60 s` whose head is not another CCwiki job's branch. A hit makes the job
-   `opened(url)`, with the orange notice "The agent opened this pull request
-   itself, bypassing review." if its head is the job's branch, or "A pull
-   request was opened while the agent ran, and CCwiki did not open it." if
-   not.
+   url,createdAt,headRefName,isCrossRepository`, keeping PRs created at or
+   after `startedAt − 60 s`, but for those from another CCwiki job's branch
+   in R itself, where CCwiki opens its own. Only a PR from **the job's own branch in R itself** (`isCrossRepository`
+   false) is evidence that this job's changes left without review: it makes
+   the job `opened(url)`, with the orange notice "The agent opened this pull
+   request itself, bypassing review." Any other PR, from another branch, or
+   from a branch of the same name in a fork, never does. The maintainer may
+   open one from Terminal while a job runs, and the minute of look-back
+   reaches back before the job started; CCwiki cannot tell that PR from one
+   the agent opened on a branch of its own, so it does not guess. The notice
+   names it and says where to look: "A pull request from manual/b was opened
+   while the agent ran, and CCwiki did not open it: <url>. Look at it on
+   GitHub to see whether the agent made it; CCwiki has sent nothing from
+   this job, which waits for your review." The job goes on to the hand-over
+   and to `awaitingReview` with its own diff. (Fixed after the PR #11
+   review, which found that the newest unrelated PR used to complete the
+   job and skip its review.)
 
 If GitHub cannot be reached, the log says the tripwire did not run. The
 contract's own branch name, `paper-submission/<KEY>-<slug>`, is covered by
@@ -796,25 +842,43 @@ check 1, which watches every head.
 
 ```
 git add -A -- . ':(exclude).ccwiki'
-git diff --cached -M --name-status -z <base>     → GitNameStatus.parse
-git diff --cached --numstat -z <base>            → binary paths ("-\t-\t")
-git diff --cached --binary <base>                → the digest (SHA-256), and logs/<id>.patch
-git show <base>:<old path>                       → each changed file's old text
-git show :<path>                                 → each changed file's new text, from the index
+git write-tree                                   → <tree>: what is staged, by name
+git diff -M --name-status -z <base> <tree>       → GitNameStatus.parse
+git diff --numstat -z <base> <tree>              → binary paths ("-\t-\t")
+git diff <patchOptions> <base> <tree>            → the digest (SHA-256), and logs/<id>.patch
+git cat-file blob <base>:<old path>              → each changed file's old text
+git cat-file blob <tree>:<path>                  → each changed file's new text
 ```
 
+- **One tree, by name.** The snapshot records `<tree>` (`ReviewSnapshot.tree`)
+  and reads everything else from it, never from the index again. Approve
+  commits that tree or nothing (§6.5).
+- **What git shows is what git sends.** Every git command CCwiki runs starts
+  `git --no-replace-objects -c core.useReplaceRefs=false`
+  (`GitService.realObjects`): a `refs/replace/` entry, which an ingestion
+  agent can write since it keeps `node`, changes what `diff` and `cat-file`
+  show but not what `push` sends, so a replaced base tree could hide a file
+  from the review and from the digest and still reach GitHub (found in the
+  PR #11 review). Every diff carries `--ignore-submodules=none`, and the
+  patch `--submodule=short`, so a submodule's new commit shows, by its full
+  name, whatever `diff.ignoreSubmodules`, `submodule.<name>.ignore` or
+  `diff.submodule` say: the wiki has two submodules, and ingestion agents
+  may run `git submodule update`, `--remote` included. A gitlink is outside
+  `content/`, so DiffGuard blocks it.
 - **Bytes, not lines.** `Subprocess.run` goes through `LineSplitter`, which
   splits on `\r` as well as `\n`, decodes lossily and drops the final
-  newline. Every `git show`, `-z` and `--binary` call therefore uses
+  newline. Every `git cat-file`, `-z` and `--binary` call therefore uses
   `Subprocess.runData` (§11.6), and texts are decoded only after. Otherwise
   every file would gain a spurious end-of-file hunk, and the patch backup
   would not apply.
-- **The new text comes from the index**, so the snapshot shows exactly what
-  was staged and digested, not what was on disk a moment later.
+- **The new text comes from the staged tree**, so the snapshot shows exactly
+  what was staged and digested, not what was on disk or in the index a
+  moment later.
 - `-z` is not optional: reference filenames carry spaces, `&` and non-ASCII
   titles, which git otherwise quotes.
-- If the agent committed despite the deny-list, `git diff --cached <base>`
-  still shows everything since the base, and Approve collapses it (§6.5).
+- If the agent committed despite the deny-list, the diff from `<base>` to
+  the staged tree still shows everything since the base, and Approve
+  collapses it (§6.5).
 - **The base is required.** Snapshot, Revert File, Restore and Approve
   refuse when `baseCommit` is nil.
 
@@ -846,7 +910,12 @@ it:
 - the correction's target;
 - the local paths that must not appear in text (`PrivateText`).
 
-It returns findings sorted blocking first, then by path and line.
+It returns findings sorted blocking first, then by path and line, and keeps
+one per rule, path and line. Rules about lines look only at the lines the
+change added, so a page that already broke a rule at the base does not block
+a fix elsewhere on it. The rules that read a page's text (the region rules,
+`relationFieldOnObjectPage`, `wikilinkMath`, `proseRelationBullet`,
+`statusComplete` and `rawHTML`) read only `.md` files under `content/`.
 
 **Rules that copy the wiki's lint** name its rule id, and their messages end
 with it, as "(lint: `wikilink-math`)". There are three: `generated-region` and
@@ -860,36 +929,36 @@ offers Revert File.
 
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
-| `outsideContent` | all | any path other than a `.md` file under `content/` (excluding `content/Templates/`) or `.reductions/relations.json`. This is an **allow-list**: `scripts/`, `CLAUDE.md`, `.claude/`, `tsconfig.tsbuildinfo` and a stray `lint.log` at the root are all caught | "CCwiki opens pull requests that change `content/` only. Revert `scripts/lint.mjs`, or make this change outside CCwiki." |
-| `renamedOrDeleted` | all | a rename or a deletion under `content/` | Rename: "Filenames under `content/` are live URLs. Revert the rename." Deletion: "Filenames under `content/` are live URLs. Restore the file." |
-| `binaryFile` | all | any binary file added or changed, PDFs included | "PDFs and other binary files never enter the wiki." |
-| `generatedRegionEdited` | all | in a changed file, the BEGIN and END marker counts differ, or a `participates-in` region's checksum is not `sha256(trimmed contents)[0..<12]` | "The “Participates in” section on lines 153–171 was edited by hand. It is rebuilt from the reduction pages; correct those instead. (lint: `generated-region-edited`)" |
-| `relationFieldOnObjectPage` | all | an object page gains `implies`, `implied-by`, `reductions`, `from`, `to`, `hypotheses` or `conclusion` in its frontmatter | "Relation fields are not allowed on object pages. A relation is a page in `content/Reductions/`. (lint: `object-relation-field`)" |
-| `wikilinkMath` | all | an added line, outside generated regions, with a `$` inside `[[…]]` | "Math in a wikilink breaks the link on the site. Write `[text $x$](slug)` instead. (lint: `wikilink-math`)" |
-| `privateText` | all | an added line matched by `PrivateText` (§6.4) | "This line contains a local path or a token: `/Users/…/Library/…`." |
+| `outsideContent` | all | any path, or a rename's old path, other than a `.md` file under `content/` (excluding `content/Templates/`, in any case) or `.reductions/relations.json`. This is an **allow-list**: `scripts/`, `CLAUDE.md`, `.claude/`, `tsconfig.tsbuildinfo` and a stray `lint.log` at the root are all caught | "CCwiki opens pull requests that change `content/` only. Revert `scripts/lint.mjs`, or make this change outside CCwiki." |
+| `renamedOrDeleted` | all | a rename to or from a path under `content/`, a deletion under `content/`, or the deletion of `.reductions/relations.json` | Rename: "Filenames under `content/` are live URLs. Revert the rename." Deletion: "Filenames under `content/` are live URLs. Restore the file." `relations.json`: "`relations.json` is generated, and the site reads it. Restore the file." |
+| `binaryFile` | all | a binary file, or any `.pdf`, that the change adds, changes or renames. This includes a page or `relations.json` that git calls binary, or whose text could not be read as UTF-8 (`ReviewSnapshot.assemble` treats a side it could not read as binary) | "PDFs and other binary files never enter the wiki." For a page or `relations.json`: "CCwiki could not read this file as UTF-8 text, so it checked nothing in it. Revert it, or save it as UTF-8." |
+| `generatedRegionEdited` | all | on a page, the BEGIN and END marker counts differ, unless the base had the same counts; or a region the change added or altered fails its checksum, `sha256(trimmed contents)[0..<12]`; or a region is gone, markers and all, while `relations.json` was not regenerated in the same diff | Edited: "The “Participates in” section on lines 153–171 was edited by hand. It is rebuilt from the reduction pages; correct those instead. (lint: `generated-region-edited`)" Unbalanced markers: "The “Participates in” markers are unbalanced (2 BEGIN, 1 END). They are written by the script; restore them, and correct the reduction pages instead. (lint: `generated-region`)" A removed region: "The “Participates in” section was removed by hand. It is rebuilt from the reduction pages; restore it, and correct those instead." |
+| `relationFieldOnObjectPage` | all | an object page gains `implies`, `implied-by`, `implied_by`, `reductions`, `barriers`, `separations`, `from`, `to`, `between`, `hypotheses` or `conclusion` in its frontmatter (lint.mjs `FORBIDDEN_ON_OBJECTS`), one finding per key. An object page has `type:` `primitive`, `assumption`, `complexity-class`, `glossary`, `folklore` or `note`; without a `type:`, it is any page not directly under `References/`, `Reductions/` or `Barriers/` | "Relation fields such as `implies` are not allowed on object pages. A relation is a page in `content/Reductions/`. (lint: `object-relation-field`)" |
+| `wikilinkMath` | all | an added line, outside generated regions, backtick code fences and inline code, with an unescaped `$` inside `[[…]]` | "Math in a wikilink breaks the link on the site. Write `[text $x$](slug)` instead. (lint: `wikilink-math`)" |
+| `privateText` | all | an added line of any text file matched by `PrivateText` (§6.4) | "This line contains a local path or a token: `/Users/…/Library/…`." A path is shown whole, a token by its first eight characters and "…". |
 
 **Warnings.** These need a human's judgement. Open Draft PR asks first
 (§6.6).
 
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
-| `newObjectPage` | all | a new page under `Primitives/`, `Assumptions/`, `Complexity/`, `Glossary/` or `Folklore/` | "This creates an object page. The wiki asks for a human decision on new objects." |
-| `otherPages` | correction, edit | a changed `.md` file other than the target | "This also changes `X.md`, which is not the page you started from." |
-| `largeEdit` | correction, edit | more than 20 changed lines in all | "This changes 46 lines. A correction is usually a line or two." |
-| `ingestionScope` | ingestion | more than one new page outside `References/`, `Reductions/` and `Barriers/`, or a hand change outside generated regions to more than one existing page, or more than 5 such lines on one (ingestion.md §4) | "This changes three existing pages. An ingestion normally adds pages and touches at most one." |
-| `proseRelationBullet` | all | an added list item, with two or more wikilinks, inside a `# Other results`, `# Known relationships` or `## Known Results` section | "This adds a relationship as a prose bullet. Relationships are reduction pages." |
-| `derivedFilesStale` | all | without a change to `.reductions/relations.json`, the diff changes a reduction or barrier page's frontmatter; an object page's `id`, `title`, `aliases`, `variants`, `unlisted` or `type`; or a heading a `variants` anchor names | "The “Participates in” sections and `relations.json` are now out of date, and the wiki's checks fail until they are regenerated. In this job's worktree (Open in Terminal), run `npm ci` and `node scripts/generate-relations.mjs`, then review again. Or run them on the branch after the pull request is open." |
+| `newObjectPage` | all | a new `.md` file under `Primitives/`, `Assumptions/`, `Complexity/`, `Glossary/` or `Folklore/` | "This creates an object page. The wiki asks for a human decision on new objects." |
+| `otherPages` | correction, edit | a changed `.md` file under `content/` other than the target, by its new or old path | "This also changes `X.md`, which is not the page you started from." |
+| `largeEdit` | correction, edit | more than 20 changed lines in all, in Markdown files (`relations.json` does not count), counting hand lines only: not blank, and outside generated regions, except a region removed by hand. A hunk counts the larger of its removed and added sides. The finding is on the file that changed most | "This changes 46 lines. A correction is usually a line or two." |
+| `ingestionScope` | ingestion | more than one new page outside `References/`, `Reductions/` and `Barriers/`; or hand changes to more than one existing page; or more than 5 hand-changed lines on one (ingestion.md §4). Lines are counted as for `largeEdit`. Page counts up to nine are spelled out | New pages: "This adds two pages outside `References/`, `Reductions/` and `Barriers/`. An ingestion normally adds a reference and its reductions." Existing pages: "This changes three existing pages. An ingestion normally adds pages and touches at most one." Lines on one page: "This changes 7 lines of `x.md` by hand. An ingestion normally changes at most five lines of an existing page." |
+| `proseRelationBullet` | all | an added list item with two or more wikilinks, outside code fences and generated regions, in a section headed `Other results`, `Known relationships` or `Known results`, at any level and in any case, or in a subsection of one | "This adds a relationship as a prose bullet. Relationships are reduction pages." |
+| `derivedFilesStale` | all | without a regenerated `.reductions/relations.json` (changed, not deleted), the diff changes a reduction or barrier page's frontmatter; an object page's `id`, `title`, `aliases`, `variants`, `unlisted` or `type`; or a heading a `variants` anchor names, reworded, gained or lost. One finding per page | "The “Participates in” sections and `relations.json` are now out of date, and the wiki's checks fail until they are regenerated. In this job's worktree (Open in Terminal), run `npm ci` and `node scripts/generate-relations.mjs`, then review again. Or run them on the branch after the pull request is open." |
 | `relationsJSONByHand` | correction | `.reductions/relations.json` changed | "`relations.json` changed. The correction agent cannot run the generator, so unless you ran it in this worktree, revert this file." |
 | `humanVerified` | all | a changed page whose queue entry at the base is `human_verified`. There are none today: 59 are `bot_flagged`, 30 `unreviewed` | "A human verified this page. The wiki asks that a change to a claim here also marks its queue entry stale; CCwiki does not edit that file." |
 | `statusComplete` | all | `status:` becomes `complete` | "`status: complete` is a human judgement, and the lint then requires the full section contract." |
-| `changedUpstream` | all | a changed path also changed on `origin/<default>` since the base | "This page changed on main after the job started. The pull request may conflict." |
-| `rawHTML` | all | an added line with an HTML tag or `<!--`, outside inline code, math spans and the generated markers. The wiki's 222 `<!--` are all generated markers | "This adds raw HTML, which the Rendered view may hide. Check it in Source." |
+| `changedUpstream` | all | a changed path, or a rename's old path, also changed on `origin/<default>` since the base | "This page changed on main after the job started. The pull request may conflict." For a path that is not a `.md` file: "This file changed on main after the job started. The pull request may conflict." |
+| `rawHTML` | all | an added body line with an HTML tag or `<!--`, outside code fences, display math, inline code, `$…$` spans, backslash escapes and the generated markers. An autolink such as `<https://…>` is not a tag. The wiki's 222 `<!--` are all generated markers | "This adds raw HTML, which the Rendered view may hide. Check it in Source." |
 
 **Notes.**
 
 | Rule | Kind | Fires when | Message |
 |---|---|---|---|
-| `regionRegenerated` | all | a generated region changed and its checksum matches | "Regenerated by the script, not edited by hand." |
+| `regionRegenerated` | all | a region the change added or altered, whose checksum matches; or a region is gone while `relations.json` changed in the same diff and was not deleted, since the generator drops the region from a page left with no relation | "Regenerated by the script, not edited by hand." A removed region: "Removed by the script, not by hand: `relations.json` was regenerated too." |
 
 So following `derivedFilesStale`'s advice in an edit or ingestion worktree
 gives notes, never a block. `derivedFilesStale` is a warning, not an
@@ -1062,15 +1131,16 @@ identity.
 
 ### 6.5 Approve, Discard, Revert File, Review Anyway
 
-**Approve** is `JobCenter.approve(job)`. It awaits `flushEdits(job)`, then the
-job's git queue, sets `publishing("Checking…")` (which makes every editor of
-the job read-only), clears `notice`, and calls
-`Publisher.publish(job, reviewed:provenance:)`. Each step sets
-`publishing(step)` and is also written to the job's log file.
+**Approve** is `JobCenter.approve(job)`. It notes the snapshot on screen
+(`job.review`), awaits `flushEdits(job)`, then the job's git queue, sets
+`publishing("Checking…")` (which makes every editor of the job read-only),
+clears `notice`, and calls `Publisher.publish(job, reviewed:provenance:)`
+with that snapshot. Each step sets `publishing(step)` and is also written to
+the job's log file.
 
 1. **"Checking…"**
-   - Take a snapshot. If its digest differs from the reviewed one, return
-     `.changedSinceReview`.
+   - Take a snapshot. If its tree or its digest differs from the reviewed
+     one's, return `.changedSinceReview`.
    - Run DiffGuard. A blocking finding returns `.refused`. So does a
      `PrivateText` hit in the title or body.
    - `git config user.name` / `user.email` in the worktree: if either is
@@ -1079,14 +1149,39 @@ the job read-only), clears `notice`, and calls
    - `GitHubAccess` (§7.1) must be `.ready`, for `PublishTarget.repository`.
      Offline, it returns `.refused("Offline. Nothing was sent; open the pull
      request when you are connected.")`.
-2. **"Committing…"**
-   - `git reset --soft <base>`, which collapses anything the agent committed;
-   - `git commit --no-verify -m …`. A hook that rewrites files would change
-     what was reviewed.
+2. **"Committing…"** (`GitService.commitReviewed`), plumbing only, so that
+   nothing reads HEAD and no `git commit` runs:
+   - `git write-tree`: the tree of what step 1 staged, which must be the
+     reviewed snapshot's tree, by name (`ReviewSnapshot.tree`). This is the
+     binding: the commit has exactly the tree the review was read from;
+   - `git diff <base> <tree>`, with the options the snapshot's patch uses
+     (`GitService.patchOptions`), must have the reviewed digest: a second
+     check, on the real objects (§6.1), with every submodule shown and named
+     in full. If either fails, nothing is committed and
+     `.refused(Publisher.notReviewed)` returns the job to review: "What git
+     would have committed is not the change you reviewed, so nothing was
+     sent. Check the diff, then open the pull request again." The
+     transcript says which tree it was;
+   - `git commit-tree -p <base> -m … <tree>` (with `-S` when
+     `commit.gpgSign` is true, as `git commit` would sign), which collapses
+     anything the agent committed: the base is the only parent;
+   - `git cat-file commit`: the commit's tree must be that tree and its only
+     parent the base, or nothing more happens and the job is back in review
+     the same way;
+   - `git update-ref refs/heads/<branch> <commit>`, by name, so the branch's
+     reflog has every Approve's commit (step 3's recovery reads it).
 3. **"Pushing fix/pseudorandom-function…"**
    - persist `pushingCommit` = the new commit;
-   - `git push <PublishTarget.pushURL> HEAD:refs/heads/<branch>
-     --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>`;
+   - `git --no-replace-objects -c core.useReplaceRefs=false -c
+     core.hooksPath=/dev/null -c core.fsmonitor=false push --no-verify
+     --no-follow-tags --recurse-submodules=no
+     --force-with-lease=refs/heads/<branch>:<pushedCommit or empty>
+     <PublishTarget.pushURL> <commit>:refs/heads/<branch>`, as the
+     transcript logs it: the commit step 2 checked, **by name, never HEAD**,
+     which anything may move after the check, on the first try and on the
+     retry alike. One ref: `--no-follow-tags` sends no annotated tag with
+     it whatever `push.followTags` says (on GitHub a tag can start a
+     workflow), and `--recurse-submodules=no` no submodule's;
    - on success, persist `pushedCommit`.
    - **If the lease is refused**, ask GitHub: `git ls-remote <pushURL>
      refs/heads/<branch>`, then `Publisher.leaseRecovery` decides:
@@ -1096,8 +1191,8 @@ the job read-only), clears `notice`, and calls
        as `pushedCommit` and retry once;
      - the tip is unknown and this job has never confirmed a push: someone
        else's branch. Take the next name free both locally and on GitHub,
-       `git branch -m`, log "fix/x was taken on GitHub; using fix/x-2", and
-       retry once;
+       `git branch -m <branch> <new>`, log "fix/x was taken on GitHub; using
+       fix/x-2", and retry once;
      - otherwise refuse: "fix/x on GitHub has commits CCwiki did not push.
        CCwiki will not overwrite them; check the branch on GitHub."
 4. **"Opening the pull request…"**
@@ -1109,6 +1204,27 @@ the job read-only), clears `notice`, and calls
      `pullRequest(createdAfter:in:)` with `job.createdAt − 60 s`.
 5. Prune the worktree and the scratch directory. Delete the local branch,
    never the remote one. The job is `opened(url)`.
+
+**No git hook runs from step 1 to step 5.** `Publisher` keeps its
+`GitService` as `withoutHooks`, so every git command it runs, the staging
+of step 1's snapshot included, carries `-c core.hooksPath=/dev/null -c
+core.fsmonitor=false` (`GitService.hooksOff`), after `realObjects`.
+`--no-verify` is not enough: it skips `pre-commit` and `commit-msg` only,
+and a `post-commit` hook can amend the commit just made (the PR #11 review
+showed one adding an unreviewed file). `core.hooksPath` does not cover
+`core.fsmonitor`, which githooks(5) counts as the `fsmonitor-watchman` hook
+and which the configuration can point at any program; git would otherwise
+run it from staging, `diff`, `write-tree` and `cat-file`. A `-c` on the
+command line is read after every configuration file and after
+`GIT_CONFIG_COUNT`, so nothing the clone, a worktree or the user sets can
+undo either, and nothing can be put under `/dev/null` to run. The push
+carries `--no-verify` as well.
+
+Programs the configuration names for other purposes still run, by design: a
+credential helper (the push needs one), a GPG or SSH signing program
+(`commit.gpgSign`), a clean filter during staging. Step 2 does not depend on
+any of this: whatever runs, the commit pushed is the one whose tree is the
+reviewed tree, by name, and whose diff has the reviewed digest.
 
 `CCWIKI_PUBLISH_DRY_RUN=1` stops after step 2, logs the push and `gh`
 commands it would have run, and returns
@@ -1177,7 +1293,10 @@ right ([design-system.md](design-system.md) §4a).
   metadata (branch, page or source) moves into the banner's second line, and
   the pre-flight findings move to the Transcript tab.
 - **The banner**, in the accent colour:
-  - nothing pushed: "Awaiting your review. Nothing has been pushed.";
+  - nothing pushed by CCwiki: "Awaiting your review. CCwiki has pushed
+    nothing." It says what CCwiki did, not what is on GitHub: an agent that
+    pushed for itself is the tripwire's notice beneath, which the banner
+    must not contradict;
   - `pushedCommit` set: "Awaiting your review. The branch fix/… is on GitHub;
     no pull request is open yet.";
   - publishing: the step;
@@ -1202,9 +1321,14 @@ right ([design-system.md](design-system.md) §4a).
       axhoover/cryptology.city", followed by "· from CCwiki Dev" in a Dev
       build.
 - **Open Draft PR** is disabled with a blocking finding, a `PrivateText` hit,
-  or `GitHubAccess` not `.ready`; its help says why. With warnings, or in a
-  Dev build, it confirms: "Open a draft pull request with 2 flagged
-  changes?" (or "Open a draft pull request on axhoover/cryptology.city?"),
+  `GitHubAccess` not `.ready`, or an editor of the job holding text the disk
+  does not, a conflict nobody settled or a write that failed ("page.md could
+  not be saved. Settle it in its window first."); its help says why.
+  `JobCenter.approve` asks the last again once it has saved the editors
+  (`unsettledEdits`), since that save may be the one that fails, and refuses
+  with the same words. With warnings, or in a Dev build, it confirms: "Open
+  a draft pull request with 2 flagged changes?" (or "Open a draft pull
+  request on axhoover/cryptology.city?"),
   with "on axhoover/cryptology.city · from CCwiki Dev" as the informative
   text in a Dev build, and the buttons **Open Draft PR** (default) and
   **Cancel**.
@@ -1258,11 +1382,20 @@ and the review show its banner when it is not `.ready`:
 | `GitHubAccess` | Banner |
 |---|---|
 | `.offline` (a timeout, or a network failure) | "Offline. You can edit now; opening the pull request needs a connection." |
-| `.ghMissing` | "gh is not installed, so this cannot become a pull request yet. Install it, or open an issue." with **Open an Issue…** |
-| `.notSignedIn` | "gh is not signed in. Run gh auth login in Terminal, then review again." |
+| `.ghMissing` | "gh is not installed, so this cannot become a pull request yet. Install it with Homebrew (brew install gh), then check again." No issue is offered: opening one needs gh too (§8.2) |
+| `.notSignedIn` | "gh is not signed in. Run gh auth login in Terminal, then check again." |
 | `.cannotPush` | "The signed-in account cannot push to axhoover/cryptology.city, so this cannot become a pull request. Open an issue instead." with **Open an Issue…** |
 
-Approve asks again (§6.5).
+Each banner sits beside **Check Again**. Approve asks again (§6.5).
+
+**Not before the tools are found.** At launch, gh is found a moment after
+git, in the background, and a window macOS restores asks at once. An answer
+computed before gh is found says it is missing, and would be kept. So the
+editor and the review ask only once `AppModel.isDiscoveringTools` is false,
+and ask then if nobody has; and when discovery finishes,
+`JobCenter.toolsDidChange()` waits for any ask in flight and asks again if an
+answer was kept, so one asked meanwhile from elsewhere (a correction begun
+from the reader) is replaced.
 
 If the target's region is `generated`, the editor opens with a banner: "This
 passage is generated from the reduction pages. Correct the reduction page it
@@ -1397,13 +1530,23 @@ page (§7.1).
 - **The field:** "What is wrong, and what should it say?", focused when the
   sheet opens.
 - **Below the field:** "Uses Claude Sonnet." (or "Uses the claude CLI's
-  default model.") "Change it in Settings → Jobs."
+  default model.") "Change it in Settings > Jobs." (with `>`, as the app's
+  other strings name a settings pane).
 - **The blockers:** git, claude, and a git clone (§7.1). GitHub is asked in
   the background, as for an edit.
-- **A generated passage** (`region` is `generated` or `frontmatter`) shows,
-  in place of the field: "This passage is generated from the reduction pages.
-  Open an issue, or edit the reduction page it links to." with **Open an
-  Issue…** as the default button.
+- **A generated passage** shows, in place of the field, a note with **Open
+  an Issue…** as the default button. The note is
+  `CorrectionBlockers.generated` or `.frontmatterLine`, the blocker
+  `CorrectionBlockers.list` gives route b, and the failure a correction run
+  again later meets (`CorrectionJobRunner`):
+  - a "Participates in" passage (`generated`): "This passage is generated
+    from the reduction pages. Open an issue, or edit the reduction page it
+    links to.";
+  - the relation line under a reduction or barrier page's title
+    (`frontmatter`), whose links go to classes, models and references, never
+    to a reduction page: "This line is built from this page's own
+    frontmatter, which an agent cannot change here. Open an issue, or edit
+    those fields yourself with Edit Page."
 - **Start Job** calls `jobCenter.startCorrection(CorrectionRequest(target:
   description: model:))` and opens the Jobs window on the new job, as
   ingestion does.
@@ -1413,13 +1556,16 @@ page (§7.1).
 - **The secondary line:** "For when something is wrong and you are not sure
   what it should say. No branch, no pull request."
 - **The fields:**
-  - **Title,** proposed as `<page title>: <section title>`;
+  - **Title,** proposed as `<page title>: <section title>`, or the page
+    title alone when there is no section or it has the page's title;
   - **Body,** one editor in `Theme.Fonts.code`, prefilled by
     `IssueComposer`: the page line, the permalink and the quote, then an
     empty paragraph where the cursor lands. It holds exactly the text sent.
   - Under it, one secondary line showing what CCwiki adds: "CCwiki adds:
-    Opened with CCwiki 0.3.0 · from CCwiki Dev". The hidden marker is not
-    shown.
+    Opened with CCwiki 0.3.0 (CCwiki Dev, a development build) · reported
+    from the reader". That is the footer's visible line, as
+    `PullRequestDraft.footer` writes it; the release leaves out the
+    parenthesis. The hidden marker is not shown.
 
   The body is not rendered: the reader's renderer is not GitHub's, which
   turns a permalink into a code snippet and renders math its own way.
@@ -1435,8 +1581,16 @@ page (§7.1).
   UUID per sheet. `gh` prints the URL, and the sheet changes to "Issue #123
   opened." with Open in Browser and Done.
 - **A retry** after a failure first runs `gh issue list --repo R --author @me
-  --state all --search "<uuid> in:body"`. If the issue exists, gh's reply was
-  lost; the sheet shows it instead of opening another.
+  --state all --limit 50 --json url,body` and looks for the marker in the
+  bodies itself: GitHub's search lags a new issue and may not read inside
+  the HTML comment that holds the marker. If the issue exists, gh's reply was lost; the sheet shows it
+  instead of opening another. If gh cannot answer, nothing is sent.
+- **Deadlines.** `gh issue create` and the retry's `gh issue list` each get
+  `Publisher.ghDeadline` (90 s), and `githubLogin` gets
+  `GitHubAuth.deadline`, so a stalled network cannot hold the sheet, whose
+  Cancel is disabled while gh runs. A create that does not answer in time
+  fails with "gh did not answer in time. The issue may have been opened;
+  Open Issue checks GitHub for it before sending again."
 - **On failure** the sheet stays open, with the text and gh's error.
 - **`CCWIKI_PUBLISH_DRY_RUN=1`** stops before `gh issue create` and shows the
   command it would have run.
@@ -1464,7 +1618,7 @@ https://github.com/axhoover/cryptology.city/blob/<base commit>/content/Primitive
 - **The path** is percent-encoded segment by segment, because reference
   filenames have spaces and `&`.
 - **Labels.** None are passed. The wiki defines none, and `--label` fails
-  on a missing one. §15 has the question.
+  on a missing one. §15 records the choice.
 
 ---
 
@@ -1843,6 +1997,10 @@ final class JobCenter {
     @ObservationIgnored var environment: @MainActor () -> Environment
     /// Saves every open editor of the job. Set by AppModel.init.
     @ObservationIgnored var flushEdits: (@MainActor (Job) async -> Void)?
+    /// Why an editor of the job holds text the disk does not (a conflict,
+    /// or a failed write); nil when none does. Approve asks it after
+    /// flushEdits (§4.4). Set by AppModel.init.
+    @ObservationIgnored var unsettledEdits: (@MainActor (Job) -> String?)?
     /// CCwiki changed these repository-relative paths in the job's worktree.
     @ObservationIgnored var onFilesChanged: (@MainActor (Job, [String]) -> Void)?
     /// Loads the job history synchronously.
@@ -1857,6 +2015,14 @@ final class JobCenter {
     /// changes it (content-relative), newest first.
     func jobs(touching pagePath: String) -> [Job]
     func refreshGitHubAccess() async
+    /// Once git is found: a snapshot for every review that has none.
+    func refreshMissingReviews() async
+    /// Once every tool is found: refreshMissingReviews, then GitHub asked
+    /// again if an answer was kept from before gh was found (§4.3, §7.1).
+    func toolsDidChange() async
+    /// A transcript line from outside the runners, which alone change a
+    /// job (§4.2): an editor saying where its unsaved text went.
+    func log(_ entry: JobLogEntry, in job: Job)
 
     @discardableResult func submitIngestion(source: IngestSubmission.Source?, pdf: URL?, notes: String) -> Job
     @discardableResult func startCorrection(_ request: CorrectionRequest) -> Job
@@ -1877,20 +2043,24 @@ final class JobCenter {
     func clearFinishedJobs()
     func cancelActiveJobs()
     func refreshOrphanedWorktrees() async
+    /// Never the worktree of a job that owns it.
     func pruneOrphan(_ path: String)
+    /// Not finished, or Review Anyway may still take it to review (§4.3).
+    nonisolated static func ownsWorktree(_ state: JobState) -> Bool
 }
 struct JobError: Error, Sendable, Equatable { let message: String; init(_ message: String) }
 
 // MARK: Jobs/ReviewSnapshot.swift, LineDiff.swift, GitNameStatus.swift — Track A
 struct ReviewSnapshot: Sendable, Equatable {
     let baseCommit: String
+    let tree: String                      // `git write-tree` of what was staged: what Approve commits
     let files: [ChangedFile]
-    let digest: String                    // hex SHA-256 of `git diff --cached --binary <base>`
+    let digest: String                    // hex SHA-256 of `git diff <patchOptions> <base> <tree>`
     var isEmpty: Bool { files.isEmpty }
     /// Pure and Sendable, so it runs in Task.detached.
-    static func assemble(base: String, entries: [GitNameStatus.Entry], binary: Set<String>,
-                         patch: Data, oldTexts: [String: String], newTexts: [String: String])
-        -> ReviewSnapshot
+    static func assemble(base: String, tree: String, entries: [GitNameStatus.Entry],
+                         binary: Set<String>, patch: Data, oldTexts: [String: String],
+                         newTexts: [String: String]) -> ReviewSnapshot
 }
 struct ChangedFile: Sendable, Equatable, Identifiable {
     enum Status: String, Sendable { case added, modified, deleted, renamed }
@@ -1995,14 +2165,20 @@ struct AgentInvocation: Sendable, Equatable {
 @MainActor struct Publisher {
     let paths: AppPaths
     let tools: ToolLocator
-    let git: GitService
+    let git: GitService            // the one given, `withoutHooks` (§6.5)
     let target: PublishTarget
-    func publish(_ job: Job, reviewed digest: String,
+    /// `reviewed`: the snapshot on screen when Open Draft PR was pressed.
+    func publish(_ job: Job, reviewed: ReviewSnapshot,
                  provenance: PullRequestDraft.Provenance) async -> ApproveResult
+    func check(_ job: Job, reviewed: ReviewSnapshot) async -> ApproveResult?
+    func commit(_ job: Job, version: String, reviewed: ReviewSnapshot) async
+        -> GitService.ReviewedCommit
+    nonisolated static let notReviewed: String
     enum LeaseRecovery: Sendable, Equatable { case retry(expecting: String?), rename, refuse }
     nonisolated static func leaseRecovery(remoteTip: String?, pushing: String?, pushed: String?,
                                           reflog: Set<String>) -> LeaseRecovery
-    nonisolated static func pushArguments(remote: String, branch: String, expecting: String?) -> [String]
+    nonisolated static func pushArguments(remote: String, branch: String, commit: String,
+                                          expecting: String?) -> [String]
     nonisolated static func createArguments(target: PublishTarget, base: String, branch: String,
                                             title: String, bodyFile: String) -> [String]
     nonisolated static func commitMessage(title: String, version: String, jobID: String) -> String
@@ -2019,18 +2195,31 @@ extension GitService {
     func resolveCommit(_ ref: String, in directory: URL) async -> String?       // rev-parse --verify <ref>^{commit}
     func mergeBase(_ a: String, _ b: String, in directory: URL) async -> String?
     func stageAll(in worktree: URL) async -> Bool                               // excludes .ccwiki
+    /// write-tree, then every diff from <base> to that tree (§6.1).
     func stagedDiff(in worktree: URL, base: String) async
-        -> (nameStatus: Data, numstat: Data, patch: Data)?
-    /// `git show <spec>`, bytes exact: "<base>:<path>", or ":<path>" for the index.
+        -> (tree: String, nameStatus: Data, numstat: Data, patch: Data)?
+    /// `git cat-file blob <spec>`, bytes exact: "<commit or tree>:<path>", or ":<path>".
     func blob(_ spec: String, in directory: URL) async -> Data?
     func revertPath(_ path: String, to base: String, in worktree: URL) async -> Bool
-    func commitStaged(in worktree: URL, base: String, message: String) async -> String?  // the new sha
-    func push(in worktree: URL, to remote: String, branch: String, expecting: String?) async
-        -> Subprocess.Result
+    static let realObjects: [String]              // ["--no-replace-objects", "-c", "core.useReplaceRefs=false"]
+    static let hooksOff: [String]                 // ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+    var hooksDisabled: Bool
+    var withoutHooks: GitService { get }
+    /// realObjects, hooksOff when disabled, then `arguments`: what runs, and what a transcript shows.
+    func invocation(_ arguments: [String]) -> [String]
+    static let patchOptions: [String]             // the snapshot's patch and commitReviewed's check
+    enum ReviewedCommit: Sendable, Equatable { case committed(String), notReviewed(String), failed }
+    /// write-tree, which must be `reviewedTree`; its digest checked; commit-tree -p <base>;
+    /// checked; update-ref (§6.5).
+    func commitReviewed(in worktree: URL, base: String, branch: String, tree reviewedTree: String,
+                        digest: String, message: String) async -> ReviewedCommit
+    /// <commit>:refs/heads/<branch>, never HEAD, no tag; hooks off.
+    func push(_ commit: String, in worktree: URL, to remote: String, branch: String,
+              expecting: String?) async -> Subprocess.Result
     func remoteTip(of branch: String, remote: String, in directory: URL) async -> RemoteTip
     func remoteHeads(remote: String, in directory: URL) async -> [String: String]?
     func reflog(of branch: String, in directory: URL) async -> Set<String>
-    func renameBranch(to name: String, in worktree: URL) async -> Bool
+    func renameBranch(_ branch: String, to name: String, in worktree: URL) async -> Bool
     func identity(in worktree: URL) async -> (name: String, email: String)?
     func changedPaths(in clone: URL, from base: String, to ref: String, limitedTo paths: [String]) async
         -> Set<String>
@@ -2273,6 +2462,22 @@ merges to `main`.**
   `SSH_AUTH_SOCK` are gone; `GIT_CONFIG_COUNT` and its keys and values;
   `GIT_SSH_COMMAND` and the two askpass variables.
 
+**`TripwireTests`** (B)
+- The listing asks for `isCrossRepository`; lines are read with it, newest
+  first, from a minute before the job started.
+- `finding(jobBranch: "job/A", moved: [], opened: [a PR from manual/B])`,
+  the PR opened inside the minute of look-back before the job started: a
+  warning naming it, its URL and where to look, and `pullRequest == nil`.
+  So for a PR from the job's branch name in a fork. Only a PR from the
+  job's own branch in the target repository is returned, and the notice
+  says the agent bypassed review.
+
+**`JobCenterTests`**, the tripwire with a fake `gh` (B)
+- A correction while `gh` lists a PR from manual/B opened twenty seconds
+  before the job: it reaches `awaitingReview` with its own diff of
+  `content/page.md` and the warning. A fork's PR from `fix/page`: the same.
+  A PR from the job's own `fix/page`: `opened(url)`, worktree kept.
+
 **`PromptCompositionTests`** (B, changed)
 - `ingest.md` contains `.ccwiki/pull-request.md`, and no longer the
   instruction to run `gh pr create`.
@@ -2282,7 +2487,30 @@ merges to `main`.**
 
 **`PublisherTests`** (B)
 - The lease is `--force-with-lease=refs/heads/x:` before the first push,
-  and `:<sha>` after.
+  and `:<sha>` after. The source is `<commit>:refs/heads/x`, never HEAD, and
+  `--no-verify` and `--no-follow-tags` are there.
+- Against a bare origin: HEAD and the branch moved after the commit was
+  checked, and the push still sends, and logs, the checked commit, the log
+  starting `git --no-replace-objects -c core.useReplaceRefs=false -c
+  core.hooksPath=/dev/null -c core.fsmonitor=false push --no-verify
+  --no-follow-tags --recurse-submodules=no`.
+- Approve end to end, with a `gh` script that is signed in and opens PR 99,
+  and executable `pre-commit`, `prepare-commit-msg`, `commit-msg`,
+  `post-commit` (which amends HEAD with `extra.md`), `post-rewrite`,
+  `post-index-change`, `post-checkout`, `reference-transaction` and
+  `pre-push` hooks in the directory the clone's `core.hooksPath` names, and
+  a `core.fsmonitor` program: none runs; the pushed commit's tree is the
+  reviewed tree (the review's `tree`), its only parent the base, and the
+  logged push names it. A control shows the hooks run for git's own
+  `update-ref`, and the monitor for its `status`.
+- A `gh` that stages `extra.md` while it is asked about push rights, after
+  the check's snapshot: `.refused(Publisher.notReviewed)`, the job back in
+  review with that notice, no push tried, the branch never moved.
+- A replacement for the base's tree that already has `extra.md` (in the
+  clone's `refs/replace/`), and a gitlink at a new commit with
+  `diff.ignoreSubmodules=all`: git's own `diff --cached` hides each, the
+  review shows it, DiffGuard blocks it, and Approve refuses with nothing
+  pushed.
 - `leaseRecovery`: absent → retry on absence; the tip equal to
   `pushingCommit`, to `pushedCommit`, or in the reflog → retry expecting it;
   unknown with no confirmed push → rename; unknown after a confirmed push →
@@ -2334,8 +2562,23 @@ sets `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
 7. The patch round-trips: remove the worktree, `addWorktree(…
    resettingBranch:to:)` and `applyPatch` restore a byte-identical tree,
    and `refreshOrphanedWorktrees` never lists the job's worktree.
-8. `commitStaged` collapses an agent commit, and the committed tree contains
-   only the job's change.
+8. `commitReviewed` collapses an agent commit: the commit's tree is the
+   reviewed tree, its only parent the base, and the branch and its reflog
+   name it. A tree staged after the review is `notReviewed`, by its tree,
+   and by its digest when given its own tree, and the branch stays. With
+   the hooks of `HookTrap` (in `GitReviewIntegrationTests.swift`; Publisher
+   tests use it too) in the clone's own `.git/hooks` with nothing
+   configured, in a directory the clone's `core.hooksPath` names, and in
+   one only `GIT_CONFIG_COUNT` names, and a `core.fsmonitor` program each
+   time, staging, `commitReviewed` and `push` run none of them; then git's
+   own `reset --soft` and `commit --no-verify`, as Approve used to run
+   them, do run them and the monitor, and `post-commit` amends HEAD.
+   A replacement for the base's tree, and a gitlink with
+   `diff.ignoreSubmodules=all` and `diff.submodule=log`, show in the
+   review's name-status and patch (the gitlink by its full name), and a
+   digest taken as git's own `diff --cached` takes it is `notReviewed`.
+   With an annotated tag on the base and `push.followTags=true`, the push
+   sends no tag; git's own push of the same commit does.
 9. The first push with the absence lease succeeds, a second push after an
    edit with `expecting:` succeeds, and a push with a stale lease is refused.
    With `pushedCommit` dropped and `pushingCommit` set, Approve recovers and
@@ -2397,10 +2640,17 @@ Teardown discards the scripted job, so no shots run leaves a worktree behind.
 - **The seal is not a sandbox** (§5.1). Ingestion reads untrusted papers and
   keeps `node`. The tripwire reports a push or a PR CCwiki did not make; it
   cannot undo one.
-- **CLI flags.** `--disallowedTools`, the `Bash(git push:*)` prefix rule and
-  `--model sonnet` are from the CLI's documented surface, not from a run.
-  The first live correction job should be watched. If a flag is refused, the
-  job fails visibly at start, and the environment seal still holds.
+- **CLI flags.** `--disallowedTools`, the `Bash(git push:*)` prefix rule,
+  `--model sonnet`, `--strict-mcp-config` and `--setting-sources project`
+  are from the CLI's documented surface, not from a run. Confirm each
+  against `claude --help` on the first live job, an ingestion and a
+  correction both, and watch that job. If a flag is refused, the job fails
+  visibly at start, and the environment seal still holds.
+  `--setting-sources project` also leaves out an `env` block or an
+  `apiKeyHelper` in the user's own `~/.claude/settings.json`: a maintainer
+  who reaches Claude that way (a provider or a key set there) finds the
+  first job failing to sign in, and must set it where the app's
+  environment, or the CLI's own login, provides it.
   **Path-scoped rules** (`Edit(./content/<path>)`,
   `Write(./.ccwiki/pull-request.md)`, with `--permission-mode default`) would
   enforce the one-page rule before the fact. Adopt them once that first run
@@ -2464,27 +2714,31 @@ Teardown discards the scripted job, so no shots run leaves a worktree behind.
 - **Line numbers in the editor's gutter.** The status line gives line and
   column.
 
-## 15. Open questions for the maintainer
+## 15. The maintainer's questions, as settled and built
 
-1. **The default model for corrections.** *Recommended: Sonnet.* Haiku is
+1. **The default model for corrections.** *Settled: Sonnet.* Haiku is
    cheaper, but a mangled macro in a security definition costs more than the
-   difference. All four choices are in Settings → Jobs.
+   difference. All four choices are in Settings → Jobs: Sonnet, Haiku, Opus,
+   and the CLI's default.
 2. **Should the correction agent have `WebFetch`, to check a cited paper?**
-   *Recommended: no, not in this version.* It turns a job of seconds and
+   *Settled: no, not in this version.* It turns a job of seconds and
    cents into minutes and dollars. The prompt tells the agent to abort and
    say what to check.
-3. **The title prefix.** *Recommended: `[fix]`*, mirroring the wiki's
+3. **The title prefix.** *Settled: `[fix]`*, mirroring the wiki's
    `[paper]`, in the title and the commit subject.
-4. **Draft or ready for review?** *Recommended: draft.* You have approved
+4. **Draft or ready for review?** *Settled: draft.* You have approved
    it, but "never ready-for-review" is a non-negotiable in PLAN.md §3, and CI
    runs on drafts.
-5. **Where CCwiki Dev publishes.** *Recommended: the same repository, said
+5. **Where CCwiki Dev publishes.** *Settled: the same repository, said
    at every step (§10).* The alternative is a standing sandbox repository.
-6. **Should CCwiki regenerate derived files?** *Recommended: not yet.* Warn,
+   `CCWIKI_TARGET_REPO=owner/name` points a Dev build at a fork for
+   testing.
+6. **Should CCwiki regenerate derived files?** *Settled: not yet.* Warn,
    and build it if the warning fires often.
-7. **A `reader-report` label on the wiki.** *Recommended: only if you want
-   to filter on it.* If you create one, CCwiki passes it with `--label`.
-8. **⌥⌘E for Edit Page.** *Recommended: yes.* It is the only free chord near
+7. **A `reader-report` label on the wiki.** *Settled: none for now.*
+   CCwiki passes no `--label` (§8.2). The wiki defines no such label, and
+   `--label` fails on a missing one.
+8. **⌥⌘E for Edit Page.** *Settled: yes.* It is the only free chord near
    ⇧⌘E that reads as Edit.
 
 ## 16. Review notes (2026-10-12)

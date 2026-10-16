@@ -50,7 +50,8 @@ redesign, not a refactor.
 | Rendering is **fully offline** | Reading must work on a plane | Vendored into `Resources/web/`; a CSP header and a scheme handler make it structural, not aspirational |
 | The **search index is derived** | Never authoritative, safe to delete at any time | `SearchIndex.reset()` is a legitimate answer to any problem |
 | **PDFs never enter the repo** | They are job inputs; References pages point at eprint/arXiv/DOI | `AppPaths.library` sits outside the clone |
-| **Never merge a PR** | The app's job ends at "draft PR opened" | `prompts/ingest.md` Step 6; `IngestJobRunner` only ever reads the URL |
+| **Never merge a PR** | The app's job ends at "draft PR opened" | `Publisher` opens a draft with `gh pr create --draft`; nothing in CCwiki runs `gh pr merge` or `gh pr ready`. See [plans/corrections.md](plans/corrections.md) §6.5 |
+| **Nothing reaches GitHub without an approval** | An agent, or a slip in the editor, must not be able to publish; the maintainer reads the diff first | Every job stops in `awaitingReview`; only `JobCenter.approve` → `Publisher` pushes. Agent jobs run sealed (no `gh` or push credentials) and a `Tripwire` checks for anything CCwiki did not push; `prompts/ingest.md` Step 6 hands over instead of pushing. See [plans/corrections.md](plans/corrections.md) §5–§6 |
 | **House style is never compiled in** | The wiki maintains its own ingestion contract, and a snapshot of it in a Mac app goes stale immediately | `PromptComposer` fills placeholders only; the rules are read from the worktree |
 | A reduction is a **hyperedge, never a pair** | `hypotheses` is a conjunction. Flattening `{sparse-lpn, ddh} ⇒ she` into two object-to-object edges asserts two implications the wiki does not make — a false mathematical claim, not a rendering shortcut | No API in `RelationsManifest` returns a `(from, to)` pair; see [plans/relations.md](plans/relations.md) §1 |
 
@@ -61,6 +62,7 @@ redesign, not a refactor.
 ├── Makefile                 the entry point for everything — `make help`
 ├── build.sh                 swift build → .app bundle → codesign
 ├── prompts/ingest.md        the agent prompt template for an ingestion job
+├── prompts/correct.md       the agent prompt template for a described correction
 ├── scripts/
 │   ├── vendor-web.sh        fetch the pinned offline render pipeline (run once)
 │   ├── shots.sh             drive the app and capture screenshots
@@ -72,18 +74,23 @@ redesign, not a refactor.
 │   ├── Info.plist
 │   ├── derivation-curation.json  reviewed corrections to relations.json that
 │   │                        the derivation engine reads (plans/derivations.md §2a)
-│   └── web/                 the reader: index.html, app.css, ccwiki.js, vendor/
+│   └── web/                 the reader: index.html, app.css, ccwiki-markdown.js
+│                            (the DOM-free Markdown half), ccwiki.js, vendor/
 ├── CCwiki/                CCwiki.entitlements (NOT sandboxed — see §5)
 ├── Sources/CCwiki/
-│   ├── App/                 CCwikiApp, AppModel, AppPaths, Theme, ScreenshotRunner
+│   ├── App/                 CCwikiApp, AppModel, AppPaths, JobCenter, EditorSession,
+│   │                        Theme, ScreenshotRunner
 │   ├── Wiki/                pure, testable: slugs, wikilinks and markdown links,
 │   │                        frontmatter, macros, index, the relations manifest,
 │   │                        and the site's relation-meta line (RelationMeta)
 │   ├── Reader/              the WKWebView, its scheme handler, and the render request
 │   ├── Search/              SQLite FTS5, the ⌘S and ⇧⌘R rankers, ⇧⌘F grep, the quick switcher
-│   ├── Jobs/                subprocess plumbing, tool discovery, git, ingestion
+│   ├── Corrections/         pure: CorrectionTarget, SourceLineMap, IssueComposer
+│   ├── Jobs/                subprocess plumbing, tool discovery, git; the ingestion
+│   │                        and correction runners, the review snapshot, DiffGuard,
+│   │                        Publisher, Tripwire
 │   └── UI/                  the SwiftUI views
-└── Tests/CCwikiTests/     101 tests; see §6
+└── Tests/CCwikiTests/     about 870 tests (2026-10-12); see §6
 ```
 
 ## 5. Documentation index
@@ -132,8 +139,9 @@ redesign, not a refactor.
 - [plans/design-system.md](plans/design-system.md) — the two type systems (app
   chrome vs document), the macOS idioms applied, and the visual gate.
 - [plans/roadmap.md](plans/roadmap.md) — what we deliberately deferred and how
-  we would build it: a human review step before the PR, a better ingestion
-  pipeline, and page corrections from the reader.
+  we would build it: a better ingestion pipeline, a graph view, and smaller
+  things. §1 (a human review step before the PR) and §3 (page corrections
+  from the reader) are built ([corrections.md](plans/corrections.md)).
 - [plans/audit-2026-09.md](plans/audit-2026-09.md) — a full read-through
   aimed at "what happens when a stranger downloads this": eight first-launch
   breakers, the correctness tail, reader usability gaps, performance, and a
@@ -159,10 +167,11 @@ redesign, not a refactor.
   `claude/reader-comforts` (all but D6), second of the batch**: native tabs and windows, each with its own
   `ReaderSession`; a reference's paper on request, in a window of its own; and
   a library load that rebuilds only what changed.
-- [plans/corrections.md](plans/corrections.md) — **specified 2026-10-12,
-  third**: correct a page yourself, have an agent draft it, or open an issue;
-  and a review step before anything reaches GitHub, for every job, with
-  DiffGuard and a rendered diff.
+- [plans/corrections.md](plans/corrections.md) — **built on
+  `claude/page-corrections`, third of the batch**: correct a page yourself,
+  have an agent draft it, or open an issue; and a review step before anything
+  reaches GitHub, for every job, with DiffGuard and a rendered diff. §16 and
+  §17 record the review notes and the seams with the other two specs.
 - [plans/update-integrity.md](plans/update-integrity.md) — why CCwiki came
   back as 0.1.0 after updates (a second copy with the same bundle id, most
   likely), and the fix: the dev and release channels (`CHANNEL`, CCwiki Dev),

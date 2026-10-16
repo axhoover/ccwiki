@@ -241,7 +241,7 @@ struct PromptCompositionTests {
         let submission = IngestSubmission(
             kind: .url, source: .eprint(year: "2025", number: "375"),
             localPDF: nil, notes: "Check the LWE page.", submittedAt: Date())
-        let job = IngestJob(submission: submission, paths: paths)
+        let job = Job(kind: .ingestion(submission), paths: paths, createdAt: submission.submittedAt)
 
         let prompt = try PromptComposer.compose(
             job: job, baseBranch: "main",
@@ -268,7 +268,7 @@ struct PromptCompositionTests {
             kind: .pdf, source: nil,
             localPDF: URL(fileURLWithPath: "/tmp/library/paper.pdf"),
             notes: "", submittedAt: Date())
-        let job = IngestJob(submission: submission, paths: paths)
+        let job = Job(kind: .ingestion(submission), paths: paths, createdAt: submission.submittedAt)
 
         let prompt = try PromptComposer.compose(job: job, baseBranch: "main", preflight: [])
         #expect(prompt.contains("/tmp/library/paper.pdf"))
@@ -276,41 +276,121 @@ struct PromptCompositionTests {
         #expect(prompt.contains("do not copy it into the repository"))
     }
 
-    @Test("the tool allow-list covers what the job actually needs")
+    @Test("the tool allow-list covers what the job needs, and nothing that reaches GitHub")
     func allowedTools() {
-        let tools = PromptComposer.allowedTools
+        let tools = AgentInvocation.ingestionTools
         // The wiki's own workflow grants these…
-        for tool in ["Read", "Write", "Edit", "Glob", "Grep",
-                     "Bash(git:*)", "Bash(gh:*)", "WebFetch", "WebSearch"] {
+        for tool in ["Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"] {
             #expect(tools.contains(tool), "missing \(tool)")
         }
         // …and the local lint additionally needs node.
         for tool in ["Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)"] {
             #expect(tools.contains(tool), "missing \(tool)")
         }
+        // The agent stops before GitHub (corrections §5.1): no gh at all,
+        // and git only to read with.
+        #expect(!tools.contains("Bash(gh:*)"))
+        #expect(!tools.contains("Bash(git:*)"), "an unscoped git grant can commit and push")
+        #expect(tools.contains("Bash(git submodule update:*)"),
+                "the prompt tells the agent to update an empty submodule")
         #expect(!tools.contains("Bash"), "an unscoped Bash grant defeats the point")
     }
-}
 
-/// The runner believes GitHub over the agent's prose — but only about a PR
-/// this job could have opened.
-struct PullRequestConfirmationTests {
+    @Test("ingest.md hands over to review instead of opening a pull request")
+    func ingestionHandsOver() throws {
+        let template = try #require(PromptComposer.template())
+        #expect(template.contains(".ccwiki/pull-request.md"))
+        #expect(template.contains("READY FOR REVIEW"))
+        #expect(!template.contains("gh pr create"), "CCwiki opens the pull request, not the agent")
+        #expect(!template.contains("git push"))
+        #expect(!template.contains("git commit"))
+        // The contract decides what the change is; the envelope decides how
+        // it leaves the machine (§5.3).
+        #expect(template.contains("how it leaves the machine"))
+        #expect(!template.contains("without exception"),
+                "the old precedence sentence handed the PR back to the agent")
+    }
 
-    @Test("only an open PR created after the job started counts, and the newest wins")
-    func createdAfter() throws {
-        let started = ISO8601DateFormatter().date(from: "2026-09-27T10:00:00Z")!
-        let listing = """
-            2026-09-20T09:00:00Z https://github.com/axhoover/cryptology.city/pull/36
-            2026-09-27T10:05:00Z https://github.com/axhoover/cryptology.city/pull/41
-            2026-09-27T10:02:00Z https://github.com/axhoover/cryptology.city/pull/40
-            garbage line
-            """
-        let url = IngestJobRunner.pullRequest(createdAfter: started, in: listing)
-        #expect(url?.absoluteString == "https://github.com/axhoover/cryptology.city/pull/41")
-        #expect(IngestJobRunner.pullRequest(createdAfter: started, in: "") == nil)
-        #expect(IngestJobRunner.pullRequest(
-            createdAfter: started,
-            in: "2026-09-20T09:00:00Z https://github.com/axhoover/cryptology.city/pull/36") == nil,
-            "a PR from an earlier job on the same branch name is not this job's")
+    // MARK: Corrections (§5.4)
+
+    static let target = CorrectionTarget(
+        pagePath: "Primitives/pseudorandom-function.md", pageTitle: "Pseudorandom function",
+        baseCommit: "865206d47c53",
+        section: CorrectionTarget.Section(id: "security", title: "Security", level: 2),
+        lines: LineRange(first: 42, last: 46), region: .body,
+        quote: "for every PPT $\\calA$\n\nthe advantage is negligible",
+        excerpt: "```pseudocode\n\\State $x \\gets {{y}}$\n```\nFor every PPT $\\calA$,")
+
+    static func correctionJob(_ target: CorrectionTarget, request: String) -> (Job, CorrectionRequest) {
+        let paths = AppPaths(support: URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "ccwiki-prompt-\(UUID().uuidString)"))
+        let correction = CorrectionRequest(target: target, description: request, model: "sonnet")
+        return (Job(kind: .correction(correction), paths: paths), correction)
+    }
+
+    @Test("correct.md: every placeholder is filled, and the page, lines, quote, excerpt and request are there")
+    func correctionComposition() throws {
+        let template = try #require(PromptComposer.template(named: "correct"),
+                                    "prompts/correct.md should be findable from the repo root")
+        #expect(template.contains("CLAUDE.md"), "the prompt must defer to the wiki's own rules")
+
+        let (job, request) = Self.correctionJob(
+            Self.target, request: "It should say PRP.\nNot PRF.")
+        let siteURL = try #require(URL(string: "https://cryptology.city/Primitives/pseudorandom-function"))
+        let prompt = try PromptComposer.composeCorrection(request, job: job, siteURL: siteURL)
+
+        for placeholder in ["WORKTREE", "PAGE_PATH", "PAGE_TITLE", "PAGE_URL", "LINES", "SECTION",
+                            "QUOTE", "FENCE", "EXCERPT", "REQUEST"] {
+            #expect(!prompt.contains("{{\(placeholder)}}"), "{{\(placeholder)}} was not substituted")
+            #expect(!prompt.contains("{{#\(placeholder)}}") && !prompt.contains("{{/\(placeholder)}}"))
+        }
+        #expect(!prompt.hasPrefix("<!--"), "the template's own explanation is stripped")
+        #expect(prompt.contains("`content/Primitives/pseudorandom-function.md`"))
+        #expect(prompt.contains("https://cryptology.city/Primitives/pseudorandom-function#security"))
+        #expect(prompt.contains("lines 42–46, in “Security”"))
+        #expect(prompt.contains(job.worktree.path(percentEncoded: false)))
+        // The quote and the request are blockquotes, line by line.
+        #expect(prompt.contains("> for every PPT $\\calA$\n>\n> the advantage is negligible"))
+        #expect(prompt.contains("> It should say PRP.\n> Not PRF."))
+        // The excerpt arrives verbatim, `{{` and all, inside a fence longer
+        // than the pseudocode fence it holds.
+        #expect(prompt.contains("````\n```pseudocode\n\\State $x \\gets {{y}}$\n```\nFor every PPT $\\calA$,\n````"))
+        #expect(prompt.contains("# [fix] Pseudorandom function: "))
+        #expect(prompt.contains(".ccwiki/pull-request.md"))
+        #expect(prompt.contains("ABORTED:"))
+    }
+
+    @Test("a whole-page correction leaves out the quote and the excerpt")
+    func wholePageCorrection() throws {
+        var target = Self.target
+        target.lines = nil
+        target.quote = nil
+        target.excerpt = nil
+        let (job, request) = Self.correctionJob(target, request: "The intro is wrong.")
+        let prompt = try PromptComposer.composeCorrection(request, job: job, siteURL: nil)
+
+        #expect(!prompt.contains("The reader quoted"))
+        #expect(!prompt.contains("The source of those lines"))
+        #expect(!prompt.contains("{{"))
+        #expect(prompt.contains("`content/Primitives/pseudorandom-function.md`, the whole page, near “Security”."),
+                "without a site URL, the page line has no empty parentheses")
+        #expect(prompt.contains("> The intro is wrong."))
+    }
+
+    @Test("the fence is one backtick longer than the longest run, and at least three")
+    func fences() {
+        #expect(PromptComposer.fence(for: "") == "```")
+        #expect(PromptComposer.fence(for: "a `b` c") == "```")
+        #expect(PromptComposer.fence(for: "```js\nx\n```") == "````")
+        #expect(PromptComposer.fence(for: "`````") == "``````")
+    }
+
+    @Test("filling is one pass, and an optional block keeps or drops its lines")
+    func filling() {
+        let template = "<!-- a note --> -->\nA {{X}}.\n{{#Y}}\nY is {{Y}}.\n{{/Y}}\nEnd {{Z}}."
+        #expect(PromptComposer.fill(template, ["X": "{{Z}}", "Y": "here", "Z": "z"])
+            == "-->\nA {{Z}}.\nY is here.\nEnd z.")
+        #expect(PromptComposer.fill(template, ["X": "x", "Y": nil, "Z": "z"])
+            == "-->\nA x.\nEnd z.")
     }
 }

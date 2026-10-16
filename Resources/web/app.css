@@ -30,6 +30,15 @@
   --broken: #b3261e;
   --highlight: #e0c8ff88;
 
+  /* A change under review (corrections §6.3): what it adds and removes,
+   * and the severities of DiffGuard's flags. */
+  --added: #1f7a3d;
+  --added-wash: rgba(31, 122, 61, 0.07);
+  --removed: #b3261e;
+  --removed-wash: rgba(179, 38, 30, 0.06);
+  --flag-blocking: #b3261e;
+  --flag-warning: #b0640a;
+
   --measure: 42rem;
   --gutter: 2.75rem;
 }
@@ -51,6 +60,13 @@
     --accent-wash: rgba(176, 122, 212, 0.14);
     --broken: #ff8a80;
     --highlight: #7030a877;
+
+    --added: #6fd08c;
+    --added-wash: rgba(111, 208, 140, 0.1);
+    --removed: #ff8a80;
+    --removed-wash: rgba(255, 138, 128, 0.09);
+    --flag-blocking: #ff8a80;
+    --flag-warning: #f2b04c;
   }
 }
 
@@ -705,6 +721,219 @@ tbody tr:last-child td { border-bottom: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .link-preview { animation: none; }
+}
+
+/* --------------------------------------------------------- source reveal */
+
+/* The block the editor's cursor is on, outlined for a moment when the
+ * preview scrolls to it (corrections §7.4), and the entry a click on a
+ * finding scrolls the review to. Faded out, never removed with a jump. */
+.source-reveal {
+  border-radius: 4px;
+  animation: source-reveal 1.2s ease-out forwards;
+}
+
+@keyframes source-reveal {
+  from { outline: 2px solid var(--accent); outline-offset: 4px; }
+  to { outline: 2px solid transparent; outline-offset: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .source-reveal { animation: none; outline: 2px solid var(--accent); outline-offset: 4px; }
+}
+
+/* ----------------------------------------------------------------- review */
+
+/* A change, as the reader renders pages (corrections §6.3): one section per
+ * file, and in it the blocks that changed, a block of context either side,
+ * and a line for each run of unchanged ones. Added and removed blocks
+ * differ by more than colour: each has its label in the leading gutter. */
+
+.review-file { margin: 0 0 3rem; }
+
+.review-file-header {
+  margin: 0 0 1.2rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.review-file-title {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  font-size: 1.36rem;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.015em;
+}
+
+.review-file-meta,
+.review-endpoints,
+.review-nonmarkdown {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-top: 0.3rem;
+}
+
+.review-file-meta code,
+.review-nonmarkdown code { font-size: 0.95em; }
+
+.review-separator { color: var(--text-tertiary); }
+
+.review-nonmarkdown {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.review-empty {
+  color: var(--text-tertiary);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  text-align: center;
+  padding: 6rem 0;
+}
+
+/* The frontmatter is YAML: its lines as source, signed, in a box. */
+.review-frontmatter {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  background: var(--bg-sunken);
+  border-radius: 8px;
+  padding: 0.55rem 0;
+  margin: 0 0 1.2rem;
+  overflow-x: auto;
+}
+
+.review-frontmatter-line {
+  padding: 0 0.9rem;
+  white-space: pre-wrap;
+}
+
+.review-frontmatter-sign {
+  display: inline-block;
+  width: 1.2em;
+  color: var(--text-tertiary);
+}
+
+.review-frontmatter-line.added { background: var(--added-wash); }
+.review-frontmatter-line.added .review-frontmatter-sign { color: var(--added); }
+.review-frontmatter-line.removed { background: var(--removed-wash); }
+.review-frontmatter-line.removed .review-frontmatter-sign { color: var(--removed); }
+
+/* Unchanged lines left out: a caption in the text's column, set like the
+ * body's gaps, so it never reads as a line of the YAML. */
+.review-frontmatter-line.gap {
+  padding-left: calc(0.9rem + 1.2em);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+/* An entry sits on the page's measure; its rule and tint reach a little
+ * into the gutter, and its label sits in the gutter beside it. */
+.review-entry {
+  position: relative;
+  margin: 0 0 1.05rem -0.9rem;
+  padding: 0.45rem 0 0.45rem calc(0.9rem - 3px);
+  border-left: 3px solid transparent;
+  border-radius: 0 6px 6px 0;
+}
+
+.review-entry-body > :last-child { margin-bottom: 0; }
+
+.review-entry.added {
+  border-left-color: var(--added);
+  background: var(--added-wash);
+}
+
+/* Never struck through: struck-through math is unreadable. */
+.review-entry.removed {
+  border-left-color: var(--removed);
+  background: var(--removed-wash);
+}
+
+.review-entry.removed > .review-entry-body { opacity: 0.75; }
+
+.review-entry.added::before,
+.review-entry.removed::before {
+  position: absolute;
+  right: 100%;
+  top: 0.6rem;
+  margin-right: 0.55rem;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--text-tertiary);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.review-entry.added::before { content: "After"; }
+.review-entry.removed::before { content: "Before"; }
+
+/* Context: the page as it is, without a rule. */
+.review-entry.context { padding-top: 0; padding-bottom: 0; }
+
+/* A run of unchanged blocks, or blank lines only: one quiet line. */
+.review-entry.gap {
+  margin-left: 0;
+  padding: 0.15rem 0;
+  border-left: none;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.review-note {
+  margin-top: 0.35rem;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+/* A DiffGuard finding, as a caption above the entry it is about. */
+.review-flag {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  margin: 0 0 0.35rem;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.review-flag-glyph { flex: none; font-weight: 600; }
+.review-flag.blocking .review-flag-glyph { color: var(--flag-blocking); }
+.review-flag.warning .review-flag-glyph { color: var(--flag-warning); }
+.review-flag.note .review-flag-glyph { color: var(--text-tertiary); }
+
+/* A link to a page the change adds: a link, with nowhere to go yet. */
+a.new {
+  color: var(--accent);
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent) 60%, transparent);
+  cursor: default;
+}
+
+a.new:hover { color: var(--accent); }
+
+/* Without room left of the measure for the label (the page is 42rem and
+ * its gutter 2.75rem, so below about 720px), the label leads the entry.
+ * The review pane in the Jobs window is often that narrow. */
+@media (max-width: 720px) {
+  .review-entry.added::before,
+  .review-entry.removed::before {
+    position: static;
+    display: block;
+    margin: 0 0 0.3rem;
+  }
 }
 
 /* ------------------------------------------------------------------ print */

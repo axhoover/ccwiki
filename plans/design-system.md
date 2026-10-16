@@ -135,6 +135,8 @@ discoverable rather than folklore.
 | ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
 | ⌘P | Print, or Save as PDF from the print panel |
 | ⌥⌘P | Show Paper, on a reference page |
+| ⌥⌘E | Edit Page: the page being read, in an editor window, at the passage selected |
+| ⌘↩ | Review Changes, in an editor window: save, and review the job in Jobs |
 | ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size, in every tab; in a paper window, Zoom In / Zoom Out / Zoom to Fit |
 | ⇧⌘H | Go home |
 | ⌥⌘C / ⌥⇧⌘C | Copy proof as LaTeX / as wiki Markdown (Relations Explorer) |
@@ -286,6 +288,68 @@ An **aborted** job gets an orange banner saying so is a good outcome, not a red
 one. The prompt asks the agent to abort rather than guess; punishing that
 visually would be teaching the wrong lesson.
 
+### The review
+
+Every route that changes the wiki ends in this window, ingestion included,
+and nothing leaves for GitHub from anywhere else
+([corrections.md](corrections.md) §6.6).
+
+- **The queue** puts **Awaiting Review** above **Jobs**. A row's glyph is
+  its kind (a paper, a described correction, an edit), tinted by its state
+  and a spinner while a process runs; its subtitle is the passage, then the
+  status. An edit nobody has touched yet reads "Editing" and waits under
+  Jobs. **Clear Finished** and **Ingest a Paper** sit over the queue, as
+  Mail puts New Message over its list.
+- **A job under review** has a segmented **Changes | Transcript** in the
+  toolbar's centre, then **Edit…** (a pull-down when several files
+  changed), **Discard…**, and last **Open Draft PR**, the one prominent
+  button. Its header is the state row and an accent banner that says what
+  is already on GitHub; the job's last notice and the GitHub line sit under
+  it, and the pre-flight findings move to the Transcript.
+- **Changes** is a `VSplitView`: DiffGuard's findings and the diff above,
+  the pull request below, never shorter than 150 pt, so the form never
+  covers the diff. The findings take about a third of their pane at most and
+  scroll past it, so the diff keeps the larger share however many there
+  are. A finding's glyph says its severity as well as its colour (an
+  octagon blocks, a triangle warns, an `i` informs); a click scrolls the
+  diff to it.
+- **Rendered or Source.** Rendered is the reader's own pipeline drawing
+  only the changed blocks, Before and After labelled in the gutter so they
+  differ by more than colour. Source is the lines, both line numbers in the
+  gutter, `−` and `+` rows tinted, and in a changed pair the changed words
+  set in **bold** on a stronger tint, so a one-letter fix is findable. A job
+  whose diff adds raw HTML opens in Source.
+- **Open Draft PR** is disabled, with its reason as its help, by a blocking
+  finding, a local path in the title or body, GitHub not ready, or an
+  editor of the job whose file changed on disk and still asks which
+  version to keep. With warnings, or in a Dev build, it asks first, naming
+  the repository. The line under the body names where it goes before
+  anything is sent: "Opens a draft pull request on
+  axhoover/cryptology.city · from CCwiki Dev".
+  No shortcut: Review Changes brings this window forward, and a key pressed
+  twice from the editor would publish.
+
+### The editor
+
+A file of a job is a window of its own, as a document is: titled by its
+file name, with the page and the passage as the subtitle, and tabbed only
+with other editors. The source (an `NSTextView`, monospaced, with smart
+quotes, dashes, replacement, correction and detectors off) sits beside a
+preview rendered by the reader's pipeline, which follows the caret's line.
+The preview hides by width, never leaving the split view.
+
+Under the toolbar, on the bar, a strip carries what came from the reader: the
+quoted passage in two lines at most, with Show to select it again, and,
+when they apply, why the file is read-only, what a generated passage or a
+line built from the frontmatter is, the GitHub line and a failed save.
+Saving is automatic, so there is no Save; the status line says "Saved to the
+job's worktree" or "Saving…", then the line and column, then "CCwiki Dev" in
+a Dev build. Text an editor could not save when it or the app closes, such
+as a conflict nobody settled, is kept in the worktree's `.ccwiki/` and the
+job's log says where. **Review Changes** (⌘↩) saves, takes the review again
+and opens Jobs on the job. Revert File… waits in the toolbar's More menu,
+behind a confirmation.
+
 ## 4b. Error states
 
 Every failure the app can hit has a designed resting state, because the
@@ -353,8 +417,15 @@ each step, waits for it to settle, writes a `.ready-N` marker and blocks;
 tabs `window:<path>` (a second reader window), `tab:<path>` (a new tab in
 front) and `bgtab:<path>` (a new tab behind, once background tabs are on),
 and `paper:<path>` (a reference's paper window, served from
-`CCWIKI_PAPER_FIXTURES`; Offline for a paper without a fixture). Each step
-drives the reader window or tab that was key most recently.
+`CCWIKI_PAPER_FIXTURES`; Offline for a paper without a fixture). For
+corrections there are `edit:<path>` (an edit of the page, begun past the
+blockers, in its editor), `review:<path>` (a scripted one-word edit of the
+page, reviewed in Jobs), `source` (that review's changes in Source), and
+`describe:<path>` and `issue:<path>` (the Describe a Correction and Open an
+Issue sheets over the page). The jobs that `edit:` and `review:` begin are
+discarded when the plan ends, so no run leaves a worktree behind
+([corrections.md](corrections.md) §12.3). Each step drives the reader window
+or tab that was key most recently.
 
 The capture needs the **Screen Recording** permission (System Settings → Privacy
 & Security). Without it the script falls back to an in-app composite —

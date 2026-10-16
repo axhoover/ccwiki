@@ -1,8 +1,8 @@
 # CCwiki
 
 A native macOS reader for the [cryptology.city](https://cryptology.city) wiki,
-and a launcher for headless agent jobs that ingest papers and open pull requests
-against it.
+and a launcher for jobs that ingest papers and correct pages, each reviewed
+before CCwiki opens a draft pull request against it.
 
 CCwiki is a **client** of `axhoover/cryptology.city`. The GitHub repo is the
 only canonical store; the app owns no content and never merges anything.
@@ -17,11 +17,17 @@ only canonical store; the app owns no content and never merges anything.
   references left out; ⇧⌘R reference search by key, author, title, year,
   the pages that cite a paper, and its abstract; ⇧⌘F literal text across
   every page, with the lines it is on. Backed by SQLite FTS5.
-- **Ingest papers.** Drop a PDF on the reader, or paste an ePrint, arXiv, DOI or
-  ECCC link (⇧⌘N). CCwiki runs `claude` in a throwaway git worktree, streams
-  the transcript into a jobs window (⇧⌘J), and ends at a **draft** PR — it never
-  merges, and never marks one ready for review. See
-  [plans/ingestion.md](plans/ingestion.md).
+- **Ingest papers, correct pages.** Drop a PDF on the reader, or paste an
+  ePrint, arXiv, DOI or ECCC link (⇧⌘N), and CCwiki runs `claude` in a
+  throwaway git worktree, streaming the transcript into a jobs window (⇧⌘J).
+  On any page, Edit Page… (⌥⌘E) opens it in an editor, Describe a
+  Correction… has an agent draft the fix, and Open an Issue About This Page…
+  reports a problem with no pull request. A job with changes stops in Jobs
+  under Awaiting Review, with a rendered diff, DiffGuard's findings and the
+  PR's text, and nothing reaches GitHub until you choose Open Draft PR.
+  CCwiki never merges, and never marks a PR ready for review. See
+  [plans/ingestion.md](plans/ingestion.md) and
+  [plans/corrections.md](plans/corrections.md).
 
 ## Requirements
 
@@ -31,7 +37,9 @@ as a tarball snapshot; with it, as a pull-only clone that fast-forwards.
 To build from source: a Swift 6 toolchain (Xcode, or the swift.org installer).
 
 To run ingestion jobs: `git` (a real one — Apple's Command Line Tools, or
-Homebrew's), `node` ≥ 20, `gh`, and the `claude` CLI.
+Homebrew's), `node` ≥ 20, `gh`, and the `claude` CLI. To correct a page:
+`git` to edit it, the `claude` CLI for Describe a Correction, and `gh` to
+open the pull request or an issue.
 
 A Finder-launched app inherits launchd's `PATH`, which is
 `/usr/bin:/bin:/usr/sbin:/sbin` — enough for `/usr/bin/git` and nothing else.
@@ -103,10 +111,13 @@ that off), and ⌘R does the same at any time.
 ├── repo/          the pull-only clone: the reader's copy, never written to
 ├── library/       PDFs you drop on the app (deliberately outside the repo)
 ├── index/         search.sqlite3 — derived, safe to delete at any time
-└── logs/          per-job transcripts
+└── logs/          per-job transcripts, and each job's last reviewed diff
+                   (<id>.patch)
 
 ~/Library/Caches/CCwiki/
-└── worktrees/     one git worktree per ingestion job
+├── worktrees/     one git worktree per job: ingestion, correction or edit
+└── scratch/       per-job scratch outside the worktree (an agent's empty gh
+                   config), removed with it
 ```
 
 CCwiki Dev keeps the same trees under `CCwiki-Dev` instead of `CCwiki`.
@@ -157,7 +168,9 @@ a job that could not push.
 | ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size; in a paper window, zoom in / out / to fit |
 | ⇧⌘H | Go home |
 | ⇧⌘N | Ingest a paper |
+| ⌥⌘E | Edit the page |
 | ⇧⌘J | Show the jobs window |
+| ⌘↩ | Review Changes, in an editor window |
 | ⌘, | Settings |
 
 ## Make targets
@@ -185,7 +198,8 @@ Every push runs `make check` on a macOS runner (`.github/workflows/ci.yml`).
 ## Where to read next
 
 [PLAN.md](PLAN.md) is the index to everything: architecture, the Quartz slug
-port, the render pipeline, search, ingestion, and the design system.
+port, the render pipeline, search, ingestion, corrections and the review, and
+the design system.
 
 ## Licence
 

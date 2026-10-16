@@ -1,7 +1,8 @@
 # Roadmap
 
 Things deliberately deferred, with enough detail that picking one up does not
-mean re-deciding it. Nothing here is started.
+mean re-deciding it. Nothing here is started, except where a section says it
+was built.
 
 Ordered by how much they change the app's shape, not by priority.
 
@@ -31,7 +32,11 @@ Ordered by how much they change the app's shape, not by priority.
 
 ## 1. A human step between the agent and GitHub
 
-**Requested 2026-08-22.**
+**Requested 2026-08-22.** **Built for 0.3.0:** [corrections.md](corrections.md)
+§5–§6. Every job now stops in Jobs under Awaiting Review, and CCwiki pushes
+and opens the draft only after Open Draft PR. Item 2 below, the host page's
+definition beside the claim, is not built (corrections §14). What follows is
+the request as it stood.
 
 Today a job runs to completion and the first time you see its work is in a PR on
 github.com. The asked-for shape is:
@@ -64,9 +69,10 @@ Design notes already settled by the current build:
 - The worktree is still there at that point (the runner only prunes on success),
   so "edit locally" means editing files in the worktree — no staging area to
   invent.
-- `DiffGuard` (specified in [ingestion.md](ingestion.md) §4, not yet built) is
-  the machine half of this review; the human half is the pane. Build the guard
-  first: it turns "read this whole diff" into "read these two flagged lines".
+- `DiffGuard` (specified in [ingestion.md](ingestion.md) §4, built for 0.3.0:
+  [corrections.md](corrections.md) §6.2) is the machine half of this review;
+  the human half is the pane. It turns "read this whole diff" into "read these
+  two flagged lines".
 
 ## 2. A better ingestion pipeline
 
@@ -106,6 +112,11 @@ Cheap wins available now, before any restructuring:
   — see [relations.md](relations.md).)
 
 ## 3. Correcting a page
+
+**Built for 0.3.0:** [corrections.md](corrections.md). Edit Page…, Describe a
+Correction… and Open an Issue About This Page…, from the Wiki menu, the
+toolbar and the reader's context menu. The read-only "check this page for
+errors" pass below is not built.
 
 **Requested 2026-08-22:** *"allow a user to edit/correct a page either by
 themselves or with the help of an LLM to point out errors. Just having an error
@@ -171,12 +182,14 @@ the list for a real reading task. "The data is a graph" is not one.
 ## 5. Smaller things
 
 - **`DiffGuard`** — the mechanical half of §1, specified in
-  [ingestion.md](ingestion.md) §4 and not yet built.
+  [ingestion.md](ingestion.md) §4. **Built for 0.3.0:**
+  [corrections.md](corrections.md) §6.2.
 - **Job history across launches.** **Done 2026-09-26:** a `JobRecord` is
   written beside each transcript on every state change and the list is
-  rebuilt from them at launch. The transcript itself is not re-parsed into
-  the log pane; that is the remaining half.
-- **A second job kind needs a job *type*.** `IngestJob` is currently named for
-  the only kind there is. §3 is the moment to generalize it.
+  rebuilt from them at launch. **Done for 0.3.0:** the first time a restored
+  job is shown, its transcript is replayed into the log pane.
+- **A second job kind needs a job *type*.** **Done for 0.3.0:** `IngestJob`
+  became `Job`, with a `JobKind` of ingestion, correction or edit
+  ([corrections.md](corrections.md) §4).
 - **Reference PDFs.** The library holds what you drop; it could also cache the
   PDF for any reference page you open, and show it in a tab beside the page.

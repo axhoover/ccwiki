@@ -172,4 +172,79 @@ struct ReaderContextMenuTests {
         #expect(ReaderContextTarget.indexAfterOpenLink(in: menu) == nil)
         #expect(ReaderContextTarget.indexAfterOpenLink(in: []) == nil)
     }
+
+    // MARK: Corrections (plans/corrections.md §3.3, §9)
+
+    private static func selection(text: String?) -> ReaderSelection {
+        ReaderSelection(
+            renderedLines: 4..<6, text: text, heading: nil, path: pagePath, revision: "ab81f02")
+    }
+
+    private static func titles(_ group: [ReaderContextTarget.CorrectionEntry]) -> [String] {
+        group.compactMap { entry -> String? in
+            if case .item(let title, _) = entry { return title }
+            return nil
+        }
+    }
+
+    @Test("with a passage, the corrections group says Passage")
+    func passageGroup() {
+        let group = ReaderContextTarget.correctionGroup(
+            available: true, selection: Self.selection(text: "a passage"))
+        #expect(Self.titles(group) == [
+            "Edit This Passage…",
+            "Describe a Correction…",
+            "Open an Issue About This Passage…",
+        ])
+    }
+
+    @Test("with a pointer or nothing, it says Page")
+    func pageGroup() {
+        let page = [
+            "Edit This Page…",
+            "Describe a Correction…",
+            "Open an Issue About This Page…",
+        ]
+        let pointer = ReaderContextTarget.correctionGroup(
+            available: true, selection: Self.selection(text: nil))
+        #expect(Self.titles(pointer) == page)
+        #expect(Self.titles(ReaderContextTarget.correctionGroup(available: true, selection: nil)) == page)
+    }
+
+    @Test("the group follows a separator, and each item names its route")
+    func groupShape() {
+        let group = ReaderContextTarget.correctionGroup(available: true, selection: nil)
+        #expect(group.first == .separator)
+        #expect(group.dropFirst().allSatisfy { $0 != .separator })
+        let routes = group.compactMap { entry -> CorrectionRoute? in
+            if case .item(_, let route) = entry { return route }
+            return nil
+        }
+        #expect(routes == [.edit, .describe, .issue])
+    }
+
+    @Test("there are no items on a folder or the app's own pages")
+    func noGroup() {
+        #expect(ReaderContextTarget.correctionGroup(available: false, selection: nil).isEmpty)
+        #expect(ReaderContextTarget.correctionGroup(
+            available: false, selection: Self.selection(text: "a passage")).isEmpty)
+    }
+
+    @Test("the bridge message carries the selection after the link")
+    func readsSelection() {
+        let message: [String: Any] = [
+            "type": "contextTarget",
+            "tex": NSNull(),
+            "algorithm": NSNull(),
+            "algorithmExpanded": NSNull(),
+            "link": Self.pageLink,
+            "selection": [
+                "start": 4, "end": 6, "text": NSNull(),
+                "heading": NSNull(), "path": Self.pagePath, "revision": "ab81f02",
+            ] as [String: Any],
+        ]
+        let target = ReaderContextTarget(message: message)
+        #expect(target == ReaderContextTarget(link: Self.pageLink, selection: Self.selection(text: nil)))
+        #expect(target.selection?.isPassage == false)
+    }
 }

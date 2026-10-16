@@ -50,6 +50,14 @@ struct RootView: View {
         .sheet(isPresented: $session.syncLogPresented) {
             SyncLogView()
         }
+        // Describe a Correction and Open an Issue, about this window's page
+        // (plans/corrections.md §8).
+        .sheet(item: $session.correctionSheet) { request in
+            switch request.kind {
+            case .describe: CorrectionSheet(request: request)
+            case .issue: IssueSheet(request: request)
+            }
+        }
         // The whole reader is a drop target: when you have the paper open, the
         // natural gesture is to drag it onto the wiki, not to go looking for a
         // form. Not while an ingest sheet is up, in any window: the sheet
@@ -74,6 +82,14 @@ struct RootView: View {
         // hands it to `ReaderSession.handleOpenURL`.
         .onChange(of: model.settingsRequests) { _, _ in
             openSettings()
+        }
+        // An editor asked for by AppKit or async code (corrections §7.2).
+        // Every reader window hears it; the first to take the request opens
+        // the editor, and the others find nil.
+        .onChange(of: model.editorWindowRequestCount) { _, _ in
+            if let target = model.takeEditorRequest() {
+                openWindow(id: CCwikiApp.editorWindowID, value: target)
+            }
         }
         .focusedSceneValue(\.searchAction, FindAction { session.searchPresented = true })
     }
@@ -128,12 +144,30 @@ struct RootView: View {
             .help("Sync with GitHub (⌘R)")
             .accessibilityLabel("Sync with GitHub")
 
+            // Edit the page, describe a correction, or open an issue
+            // (corrections §9), before the inspector toggle.
+            Menu {
+                Button("Edit Page…") { beginCorrection(.edit) }
+                Button("Describe a Correction…") { beginCorrection(.describe) }
+                Button("Open an Issue About This Page…") { beginCorrection(.issue) }
+            } label: {
+                Image(systemName: "square.and.pencil")
+            }
+            .disabled(!session.canCorrectCurrentPage)
+            .help("Edit this page, describe a correction, or open an issue")
+            .accessibilityLabel("Correct This Page")
+
             Button { session.showInspector.toggle() } label: {
                 Image(systemName: "sidebar.right")
             }
             .help("Toggle inspector (⌥⌘I)")
             .accessibilityLabel("Toggle Inspector")
         }
+    }
+
+    /// From the toolbar, which carries whatever is selected on the page.
+    private func beginCorrection(_ route: CorrectionRoute) {
+        Task { await session.beginCorrection(route) }
     }
 
     // MARK: Ingest
@@ -161,12 +195,19 @@ struct RootView: View {
                     .foregroundStyle(.tint)
                 Text("Ingest this paper")
                     .font(Theme.Fonts.emptyTitle)
-                Text("CCwiki will run an agent in a worktree and open a draft PR.")
+                Text("CCwiki will run an agent in a worktree and show you its changes "
+                    + "before opening a draft PR.")
                     .font(Theme.Fonts.meta)
                     .foregroundStyle(.secondary)
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// The oldest job that waits for review, which the status bar's count
+    /// opens Jobs on.
+    private var firstAwaitingReview: String? {
+        model.jobs.last { $0.state == .awaitingReview && !$0.isUntouchedEdit }?.id
     }
 
     private func acceptDroppedPDF(_ providers: [NSItemProvider]) -> Bool {
@@ -273,6 +314,19 @@ struct RootView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Show the jobs window (⇧⌘J)")
+                }
+                // The same in every window, like the job count (corrections
+                // §6.6, §17): work that waits for a person.
+                if model.jobCenter.reviewCount > 0 {
+                    Button {
+                        model.requestJobsWindow(selecting: firstAwaitingReview)
+                    } label: {
+                        Text("\(model.jobCenter.reviewCount) awaiting review")
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Review the changes in the jobs window")
                 }
                 if !model.warnings.isEmpty {
                     // Warnings are unique (`AppModel.warn`), so the text is a

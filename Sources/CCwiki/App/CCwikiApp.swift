@@ -57,6 +57,28 @@ struct CCwikiApp: App {
         // open a window with no paper. Only Show Paper opens one.
         .commandsRemoved()
 
+        // An editor gets a window of its own, one per file of a job, as a
+        // document does (plans/corrections.md §7.2), restored with the job
+        // it edits. After the reader's group, for the reason the paper's is.
+        WindowGroup("Edit Page", id: CCwikiApp.editorWindowID, for: EditorTarget.self) { $target in
+            EditorWindow(target: target)
+                .environment(model)
+                // Editors tab with editors, never with readers (§17).
+                .background {
+                    WindowReader { $0.tabbingIdentifier = EditorWindow.tabbingIdentifier }
+                }
+                // Restored with no reader window, an editor still needs git,
+                // and a quit with unsaved text still has to ask (§17).
+                .onAppear { appDelegate.model = model }
+                .task { await model.launchIfNeeded() }
+        }
+        .defaultSize(width: Theme.editorDefaultWidth, height: Theme.editorDefaultHeight)
+        .windowResizability(.contentMinSize)
+        // Never for a ccwiki:// link or a PDF: those belong to a reader.
+        .handlesExternalEvents(matching: [])
+        // Nor from File ▸ New, which would open an editor with no file.
+        .commandsRemoved()
+
         // Jobs get their own window rather than a fourth pane: the thing you
         // actually want is to watch a job run while reading the page it is
         // going to edit. Never a tab of anything (reader-comforts §1.8).
@@ -64,8 +86,13 @@ struct CCwikiApp: App {
             JobsView()
                 .environment(model)
                 .background { WindowReader { $0.tabbingMode = .disallowed } }
+                // A review restored with no reader window still needs git,
+                // and a quit with a publishing job still has to ask
+                // (corrections §17).
+                .onAppear { appDelegate.model = model }
+                .task { await model.launchIfNeeded() }
         }
-        .defaultSize(width: 1000, height: 640)
+        .defaultSize(width: Theme.jobsDefaultWidth, height: Theme.jobsDefaultHeight)
         .keyboardShortcut("j", modifiers: [.command, .shift])
 
         // The Relations Explorer, in a window of its own for the same reason:
@@ -87,6 +114,7 @@ struct CCwikiApp: App {
     }
 
     static let jobsWindowID = "ccwiki.jobs"
+    static let editorWindowID = "ccwiki.editor"
     static let explorerWindowID = "ccwiki.relations-explorer"
     static let mainWindowID = "ccwiki.main"
     static let paperWindowID = "ccwiki.paper"
@@ -94,31 +122,41 @@ struct CCwikiApp: App {
 
 /// The one AppKit hook SwiftUI does not offer: a say in whether the app quits.
 ///
-/// An ingestion job is a `claude` process with `node` children, and nothing
-/// but this stops them when the app goes away. Left alone they keep working
-/// in the worktree and can push and open a PR nobody is watching, and the
-/// next launch offers to prune a worktree they are still writing to.
+/// An ingestion or correction job is a `claude` process with `node`
+/// children, and nothing but this stops them when the app goes away. Left
+/// alone they keep working in the worktree, and the next launch offers to
+/// prune a worktree they are still writing to. A job awaiting review is not
+/// running anything, so a quit never asks about it, and it survives the
+/// relaunch (plans/corrections.md §4.3).
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var model: AppModel?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model, model.activeJobCount > 0 else { return .terminateNow }
-        let count = model.activeJobCount
+        guard let model else { return .terminateNow }
 
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = count == 1
-            ? "Quit and stop the running job?"
-            : "Quit and stop \(count) running jobs?"
-        alert.informativeText = "The agent will be stopped before it opens a pull request. "
-            + "Its worktree and transcript are kept, so you can inspect or prune them later."
-        alert.addButton(withTitle: count == 1 ? "Stop Job and Quit" : "Stop Jobs and Quit")
-        alert.addButton(withTitle: "Don't Quit")
+        // Agents are stopped; a publish is interrupted and goes back to
+        // review. Counted apart, because they lose different things.
+        let publishing = model.jobCenter.publishingCount
+        let agents = model.activeJobCount - publishing
+        if let wording = StopJobsWording.make(
+            agents: agents, publishing: publishing, action: "quit", verb: "Quit",
+            agentsMessage: agents == 1
+                ? "Quit and stop the running job?"
+                : "Quit and stop \(agents) running jobs?") {
+            guard wording.confirm() else { return .terminateCancel }
+            model.cancelActiveJobs()
+        }
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
-        model.cancelActiveJobs()
-        return .terminateNow
+        // Text typed into an editor is saved before the app goes. SwiftUI
+        // does not reliably run `onDisappear` during termination, so this is
+        // the only dependable save (corrections §7.5).
+        guard model.hasUnsavedEdits else { return .terminateNow }
+        Task { @MainActor in
+            await model.flushAllEditors()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -148,6 +186,10 @@ struct CCwikiCommands: Commands {
     @FocusedValue(\.searchAction) private var searchAction
     /// Set while a paper window is key: the text-size items zoom the PDF.
     @FocusedValue(\.paperZoom) private var paperZoom
+    /// Review Changes, from an editor window, and Open Draft PR, from the
+    /// Jobs window (plans/corrections.md §9). Nil elsewhere.
+    @FocusedValue(\.reviewChangesAction) private var reviewChangesAction
+    @FocusedValue(\.openDraftPRAction) private var openDraftPRAction
     @FocusedValue(\.proofCopyAction) private var proofCopyAction
     @Environment(\.openWindow) private var openWindow
 
@@ -378,6 +420,21 @@ struct CCwikiCommands: Commands {
 
             Divider()
 
+            // Correcting the page being read (plans/corrections.md §9). The
+            // titles stay fixed; each carries whatever is selected. ⌥⌘E:
+            // ⌘E is Use Selection for Find, ⇧⌘E the Relations Explorer.
+            Button("Edit Page…") { beginCorrection(.edit) }
+                .keyboardShortcut("e", modifiers: [.command, .option])
+                .disabled(session?.canCorrectCurrentPage != true)
+
+            Button("Describe a Correction…") { beginCorrection(.describe) }
+                .disabled(session?.canCorrectCurrentPage != true)
+
+            Button("Open an Issue About This Page…") { beginCorrection(.issue) }
+                .disabled(session?.canCorrectCurrentPage != true)
+
+            Divider()
+
             Button("Reveal Page in Finder") {
                 guard let model, let page = session?.currentPage else { return }
                 NSWorkspace.shared.activateFileViewerSelecting(
@@ -399,6 +456,67 @@ struct CCwikiCommands: Commands {
 
             Button("Show Jobs") { openWindow(id: CCwikiApp.jobsWindowID) }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
+
+            Divider()
+
+            // ⌘↩, only in an editor window: elsewhere it is a sheet's own
+            // default button (corrections §9).
+            Button("Review Changes") { reviewChangesAction?.perform() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(reviewChangesAction?.isEnabled != true)
+
+            // No shortcut: Review Changes brings Jobs forward on the job, so
+            // two presses from the editor would publish.
+            Button("Open Draft PR") { openDraftPRAction?.perform() }
+                .disabled(openDraftPRAction?.isEnabled != true)
         }
+    }
+
+    /// A correction of the key reader's page, which carries what is selected
+    /// on it.
+    private func beginCorrection(_ route: CorrectionRoute) {
+        guard let session else { return }
+        Task { await session.beginCorrection(route) }
+    }
+}
+
+/// A command a window offers the Jobs menu: Review Changes from an editor,
+/// Open Draft PR from the Jobs window (plans/corrections.md §9). Published
+/// with `focusedSceneValue`; the item is disabled where none is.
+struct JobCommandAction: Equatable {
+    /// False where the command applies but cannot run now, as Open Draft
+    /// PR with a blocking finding.
+    let isEnabled: Bool
+    let perform: () -> Void
+    private let id = UUID()
+
+    init(isEnabled: Bool = true, perform: @escaping () -> Void) {
+        self.isEnabled = isEnabled
+        self.perform = perform
+    }
+
+    static func == (lhs: JobCommandAction, rhs: JobCommandAction) -> Bool {
+        lhs.id == rhs.id && lhs.isEnabled == rhs.isEnabled
+    }
+}
+
+// `@Entry` on a FocusedValues property is macOS 15; this is the macOS 14 form.
+private struct ReviewChangesActionKey: FocusedValueKey {
+    typealias Value = JobCommandAction
+}
+
+private struct OpenDraftPRActionKey: FocusedValueKey {
+    typealias Value = JobCommandAction
+}
+
+extension FocusedValues {
+    var reviewChangesAction: JobCommandAction? {
+        get { self[ReviewChangesActionKey.self] }
+        set { self[ReviewChangesActionKey.self] = newValue }
+    }
+
+    var openDraftPRAction: JobCommandAction? {
+        get { self[OpenDraftPRActionKey.self] }
+        set { self[OpenDraftPRActionKey.self] = newValue }
     }
 }

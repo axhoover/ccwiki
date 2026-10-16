@@ -56,7 +56,19 @@ silently rendering garbage.
 pseudocode.js resolves its math backend from the global `katex` symbol and calls
 `renderToString` with **no options**, so macros arrive by monkey-patching —
 exactly as the site's own plugin does. Load order is therefore mandatory:
-`katex.min.js` → `pseudocode.js` → `ccwiki.js`.
+`katex.min.js` → `pseudocode.js` → markdown-it and its plugins →
+`github-slugger.umd.js` → `ccwiki-markdown.js` → `ccwiki.js`.
+
+**Two files of our own.** `ccwiki-markdown.js` is the Markdown half: the
+markdown-it instance with the site's math, wikilinks, heading ids and
+callouts, the source-line stamps (below), and the review's blocks. It touches
+no DOM, wraps itself as `(function (global) {…})(typeof window !== "undefined"
+? window : this)`, and defines `CCwikiMarkdown = { create, createPreview,
+reviewEntries, reviewFrontmatter }`. That is what lets JavaScriptCore load it without a web view,
+so `SourceStampTests` and `ReviewEntriesTests` run it in Swift tests, beside
+the vendored bundles (with an `atob` shim, which markdown-it's entity tables
+need and a bare `JSContext` may not have). `ccwiki.js` has everything that
+touches the document and calls `CCwikiMarkdown.create`.
 
 ### KaTeX fonts: the directory layout is load-bearing
 
@@ -216,6 +228,78 @@ on the order. No macro's body uses another and none takes arguments (all
 the app's output is the site's. If a body ever uses another macro, the app
 still writes it out in full, where the site's single pass may not; a macro
 with arguments would be expanded wrongly on both sides.
+
+### Source lines
+
+A correction carries the lines of the file a passage came from
+([corrections.md](corrections.md) §3). markdown-it gives every block token a
+`map`, `[first, end)`, 0-based in the markdown it was handed: the
+`RenderRequest`'s, which is the page body with, on a reduction or barrier
+page, the relation-meta line spliced under the H1. A core rule,
+`ccwiki_source_lines`, pushed after `ccwiki_callouts`, stamps each block
+(every token with a `map` that is a block and not a closing tag) as
+`data-source-lines="first-end"`.
+
+- Display math and tables build their own markup, so their renderers write
+  the attribute: on `div.math-display` and on `div.table-scroll`.
+- `mathBlock`'s map is set from `state.line`, so a block's lines end on its
+  closing `$$`. An unclosed block runs to the end of its container, and
+  consumes its last line: it used to parse that line again, and, as the last
+  line of a page, to throw "block rule didn't increment state.line".
+- Pseudocode takes the range as `ccwiki-lines`, never a `data-` attribute,
+  which `pseudocode.renderElement` would copy into its options;
+  `renderPseudocode` moves it onto the `.pseudocode-container` (or the
+  `pre.pseudocode-error`) as `data-source-lines`.
+- An `html_block` carries its map, but raw HTML has nowhere to show it.
+
+`SourceLineMap` (Swift) maps a rendered range to the file: past the
+frontmatter, and around the spliced lines, which map to the frontmatter they
+are made from. `SourceStampTests` checks every kind of block against it.
+markdown-it counts the blank line after a list into the list and its last
+item, so `CorrectionTarget` drops blank lines at either end of a range before
+it quotes the file or opens the editor there.
+
+**Reading a selection.** `CCwiki.selectionSource()` returns a JSON string,
+`"null"` when nothing on the page is selected: the union of the lines of the
+blocks the selection's first and last selected text sit in, its text through
+the same `selectionText(range)` as ⌘C (each formula as `$…$` or `$$…$$`), the
+last heading at or before it, and the page's `path` and `revision`, which
+arrived with the render payload. A triple-click ends its range at the start
+of the next block; that block is not part of the passage.
+
+**The right-click.** On a secondary click, WebKit selects the word under the
+pointer before it dispatches `contextmenu`. A capture-phase `mousedown`
+listener of its own, for `button === 2` or `ctrlKey`, records the passage
+first, if the pointer is inside one of the selection's client rects. The
+`contextmenu` listener sends it as `contextTarget`'s `selection`, or else the
+block under the pointer with `text: null`: a pointer, which the menu calls
+the Page. The message's keys are `type, tex, algorithm, algorithmExpanded,
+link, selection`.
+
+**The editor's preview** follows the cursor with
+`CCwiki.revealSourceLines(start, end, mark)`: the innermost block that
+overlaps the range scrolls to the middle, and with `mark` it is outlined for
+1.2 s (`.source-reveal`).
+
+### The review
+
+`CCwiki.renderReview(payload)` shows a change the way pages are shown
+(corrections §6.3). `CCwikiMarkdown.reviewEntries(md, file)`, DOM-free,
+parses each file's old and new body and takes the top-level blocks from
+their maps: the old blocks a hunk overlaps are `removed`, the new ones
+`added`, one unchanged block either side is `context`, and every other run
+of unchanged blocks one `gap`. `ccwiki.js` lays them out, one `section` per
+file, each entry a `div.review-entry.<kind>` with a `data-entry-id`, the
+frontmatter as signed source lines (`CCwikiMarkdown.reviewFrontmatter`; a
+`gap` row, unchanged lines left out, is a caption with no sign), and
+DiffGuard's flags as captions above the entries they meet. Added and removed entries carry Before and After in
+the gutter and `role="insertion"`/`"deletion"`, so they differ by more than
+colour. A link to a page the change adds (`kind: "new"`) is `a.new`: styled
+as a link, titled "Added by this change", going nowhere.
+`CCwiki.scrollToReviewEntry(id)` takes an entry's id, a file's id or path, or
+a finding's id, `<rule>:<path>:<line>`, whose line finds its entry.
+`WebController` keeps the last review's JSON and sends it whenever the shell
+says `ready`.
 
 ## 4. Serving content: a custom scheme, not `file://`
 

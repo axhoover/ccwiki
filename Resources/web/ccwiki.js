@@ -15,6 +15,11 @@
  * Everything mirrors the site's own pipeline (quartz.config.ts): remark-math's
  * delimiter semantics, remark-gfm, smartypants, rehype-slug heading ids, and
  * the patched pseudocode.js that understands `\algname{...}`.
+ *
+ * The Markdown half, which touches no DOM, is `ccwiki-markdown.js`, loaded
+ * just before this file. This one has everything that touches the document:
+ * rendering into it, pseudocode, copying, the context menu, link previews,
+ * the selection a correction starts from, and the review of a change.
  */
 (function (global) {
   "use strict";
@@ -27,369 +32,17 @@
     if (bridge) { try { bridge.postMessage(message); } catch (e) { /* no-op */ } }
   }
 
-  // ================================================================= math ==
-  // Ports micromark-extension-math@3.0.0, which is what remark-math@6 uses.
-  // The quirks are deliberate: reproducing the site beats "fixing" it.
+  // The Markdown itself (the math, wikilinks, heading ids, callouts and
+  // the source line of every block) is `ccwiki-markdown.js`, which touches
+  // no DOM, so it can be tested without a web view. This file keeps
+  // everything that touches the document.
+  var markdownLibrary = global.CCwikiMarkdown;
 
-  function mathInline(state, silent) {
-    var src = state.src, start = state.pos, max = state.posMax;
-    if (src.charCodeAt(start) !== 0x24 /* $ */) return false;
-
-    // micromark's `previous` guard: the preceding character may not be an
-    // unescaped `$`, which is what stops `$$` block fences being eaten here.
-    if (start > 0 && src.charCodeAt(start - 1) === 0x24) {
-      var backslashes = 0, k = start - 2;
-      while (k >= 0 && src.charCodeAt(k) === 0x5c) { backslashes++; k--; }
-      if (backslashes % 2 === 0) return false;
-    }
-
-    var pos = start;
-    while (pos < max && src.charCodeAt(pos) === 0x24) pos++;
-    var sizeOpen = pos - start, contentStart = pos;
-
-    while (pos < max) {
-      if (src.charCodeAt(pos) !== 0x24) { pos++; continue; }
-      var runStart = pos;
-      while (pos < max && src.charCodeAt(pos) === 0x24) pos++;
-      if (pos - runStart !== sizeOpen) continue;  // wrong length: demote to data
-
-      if (!silent) {
-        var content = src.slice(contentStart, runStart);
-        // Padding: one space/EOL comes off each end when both are present.
-        if (/^[ \n]/.test(content) && /[ \n]$/.test(content) && /[^ \n]/.test(content)) {
-          content = content.slice(1, -1);
-        }
-        var token = state.push("math_inline", "math", 0);
-        token.markup = "$".repeat(sizeOpen);
-        token.content = content;
-      }
-      state.pos = pos;
-      return true;
-    }
-    return false;
-  }
-
-  function mathBlock(state, startLine, endLine, silent) {
-    var pos = state.bMarks[startLine] + state.tShift[startLine];
-    var max = state.eMarks[startLine];
-    if (state.sCount[startLine] - state.blkIndent >= 4) return false;
-    if (pos + 1 >= max) return false;
-    if (state.src.charCodeAt(pos) !== 0x24) return false;
-
-    var open = pos;
-    while (pos < max && state.src.charCodeAt(pos) === 0x24) pos++;
-    var sizeOpen = pos - open;
-    if (sizeOpen < 2) return false;                       // `$` alone is inline
-
-    var meta = state.src.slice(pos, max).trim();
-    if (meta.indexOf("$") >= 0) return false;
-    if (silent) return true;
-
-    var nextLine = startLine, haveEnd = false;
-    while (nextLine + 1 < endLine) {
-      nextLine++;
-      var p = state.bMarks[nextLine] + state.tShift[nextLine];
-      var m = state.eMarks[nextLine];
-      if (p < m && state.sCount[nextLine] < state.blkIndent) break;
-      if (state.src.charCodeAt(p) !== 0x24) continue;
-      if (state.sCount[nextLine] - state.blkIndent >= 4) continue;
-      var q = p;
-      while (q < m && state.src.charCodeAt(q) === 0x24) q++;
-      if (q - p < sizeOpen) continue;
-      if (state.skipSpaces(q) < m) continue;
-      haveEnd = true;
-      break;
-    }
-
-    var body = state.getLines(startLine + 1, haveEnd ? nextLine : nextLine + 1,
-                              state.blkIndent, false);
-    var blockToken = state.push("math_block", "math", 0);
-    blockToken.block = true;
-    blockToken.markup = "$".repeat(sizeOpen);
-    blockToken.content = body.replace(/\n$/, "");
-    blockToken.map = [startLine, nextLine];
-    state.line = haveEnd ? nextLine + 1 : nextLine;
-    return true;
-  }
-
-  // ============================================================ wikilinks ==
-  // Same grammar as quartz/plugins/transformers/ofm.ts:123.
-
-  var WIKILINK = /^!?\[\[([^\[\]\|\#\\]+)?(#+[^\[\]\|\#\\]+)?(\\?\|[^\[\]\#]*)?\]\]/;
-
-  function wikilink(state, silent) {
-    var c = state.src.charCodeAt(state.pos);
-    if (c !== 0x5b /* [ */ && c !== 0x21 /* ! */) return false;
-
-    var match = WIKILINK.exec(state.src.slice(state.pos, state.posMax));
-    if (!match) return false;
-
-    if (!silent) {
-      var token = state.push("wikilink", "", 0);
-      token.content = match[0];
-      token.meta = {
-        raw: match[0],
-        target: (match[1] || "").trim(),
-        anchor: (match[2] || "").trim(),
-        alias: match[3] ? match[3].replace(/^\\?\|/, "").trim() : null,
-        embed: match[0].charAt(0) === "!",
-      };
-    }
-    state.pos += match[0].length;
-    return true;
-  }
-
-  // ============================================================= headings ==
-  // rehype-slug assigns heading ids with a per-document *deduplicating*
-  // GithubSlugger, so a second `## Syntax` becomes `syntax-1`. Wikilink
-  // anchors use the non-deduplicating variant and therefore can only ever
-  // address the first — a real Quartz limitation we reproduce rather than fix.
-
-  function headingPlainText(inlineToken) {
-    var out = "";
-    (inlineToken.children || []).forEach(function (child) {
-      if (child.type === "text" || child.type === "code_inline") {
-        out += child.content;
-      } else if (child.type === "math_inline") {
-        // rehype-slug runs before rehype-katex, so the *source* is what feeds
-        // the anchor — minus the `$` delimiters, which it strips anyway.
-        out += child.content;
-      } else if (child.type === "wikilink") {
-        out += child.meta.alias || child.meta.target;
-      }
-    });
-    return out;
-  }
-
-  function headingIds(md) {
-    md.core.ruler.push("ccwiki_heading_ids", function (state) {
-      var slugger = new global.GithubSlugger();
-      var toc = [];
-      var tokens = state.tokens;
-
-      for (var i = 0; i < tokens.length; i++) {
-        if (tokens[i].type !== "heading_open") continue;
-        var text = headingPlainText(tokens[i + 1]);
-        var id = slugger.slug(text);
-        tokens[i].attrSet("id", id);
-        toc.push({ level: Number(tokens[i].tag.slice(1)), text: text, id: id });
-      }
-      state.env.toc = toc;
-    });
-  }
-
-  // ============================================================= callouts ==
-  // Obsidian callouts are blockquotes whose first line is `[!type] Title`
-  // (quartz ofm.ts:147). Zero pages use them today, but the plugin is enabled
-  // site-side and agent-written pages may well start.
-
-  var CALLOUT = /^\[!([\w-]+)\]([+-]?)\s*(.*)$/;
-
-  function callouts(md) {
-    md.core.ruler.push("ccwiki_callouts", function (state) {
-      var tokens = state.tokens;
-      for (var i = 0; i < tokens.length; i++) {
-        if (tokens[i].type !== "blockquote_open") continue;
-        // blockquote_open, paragraph_open, inline, ...
-        var inline = tokens[i + 2];
-        if (!inline || inline.type !== "inline") continue;
-        var match = CALLOUT.exec(inline.content);
-        if (!match) continue;
-
-        var kind = match[1].toLowerCase();
-        var title = match[3] || (kind.charAt(0).toUpperCase() + kind.slice(1));
-
-        tokens[i].tag = "div";
-        tokens[i].attrJoin("class", "callout callout-" + kind);
-        var close = findMatching(tokens, i, "blockquote_open", "blockquote_close");
-        if (close >= 0) tokens[close].tag = "div";
-
-        // Replace the marker paragraph with the styled title.
-        tokens[i + 1].tag = "div";
-        tokens[i + 1].attrJoin("class", "callout-title");
-        tokens[i + 3].tag = "div";
-        inline.content = title;
-        inline.children = [Object.assign(new state.Token("text", "", 0), { content: title })];
-      }
-    });
-  }
-
-  function findMatching(tokens, from, openType, closeType) {
-    var depth = 0;
-    for (var i = from; i < tokens.length; i++) {
-      if (tokens[i].type === openType) depth++;
-      else if (tokens[i].type === closeType && --depth === 0) return i;
-    }
-    return -1;
-  }
-
-  // ============================================================== factory ==
-
-  function katexOptionsFor(macros) {
-    return {
-      macros: macros || {},
-      throwOnError: false,
-      strict: "ignore",
-      output: "html",          // parity with quartz latex.ts:46 — no MathML
-      trust: false,
-      maxExpand: 1000,
-    };
-  }
-
-  function createMarkdown(macros) {
-    var katexOptions = katexOptionsFor(macros);
-
-    var md = global.markdownit({
-      // The corpus contains exactly one raw HTML block (the macros-copy anchor
-      // in Glossary/latex-macros.md) and the website renders it. With
-      // `script-src 'self'` and no 'unsafe-inline' in the CSP, markup coming
-      // out of the wiki cannot execute, so passing it through is safe and
-      // matches the site.
-      html: true,
-      linkify: true,           // remark-gfm autolink literals
-      typographer: true,       // remark-smartypants (quartz gfm.ts:24)
-      breaks: false,           // Plugin.HardLineBreaks() is not configured
-    });
-
-    if (global.markdownitFootnote) md.use(global.markdownitFootnote);
-    if (global.markdownitMark) md.use(global.markdownitMark);
-
-    // Math has to be reachable before `escape` and the emphasis scanners, or
-    // `$\mathsf{st}_{\calA}$` loses its underscores to italics.
-    md.inline.ruler.before("escape", "math_inline", mathInline);
-    md.inline.ruler.before("escape", "wikilink", wikilink);
-    md.block.ruler.before("fence", "math_block", mathBlock,
-      { alt: ["paragraph", "reference", "blockquote", "list"] });
-
-    headingIds(md);
-    callouts(md);
-
-    // Every rendered formula carries its source in `data-tex`, so ⌘C and a
-    // right-click can copy its LaTeX. KaTeX's own annotation would do it,
-    // but only with MathML output, which the site does not emit.
-    md.renderer.rules.math_inline = function (tokens, idx) {
-      try {
-        return '<span class="math" data-tex="' + md.utils.escapeHtml(tokens[idx].content) + '">' +
-          global.katex.renderToString(tokens[idx].content, katexOptions) + "</span>";
-      } catch (e) {
-        return '<code class="math-error">' + md.utils.escapeHtml(tokens[idx].content) + "</code>";
-      }
-    };
-
-    md.renderer.rules.math_block = function (tokens, idx) {
-      try {
-        var opts = Object.assign({}, katexOptions, { displayMode: true });
-        return '<div class="math-display" data-tex="' + md.utils.escapeHtml(tokens[idx].content) + '">' +
-          global.katex.renderToString(tokens[idx].content, opts) + "</div>\n";
-      } catch (e) {
-        return '<pre class="math-error">' + md.utils.escapeHtml(tokens[idx].content) + "</pre>\n";
-      }
-    };
-
-    md.renderer.rules.wikilink = function (tokens, idx, options, env) {
-      var meta = tokens[idx].meta;
-      var resolved = (env.links || {})[meta.raw];
-      var label = displayText(meta);
-
-      // Swift resolved every link before the markdown crossed the bridge; a
-      // miss here means no page, alias or folder claims that slug. The website
-      // renders those as ordinary links to nowhere. Showing them as broken is
-      // the one deliberate divergence: in an app you use to *edit* the wiki,
-      // a dead link is information.
-      if (!resolved || !resolved.href) {
-        return '<a class="broken" title="Nothing resolves to \u201c' +
-          md.utils.escapeHtml(meta.target || meta.anchor) + '\u201d">' +
-          md.utils.escapeHtml(label) + "</a>";
-      }
-      if (meta.embed && resolved.isImage) {
-        return '<img src="' + md.utils.escapeHtml(resolved.href) + '" alt="' +
-          md.utils.escapeHtml(label) + '" loading="lazy">';
-      }
-      if (resolved.external) {
-        return '<a class="external" href="' + md.utils.escapeHtml(resolved.href) +
-          '">' + md.utils.escapeHtml(label) + "</a>";
-      }
-      return '<a class="internal' + (resolved.kind === "folder" ? " folder" : "") +
-        '" href="' + md.utils.escapeHtml(resolved.href) + '">' +
-        md.utils.escapeHtml(label) + "</a>";
-    };
-
-    // Markdown links. The wiki writes `[text](slug#anchor)` wherever the text
-    // holds math, because a wikilink's alias cannot (remark-math splits it
-    // first). Swift resolved each destination like a wikilink and keyed it by
-    // the destination as parsed; markdown-it keeps only the normalized href,
-    // so normalizeLink remembers which destination each href came from.
-    var linkDestinations = Object.create(null);
-    var normalizeLink = md.normalizeLink;
-    md.normalizeLink = function (url) {
-      var href = normalizeLink.call(md, url);
-      linkDestinations[href] = url;
-      return href;
-    };
-
-    var defaultLinkOpen = md.renderer.rules.link_open || function (tokens, idx, options, env, self) {
-      return self.renderToken(tokens, idx, options);
-    };
-    md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
-      var token = tokens[idx];
-      var href = token.attrGet("href") || "";
-      // URLs and same-page anchors are the click handler's; a reference-style
-      // link names no destination Swift has seen.
-      if (!href || href.charAt(0) === "#" || /^[A-Za-z][A-Za-z0-9+.\-]*:/.test(href) ||
-          (token.meta && token.meta.label)) {
-        return defaultLinkOpen(tokens, idx, options, env, self);
-      }
-      var destination = linkDestinations[href] !== undefined ? linkDestinations[href] : href;
-      var links = env.links || {};
-      var resolved = Object.prototype.hasOwnProperty.call(links, destination) ? links[destination] : null;
-      // A miss is a dead link, shown as a dead wikilink is.
-      if (!resolved || !resolved.href) {
-        token.attrs = [["class", "broken"],
-          ["title", "Nothing resolves to \u201c" + destination + "\u201d"]];
-      } else {
-        token.attrSet("href", resolved.href);
-        token.attrJoin("class", resolved.external ? "external"
-          : "internal" + (resolved.kind === "folder" ? " folder" : ""));
-      }
-      return defaultLinkOpen(tokens, idx, options, env, self);
-    };
-
-    // Pseudocode fences are handed to pseudocode.js verbatim after render.
-    var defaultFence = md.renderer.rules.fence;
-    md.renderer.rules.fence = function (tokens, idx, options, env, self) {
-      if ((tokens[idx].info || "").trim() === "pseudocode") {
-        return '<pre class="pseudocode">' + md.utils.escapeHtml(tokens[idx].content) + "</pre>\n";
-      }
-      return defaultFence(tokens, idx, options, env, self);
-    };
-
-    // Wide tables scroll in their own box instead of widening the measure.
-    md.renderer.rules.table_open = function () { return '<div class="table-scroll"><table>\n'; };
-    md.renderer.rules.table_close = function () { return "</table></div>\n"; };
-
-    return md;
-  }
-
-  /** The renderer for link-preview cards: inline markdown and its math only.
-   *  Swift has already reduced each part to text, emphasis, code and `$…$`,
-   *  so this instance knows nothing else. `html: false` escapes anything
-   *  Swift missed rather than injecting it, and links and images are off, so
-   *  a stray `[text](url)` stays text: a card is never clicked. Same macro
-   *  table as the page, so the site's macros render in cards. */
-  function createPreviewMarkdown(macros) {
-    var katexOptions = katexOptionsFor(macros);
-    var pm = global.markdownit({ html: false, linkify: false, typographer: true });
-    pm.disable(["link", "image", "autolink"], true);
-    pm.inline.ruler.before("escape", "math_inline", mathInline);
-    pm.renderer.rules.math_inline = function (tokens, idx) {
-      try {
-        return global.katex.renderToString(tokens[idx].content, katexOptions);
-      } catch (e) {
-        return '<code class="math-error">' + pm.utils.escapeHtml(tokens[idx].content) + "</code>";
-      }
-    };
-    return pm;
-  }
+  /** Where a block came from in the Markdown: `first-end`, 0-based and
+   *  half-open, on every block `ccwiki-markdown.js` renders. Pseudocode's
+   *  arrives as `ccwiki-lines` and moves onto its box. */
+  var SOURCE_LINES = "data-source-lines";
+  var PSEUDOCODE_LINES = "ccwiki-lines";
 
   function noticeHTML(notices) {
     if (!notices || !notices.length) return "";
@@ -398,14 +51,6 @@
       return '<div class="notice notice-' + (n.level === "warning" ? "warning" : "info") +
         '">' + md.utils.escapeHtml(n.text) + "</div>";
     }).join("");
-  }
-
-  function displayText(meta) {
-    if (meta.alias) return meta.alias;
-    if (!meta.target && meta.anchor) return meta.anchor.replace(/^#+/, "");
-    // Quartz's prettyLinks default shows the last path segment.
-    var base = meta.target.split("/").pop();
-    return meta.anchor ? base + " › " + meta.anchor.replace(/^#+/, "") : base;
   }
 
   // ========================================================== post-render ==
@@ -436,6 +81,14 @@
       // none, and misaligned every later block.
       var box = document.createElement("div");
       box.className = "pseudocode-container";
+      // The block's source lines come as `ccwiki-lines`, not a data-*
+      // attribute, which renderElement would copy into its options; the box
+      // carries them as every other block does (corrections §3.2).
+      var lines = el.getAttribute(PSEUDOCODE_LINES);
+      if (lines) {
+        box.setAttribute(SOURCE_LINES, lines);
+        el.removeAttribute(PSEUDOCODE_LINES);
+      }
       el.parentNode.insertBefore(box, el);
       box.appendChild(el);
       try {
@@ -452,6 +105,7 @@
         var pre = document.createElement("pre");
         pre.className = "pseudocode-error";
         pre.textContent = "pseudocode error: " + e.message + "\n\n" + source;
+        if (lines) pre.setAttribute(SOURCE_LINES, lines);
         box.replaceWith(pre);
         return;
       }
@@ -681,8 +335,8 @@
     currentMacros = macros;
     currentMacrosKey = key;
     installKatexMacros();
-    md = createMarkdown(macros);
-    previewMarkdown = createPreviewMarkdown(macros);
+    md = markdownLibrary.create(macros);
+    previewMarkdown = markdownLibrary.createPreview(macros);
     return md;
   }
 
@@ -700,6 +354,8 @@
    *   previews : { href: {kind, title, meta, note, excerpt, label} }
    *                                (optional) a card per internal link
    *                                target, keyed by the href the link carries
+   *   revision : string            (optional) the commit the page was read
+   *                                from, returned with a selection
    * }
    */
   // Where each page was left, so Back and Forward return to the same place,
@@ -707,6 +363,11 @@
   // every page at the top again.
   var scrollPositions = {};
   var shownPath = null;
+  // What a selection reports with its lines (corrections §3.3): the commit
+  // the page was read from, and its headings' plain text by id, math as
+  // its source, as the outline has them.
+  var shownRevision = null;
+  var shownHeadings = {};
 
   function render(payload) {
     var started = Date.now();
@@ -719,6 +380,9 @@
       Object.prototype.hasOwnProperty.call(scrollPositions, payload.path)
       ? scrollPositions[payload.path] : null;
     shownPath = payload.path;
+    shownRevision = payload.revision || null;
+    shownHeadings = {};
+    shownReview = null;
     lastReportedHeading = undefined;
     dismissPreview();
     previews = payload.previews || {};
@@ -732,6 +396,7 @@
       } else {
         page.innerHTML = prefix + markdown.render(payload.markdown || "", env);
         toc = env.toc || [];
+        toc.forEach(function (heading) { shownHeadings[heading.id] = heading; });
       }
     } catch (e) {
       page.innerHTML = '<div class="notice notice-warning">Render failed: ' +
@@ -832,72 +497,294 @@
     return node;
   }
 
-  // ⌘C, Edit › Copy and the menu's own Copy all reach here. A selection with
-  // math in it is copied with each formula as its LaTeX, as plain text and
-  // as HTML, so Notes and Mail paste the LaTeX too. Anything else is left to
-  // WebKit.
-  document.addEventListener("copy", function (event) {
-    var selection = window.getSelection();
-    if (!event.clipboardData || !selection || selection.isCollapsed || !selection.rangeCount) return;
-
-    // A clone, widened to whole formulas: half a formula has no LaTeX, and
-    // moving the real selection would show.
-    var range = selection.getRangeAt(0).cloneRange();
-    var start = mathHost(range.startContainer);
-    if (start) range.setStartBefore(start);
-    var end = mathHost(range.endContainer);
-    if (end) range.setEndAfter(end);
+  /** What `range` holds, as a detached box: a clone widened to whole
+   *  formulas, since half a formula has no LaTeX, and moving the real
+   *  selection would show. */
+  function selectionScratch(range) {
+    var widened = range.cloneRange();
+    var start = mathHost(widened.startContainer);
+    if (start) widened.setStartBefore(start);
+    var end = mathHost(widened.endContainer);
+    if (end) widened.setEndAfter(end);
 
     var scratch = document.createElement("div");
     scratch.className = "copy-scratch";
     scratch.setAttribute("aria-hidden", "true");
-    scratch.appendChild(range.cloneContents());
-    // The copy buttons are not page text. Their labels are generated content,
-    // but the buttons themselves, whatever WebKit makes of their
-    // user-select: none, could still reach the copied HTML, so a selection
-    // across them is copied here, without them.
-    if (!scratch.querySelector("[data-tex], .katex, .copy-row")) return;
+    scratch.appendChild(widened.cloneContents());
+    return scratch;
+  }
+
+  /** The box as text is read from it: without the copy buttons, which are
+   *  not page text (their labels are generated content, but the buttons
+   *  themselves, whatever WebKit makes of their user-select: none, could
+   *  still reach copied HTML), with each formula as its LaTeX, and one line
+   *  per algorithm line: to innerText a <p> is a paragraph, with a blank
+   *  line after it. */
+  function prepareScratch(scratch) {
     scratch.querySelectorAll(".copy-row").forEach(function (row) { row.remove(); });
     texify(scratch);
-    // One line per algorithm line: to innerText a <p> is a paragraph, with
-    // a blank line after it.
     scratch.querySelectorAll("p.ps-line").forEach(function (line) {
       var div = document.createElement("div");
       div.className = line.className;
       while (line.firstChild) div.appendChild(line.firstChild);
       line.replaceWith(div);
     });
+  }
 
-    // Attached, because only a laid-out box has an innerText with the
-    // paragraph and line breaks the reader sees; textContent runs them
-    // together.
+  /** The box's text as the reader sees it. Attached while it is read,
+   *  because only a laid-out box has an innerText with the paragraph and
+   *  line breaks the reader sees; textContent runs them together. */
+  function scratchText(scratch) {
     document.body.appendChild(scratch);
     var text = scratch.innerText || scratch.textContent;
     scratch.remove();
+    return text;
+  }
+
+  /** The selection as the reader shows it, each formula written as `$…$`
+   *  or `$$…$$`: what ⌘C copies when there is math, and what a correction
+   *  quotes, so copying and quoting cannot drift apart (corrections §3.3). */
+  function selectionText(range) {
+    var scratch = selectionScratch(range);
+    prepareScratch(scratch);
+    return scratchText(scratch);
+  }
+
+  // ⌘C, Edit › Copy and the menu's own Copy all reach here. A selection with
+  // math in it is copied with each formula as its LaTeX, as plain text and
+  // as HTML, so Notes and Mail paste the LaTeX too. Anything else is left to
+  // WebKit; a selection across the copy buttons is copied here, without
+  // them.
+  document.addEventListener("copy", function (event) {
+    var selection = window.getSelection();
+    if (!event.clipboardData || !selection || selection.isCollapsed || !selection.rangeCount) return;
+
+    var scratch = selectionScratch(selection.getRangeAt(0));
+    if (!scratch.querySelector("[data-tex], .katex, .copy-row")) return;
+    prepareScratch(scratch);
+    var text = scratchText(scratch);
 
     event.clipboardData.setData("text/plain", text);
     event.clipboardData.setData("text/html", scratch.innerHTML);
     event.preventDefault();
   }, true);
 
+  // ========================================================== selection ==
+  // A correction starts from the page, or from a passage on it, and carries
+  // the passage's source lines, its section and its text (corrections §3).
+
+  /** The nearest block under `node` that says where it came from, inside
+   *  the page. */
+  function stampedBlock(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    var block = el && el.closest ? el.closest("[" + SOURCE_LINES + "]") : null;
+    var page = document.getElementById("page");
+    return block && page && page.contains(block) ? block : null;
+  }
+
+  /** A block's lines, `{start, end}`, 0-based and half-open. */
+  function blockLines(block) {
+    var match = /^(\d+)-(\d+)$/.exec(block.getAttribute(SOURCE_LINES) || "");
+    if (!match) return null;
+    var lines = { start: Number(match[1]), end: Number(match[2]) };
+    return lines.end > lines.start ? lines : null;
+  }
+
+  /** The section `node` is in: the last heading with an id at or before it
+   *  in document order, `{id, text, level}`, its text as the outline has
+   *  it. Null above the first. */
+  function headingBefore(node) {
+    var page = document.getElementById("page");
+    if (!page || !node) return null;
+    var headings = page.querySelectorAll("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]");
+    var found = null;
+    for (var i = 0; i < headings.length; i++) {
+      var heading = headings[i];
+      var position = heading.compareDocumentPosition(node);
+      if (heading !== node && !(position & Node.DOCUMENT_POSITION_FOLLOWING)) break;
+      found = heading;
+    }
+    if (!found) return null;
+    var known = shownHeadings[found.id];
+    return {
+      id: found.id,
+      text: known ? known.text : (found.textContent || "").trim(),
+      level: Number(found.tagName.slice(1)),
+    };
+  }
+
+  /** The text nodes the range really selects some of, in order. A
+   *  triple-click ends the range at the start of the next block, which
+   *  selects none of it, so that block is not part of the passage. */
+  function selectedTextNodes(range) {
+    var root = range.commonAncestorContainer;
+    if (root.nodeType === Node.TEXT_NODE) return [root];
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    var nodes = [];
+    while (walker.nextNode()) {
+      var node = walker.currentNode;
+      if (!range.intersectsNode(node)) continue;
+      var from = node === range.startContainer ? range.startOffset : 0;
+      var to = node === range.endContainer ? range.endOffset : node.data.length;
+      if (/\S/.test(node.data.slice(from, to))) nodes.push(node);
+    }
+    return nodes;
+  }
+
+  /** What `range` selects on the page, for a correction: the union of the
+   *  lines of the blocks it starts and ends in, its text, its section, and
+   *  the page and revision it was shown at. Null outside the page, or when
+   *  neither end is in a block with lines: raw HTML, or a notice alone. */
+  function passage(range) {
+    var page = document.getElementById("page");
+    if (!page || shownPath === null || !page.contains(range.commonAncestorContainer)) return null;
+    var nodes = selectedTextNodes(range);
+    var first = nodes.length ? nodes[0] : range.startContainer;
+    var last = nodes.length ? nodes[nodes.length - 1] : range.endContainer;
+    var startBlock = stampedBlock(first);
+    var endBlock = stampedBlock(last);
+    // A selection that starts in a notice has lines only at its end.
+    var a = startBlock ? blockLines(startBlock) : null;
+    var b = endBlock ? blockLines(endBlock) : null;
+    if (!a && !b) return null;
+    a = a || b;
+    b = b || a;
+    var text = selectionText(range).trim();
+    if (!text) return null;
+    return {
+      start: Math.min(a.start, b.start),
+      end: Math.max(a.end, b.end),
+      text: text,
+      heading: headingBefore(startBlock ? first : last),
+      path: shownPath,
+      revision: shownRevision,
+    };
+  }
+
+  /** The block under the pointer at a right-click with nothing selected:
+   *  its lines and section, and no text. A pointer, not a passage: the
+   *  correction is about the whole page, opened at this block. */
+  function pointer(target) {
+    var block = stampedBlock(target);
+    var lines = block ? blockLines(block) : null;
+    if (!lines || shownPath === null) return null;
+    return {
+      start: lines.start,
+      end: lines.end,
+      text: null,
+      heading: headingBefore(block),
+      path: shownPath,
+      revision: shownRevision,
+    };
+  }
+
+  /** The live selection, for the menu bar's and the toolbar's correction
+   *  commands, as a JSON string: Swift's `ReaderSelection(json:)` reads it.
+   *  The string "null" when nothing on the page is selected, never
+   *  undefined, which `evaluateJavaScript` cannot return. */
+  function selectionSource() {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return "null";
+    var found = null;
+    try { found = passage(selection.getRangeAt(0)); } catch (e) { found = null; }
+    return JSON.stringify(found);
+  }
+
+  // A right-click must not invent a selection. On a secondary click, WebKit
+  // selects the word under the pointer before it dispatches `contextmenu`,
+  // which is what makes Look Up "word" appear, so read there, nearly every
+  // right-click would report a one-word passage. This listener reads the
+  // selection as it was, as the button goes down: a passage only if there
+  // is one and the pointer is on it. It is a listener of its own: it returns
+  // at once for any other button, and never calls preventDefault.
+  var rightClickPassage;      // undefined: no right-click since the last menu
+
+  document.addEventListener("mousedown", function (event) {
+    if (event.button !== 2 && !event.ctrlKey) return;
+    rightClickPassage = null;
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    var range = selection.getRangeAt(0);
+    var rects = range.getClientRects();
+    for (var i = 0; i < rects.length; i++) {
+      var rect = rects[i];
+      if (event.clientX >= rect.left && event.clientX <= rect.right &&
+          event.clientY >= rect.top && event.clientY <= rect.bottom) {
+        try { rightClickPassage = passage(range); } catch (e) { rightClickPassage = null; }
+        return;
+      }
+    }
+  }, true);
+
   // Before WebKit builds the context menu, tell Swift what is under the
   // pointer: a formula's LaTeX, and an algorithm's, as written and with the
-  // macros written out; and the link, for the menu's Open Link in New Tab,
-  // in New Window and on cryptology.city. The message is sent on the same
+  // macros written out; the link, for the menu's Open Link in New Tab, in
+  // New Window and on cryptology.city; and the selection, for the
+  // corrections group: the passage the right-click was on, or else the
+  // block under the pointer, with no text. The message is sent on the same
   // connection as, and ahead of, the menu request, so it arrives first.
   document.addEventListener("contextmenu", function (event) {
     var target = event.target;
     var host = mathHost(target);
     var box = target && target.closest ? target.closest(".pseudocode-container") : null;
     var source = box ? box.getAttribute("data-source") : null;
+    var selection = rightClickPassage || null;
+    rightClickPassage = undefined;
+    if (!selection) {
+      try { selection = pointer(target); } catch (e) { selection = null; }
+    }
     post({
       type: "contextTarget",
       tex: host ? texOf(host) : null,
       algorithm: source,
       algorithmExpanded: source === null ? null : expandMacros(source, currentMacros || {}),
       link: appLink(linkAt(target)),
+      selection: selection,
     });
   }, true);
+
+  // ===================================================== source reveal ==
+  // The editor's preview follows the line being edited (corrections §7.4).
+
+  var revealTimer = null;
+
+  /** Scrolls the first block that overlaps rendered lines `[start, end)` to
+   *  the middle of the window: the innermost, so a list item rather than
+   *  its list. With `mark`, outlines the blocks briefly. */
+  function revealSourceLines(start, end, mark) {
+    var page = document.getElementById("page");
+    if (!page) return false;
+    end = Math.max(end, start + 1);
+    var overlapping = Array.prototype.filter.call(
+      page.querySelectorAll("[" + SOURCE_LINES + "]"), function (block) {
+        var lines = blockLines(block);
+        return lines && lines.start < end && start < lines.end;
+      });
+    if (!overlapping.length) return false;
+    var first = overlapping[0];
+    for (var i = 1; i < overlapping.length && first.contains(overlapping[i]); i++) {
+      first = overlapping[i];
+    }
+    first.scrollIntoView({ block: "center", behavior: "auto" });
+    if (mark) {
+      clearTimeout(revealTimer);
+      page.querySelectorAll(".source-reveal").forEach(function (block) {
+        block.classList.remove("source-reveal");
+      });
+      // The innermost blocks only: outlining a list and its item both
+      // draws two boxes around one line.
+      var marked = overlapping.filter(function (block) {
+        return !overlapping.some(function (other) {
+          return other !== block && block.contains(other);
+        });
+      });
+      marked.forEach(function (block) { block.classList.add("source-reveal"); });
+      revealTimer = setTimeout(function () {
+        marked.forEach(function (block) { block.classList.remove("source-reveal"); });
+      }, 1200);
+    }
+    return true;
+  }
 
   /** The link `node` is in, if any. */
   function linkAt(node) {
@@ -1305,16 +1192,274 @@
     return false;
   }
 
+  // =============================================================== review ==
+  // A change shown the way the reader renders pages: the blocks it changed,
+  // and nothing else (corrections §6.3). The blocks are
+  // `CCwikiMarkdown.reviewEntries`'s; this lays them out, one section per
+  // file, each entry a `div.review-entry.<kind>`.
+  //
+  // payload = {
+  //   macros : { "\\calA": "\\mathcal{A}" },
+  //   files  : [{ id, path, title, status, summary, isMarkdown, header,
+  //               frontmatter: [{kind, text}], old, new,
+  //               bodyLine: {old, new}, hunks: [{old: [a, b], new: [c, d]}],
+  //               flags: [{lines: [a, b], severity, text}], links }]
+  // }
+  //
+  // Hunk and flag lines are 0-based and half-open, in the body; `bodyLine`
+  // is the file line, 1-based, of each side's body line 0.
+
+  /** The paths of the review on screen, so a review of the same files,
+   *  shown again after a save, keeps the reader's place. */
+  var shownReview = null;
+
+  var REVIEW_STATUS = {
+    added: "New file",
+    deleted: "Deleted",
+    renamed: "Renamed",
+    modified: "Modified",
+  };
+  // Text presentation, so each takes its severity's colour.
+  var FLAG_GLYPH = { blocking: "⛔︎", warning: "⚠︎", note: "ⓘ" };
+  var FLAG_LABEL = { blocking: "Blocks the pull request", warning: "Warning", note: "Note" };
+
+  function renderReview(payload) {
+    var started = Date.now();
+    var page = document.getElementById("page");
+    payload = payload || {};
+    var files = payload.files || [];
+    var key = files.map(function (file) { return file.path; }).join("\n");
+    var keepY = shownReview === key ? window.scrollY : null;
+    if (shownPath !== null) scrollPositions[shownPath] = window.scrollY;
+    // Not a page: nothing here is a passage to correct.
+    shownPath = null;
+    shownRevision = null;
+    shownHeadings = {};
+    shownReview = key;
+    lastReportedHeading = undefined;
+    dismissPreview();
+    previews = {};
+    renderedPreviews = {};
+
+    try {
+      var markdown = ensureMarkdown(payload.macros);
+      page.innerHTML = files.length
+        ? files.map(function (file) { return reviewFileHTML(markdown, file); }).join("")
+        : '<p class="review-empty">No changes.</p>';
+    } catch (e) {
+      var message = String(e && e.message ? e.message : e);
+      page.innerHTML = '<div class="notice notice-warning">The review could not be shown: ' +
+        escapeText(message) + "</div>";
+      post({ type: "rendered", ok: false, error: message, toc: [] });
+      return;
+    }
+
+    var pseudo = { count: 0, errors: 0 };
+    if (global.pseudocode) {
+      pseudo = renderPseudocode(page);
+      groupGames(page);
+    }
+    markRelationMeta(page);
+    window.scrollTo(0, keepY !== null ? keepY : 0);
+    post({
+      type: "rendered",
+      ok: true,
+      toc: [],
+      pseudocodeBlocks: pseudo.count,
+      pseudocodeErrors: pseudo.errors,
+      ms: Date.now() - started,
+    });
+  }
+
+  function escapeText(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /** Inline markdown and math, never HTML: a title, a flag's message. */
+  function inlineText(text) {
+    if (!text) return "";
+    try {
+      return previewMarkdown.renderInline(String(text));
+    } catch (e) {
+      return escapeText(text);
+    }
+  }
+
+  function reviewFileHTML(markdown, file) {
+    var flags = file.flags || [];
+    var bodyLine = file.bodyLine || {};
+    var out = ['<section class="review-file" data-file-id="' + escapeText(file.id || "") +
+      '" data-path="' + escapeText(file.path || "") + '"' +
+      (typeof bodyLine.new === "number" ? ' data-body-line="' + bodyLine.new + '"' : "") + ">"];
+
+    // relations.json and anything else that is not a page: one line, and
+    // its lines in Source.
+    if (file.isMarkdown === false) {
+      out.push('<div class="review-nonmarkdown"><code>' + escapeText(file.path || "") + "</code>" +
+        separator() + escapeText(file.summary || "") + separator() + "Shown in Source</div>");
+      out.push(flags.map(flagHTML).join(""));
+      out.push("</section>");
+      return out.join("");
+    }
+
+    out.push('<header class="review-file-header">');
+    out.push('<div class="review-file-title">' + inlineText(file.title || file.path || "") + "</div>");
+    out.push('<div class="review-file-meta"><code>' + escapeText(file.path || "") + "</code>" +
+      separator() + escapeText(REVIEW_STATUS[file.status] || REVIEW_STATUS.modified) +
+      (file.summary ? separator() + escapeText(file.summary) : "") + "</div>");
+    // A reduction's or barrier's endpoints, each a link to its page.
+    if (file.header) {
+      out.push('<div class="review-endpoints">' +
+        markdown.renderInline(file.header, { links: file.links || {} }) + "</div>");
+    }
+    out.push("</header>");
+
+    var entries = markdownLibrary.reviewEntries(markdown, file);
+    var attached = [];
+    entries.forEach(function (entry) { attached = attached.concat(entry.flags); });
+    // A flag on no entry (one on the frontmatter, or on the file as a
+    // whole) heads the file.
+    out.push(flags.filter(function (flag) { return attached.indexOf(flag) < 0; })
+      .map(flagHTML).join(""));
+    out.push(frontmatterHTML(file.frontmatter || []));
+    out.push(entries.map(entryHTML).join(""));
+    out.push("</section>");
+    return out.join("");
+  }
+
+  function separator() {
+    return '<span class="review-separator" aria-hidden="true"> · </span>';
+  }
+
+  /** The frontmatter is YAML, not Markdown: its changed lines as source,
+   *  with a line of context, in a box at the top of the file. A gap, a run
+   *  of unchanged lines left out, is a caption, not a line of the file. */
+  function frontmatterHTML(lines) {
+    var rows = markdownLibrary.reviewFrontmatter(lines);
+    if (!rows.length) return "";
+    return '<div class="review-frontmatter">' + rows.map(function (row) {
+      if (row.kind === "gap") {
+        return '<div class="review-frontmatter-line gap">' + escapeText(row.text) + "</div>";
+      }
+      var role = row.kind === "added" ? ' role="insertion" aria-label="Added"'
+        : row.kind === "removed" ? ' role="deletion" aria-label="Removed"' : "";
+      return '<div class="review-frontmatter-line ' + row.kind + '"' + role + ">" +
+        '<span class="review-frontmatter-sign" aria-hidden="true">' + row.sign + "</span>" +
+        escapeText(row.text) + "</div>";
+    }).join("") + "</div>";
+  }
+
+  function flagHTML(flag) {
+    var severity = FLAG_GLYPH[flag.severity] ? flag.severity : "note";
+    return '<div class="review-flag ' + severity + '">' +
+      '<span class="review-flag-glyph" role="img" aria-label="' + FLAG_LABEL[severity] + '">' +
+      FLAG_GLYPH[severity] + "</span>" + inlineText(flag.text || "") + "</div>";
+  }
+
+  /** One entry, with the flags on its lines as captions above it. Added and
+   *  removed entries say so in their gutter label (app.css), so they differ
+   *  by more than colour, and to VoiceOver by their role. */
+  function entryHTML(entry) {
+    var attributes = ' class="review-entry ' + entry.kind + '" data-entry-id="' +
+      escapeText(entry.id) + '" data-side="' + entry.side + '"';
+    if (entry.fileLines) {
+      attributes += ' data-file-lines="' + entry.fileLines[0] + "-" + entry.fileLines[1] + '"';
+    }
+    if (entry.kind === "added") attributes += ' role="insertion" aria-label="Added"';
+    if (entry.kind === "removed") attributes += ' role="deletion" aria-label="Removed"';
+    var flags = entry.flags.map(flagHTML).join("");
+    if (entry.kind === "gap") {
+      return flags + "<div" + attributes + ">" + escapeText(entry.text || "") + "</div>";
+    }
+    return flags + "<div" + attributes + '><div class="review-entry-body">' + entry.html + "</div>" +
+      (entry.note ? '<div class="review-note">' + escapeText(entry.note) + "</div>" : "") +
+      "</div>";
+  }
+
+  /** Scrolls the review to `id` and outlines it briefly. `id` is an
+   *  entry's `data-entry-id`; a file's id or path; or `<rule>:<path>:<line>`,
+   *  a DiffGuard finding's id, whose 1-based line (in the new text; the old
+   *  for a deleted file) finds the entry that holds it, the frontmatter
+   *  when it is above the body, and the file when it is 0. */
+  function scrollToReviewEntry(id) {
+    var page = document.getElementById("page");
+    if (!page || id === undefined || id === null) return false;
+    var target = reviewTarget(page, String(id));
+    if (!target) return false;
+    target.scrollIntoView({ block: "center", behavior: "auto" });
+    clearTimeout(revealTimer);
+    page.querySelectorAll(".source-reveal").forEach(function (el) {
+      el.classList.remove("source-reveal");
+    });
+    target.classList.add("source-reveal");
+    revealTimer = setTimeout(function () { target.classList.remove("source-reveal"); }, 1200);
+    return true;
+  }
+
+  function reviewTarget(page, id) {
+    var entries = page.querySelectorAll(".review-entry");
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].getAttribute("data-entry-id") === id) return entries[i];
+    }
+    var sections = page.querySelectorAll("section.review-file");
+    for (var j = 0; j < sections.length; j++) {
+      if (sections[j].getAttribute("data-file-id") === id ||
+          sections[j].getAttribute("data-path") === id) return sections[j];
+    }
+    var match = /^(.*):(\d+)$/.exec(id);
+    if (!match) return null;
+    var rest = match[1];
+    var line = Number(match[2]);
+    for (var k = 0; k < sections.length; k++) {
+      var path = sections[k].getAttribute("data-path") || "";
+      var fileID = sections[k].getAttribute("data-file-id") || "";
+      if (rest === path || rest === fileID ||
+          (path && rest.slice(-(path.length + 1)) === ":" + path)) {
+        return line > 0 ? (entryAtLine(sections[k], line) || sections[k]) : sections[k];
+      }
+    }
+    return null;
+  }
+
+  /** The entry holding file line `line` on the side a finding's lines are
+   *  on, else the nearest; the frontmatter above the body. */
+  function entryAtLine(section, line) {
+    var bodyLine = Number(section.getAttribute("data-body-line"));
+    if (bodyLine && line < bodyLine) {
+      return section.querySelector(".review-frontmatter");
+    }
+    var entries = Array.prototype.slice.call(section.querySelectorAll(".review-entry"));
+    var newSide = entries.filter(function (el) { return el.getAttribute("data-side") === "new"; });
+    var candidates = newSide.length ? newSide : entries;
+    var nearest = null, distance = Infinity;
+    for (var i = 0; i < candidates.length; i++) {
+      var match = /^(\d+)-(\d+)$/.exec(candidates[i].getAttribute("data-file-lines") || "");
+      if (!match) continue;
+      var first = Number(match[1]), last = Number(match[2]);
+      if (line >= first && line <= last) return candidates[i];
+      var gap = line < first ? first - line : line - last;
+      if (gap < distance) { distance = gap; nearest = candidates[i]; }
+    }
+    return nearest;
+  }
+
   global.CCwiki = {
     render: render,
     scrollToAnchor: scrollToAnchor,
     currentHeading: currentHeading,
-    // Exposed for the unit-test harness in scripts/.
-    createMarkdown: createMarkdown,
-    // For the visual gate, and exposed for the same reason.
-    createPreviewMarkdown: createPreviewMarkdown,
+    // The Markdown half's, under the names they have always had here: for
+    // a test harness, and the visual gate. Guarded, so a shell missing that
+    // file still says "ready", and each render says what failed.
+    createMarkdown: markdownLibrary && markdownLibrary.create,
+    createPreviewMarkdown: markdownLibrary && markdownLibrary.createPreview,
     showPreview: showPreviewFor,
     hidePreview: dismissPreview,
+    // Corrections (plans/corrections.md §3.3, §6.3).
+    selectionSource: selectionSource,
+    revealSourceLines: revealSourceLines,
+    renderReview: renderReview,
+    scrollToReviewEntry: scrollToReviewEntry,
   };
 
   post({ type: "ready" });

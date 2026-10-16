@@ -83,16 +83,8 @@ struct IngestSubmission: Sendable, Equatable, Codable {
         case .other, nil:
             base = localPDF?.deletingPathExtension().lastPathComponent ?? "paper"
         }
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
-        let cleaned = base.lowercased().unicodeScalars
-            .map { allowed.contains($0) ? Character($0) : "-" }
-            .reduce(into: "") { result, character in
-                // Collapse runs, so `10.1145/800061.808726` does not become a
-                // branch name full of empty segments.
-                if character == "-", result.last == "-" { return }
-                result.append(character)
-            }
-        return String(cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "-")).prefix(48))
+        // The cleaning every kind of job shares (`BranchName.slug`).
+        return BranchName.slug(base)
     }
 
     /// The JSON block the prompt carries, matching the shape the wiki's own
