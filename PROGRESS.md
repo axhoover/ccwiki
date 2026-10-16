@@ -5,6 +5,89 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-16 — #11 inside #12, and round 2 of the bug hunt
+
+**#11 and #12 together.** On re-review the maintainer found that #12 could
+not take #11's fixes by a plain merge: `git merge-tree` reported 30
+conflicted files. `claude/batch-preview`, #12's base, took the tree of
+#11's reviewed head (f71a094, which includes main's #9 and #10), and the
+merge into #12 against that base conflicted in 14 files. They were
+resolved keeping both sides:
+
+- **Approve.** `JobCenter.ShownReview` carries the snapshot on screen, so
+  Publisher commits the reviewed tree and digest (#11), and refuses a
+  warning the click did not see (#12).
+- **The snapshot.** The worktree checks run before any git (#12). The mode
+  check, which takes links and gitlinks as binary, reads
+  `diff --raw <base> <tree>`, the same immutable tree as the rest (#11).
+- **The tripwire.** Only the job's own branch in the target repository
+  completes a job (#11), and branches the job center still knows after
+  Clear Finished are other jobs' (#12). Its notice no longer says the job
+  waits for review: a job whose agent fails or changes nothing does not.
+- **The curation.** The audit's rules, with R13's `metBy`. The golden file,
+  curation-review.md and every count in the plans were regenerated from
+  the merged reference engine, not taken from either side: 999 default
+  derived pairs (the audit gave 998: R13 lets single-server symmetric PIR
+  reach COM and MPC through DMO00's malicious OT, as the audit's curation
+  intends), 19 weakened only, 84 golden queries, 117 of 117 quotes. Three
+  of R13's golden queries now carry Kil88's weakened conclusion. The wiki
+  asks' counts were measured again on the merged engine.
+
+A review of the merge, in six lenses with skeptics, confirmed 16 findings,
+all fixed: a test call that #11's `stagedModes(in:base:tree:)` broke, the
+tripwire's sentence, two missing tests (the tripwire's pull-request filter
+after Clear Finished; Approve sending only the tree its click saw), and
+stale plans. #11 then landed, and main joined the branch with no change to
+its tree.
+
+**Round 2 of the bug hunt.** Five targeted finders, on the site's rendering
+and lint, the relation line, the tripwire, gh sign-in and installation, and
+the remaining UI, with skeptics, confirmed 33 findings: 4 major and 29
+minor. 28 were fixed in six file-disjoint groups, each reviewed and fixed
+again; a second pass applied the follow-ups the fixers left across groups;
+and a final review of round 2 on the integrated tree, in seven lenses,
+confirmed 11 more findings, all fixed. CI on round 2 alone was green. What
+changed:
+
+- **gh sign-in.** github.com alone is asked, and the probe is
+  `gh api user`, which needs a token, so another host's expired token, an
+  account only on another host, or a GitHub outage no longer reads as
+  signed in or out: unreachable is its own state, shown as Offline. The
+  cache is task-local, so a test owns its own. The clone's credential
+  helper follows a moved gh, and only gh's own helpers are replaced, so a
+  helper the user set beside it is kept.
+- **DiffGuard.** A regenerated relations.json is decoded and compared with
+  every changed page, with the base's records, and with the "Participates
+  in" sections the new records change. A changed region must have the
+  generator's exact layout. Frontmatter keys and `type:` are read as
+  js-yaml reads them.
+- **Frontmatter.** Comments, quoted block items, values over several lines,
+  and flow lists over several lines (blank lines, escaped breaks, a closing
+  `]` at the margin) are read as YAML reads them.
+- **Rendering, as the site.** Aliased wikilinks in tables, the site's
+  typography (link text included), `%% comments %%`, callouts and their
+  titles as ofm.ts reads them, `[[page#Heading]]` text, escaped aliases,
+  games grouped by `\algname`, tables inside code and rows that only look
+  like tables. Swift's heading ids take the page's typography, so search,
+  previews and DiffGuard use the page's ids. Folder listings follow the
+  site's collation, and `../` links resolve.
+- **UI.** ⇧⌘N from the Jobs window, an ingestion asked for with no reader
+  open, the Sync Log heading, and one quick switcher at a time.
+
+**Left on purpose:**
+
+- R2-20 to R2-23: a wikilink wrapped inside a list item or blockquote,
+  embeds, block references, and reference-style links to wiki pages. No
+  page uses them.
+- `MarkdownLinkParser.unescape` knows six named entities, not HTML5's
+  table.
+- DiffGuard keys variant anchors by the page's heading id, while the
+  generator slugs without typography. No heading in the wiki is affected.
+- Single-tilde strikethrough is not rendered.
+- The site's prettyLinks shortens a wikilink alias to its last `/`
+  segment (`[[p-poly|P/poly]]` reads "poly" there). The reader keeps the
+  alias whole; plans/render-pipeline.md says so.
+
 ## 2026-10-15 — Publishing only what was reviewed, after the maintainer's review
 
 The maintainer reviewed PRs #10, #11 and #12 and reproduced two git
@@ -152,7 +235,8 @@ The fixes add 79 tests. The ones that matter most:
 - polling for the Command Line Tools installer;
 - footnote definitions inside a callout in the review;
 - markdown-it's typographer changes in heading ids (no heading in the wiki
-  has one);
+  has one; resolved on 2026-10-16: the Swift ids now take the page's
+  typography);
 - a separate DiffGuard message for symbolic links, which get the
   unreadable-page text for now.
 

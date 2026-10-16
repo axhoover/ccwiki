@@ -101,6 +101,28 @@ whose parameters the wiki does not state is held back.
   reduction meets is no longer refused, relation names in plain text keep
   `\gets`, `\pmod` and the like, and Copy Statement on a derived row says
   what it assumes.
+- Pages read more as they do on the site. An aliased wikilink in a table no
+  longer splits its row, and one in rows that only look like a table is no
+  longer broken. Quotes curl, `--` and `---` become dashes and `->` an
+  arrow, as the site types them, in link text too. `%% comments %%` are
+  hidden. A callout written over several lines is recognised, and its title
+  reads as the site's. `[[page#Heading]]` shows the heading, and
+  `IND$-CPA` no longer shows its backslash. Games in pseudocode are grouped
+  as the site groups them, and a `../` link opens its page.
+- Folder pages list their pages in the site's order.
+- The line under a reduction's or barrier's title no longer shows a YAML
+  comment, or drops part of a value written over several lines or as a
+  list with its `]` on a line of its own.
+- Paper ingestion no longer says "Not signed in" because of another GitHub
+  host's expired token or a GitHub outage: offline, Settings and the
+  ingest sheet say so. A gh signed in only to another host no longer counts
+  as signed in to github.com. A gh that has moved no longer breaks the push
+  at the end of a job, and a credential helper you set in CCwiki's copy of
+  the wiki is kept.
+- ⇧⌘N works when the Jobs window is in front. An ingestion asked for there
+  with no reader open no longer takes the next PDF you open from the
+  Finder. The Sync Log no longer says no sync has run over the sync that
+  just ran.
 
 ## 0.2.0 — unreleased
 
