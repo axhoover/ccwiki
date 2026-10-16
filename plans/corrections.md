@@ -1240,17 +1240,20 @@ is also written to the job's log file.
    - If one is listed: `gh pr edit <url> --title … --body-file …`, on the
      newest.
    - Otherwise: `gh pr create --repo R --draft --base <default> --head
-     <branch> --title … --body-file …`, `<default>` being `git symbolic-ref
-     --short refs/remotes/origin/HEAD` in the clone, or `main` when that
-     fails.
+     <branch> --title … --body-file …`, `<default>` being the last path
+     component of what `git symbolic-ref --short refs/remotes/origin/HEAD`
+     prints in the clone (`origin/main` gives `main`), or `main` when that
+     fails (`GitService.defaultBranch`).
    - Confirm with the same `gh pr list`, using today's
      `pullRequest(createdAfter:in:)` with `job.createdAt − 60 s`. If that
      finds none and `gh pr create` succeeded, the URL `gh` printed is
      taken, and the log says GitHub could not be asked to confirm it.
 5. The job is `opened(url)`. Then `git worktree remove <worktree> --force`
    in the clone (`git worktree prune` when that fails), the scratch
-   directory deleted, and, once the worktree is gone, `git branch -D
-   <branch>`: the local branch, never the remote one.
+   directory deleted, and, only if `git worktree remove` succeeded, `git
+   branch -D <branch>`: the local branch, never the remote one. When the
+   remove fails, the branch is kept even if the prune clears the worktree's
+   record, and the log says "Could not remove the worktree at <path>."
 
 **No git hook runs from step 1 to step 5.** `Publisher` keeps its
 `GitService` as `withoutHooks`, so every git command it runs, the staging
