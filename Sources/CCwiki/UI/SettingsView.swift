@@ -67,6 +67,16 @@ struct SettingsView: View {
                             Label("Signed in", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                                 .font(Theme.Fonts.row)
+                        } else if model.isGitHubUnreachable {
+                            // Not knowing is not a fault (design-system §4b):
+                            // the glyph tertiary, like the status bar's.
+                            Label {
+                                Text("Offline")
+                            } icon: {
+                                Image(systemName: "wifi.slash").foregroundStyle(.tertiary)
+                            }
+                            .foregroundStyle(.secondary)
+                            .font(Theme.Fonts.row)
                         } else {
                             Label("Not signed in", systemImage: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
@@ -77,7 +87,12 @@ struct SettingsView: View {
                             .disabled(isCheckingGitHub)
                     }
                 }
-                if !isCheckingGitHub, !model.isGitHubAuthenticated {
+                if !isCheckingGitHub, model.isGitHubUnreachable {
+                    Text("GitHub could not be reached, so gh could not say whether it is signed "
+                        + "in. CCwiki asks again when you come back to it.")
+                        .font(Theme.Fonts.meta)
+                        .foregroundStyle(.secondary)
+                } else if !isCheckingGitHub, !model.isGitHubAuthenticated {
                     Text("Run `gh auth login` in a terminal, then re-check. Jobs need an "
                         + "account that can push a branch to the wiki.")
                         .font(Theme.Fonts.meta)

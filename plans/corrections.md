@@ -1439,9 +1439,13 @@ the context menu, does four things:
    the job in `awaitingReview`. Then it opens the editor window (§7.2).
 
 **GitHub is asked in the background.** `JobCenter.refreshGitHubAccess()` runs
-`gh auth status` and the push-rights query for `PublishTarget.repository`
-while the editor opens, and caches the answer as `gitHubAccess`. The editor
-and the review show its banner when it is not `.ready`:
+`gh auth status --hostname github.com` and the push-rights query for
+`PublishTarget.repository` (`gh api repos/… --hostname github.com`) while the
+editor opens, and caches the answer as `gitHubAccess`. When `gh auth status`
+fails in words that are not a network's, `gh api --hostname github.com user`
+decides: it needs a github.com token, so an account signed in only to an
+Enterprise host reads as signed out, and a 5xx as offline. The editor and the
+review show its banner when it is not `.ready`:
 
 | `GitHubAccess` | Banner |
 |---|---|
@@ -1451,6 +1455,15 @@ and the review show its banner when it is not `.ready`:
 | `.cannotPush` | "The signed-in account cannot push to axhoover/cryptology.city, so this cannot become a pull request. Open an issue instead." with **Open an Issue…** |
 
 Each banner sits beside **Check Again**. Approve asks again (§6.5).
+
+Settings and the ingest sheet keep the same line between offline and signed
+out (`AppModel.isGitHubUnreachable`). When gh is there but could not be
+asked, Settings shows "Offline" with `wifi.slash`, not "Not signed in", and
+no `gh auth login` advice. The ingest sheet's blocker reads "Offline. A job
+needs a connection to GitHub; CCwiki asks again when you come back to it.",
+also with `wifi.slash`, and an ingestion's pre-flight fails with "GitHub
+could not be reached", not "GitHub CLI is not authenticated". CCwiki asks
+again when the app becomes active and when the ingest sheet opens.
 
 **Not before the tools are found.** At launch, gh is found a moment after
 git, in the background, and a window macOS restores asks at once. An answer
@@ -2201,7 +2214,7 @@ enum GitHubAccess: Sendable, Equatable {
     static func classify(ghPresent: Bool, signedIn: Bool?, canPush: Bool?, repository: String) -> GitHubAccess
 }
 extension GitHubAuth {
-    /// `gh auth status`: nil on a timeout, unlike isAuthenticated's false.
+    /// `gh auth status`, asked afresh: nil when gh could not be asked, as isAuthenticated is.
     static func signedIn(tools: ToolLocator) async -> Bool?
 }
 struct AgentInvocation: Sendable, Equatable {

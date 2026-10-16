@@ -42,6 +42,9 @@ struct FixesAuthTests {
         for refused in [
             Self.result(1, "{\"message\":\"Bad credentials\"}", "gh: Bad credentials (HTTP 401)"),
             Self.result(4, "", "To get started with GitHub CLI, please run:  gh auth login"),
+            // `gh api user` with no github.com token: signed in elsewhere only.
+            Self.result(1, "{\"message\":\"Requires authentication\"}",
+                        "gh: Requires authentication (HTTP 401)"),
         ] {
             #expect(GitHubAuth.isSignedOut(refused), "\(refused.stderr)")
             #expect(GitHubAuth.verdict(status: Self.invalidToken, probe: refused) == false,
@@ -53,18 +56,18 @@ struct FixesAuthTests {
         let unreachable = Self.result(1, "", "error connecting to api.github.com")
         #expect(!GitHubAuth.needsProbe(unreachable))
         #expect(GitHubAuth.needsProbe(Self.invalidToken))
+        #expect(GitHubAuth.needsProbe(
+            Self.result(1, "", "You are not logged into any accounts on github.com")))
         #expect(!GitHubAuth.needsProbe(Self.result(0)))
     }
 
-    /// One test, in order, because the cache it reads is the app's own.
+    /// One test, in order, with a cache of its own: the app's is written
+    /// by every test whose gh answers, all running at once.
     @Test("isAuthenticated asks github.com alone, and caches only a definite answer")
     func isAuthenticatedCaches() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
-        defer {
-            try? FileManager.default.removeItem(at: directory)
-            GitHubAuth.invalidate()
-        }
+        defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         /// A gh whose `auth status` for github.com and whose probe say
@@ -76,7 +79,7 @@ struct FixesAuthTests {
                 #!/bin/sh
                 case "$*" in
                   "auth status --hostname github.com") \(status) ;;
-                  "api --hostname github.com rate_limit --jq .rate.limit") \(probe) ;;
+                  "api --hostname github.com user --jq .login") \(probe) ;;
                   "auth status") echo "X Failed to log in to ghe.example.com account me" >&2; exit 1 ;;
                   *) echo "unexpected: $*" >&2; exit 2 ;;
                 esac
@@ -93,34 +96,96 @@ struct FixesAuthTests {
         let invalid = "echo '  - The token in keyring is invalid.' >&2; exit 1"
 
         // Signed in to github.com; another host's trouble is not ours.
-        GitHubAuth.invalidate()
         let signedIn = try gh("signed-in", status: "exit 0", probe: "exit 7")
-        #expect(await GitHubAuth.isAuthenticated(tools: signedIn))
-        #expect(GitHubAuth.cachedAnswer == true)
+        await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+            #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == true)
+            #expect(GitHubAuth.cachedAnswer == true)
+        }
 
-        // A GitHub outage: false for now, and asked again next time.
-        GitHubAuth.invalidate()
-        let outage = try gh(
-            "outage", status: invalid,
-            probe: "echo 'gh: Service Unavailable (HTTP 503)' >&2; exit 1")
-        #expect(await GitHubAuth.isAuthenticated(tools: outage) == false)
-        #expect(GitHubAuth.cachedAnswer == nil)
-        #expect(await GitHubAuth.signedIn(tools: outage) == nil)
+        try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+            // A GitHub outage: not known, and asked again next time.
+            let outage = try gh(
+                "outage", status: invalid,
+                probe: "echo 'gh: Service Unavailable (HTTP 503)' >&2; exit 1")
+            #expect(await GitHubAuth.isAuthenticated(tools: outage) == nil)
+            #expect(GitHubAuth.cachedAnswer == nil)
+            #expect(await GitHubAuth.signedIn(tools: outage) == nil)
 
-        // Offline: the same.
-        let offline = try gh(
-            "offline", status: "echo 'error connecting to api.github.com' >&2; exit 1",
-            probe: "exit 7")
-        #expect(await GitHubAuth.isAuthenticated(tools: offline) == false)
-        #expect(GitHubAuth.cachedAnswer == nil)
+            // Offline: the same.
+            let offline = try gh(
+                "offline", status: "echo 'error connecting to api.github.com' >&2; exit 1",
+                probe: "exit 7")
+            #expect(await GitHubAuth.isAuthenticated(tools: offline) == nil)
+            #expect(GitHubAuth.cachedAnswer == nil)
 
-        // A refused token is an answer, and is kept.
-        let refused = try gh(
-            "refused", status: invalid,
-            probe: "echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1")
-        #expect(await GitHubAuth.isAuthenticated(tools: refused) == false)
-        #expect(GitHubAuth.cachedAnswer == false)
-        #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == false, "from the cache")
+            // A refused token is an answer, and is kept.
+            let refused = try gh(
+                "refused", status: invalid,
+                probe: "echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1")
+            #expect(await GitHubAuth.isAuthenticated(tools: refused) == false)
+            #expect(GitHubAuth.cachedAnswer == false)
+            #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == false, "from the cache")
+        }
+
+        // Signed in only to an Enterprise host: github.com asked without a
+        // token is a 401, not an answer GitHub gives anyone.
+        try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+            let elsewhere = try gh(
+                "elsewhere",
+                status: "echo 'You are not logged into any accounts on github.com' >&2; exit 1",
+                probe: "echo 'gh: Requires authentication (HTTP 401)' >&2; exit 1")
+            #expect(await GitHubAuth.isAuthenticated(tools: elsewhere) == false)
+            #expect(GitHubAuth.cachedAnswer == false)
+        }
+    }
+
+    @Test("an unreachable GitHub is offline in the sheet and the pre-flight, never signed out")
+    func unreachableIsOffline() throws {
+        func blockers(authenticated: Bool, unreachable: Bool, gh: Bool = true) -> [String] {
+            AppModel.ingestionBlockers(
+                store: .git, missing: [], needsDeveloperTools: false, ghPresent: gh,
+                isGitHubAuthenticated: authenticated, canPushToRemote: true,
+                isGitHubUnreachable: unreachable)
+        }
+        #expect(blockers(authenticated: false, unreachable: true)
+            == [AppModel.gitHubUnreachableBlocker])
+        #expect(AppModel.gitHubUnreachableBlocker.hasPrefix("Offline."), "as the editor's banner")
+        let signedOut = blockers(authenticated: false, unreachable: false)
+        #expect(signedOut.count == 1)
+        #expect(signedOut.first?.contains("gh auth login") == true)
+        #expect(blockers(authenticated: true, unreachable: false).isEmpty)
+        #expect(blockers(authenticated: false, unreachable: true, gh: false).isEmpty,
+                "without gh, nothing is said of GitHub")
+
+        // The job's pre-flight says the same.
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ccwiki-preflight-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fake = directory.appending(path: "gh")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: fake)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: fake.path(percentEncoded: false))
+        var located = ToolLocator(overrides: [.gh: fake.path(percentEncoded: false)])
+        located.locate([.gh])
+        try #require(located.path(for: .gh) != nil)
+        let tools = located
+        let submission = IngestSubmission(
+            kind: .url, source: .eprint(year: "2025", number: "375"),
+            localPDF: nil, notes: "", submittedAt: Date())
+        func titles(authenticated: Bool, unreachable: Bool) -> [String] {
+            let findings = Preflight.run(
+                submission: submission, index: nil, paths: AppPaths(support: directory),
+                tools: tools, isGitHubAuthenticated: authenticated,
+                isGitHubUnreachable: unreachable)
+            return findings.filter { $0.level == .blocking }.map(\.title)
+        }
+        let offline = titles(authenticated: false, unreachable: true)
+        #expect(offline.contains("GitHub could not be reached"), "\(offline)")
+        #expect(!offline.contains("GitHub CLI is not authenticated"), "\(offline)")
+        let refused = titles(authenticated: false, unreachable: false)
+        #expect(refused.contains("GitHub CLI is not authenticated"), "\(refused)")
+        #expect(!refused.contains("GitHub could not be reached"), "\(refused)")
     }
 
     // MARK: The clone's credential helper

@@ -55,8 +55,9 @@ struct IngestJobRunner {
         // end is checked at the beginning: an ingestion takes twenty
         // minutes, and its review is no use if it can never be published.
         let canPush = await git.canAuthenticatePush(clone: paths.clone)
-        let authenticated = await GitHubAuth.isAuthenticated(tools: tools)
-        let pushRights = authenticated
+        // Nil when GitHub could not be asked: offline, not signed out.
+        let signedIn = await GitHubAuth.isAuthenticated(tools: tools)
+        let pushRights = signedIn == true
             ? await GitHubAuth.canPush(tools: tools, repository: target.repository)
             : nil
         // Cancelled meanwhile: `job.cancel()` has set the state, and the
@@ -65,8 +66,8 @@ struct IngestJobRunner {
         if Task.isCancelled { return }
         let findings = Preflight.run(
             submission: submission, index: index, paths: paths, tools: tools,
-            isGitHubAuthenticated: authenticated, canPush: canPush, hasPushRights: pushRights,
-            repository: target.repository)
+            isGitHubAuthenticated: signedIn == true, isGitHubUnreachable: signedIn == nil,
+            canPush: canPush, hasPushRights: pushRights, repository: target.repository)
         job.setPreflight(findings)
         for finding in findings {
             job.append(JobLogEntry(

@@ -28,6 +28,11 @@ final class AppModel {
     private(set) var needsDeveloperTools = false
     private var discoveryGeneration = 0
     private(set) var isGitHubAuthenticated = false
+    /// gh is there, but GitHub could not be asked whether it is signed in:
+    /// offline, no answer before the deadline, or an error from GitHub
+    /// other than a refused token. Settings and the ingest sheet say
+    /// offline, not "not signed in" (plans/corrections.md §7.1).
+    private(set) var isGitHubUnreachable = false
     private(set) var canPushToRemote = false
     /// True while gh is asked whether it is signed in, and the clone whether
     /// it can push (`askGitHub`). Settings and the ingest sheet say
@@ -921,24 +926,27 @@ final class AppModel {
         gitHubAsk += 1
         let ask = gitHubAsk
         isCheckingGitHub = true
-        let authenticated = await GitHubAuth.isAuthenticated(tools: tools)
+        let answer = await GitHubAuth.isAuthenticated(tools: tools)
         guard generation == discoveryGeneration, ask == gitHubAsk else { return }
-        isGitHubAuthenticated = authenticated
+        isGitHubAuthenticated = answer == true
+        isGitHubUnreachable = answer == nil && tools.path(for: .gh) != nil
         await refreshPushCapability()
         guard generation == discoveryGeneration, ask == gitHubAsk else { return }
         isCheckingGitHub = false
     }
 
-    /// Ask gh again when its "no" was not an answer: a launch offline, or
-    /// one with no answer before the deadline, leaves `isGitHubAuthenticated`
-    /// false with nothing cached (`GitHubAuth.isAuthenticated`). On coming
-    /// back to the app and when the ingest sheet opens, so a network that
-    /// has returned is noticed without Settings ▸ Re-check. A cached "no"
-    /// is kept, and costs nothing: after `gh auth login`, Re-check, as the
-    /// advice says. A cached "yes" a correction's ask found is taken.
+    /// Ask gh again when it gave no answer: a launch offline, or one with
+    /// no answer before the deadline, leaves `isGitHubUnreachable` set with
+    /// nothing cached (`GitHubAuth.isAuthenticated`). On coming back to the
+    /// app and when the ingest sheet opens, so a network that has returned
+    /// is noticed without Settings ▸ Re-check. A "no" that was an answer is
+    /// kept, and costs nothing: after `gh auth login`, Re-check, as the
+    /// advice says. An answer a correction's ask has cached since is taken:
+    /// a "yes", or a "no" in place of offline.
     func refreshGitHubIfUnanswered() {
         guard !isDiscoveringTools, !isCheckingGitHub, !isGitHubAuthenticated,
-              tools.path(for: .gh) != nil, GitHubAuth.cachedAnswer != false
+              tools.path(for: .gh) != nil,
+              isGitHubUnreachable || GitHubAuth.cachedAnswer != false
         else { return }
         let generation = discoveryGeneration
         Task { await askGitHub(generation: generation) }
@@ -1023,18 +1031,27 @@ final class AppModel {
             store: index == nil ? nil : paths.wikiStore,
             missing: tools.missingForIngestion, needsDeveloperTools: needsDeveloperTools,
             ghPresent: tools.path(for: .gh) != nil,
-            isGitHubAuthenticated: isGitHubAuthenticated, canPushToRemote: canPushToRemote)
+            isGitHubAuthenticated: isGitHubAuthenticated, canPushToRemote: canPushToRemote,
+            isGitHubUnreachable: isGitHubUnreachable)
     }
+
+    /// The blocker while GitHub could not be asked, in the words of the
+    /// editor's offline banner (plans/corrections.md §7.1). The sheet shows
+    /// it without the warning triangle: offline is not a fault.
+    nonisolated static let gitHubUnreachableBlocker =
+        "Offline. A job needs a connection to GitHub; CCwiki asks again when you come back to it."
 
     /// `ingestionBlockers`, pure. `store` is nil while no wiki is loaded.
     ///
     /// A snapshot blocks a job as it blocks a correction (`CorrectionBlockers`):
     /// the job's worktree is made from the clone's git, which a snapshot has
     /// not got. The push blocker is about a clone, so a snapshot leaves it
-    /// to that one.
+    /// to that one. A GitHub that could not be asked is offline, never
+    /// "not signed in": `gh auth login` cannot bring a network back.
     nonisolated static func ingestionBlockers(
         store: AppPaths.WikiStore?, missing: [ToolLocator.Tool], needsDeveloperTools: Bool,
-        ghPresent: Bool, isGitHubAuthenticated: Bool, canPushToRemote: Bool
+        ghPresent: Bool, isGitHubAuthenticated: Bool, canPushToRemote: Bool,
+        isGitHubUnreachable: Bool = false
     ) -> [String] {
         var blockers: [String] = []
         if store == nil {
@@ -1050,7 +1067,9 @@ final class AppModel {
         if store == .snapshot {
             blockers.append(CorrectionBlockers.snapshot)
         }
-        if ghPresent, !isGitHubAuthenticated {
+        if ghPresent, isGitHubUnreachable {
+            blockers.append(Self.gitHubUnreachableBlocker)
+        } else if ghPresent, !isGitHubAuthenticated {
             blockers.append("The GitHub CLI is not signed in. Run `gh auth login` in Terminal.")
         }
         if ghPresent, isGitHubAuthenticated, !canPushToRemote, store != .snapshot {
