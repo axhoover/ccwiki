@@ -233,11 +233,45 @@
   // (quartz ofm.ts:147). Zero pages use them today, but the plugin is enabled
   // site-side and agent-written pages may well start.
 
-  // ofm.ts:147, with `??` for its `?`: the site matches the first text node
-  // of the line, which ends where a link, math or code starts, so the `]`
-  // of a `[[link]]` in the title never closes the marker. Here the line is
-  // still text, and the marker has to close at its own `]`.
-  var CALLOUT = /^\[!([\w-]+)\|?(.+?)??\]([+-]?)/;
+  // ofm.ts:147, as the site has it. The site matches it against the first
+  // line of the paragraph's first text node (ofm.ts:477), and `(.+?)?` runs
+  // on to the first `]` in that text after the marker's own: the text up to
+  // it is the callout's metadata, so `[!note] As shown in [HLL23], …` is
+  // titled `, …` there, and here. `siteTextNode` finds that text.
+  var CALLOUT = /^\[\!([\w-]+)\|?(.+?)?\]([+-]?)/;
+
+  // What OFM splits that text node at, in the order it applies them
+  // (ofm.ts:239): a wikilink (ofm.ts:123), a highlight (ofm.ts:143), an
+  // arrow (ofm.ts:121) and a tag (ofm.ts:155), unless the tag is digits and
+  // slashes only. The tag's `(?<=^| )` is captured as `(^| )` here, and the
+  // pattern is built at run time: an engine without Unicode property escapes
+  // then loses the tag split, not this file.
+  var SITE_WIKILINK = /!?\[\[([^\[\]\|\#\\]+)?(#+[^\[\]\|\#\\]+)?(\\?\|[^\[\]\#]*)?\]\]/g;
+  var SITE_HIGHLIGHT = /==([^=]+)==/g;
+  var SITE_ARROW = /(-{1,2}>|={1,2}>|<-{1,2}|<={1,2})/g;
+  var SITE_TAG = (function () {
+    try {
+      return new RegExp("(^| )#((?:[-_\\p{L}\\p{Emoji}\\p{M}\\d])+(?:\\/[-_\\p{L}\\p{Emoji}\\p{M}\\d]+)*)", "gu");
+    } catch (e) {
+      return null;
+    }
+  })();
+
+  // remark-gfm's literal links that markdown-it's inline parse does not
+  // make: `www.` ones (markdown-it's linkify leaves them alone) and email
+  // addresses (its `linkify` core rule links those after the inline parse).
+  var SITE_WWW = /(^|[\s*_~(])www\.[A-Za-z0-9_-]/i;
+
+  // What micromark counts as punctuation next to a `~`
+  // (micromark-util-character 2.0.1, the site's): ASCII punctuation and
+  // Unicode's P. Built at run time, as SITE_TAG is; without it, ASCII only.
+  var SITE_PUNCTUATION = (function () {
+    try {
+      return new RegExp("^(?:[!-\\/:-@\\[-`{-~]|\\p{P})$", "u");
+    } catch (e) {
+      return /^[!-\/:-@\[-`{-~]$/;
+    }
+  })();
 
   /** Obsidian's other names for a callout (ofm.ts:71). */
   var CALLOUT_ALIASES = {
@@ -263,13 +297,14 @@
         if (!para || para.type !== "paragraph_open" || !inline || inline.type !== "inline") continue;
         var newline = inline.content.indexOf("\n");
         var first = newline < 0 ? inline.content : inline.content.slice(0, newline);
-        var match = CALLOUT.exec(first);
+        var node = siteTextNode(state.md, first, state.env);
+        var match = CALLOUT.exec(node.text);
         if (!match) continue;
 
         var name = match[1].toLowerCase();
         var kind = Object.prototype.hasOwnProperty.call(CALLOUT_ALIASES, name)
           ? CALLOUT_ALIASES[name] : name;
-        var title = first.slice(match[0].length).trim() ||
+        var title = first.slice(node.at[match[0].length]).trim() ||
           (match[1].charAt(0).toUpperCase() + match[1].slice(1)).replace(/-/g, " ");
 
         tokens[i].tag = "div";
@@ -305,6 +340,106 @@
     });
   }
 
+  /** The text the site matches `CALLOUT` against, for a paragraph whose
+   *  first line is `line`, as written: the paragraph's first text node,
+   *  decoded, and `at`, where each of its characters starts in `line`, one
+   *  more for where the node ends. micromark ends that node where it parses
+   *  anything but text; markdown-it's inline parser reads the line as it
+   *  would (escapes and entities are text; a link, an image, math, code,
+   *  emphasis, an autolink, HTML or a wikilink is not). Then remark-gfm's
+   *  single-`~` strikethrough and literal links, and OFM's splits, end it
+   *  sooner. */
+  function siteTextNode(md, line, env) {
+    var tokens = [];
+    md.inline.parse(line, md, scratchEnv(env), tokens);
+    var text = "", at = [], written = [], pos = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i];
+      if (token.type !== "text" && token.type !== "text_special") break;
+      // A `text` token is the line as written; a `text_special` one is an
+      // escape or an entity, decoded, its source in `markup`.
+      for (var k = 0; k < token.content.length; k++) {
+        at.push(token.type === "text" ? pos + k : pos);
+        written.push(token.type === "text");
+      }
+      text += token.content;
+      pos += token.type === "text" ? token.content.length : token.markup.length;
+    }
+    at.push(pos);
+
+    var end = text.length;
+    var strike = singleTildeStrike(line, text, at, written);
+    if (strike >= 0) end = Math.min(end, strike);
+    var www = SITE_WWW.exec(text);
+    if (www) end = Math.min(end, www.index + www[1].length);
+    var emails = (md.linkify && md.linkify.match(text)) || [];
+    for (var e = 0; e < emails.length; e++) {
+      if (emails[e].schema === "mailto:") { end = Math.min(end, emails[e].index); break; }
+    }
+    text = text.slice(0, end);
+
+    [SITE_WIKILINK, SITE_HIGHLIGHT, SITE_ARROW].forEach(function (split) {
+      split.lastIndex = 0;
+      var found = split.exec(text);
+      if (found) text = text.slice(0, found.index);
+    });
+    if (SITE_TAG) SITE_TAG.lastIndex = 0;
+    for (var tag = SITE_TAG && SITE_TAG.exec(text); tag; tag = SITE_TAG.exec(text)) {
+      var hash = tag.index + tag[1].length;
+      if (!/^[\/\d]+$/.test(tag[2])) { text = text.slice(0, hash); break; }
+      SITE_TAG.lastIndex = hash + 1;
+    }
+    return { text: text, at: at.slice(0, text.length + 1) };
+  }
+
+  /** Where in `text` (`siteTextNode`'s, with `at` and which of its
+   *  characters are `written` as in the line) the site starts a
+   *  strikethrough markdown-it does not make, or -1. remark-gfm's
+   *  micromark-extension-gfm-strikethrough 2.0.0 takes a lone `~` as a
+   *  marker (`singleTilde`, on by default) and pairs it as CommonMark pairs
+   *  emphasis: a `~` opens before a letter, or before punctuation after a
+   *  space or punctuation, closes the other way round, and closes the
+   *  nearest open one before it. An escaped `~`, or one next to another, is
+   *  no such marker; `~~` is markdown-it's own. Only a closing `~` in `text`
+   *  is looked for. */
+  function singleTildeStrike(line, text, at, written) {
+    function side(character) {
+      if (character === "" || /^\s$/.test(character)) return "space";
+      return SITE_PUNCTUATION.test(character) ? "punctuation" : "other";
+    }
+    var open = [], first = -1;
+    for (var k = 0; k < text.length; k++) {
+      if (text.charAt(k) !== "~" || !written[k]) continue;
+      var p = at[k];
+      if ((k > 0 && written[k - 1] && text.charAt(k - 1) === "~") || line.charAt(p + 1) === "~") continue;
+      var before = side(Array.from(line.slice(Math.max(0, p - 2), p)).pop() || "");
+      var after = side(Array.from(line.slice(p + 1, p + 3))[0] || "");
+      var opens = after === "other" || (after === "punctuation" && before !== "other");
+      var closes = before === "other" || (before === "punctuation" && after !== "other");
+      if (closes && open.length) {
+        var opener = open.pop();
+        if (first < 0 || opener < first) first = opener;
+      } else if (opens) {
+        open.push(k);
+      }
+    }
+    return first;
+  }
+
+  /** `env` for a parse whose tokens are thrown away: the footnote plugin
+   *  counts each reference it reads into `env.footnotes`, so those are
+   *  copies. */
+  function scratchEnv(env) {
+    var notes = env.footnotes;
+    return {
+      references: env.references,
+      footnotes: notes && {
+        refs: Object.assign({}, notes.refs),
+        list: (notes.list || []).map(function (note) { return Object.assign({}, note); }),
+      },
+    };
+  }
+
   function findMatching(tokens, from, openType, closeType) {
     var depth = 0;
     for (var i = from; i < tokens.length; i++) {
@@ -327,6 +462,9 @@
   var TABLE = /^\|([^\n])+\|\n(\|)( ?:?-{3,}:? ?\|)+\n(\|([^\n])+\|\n?)+/gm;  // ofm.ts:135
   var TABLE_LINK = /(!?\[\[[^\]]*?\]\]|\[\^[^\]]*?\])/g;                    // ofm.ts:140
 
+  /** The blocks markdown-it shows as written, at any depth. */
+  var VERBATIM = { fence: true, code_block: true, math_block: true, html_block: true };
+
   function textTransform(md) {
     md.core.ruler.after("normalize", "ccwiki_text_transform", function (state) {
       var src = state.src;
@@ -335,7 +473,16 @@
         src = kept.text;
         state.ccwikiLineOf = kept.lineOf;
       }
+      var verbatim = null;
       state.src = src.replace(TABLE, function (table) {
+        // A table inside fenced code (or display math, or HTML) is shown as
+        // written, its cells never split: it gets the site's edit and
+        // nothing more, so it reads as it does on the site, and a `\|` in
+        // it, or in its math, stays as written.
+        verbatim = verbatim || verbatimLines(state.md, src);
+        if (verbatim[lineAt(src, arguments[arguments.length - 2])]) {
+          return table.replace(TABLE_LINK, siteTableLink);
+        }
         return table.replace(TABLE_LINK, function (link) {
           // markdown-it's cell split takes one backslash off each `\|`, so
           // every pipe gets one, escaped or not, and the cell holds the
@@ -354,6 +501,32 @@
         if (token.map) token.map = [lineOf[token.map[0]], lineOf[token.map[1]]];
       });
     });
+  }
+
+  /** ofm.ts:196's edit of a link in a table, exactly: its first `#`, and
+   *  each `|` no backslash escapes, escaped. */
+  function siteTableLink(link) {
+    return link.replace("#", "\\#").replace(/((^|[^\\])(\\\\)*)\|/g, "$1\\|");
+  }
+
+  /** For each line of `src`, whether it is in a block markdown-it shows as
+   *  written. From a parse of its own, whose tokens and `env` are thrown
+   *  away; a table's escapes change no block's lines. */
+  function verbatimLines(md, src) {
+    var tokens = [], lines = [];
+    md.block.parse(src, md, {}, tokens);
+    tokens.forEach(function (token) {
+      if (!token.map || !VERBATIM[token.type]) return;
+      for (var line = token.map[0]; line < token.map[1]; line++) lines[line] = true;
+    });
+    return lines;
+  }
+
+  /** The 0-based line of `text` that `offset` is on. */
+  function lineAt(text, offset) {
+    var line = 0;
+    for (var i = text.indexOf("\n"); i >= 0 && i < offset; i = text.indexOf("\n", i + 1)) line++;
+    return line;
   }
 
   /** `src` without its comments, and the line of `src` each line of what is

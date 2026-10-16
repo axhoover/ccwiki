@@ -440,8 +440,9 @@ enum PreviewExcerpt {
     /// markdown on one line:
     ///
     /// - `[[target|alias]]` becomes its display text, by `displayText` in
-    ///   `ccwiki.js` (the alias, else the last path segment, plus ` › anchor`),
-    ///   escaped, because the page shows that text as written;
+    ///   `ccwiki-markdown.js` (the alias, decoded; else the heading; else the
+    ///   last path segment), escaped, because the page shows that text as
+    ///   written;
     /// - `[text](destination)` becomes its text, which is markdown already;
     /// - images, embeds, footnote markers, inline HTML tags and comments go;
     /// - `$…$`, code spans, emphasis and backslash escapes stay, so the card
@@ -533,33 +534,38 @@ enum PreviewExcerpt {
         while p < chars.count, !stops.contains(chars[p]) { p += 1 }
         let target = String(chars[targetStart..<p]).trimmingCharacters(in: .whitespaces)
 
-        var anchor = ""
+        // The heading as the page shows it: one `#` off, then trimmed, so
+        // `[[page##Heading]]` shows `#Heading`. Nil without an anchor.
+        var anchor: String?
         if p < chars.count, chars[p] == "#" {
+            let hashStart = p
             while p < chars.count, chars[p] == "#" { p += 1 }
             let anchorStart = p
             while p < chars.count, !stops.contains(chars[p]) { p += 1 }
             guard p > anchorStart else { return nil }
-            anchor = String(chars[anchorStart..<p]).trimmingCharacters(in: .whitespaces)
+            anchor = String(chars[(hashStart + 1)..<p]).trimmingCharacters(in: .whitespaces)
         }
 
+        // Decoded, then trimmed, as the page reads it: `IND\$-CPA` is
+        // `IND$-CPA`.
         var alias = ""
         if p < chars.count, chars[p] == "|"
             || (chars[p] == "\\" && p + 1 < chars.count && chars[p + 1] == "|") {
             p += chars[p] == "\\" ? 2 : 1
             let aliasStart = p
             while p < chars.count, chars[p] != "[", chars[p] != "]", chars[p] != "#" { p += 1 }
-            alias = String(chars[aliasStart..<p]).trimmingCharacters(in: .whitespaces)
+            alias = MarkdownLinkParser.unescape(String(chars[aliasStart..<p]))
+                .trimmingCharacters(in: .whitespaces)
         }
         guard p + 1 < chars.count, chars[p] == "]", chars[p + 1] == "]" else { return nil }
 
         let display: String
         if !alias.isEmpty {
             display = alias
-        } else if target.isEmpty {
+        } else if let anchor {
             display = anchor
         } else {
-            let base = target.components(separatedBy: "/").last ?? target
-            display = anchor.isEmpty ? base : base + " › " + anchor
+            display = target.components(separatedBy: "/").last ?? target
         }
         return (p + 2, display, isEmbed)
     }
