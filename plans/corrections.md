@@ -846,7 +846,7 @@ two things:
    names it and says where to look: "A pull request from manual/b was opened
    while the agent ran, and CCwiki did not open it: <url>. Look at it on
    GitHub to see whether the agent made it; CCwiki has sent nothing from
-   this job, which waits for your review." The job goes on to the hand-over
+   this job." The job goes on to the hand-over
    and to `awaitingReview` with its own diff. (Fixed after the PR #11
    review, which found that the newest unrelated PR used to complete the
    job and skip its review.)
