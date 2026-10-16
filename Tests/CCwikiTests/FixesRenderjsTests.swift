@@ -106,12 +106,13 @@ struct FixesRenderjsTests {
             | [[one-way-function|OWF]] | $\|x\|$ |
             """#)
         #expect(!html.contains("<table>"), "each is a paragraph, as on the site")
-        #expect(html.contains(#"| <a class="internal" href="/owf">OWF</a> | <span class="math" data-tex="\|x\|">"#),
-                "a header with more cells than the line under it")
+        // The first and last rows are the same: each closing tag says whose row it is.
+        #expect(html.contains(#"| <a class="internal" href="/owf">OWF</a> | <span class="math" data-tex="\|x\|">"#
+            + #"\|x\|</span> |</p>"# + "\n<ul"), "a header with more cells than the line under it")
         #expect(html.contains(#"| <a class="internal" href="/prf">PRF</a> | x |</li>"#),
                 "rows that continue a list item's paragraph")
         #expect(html.contains(#"| <a class="internal" href="/owf">OWF</a> | <span class="math" data-tex="\|x\|">"#
-            + #"\|x\|</span> |</p>"#), "and a quote's")
+            + #"\|x\|</span> |</p>"# + "\n</blockquote>"), "and a quote's")
         #expect(!html.contains("broken"))
         #expect(!html.contains(#"\\|"#), "no backslash left over")
 
