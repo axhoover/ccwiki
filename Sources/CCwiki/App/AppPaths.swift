@@ -116,8 +116,11 @@ struct AppPaths: Sendable {
     /// `web` whenever their own copy is missing, which the pruning here makes
     /// likely, and so would delete this build's copy while it runs. `web` is
     /// theirs; each of them clears it out the same way.
-    func stagedWebRoot() -> URL {
-        let source = webRoot
+    ///
+    /// `bundle` is the pipeline to copy: `webRoot`, unless a test says
+    /// otherwise.
+    func stagedWebRoot(from bundle: URL? = nil) -> URL {
+        let source = bundle ?? webRoot
         let build = Self.stagedWebBuild
         let root = cacheRoot.appending(path: "web-builds")
         let staged = root.appending(path: build)
@@ -142,6 +145,46 @@ struct AppPaths: Sendable {
         } catch {
             return source
         }
+    }
+
+    /// Keeps `staged`, the copy `stagedWebRoot()` gave at launch, fit to
+    /// serve: checked before a web view is made from it, and while the app
+    /// runs. True when it can be served.
+    ///
+    /// A copy that is there is marked in use, so another build's launch
+    /// does not prune it after a week of this one running. A copy deleted
+    /// since, with Caches cleared by hand or by a cleaner, is staged again
+    /// at the same path, which every scheme handler already serves from,
+    /// but only while the bundle on disk is still this build: `bundleBuild`,
+    /// read only then (`bundleBuildOnDisk`). Once the updater has swapped
+    /// the bundle it holds the next release's JavaScript, which must not be
+    /// served to this release's Swift. A launch that could make no copy
+    /// serves the bundle itself, and that is left alone.
+    func keepStagedWebRoot(
+        _ staged: URL, bundleBuild: @autoclosure () -> String?, from bundle: URL? = nil
+    ) -> Bool {
+        let source = bundle ?? webRoot
+        guard staged != source else { return true }
+        if FileManager.default.fileExists(
+            atPath: staged.appending(path: "index.html").path(percentEncoded: false)) {
+            Self.touch(staged)
+            return true
+        }
+        guard bundleBuild() == Self.stagedWebBuild else { return false }
+        return stagedWebRoot(from: source) == staged
+    }
+
+    /// The running bundle's `CFBundleVersion` as its `Info.plist` says now,
+    /// read from disk: `Bundle` keeps what it read at launch, and the
+    /// updater may have replaced the bundle since. "dev" where there is no
+    /// `Info.plist`, as `stagedWebBuild` says outside an .app.
+    static var bundleBuildOnDisk: String? {
+        let plist = Bundle.main.bundleURL.appending(path: "Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plist) else { return "dev" }
+        guard let object = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let info = object as? [String: Any]
+        else { return nil }
+        return info["CFBundleVersion"] as? String
     }
 
     /// How long a staged web copy outlives the last launch of its build.

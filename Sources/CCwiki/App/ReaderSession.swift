@@ -158,8 +158,12 @@ final class ReaderSession: Identifiable {
         webController.onNavigate = { [weak self] destination, disposition in
             self?.navigate(to: destination, disposition: disposition)
         }
+        webController.opensLinksInTabs = true
         webController.onReady = { [weak self] in
             self?.renderCurrent()
+        }
+        webController.onRendererRestart = { [weak self] in
+            self?.model.checkWebRoot()
         }
         webController.siteURLProvider = { [weak self] in
             self?.currentSiteURL
@@ -292,9 +296,19 @@ final class ReaderSession: Identifiable {
     /// as one that launches the app does, opens once it is.
     func handleOpenURL(_ url: URL) {
         if url.isFileURL {
-            guard url.pathExtension.lowercased() == "pdf",
-                  let staged = try? model.stagePDF(from: url)
-            else { return }
+            guard url.pathExtension.lowercased() == "pdf" else { return }
+            // While a sheet is up it is not handed another PDF, as a drop
+            // on any window is refused (§1.3): its window comes forward. The
+            // sheet up now reads no PDF, so one left for it would wait and
+            // join the next, unrelated, ingestion.
+            guard Self.stagesOpenedPDF(
+                sheet: model.ingestSheetTarget, window: id, isStarted: isStarted,
+                hasPendingPDF: model.pendingDroppedPDF != nil)
+            else {
+                model.requestIngestSheet(in: id)
+                return
+            }
+            guard let staged = try? model.stagePDF(from: url) else { return }
             model.pendingDroppedPDF = staged
             model.requestIngestSheet(in: id)
             model.requestJobsWindow()
@@ -304,20 +318,55 @@ final class ReaderSession: Identifiable {
         }
     }
 
+    /// Whether a PDF from outside is staged for the ingest sheet: with no
+    /// sheet asked for, or with one pinned to this window that is not up
+    /// yet. That is a request made with no reader open, which the window a
+    /// PDF from Finder opens claims before it is handed the PDF. The window
+    /// has not started, so its views, and the sheet with them, have not
+    /// appeared, and the sheet opens holding the PDF, unless one already
+    /// waits for it. A sheet up, here or in another window, gets none.
+    nonisolated static func stagesOpenedPDF(
+        sheet: UUID?, window: UUID, isStarted: Bool, hasPendingPDF: Bool
+    ) -> Bool {
+        guard let sheet else { return true }
+        return sheet == window && !isStarted && !hasPendingPDF
+    }
+
     // MARK: What the model tells it
 
     /// What a load means for this window: its page renders again, keeping
     /// the reader's place, only if the load changed something that page
-    /// shows (`LibraryUpdate.requiresRerender`, §3.6). The first load also
+    /// shows (`LibraryUpdate.requiresRerender`, §3.6), or, in a snapshot,
+    /// moved the revision it was rendered at. Its history forgets the pages
+    /// the load took away, and a page on screen that went gives way to the
+    /// nearest one left on Back (`SessionReloadPlan`). The first load also
     /// does what the session's start left for the wiki; a session that has
     /// not started waits for its start, which does the same.
     func libraryDidLoad(_ update: LibraryUpdate) {
         guard isStarted else { return }
         if awaitsLibrary {
             openWhatWaited()
-        } else if case .empty = location {
+            return
+        }
+        let index = model.index
+        let plan = SessionReloadPlan.plan(
+            history: history,
+            exists: { path in index.map { $0.pages[path] != nil } ?? true },
+            changed: { update.requiresRerender(of: $0) },
+            revisionGone: SessionReloadPlan.outlivesRevision(
+                store: model.paths.wikiStore,
+                rendered: webController.lastRenderedRevision, head: model.headRevision))
+        if plan.history != history { history = plan.history }
+        switch plan.render {
+        case .unchanged:
+            break
+        case .home:
             openHome()
-        } else if update.requiresRerender(of: location) {
+        case .current:
+            reveal(location)
+            webController.invalidate()
+            renderCurrent(restoringScroll: true)
+        case .inPlace:
             webController.invalidate()
             renderCurrent(preservingScroll: true)
         }
@@ -453,13 +502,15 @@ final class ReaderSession: Identifiable {
     /// Follow a link: one in the page, whose click or context menu said
     /// where (`WebController.onNavigate`), or a ccwiki:// link from outside,
     /// which opens here. An asset opens in its own app wherever it was asked
-    /// for.
+    /// for, if it is a file of the wiki (`CCwikiURL.assetFile`).
     func navigate(to destination: CCwikiURL.Destination, disposition: LinkDisposition = .here) {
         switch destination {
         case .page(let path, let anchor): open(.page(path: path, anchor: anchor), disposition)
         case .folder(let slug): open(.folder(slug: slug), disposition)
         case .asset(let path):
-            NSWorkspace.shared.open(model.paths.content.appending(path: path))
+            if let file = CCwikiURL.assetFile(path, in: model.paths.content) {
+                NSWorkspace.shared.open(file)
+            }
         case .shell:
             break
         }
@@ -530,8 +581,10 @@ final class ReaderSession: Identifiable {
     }
 
     /// ⌘O. The query is app-wide; the page left out of the list is this
-    /// window's (§1.6).
+    /// window's (§1.6), so a switcher up in another window closes first:
+    /// two at once would share one query and fight over the left-out page.
     func presentQuickSwitcher() {
+        model.dismissQuickSwitchers(except: id)
         model.quickSwitcherExcludedPath = location.path
         model.quickSwitcherQuery = ""
         model.refreshQuickSwitcher()

@@ -181,19 +181,77 @@ struct GitService: Sendable {
     /// Written to the clone's **local** config, never `--global`: this clone is
     /// CCwiki's own artifact, and reaching into the user's global git config
     /// to fix our problem would be rude.
+    ///
+    /// Written again when gh has moved: the helper names gh's absolute
+    /// path, and one left naming a gh that is gone still counts as
+    /// configured (`canAuthenticatePush`), so the push would fail only at
+    /// Approve.
+    ///
+    /// The key can hold several values, which git tries in turn, so all of
+    /// them are read (`--get-all`) and `rewritesCredentialHelper` decides.
+    /// The write is `--replace-all` with a value-pattern that matches only
+    /// CCwiki's kind of helper: git removes every value it matches, puts
+    /// the new helper where the last of them was, and leaves the user's
+    /// values where they are. With none to match, git adds the helper
+    /// after the key's last value. So `store` and a stale gh become
+    /// `store` and this gh, and a stale gh and `store` become this gh and
+    /// `store`. A value the user set is never written over.
     func configureCredentialHelper(clone: URL, ghPath: String) async {
         let key = "credential.https://github.com.helper"
         let existing = await run([
-            "-C", clone.path(percentEncoded: false), "config", "--local", "--get", key,
+            "-C", clone.path(percentEncoded: false), "config", "--local", "--get-all", key,
         ])
-        guard !existing.succeeded
-            || existing.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return }
+        // Exit 1 with no output is no values. Any other failure is read the
+        // same: the write matches only CCwiki's kind, so it cannot cost the
+        // user a helper.
+        let values = existing.succeeded
+            ? existing.stdout.components(separatedBy: "\n") : []
+        let helper = Self.credentialHelper(ghPath: ghPath)
+        guard Self.rewritesCredentialHelper(values, with: helper) else { return }
 
+        // `rewritesCredentialHelper`'s rule as a regular expression, which
+        // git matches against each value; `.*` is the path, quoted or not.
+        // It starts with `^`: one that starts with `!` would match every
+        // value that does not match the rest.
+        let pattern = "^!.* auth git-credential$"
         _ = await run([
             "-C", clone.path(percentEncoded: false),
-            "config", "--local", key, "!\(ghPath) auth git-credential",
+            "config", "--local", "--replace-all", key, helper, pattern,
         ])
+    }
+
+    /// The helper that runs `gh auth git-credential`. git runs a helper
+    /// that starts with `!` through the shell, so the path is quoted, as
+    /// `gh auth setup-git` quotes it: unquoted, a space in it splits it.
+    static func credentialHelper(ghPath: String) -> String {
+        "!\(shellQuoted(ghPath)) auth git-credential"
+    }
+
+    /// Whether the clone's helper is to be written, given every value of
+    /// the key in the order git lists them. CCwiki's kind of helper is a
+    /// value that starts with `!` and ends with ` auth git-credential`,
+    /// naming any gh; any other value is one the user set, and is theirs.
+    ///
+    /// Written when no value names a helper: there are none, or each is
+    /// empty (git's "forget the helpers listed before this one"). Written
+    /// when there is a value of CCwiki's kind and they are anything but
+    /// `helper` once: a gh since moved, a path written unquoted, or
+    /// `helper` twice. Otherwise not: they are exactly `helper`, or there
+    /// are none of them and the user has set a helper of their own.
+    static func rewritesCredentialHelper(_ values: [String], with helper: String) -> Bool {
+        if values.allSatisfy(\.isEmpty) { return true }
+        let gitCredential = values.filter {
+            $0.hasPrefix("!") && $0.hasSuffix(" auth git-credential")
+        }
+        return !gitCredential.isEmpty && gitCredential != [helper]
+    }
+
+    /// `text` as one word to `sh`: unchanged when every character is one
+    /// the shell reads literally, otherwise in single quotes.
+    static func shellQuoted(_ text: String) -> String {
+        let plain = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./+-")
+        if !text.isEmpty, text.allSatisfy({ plain.contains($0) }) { return text }
+        return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// Is the clone able to push? Cheap proxy: a credential helper is
@@ -551,6 +609,21 @@ struct GitService: Sendable {
         "-M", "--binary", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
     ]
 
+    /// `git diff --raw -z --no-renames <base> <tree>`: each path `tree`
+    /// changes, with its old and new modes, for
+    /// `GitNameStatus.irregularPaths`. A symbolic link is staged as a blob
+    /// holding its target, which the other outputs show as one line of text
+    /// (§6.1). Read from the staged tree, as the rest of the snapshot is
+    /// (`stagedDiff`). Nil when git fails.
+    func stagedModes(in worktree: URL, base: String, tree: String) async -> Data? {
+        let result = await data([
+            "-C", worktree.path(percentEncoded: false),
+            "diff", "--no-color", "--no-renames", "--ignore-submodules=none",
+            "--raw", "-z", base, tree,
+        ])
+        return result.status == 0 ? result.stdout : nil
+    }
+
     /// The blob `spec` names, bytes exact: "<commit or tree>:<path>", or
     /// ":<path>" for the index. Nil when there is no such file, as for a
     /// page the commit does not have.
@@ -567,12 +640,34 @@ struct GitService: Sendable {
     /// Returns one repository-relative path to `base`: `git checkout <base>
     /// -- <path>`, or, for a file `base` does not have, out of the index and
     /// off the disk. True when the path is as it was at `base`.
+    ///
+    /// A submodule's commit (a gitlink) is in the submodule's own objects,
+    /// not here, so it is found with `ls-tree`, which reads only the tree:
+    /// `cat-file -e <base>:<path>` would call it new, and its checkout would
+    /// be deleted. `checkout` restores only its index entry; the submodule's
+    /// checkout goes back to that commit too, from what it already has, or
+    /// the next `git add -A` would stage the moved commit again.
     func revertPath(_ path: String, to base: String, in worktree: URL) async -> Bool {
         let directory = worktree.path(percentEncoded: false)
-        let inBase = await run(["-C", directory, "cat-file", "-e", "\(base):\(path)"]).succeeded
-        if inBase {
-            return await run([
+        let entry = await run(["-C", directory, "ls-tree", base, "--", Self.literal(path)])
+        guard entry.succeeded else { return false }
+        // "<mode> <type> <object>\t<path>", or nothing for a path not in `base`.
+        let mode = entry.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix { $0 != " " }
+        if !mode.isEmpty {
+            guard await run([
                 "-C", directory, "checkout", base, "--", Self.literal(path),
+            ]).succeeded else { return false }
+            guard mode == Self.gitlinkMode else { return true }
+            guard await run([
+                "-C", directory, "submodule", "update", "--checkout", "--no-fetch", "--",
+                Self.literal(path),
+            ]).succeeded else { return false }
+            // What `git add -A` would stage: the submodule's commit, not
+            // whatever else its checkout holds.
+            return await run([
+                "-C", directory, "diff", "--quiet", "--ignore-submodules=dirty", base, "--",
+                Self.literal(path),
             ]).succeeded
         }
         let unstaged = await run([
@@ -613,7 +708,7 @@ struct GitService: Sendable {
     /// git diff <patchOptions> <base> <tree>         → its digest must be `digest`
     /// git commit-tree -p <base> -m <message> <tree> → the commit
     /// git cat-file commit <commit>                  → its tree and only parent, checked
-    /// git update-ref refs/heads/<branch> <commit>   → the job's branch, and its reflog
+    /// git update-ref refs/heads/<branch> <commit>   → the job's branch
     /// ```
     ///
     /// `reviewedTree` and `digest` are the reviewed snapshot's
@@ -765,20 +860,6 @@ struct GitService: Sendable {
         return refs
     }
 
-    /// Every commit the local `branch` has pointed at. Each Approve's commit
-    /// is among them, which is how a push CCwiki made is recognised after its
-    /// reply was lost (§6.5).
-    func reflog(of branch: String, in directory: URL) async -> Set<String> {
-        let result = await run([
-            "-C", directory.path(percentEncoded: false),
-            "log", "--walk-reflogs", "--format=%H", "refs/heads/\(branch)", "--",
-        ])
-        guard result.succeeded else { return [] }
-        return Set(result.stdout.split(separator: "\n").map {
-            $0.trimmingCharacters(in: .whitespaces)
-        }.filter { !$0.isEmpty })
-    }
-
     /// Renames `branch`, the job's own, wherever it is checked out: by name,
     /// as `commitReviewed` moves it by name, not through HEAD.
     func renameBranch(_ branch: String, to name: String, in worktree: URL) async -> Bool {
@@ -875,6 +956,83 @@ struct GitService: Sendable {
         ":(literal)" + path
     }
 
+    /// The mode git gives a submodule's commit in a tree or the index.
+    static let gitlinkMode = "160000"
+
+    /// Whether `worktree` is still one of `clone`'s worktrees as git made
+    /// it, read from the files git itself reads, as it reads them:
+    ///
+    /// - its `.git` names a folder in `<clone>/.git/worktrees/` (a relative
+    ///   name is read from the worktree);
+    /// - that folder's `gitdir` names this `.git` back (a relative one is
+    ///   read from the folder);
+    /// - and its `commondir`, through which git finds the repository
+    ///   itself (its configuration, objects and branches), leads to
+    ///   `<clone>/.git` (`../..` as git writes it, read from the folder; an
+    ///   absolute one as it is).
+    ///
+    /// The three are files, not links or folders, and the folder is a
+    /// folder. CCwiki's own git runs in a worktree unsealed (§5.1) and finds
+    /// the repository through these files, which an agent could rewrite:
+    /// pointed anywhere else, the snapshot, the commit and the push would
+    /// run on a repository and a configuration it chose, or on another
+    /// job's index and branch. No git runs to decide this, since git in the
+    /// worktree would already be reading what is in question.
+    static func isWorktree(_ worktree: URL, of clone: URL) -> Bool {
+        let file = worktree.appending(path: ".git").path(percentEncoded: false)
+        let prefix = "gitdir: "
+        guard let line = pointer(at: file), line.hasPrefix(prefix) else { return false }
+        let named = String(line.dropFirst(prefix.count))
+        let gitdir = named.hasPrefix("/")
+            ? named : worktree.appending(path: named).path(percentEncoded: false)
+        let worktrees = realPath(clone.appending(path: ".git/worktrees").path(percentEncoded: false))
+        guard let admin = existingRealPath(gitdir),
+              fileType(at: admin) == FileAttributeType.typeDirectory,
+              (admin as NSString).deletingLastPathComponent == worktrees
+        else { return false }
+
+        // Git keeps this current through a move or a repair.
+        guard let back = pointer(at: (admin as NSString).appendingPathComponent("gitdir"))
+        else { return false }
+        let backPath = back.hasPrefix("/") ? back : (admin as NSString).appendingPathComponent(back)
+        guard realPath(backPath) == realPath(file) else { return false }
+
+        // Git reads a relative `commondir` from the folder, joined as text.
+        guard let common = pointer(at: (admin as NSString).appendingPathComponent("commondir")),
+              let shared = existingRealPath(common.hasPrefix("/") ? common : admin + "/" + common),
+              let own = existingRealPath(clone.appending(path: ".git").path(percentEncoded: false))
+        else { return false }
+        return shared == own
+    }
+
+    /// The path a pointer file holds, as git reads `.git` and `commondir`:
+    /// only line ends come off its end, and a space is part of the path.
+    /// Nil unless `path` is a regular file, not a link or a folder, of one
+    /// line of UTF-8.
+    private static func pointer(at path: String) -> String? {
+        guard fileType(at: path) == FileAttributeType.typeRegular,
+              let data = FileManager.default.contents(atPath: path)
+        else { return nil }
+        var bytes = [UInt8](data)
+        while let last = bytes.last, last == 0x0A || last == 0x0D { bytes.removeLast() }
+        guard !bytes.isEmpty, !bytes.contains(where: { $0 == 0x0A || $0 == 0x0D || $0 == 0 })
+        else { return nil }
+        return String(bytes: bytes, encoding: .utf8)
+    }
+
+    /// What is at `path` itself, a link not followed; nil when nothing is.
+    private static func fileType(at path: String) -> FileAttributeType? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        else { return nil }
+        return attributes[.type] as? FileAttributeType
+    }
+
+    /// Why CCwiki took no snapshot of a worktree, or handed none over, when
+    /// `isWorktree` says its `.git`, or the folder it names, leads
+    /// elsewhere.
+    static let redirectedWorktree =
+        "The worktree's .git no longer leads to CCwiki's clone, so CCwiki ran no git in it."
+
     /// `-z` output split at each NUL, without the empty field after the
     /// last one.
     static func fields(nulSeparated data: Data) -> [String] {
@@ -886,7 +1044,13 @@ struct GitService: Sendable {
     /// Foundation's `resolvingSymlinksInPath` will not do: it takes a
     /// leading `/private` back off.
     static func realPath(_ path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return path }
+        existingRealPath(path) ?? path
+    }
+
+    /// `path` with every symbolic link resolved, or nil when it does not
+    /// exist.
+    private static func existingRealPath(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
         defer { free(resolved) }
         return String(cString: resolved)
     }

@@ -10,6 +10,7 @@ import Foundation
 /// git diff -M --name-status -z <base> <tree>     → GitNameStatus.parse
 /// git diff --numstat -z <base> <tree>            → binary paths
 /// git diff <patchOptions> <base> <tree>          → the digest, and logs/<id>.patch
+/// git diff --raw -z <base> <tree>                → links and submodules, as binary
 /// git cat-file blob <base>:<old path>            → each changed file's old text
 /// git cat-file blob <tree>:<path>                → its new text
 /// ```
@@ -43,7 +44,8 @@ struct ReviewSnapshotter {
     /// `patchFile`. Nil when git could not stage or compare.
     func snapshot(worktree: URL, base: String, patchFile: URL) async -> ReviewSnapshot? {
         guard await git.stageAll(in: worktree),
-              let diff = await git.stagedDiff(in: worktree, base: base)
+              let diff = await git.stagedDiff(in: worktree, base: base),
+              let modes = await git.stagedModes(in: worktree, base: base, tree: diff.tree)
         else { return nil }
 
         let manager = FileManager.default
@@ -52,7 +54,10 @@ struct ReviewSnapshotter {
         try? diff.patch.write(to: patchFile, options: .atomic)
 
         let entries = GitNameStatus.parse(nameStatusZ: diff.nameStatus)
+        // A symbolic link reads as one line of text, its target, and a
+        // submodule as no text: taken as binary, which DiffGuard blocks.
         let binary = GitNameStatus.binaryPaths(numstatZ: diff.numstat)
+            .union(GitNameStatus.irregularPaths(rawZ: modes))
 
         // Each side that should have text, read from git as bytes. A binary
         // file is not read at all.
@@ -86,10 +91,13 @@ struct ReviewSnapshotter {
     /// context: its kind and target, the pages a human verified at the
     /// base, the paths that changed on `origin/<default>` since, and the
     /// local paths no text may contain (§6.2). Nil when the job has no base,
-    /// or git could not answer.
+    /// when its worktree's `.git` no longer leads to `clone`, so git there
+    /// would run on a repository someone else chose
+    /// (`GitService.isWorktree`), or when git could not answer.
     func review(of job: Job, clone: URL, privatePaths: [String]) async
         -> (snapshot: ReviewSnapshot, findings: [DiffFinding])? {
         guard let base = job.baseCommit,
+              GitService.isWorktree(job.worktree, of: clone),
               let taken = await self.snapshot(
                   worktree: job.worktree, base: base, patchFile: job.patchFile)
         else { return nil }

@@ -47,7 +47,8 @@ struct DiffFinding: Sendable, Equatable, Identifiable {
 /// wiki's `ab81f02`:
 ///
 /// - `generatedRegionEdited`, the lint's `generated-region` and
-///   `generated-region-edited`: lint.mjs 1075–1109;
+///   `generated-region-edited`: lint.mjs 1075–1109 (and, for a region's
+///   whitespace or its removal, `generate-relations.mjs --check`, 309–336);
 /// - `relationFieldOnObjectPage`, its `object-relation-field`: lint.mjs
 ///   95–104 (`TYPES`), 159–171 (`FORBIDDEN_ON_OBJECTS`) and 500–511;
 /// - `wikilinkMath`, its `wikilink-math`: lint.mjs 1238–1272, scanning with
@@ -55,7 +56,8 @@ struct DiffFinding: Sendable, Equatable, Identifiable {
 ///
 /// Rules about lines look only at the lines the change added, so a page
 /// that already broke a rule at the base does not block a fix elsewhere on
-/// it.
+/// it. `wikilinkMath` counts its hits against the base's instead, because
+/// an edit elsewhere can take a link out of a code fence.
 enum DiffGuard {
 
     struct Context: Sendable {
@@ -76,17 +78,28 @@ enum DiffGuard {
     static func check(_ snapshot: ReviewSnapshot, context: Context) -> [DiffFinding] {
         let files = snapshot.files.map { InspectedFile($0) }
         // `relations.json` is part of the change, so the generator ran in
-        // this worktree: what it did to a page's region is its doing. (A
-        // correction's agent cannot run it; `relationsJSONByHand` asks.)
-        let relationsRegenerated = files.contains {
-            $0.file.path == relationsJSON && $0.file.status != .deleted
-        }
+        // this worktree, at some point: a region it rewrote is its doing.
+        // (A correction's agent cannot run it; `relationsJSONByHand` asks.)
+        let relations = files.first { $0.file.path == relationsJSON && $0.file.status != .deleted }
+        let relationsRegenerated = relations != nil
+        // What it wrote: a region gone is its doing only if its records say
+        // so, and they say whether a page was edited after it ran.
+        let manifest: WrittenManifest? = relations?.file.newText.flatMap(WrittenManifest.init(json:))
+        // The generator drops a region only from an object page it leaves
+        // with no relation (generate-relations.mjs 320–336).
+        let scriptRemovals = Set(files.filter { file in
+            guard let manifest, let new = file.new, !file.removedRegions.isEmpty else { return false }
+            return !manifest.expectsRegion(on: new)
+        }.map(\.file.path))
+
         var findings: [DiffFinding] = []
         for file in files {
             findings += pathFindings(file.file, context: context)
             findings += privateTextFindings(file, privatePaths: context.privatePaths)
             if file.isPage {
-                findings += regionFindings(file, relationsRegenerated: relationsRegenerated)
+                findings += regionFindings(
+                    file, relationsRegenerated: relationsRegenerated,
+                    removedByScript: scriptRemovals.contains(file.file.path))
                 findings += relationFieldFindings(file)
                 findings += wikilinkMathFindings(file)
                 findings += proseBulletFindings(file)
@@ -94,8 +107,8 @@ enum DiffGuard {
                 findings += rawHTMLFindings(file)
             }
         }
-        findings += scopeFindings(files, context: context, relationsRegenerated: relationsRegenerated)
-        if !relationsRegenerated { findings += derivedFilesFindings(files) }
+        findings += scopeFindings(files, context: context, scriptRemovals: scriptRemovals)
+        findings += derivedFilesFindings(files, relations: relations, manifest: manifest)
         return ordered(findings)
     }
 
@@ -221,10 +234,14 @@ enum DiffGuard {
     // MARK: - Generated regions (lint.mjs 1075–1109)
 
     /// Unbalanced markers, and regions edited or removed by hand, block; a
-    /// region the script rewrote, or removed with `relations.json`
-    /// regenerated, is a note. A region already broken at the base,
+    /// region the script rewrote, with `relations.json` regenerated, or
+    /// removed from a page its records relate nothing to, is a note. A
+    /// region changed as the script writes one, but without
+    /// `relations.json`, warns. A region already broken at the base,
     /// character for character, is not this change's doing.
-    private static func regionFindings(_ file: InspectedFile, relationsRegenerated: Bool) -> [DiffFinding] {
+    private static func regionFindings(
+        _ file: InspectedFile, relationsRegenerated: Bool, removedByScript: Bool
+    ) -> [DiffFinding] {
         guard let new = file.new else { return [] }
         let regions = new.regions
         let before = file.old?.regions
@@ -246,16 +263,35 @@ enum DiffGuard {
             let existed = before?.regions.contains(where: { $0.text == region.text }) ?? false
             guard !existed else { continue }
             let lines = LineRange(first: region.lines.lowerBound + 1, last: region.lines.upperBound + 1)
-            if region.isIntact {
-                found.append(finding(.regionRegenerated, path, lines: lines,
-                    "Regenerated by the script, not edited by hand."))
-            } else {
+            if !region.isIntact {
                 let message = """
                     The “Participates in” section on \(lines.label) was edited by hand. It is \
                     rebuilt from the reduction pages; correct those instead. \
                     (lint: `generated-region-edited`)
                     """
                 found.append(finding(.generatedRegionEdited, path, lines: lines, message))
+            } else if !region.hasGeneratorShape {
+                // The lint's checksum trims; the generator's `--check`
+                // compares bytes (generate-relations.mjs 309–336). The blank
+                // lines may be intact, with a space added at an edge of the
+                // section, so the message names the whole layout.
+                let message = """
+                    The whitespace in the “Participates in” section on \(lines.label) was changed \
+                    by hand. Its checksum still matches, but the wiki's \
+                    `generate-relations.mjs --check` fails; restore the layout the script writes: \
+                    one blank line after the BEGIN marker, one before the END marker, and no other \
+                    whitespace at either end of the section (or run \
+                    `node scripts/generate-relations.mjs`).
+                    """
+                found.append(finding(.generatedRegionEdited, path, lines: lines, message))
+            } else if relationsRegenerated {
+                found.append(finding(.regionRegenerated, path, lines: lines,
+                    "Regenerated by the script, not edited by hand."))
+            } else {
+                // A region is built from what `relations.json` records, so
+                // the script changes the two together. Without it, this one
+                // was most likely pasted, from an older version, say.
+                found.append(finding(.derivedFilesStale, path, lines: lines, regionStaleMessage(lines)))
             }
         }
 
@@ -265,7 +301,7 @@ enum DiffGuard {
         // dropped it, from a page left with no relation.
         if let removed = file.removedRegions.first {
             let line = file.newLine(changingOld: removed.lines)
-            if relationsRegenerated {
+            if removedByScript {
                 found.append(finding(.regionRegenerated, path, line: line,
                     "Removed by the script, not by hand: `relations.json` was regenerated too."))
             } else {
@@ -279,7 +315,7 @@ enum DiffGuard {
 
     /// JavaScript's `trim()`: WhiteSpace (tab, VT, FF, ZWNBSP and every
     /// space separator) and LineTerminator (LF, CR, LS, PS).
-    private static func isECMAScriptSpace(_ scalar: Unicode.Scalar) -> Bool {
+    fileprivate static func isECMAScriptSpace(_ scalar: Unicode.Scalar) -> Bool {
         switch scalar.value {
         case 0x09...0x0D, 0x20, 0xA0, 0x1680, 0x2000...0x200A, 0x2028, 0x2029, 0x202F, 0x205F,
              0x3000, 0xFEFF:
@@ -302,23 +338,28 @@ enum DiffGuard {
         "from", "to", "between", "hypotheses", "conclusion",
     ]
 
-    /// A key the change adds to an object page's frontmatter. The lint
-    /// decides by `type:`; a page without one is judged by its directory.
+    /// A key the change adds to an object page's frontmatter, quoted or
+    /// not, as js-yaml reads keys. The lint decides by `type:`; a page
+    /// without one is judged by its directory. A key the page had before
+    /// counts only if it was an object page then: a reduction page's
+    /// `hypotheses` breaks the lint once the page becomes an object page.
     private static func relationFieldFindings(_ file: InspectedFile) -> [DiffFinding] {
-        guard let new = file.new, isObjectPage(file.file.path, frontmatter: new.frontmatter)
-        else { return [] }
+        guard let new = file.new, isObjectPage(file.file.path, new) else { return [] }
+        let before = file.old.flatMap { old in
+            isObjectPage(file.file.oldPath ?? file.file.path, old) ? old : nil
+        }
         return forbiddenOnObjects.compactMap { key -> DiffFinding? in
-            guard new.frontmatter.fields[key] != nil,
-                  file.old?.frontmatter.fields[key] == nil
-            else { return nil }
-            return finding(.relationFieldOnObjectPage, file.file.path, line: new.keyLine(key),
+            guard let line = new.keyLine(key), before?.keyLine(key) == nil else { return nil }
+            return finding(.relationFieldOnObjectPage, file.file.path, line: line,
                 "Relation fields such as `\(key)` are not allowed on object pages. A relation is "
                     + "a page in `content/Reductions/`. (lint: `object-relation-field`)")
         }
     }
 
-    private static func isObjectPage(_ path: String, frontmatter: Frontmatter) -> Bool {
-        if let type = frontmatter.string("type")?.lowercased() { return objectTypes.contains(type) }
+    /// By `type:` as js-yaml reads it, a comment after it dropped, or else
+    /// by the page's directory.
+    private static func isObjectPage(_ path: String, _ text: InspectedText) -> Bool {
+        if let type = text.type?.lowercased() { return objectTypes.contains(type) }
         let directory = (String(path.dropFirst(contentPrefix.count)) as NSString)
             .deletingLastPathComponent
         return objectTypes.contains(PageKind.forDirectory(directory).rawValue)
@@ -332,34 +373,60 @@ enum DiffGuard {
     /// A `$` not escaped by a backslash.
     private static let unescapedDollar = try! NSRegularExpression(pattern: #"(^|[^\\])(\\\\)*\$"#)
 
-    /// `dollarWikilinks`, line for line: code fences and inline code are
-    /// blanked to spaces first, keeping every offset, then each `[[…]]`
-    /// holding an unescaped `$` is a hit. Only added lines outside the
-    /// generated regions count; inside one the lint blames the generator.
+    /// The hits the change adds: the new text's, less as many of each link
+    /// as the base already had. A page that already broke the rule does not
+    /// block a fix elsewhere on it; but the fences pair across the whole
+    /// body, so an edit on another line can take an unchanged link out of
+    /// code, and that link counts. The unchanged lines' hits spend the
+    /// base's first, so a hit is reported where the change added it.
     private static func wikilinkMathFindings(_ file: InspectedFile) -> [DiffFinding] {
-        guard let new = file.new, !file.added.isEmpty else { return [] }
+        guard let new = file.new else { return [] }
+        let hits = dollarHits(new)
+        guard !hits.isEmpty else { return [] }
+        var budget: [String: Int] = [:]
+        for hit in file.old.map(dollarHits) ?? [] { budget[hit.raw, default: 0] += 1 }
+
         let added = Set(file.added)
-
-        var units = Array(new.body.utf16)
-        blank(fencedSpan, in: &units)
-        blank(inlineCodeSpan, in: &units)
-        let scan = String(decoding: units, as: UTF16.self)
-        let lineStarts = Self.lineStarts(units)
-
-        var hits: Set<Int> = []
-        for match in wikilinkSpan.matches(in: scan, range: NSRange(location: 0, length: units.count)) {
-            let inner = (scan as NSString).substring(with: match.range(at: 1))
-            let innerRange = NSRange(location: 0, length: (inner as NSString).length)
-            guard unescapedDollar.firstMatch(in: inner, range: innerRange) != nil else { continue }
-            let line = new.bodyStartLine + Self.line(of: match.range.location, lineStarts: lineStarts)
-            guard added.contains(line), !new.regions.contains(line: line) else { continue }
-            hits.insert(line)
+        var lines: Set<Int> = []
+        for hit in hits.filter({ !added.contains($0.line) }) + hits.filter({ added.contains($0.line) }) {
+            if let left = budget[hit.raw], left > 0 {
+                budget[hit.raw] = left - 1
+            } else {
+                lines.insert(hit.line)
+            }
         }
-        return hits.sorted().map { line in
+        return lines.sorted().map { line in
             finding(.wikilinkMath, file.file.path, line: line,
                 "Math in a wikilink breaks the link on the site. Write `[text $x$](slug)` instead. "
                     + "(lint: `wikilink-math`)")
         }
+    }
+
+    /// `dollarWikilinks`, line for line: code fences and inline code are
+    /// blanked to spaces first, keeping every offset, then each `[[…]]`
+    /// holding an unescaped `$` is a hit, with its 0-based file line. A hit
+    /// inside a generated region, from its BEGIN marker to the end of its
+    /// END marker, is left out: there the lint blames the generator, and a
+    /// hand edit is `generatedRegionEdited`. Text after a marker on its
+    /// line is outside, as it is to the lint's `generated` spans.
+    private static func dollarHits(_ text: InspectedText) -> [(line: Int, raw: String)] {
+        var units = Array(text.body.utf16)
+        blank(fencedSpan, in: &units)
+        blank(inlineCodeSpan, in: &units)
+        let scan = String(decoding: units, as: UTF16.self) as NSString
+        let lineStarts = Self.lineStarts(units)
+
+        var hits: [(line: Int, raw: String)] = []
+        for match in wikilinkSpan.matches(in: scan as String, range: NSRange(location: 0, length: units.count)) {
+            let inner = scan.substring(with: match.range(at: 1))
+            let innerRange = NSRange(location: 0, length: (inner as NSString).length)
+            guard unescapedDollar.firstMatch(in: inner, range: innerRange) != nil,
+                  !text.regions.contains(utf16Offset: match.range.location)
+            else { continue }
+            let line = text.bodyStartLine + Self.line(of: match.range.location, lineStarts: lineStarts)
+            hits.append((line: line, raw: scan.substring(with: match.range)))
+        }
+        return hits
     }
 
     /// UTF-16 code units the scans compare with.
@@ -580,10 +647,10 @@ enum DiffGuard {
     /// most one existing page, by at most five lines (ingestion.md §4).
     /// Only the lines a hand changed count (`InspectedFile.isHandLine`).
     private static func scopeFindings(
-        _ files: [InspectedFile], context: Context, relationsRegenerated: Bool
+        _ files: [InspectedFile], context: Context, scriptRemovals: Set<String>
     ) -> [DiffFinding] {
         func handChanged(_ file: InspectedFile) -> Int {
-            handChangedLines(file, relationsRegenerated: relationsRegenerated)
+            handChangedLines(file, removedByScript: scriptRemovals.contains(file.file.path))
         }
         switch context.family {
         case .correction:
@@ -615,7 +682,8 @@ enum DiffGuard {
             }
             for (file, count) in touched where count > 5 {
                 let name = (file.file.path as NSString).lastPathComponent
-                let line = firstHandChangedLine(file, relationsRegenerated: relationsRegenerated)
+                let line = firstHandChangedLine(
+                    file, removedByScript: scriptRemovals.contains(file.file.path))
                 found.append(finding(.ingestionScope, file.file.path, line: line,
                     "This changes \(count) lines of `\(name)` by hand. An ingestion normally changes "
                         + "at most five lines of an existing page."))
@@ -625,10 +693,10 @@ enum DiffGuard {
     }
 
     /// Per hunk, the larger side, counting the lines a hand changed.
-    private static func handChangedLines(_ file: InspectedFile, relationsRegenerated: Bool) -> Int {
+    private static func handChangedLines(_ file: InspectedFile, removedByScript: Bool) -> Int {
         file.file.hunks.reduce(0) { (total: Int, hunk: LineHunk) -> Int in
             let removed = hunk.old.filter {
-                file.isHandLine(old: $0, relationsRegenerated: relationsRegenerated)
+                file.isHandLine(old: $0, regionsRemovedByScript: removedByScript)
             }.count
             let added = hunk.new.filter { file.isHandLine(new: $0) }.count
             return total + max(removed, added)
@@ -637,12 +705,12 @@ enum DiffGuard {
 
     /// The new text's line where the first hand change is, for a finding
     /// that would otherwise share its id with the file's other one.
-    private static func firstHandChangedLine(_ file: InspectedFile, relationsRegenerated: Bool) -> Int {
+    private static func firstHandChangedLine(_ file: InspectedFile, removedByScript: Bool) -> Int {
         let lastLine = max(0, (file.new?.lines.count ?? 0) - 1)
         for hunk in file.file.hunks {
             if let line = hunk.new.first(where: { file.isHandLine(new: $0) }) { return line }
             let removesHandLines = hunk.old.contains {
-                file.isHandLine(old: $0, relationsRegenerated: relationsRegenerated)
+                file.isHandLine(old: $0, regionsRemovedByScript: removedByScript)
             }
             if removesHandLines { return min(hunk.new.lowerBound, lastLine) }
         }
@@ -660,20 +728,137 @@ enum DiffGuard {
         branch after the pull request is open.
         """
 
-    /// Called without a regenerated `relations.json`: the change touches
-    /// what the generator reads, a reduction or barrier page's frontmatter,
-    /// an object page's identity, or a heading a `variants` anchor names.
-    private static func derivedFilesFindings(_ files: [InspectedFile]) -> [DiffFinding] {
-        files
-            .filter { $0.file.isMarkdown && $0.file.path.hasPrefix(contentPrefix) && staleDerivedFiles($0) }
-            .map { finding(.derivedFilesStale, $0.file.path, derivedFilesMessage) }
+    /// A region changed as the script writes one, without `relations.json`.
+    private static func regionStaleMessage(_ lines: LineRange) -> String {
+        """
+        The “Participates in” section on \(lines.label) changed, but `relations.json` did not, \
+        so the script did not write it, and the wiki's `generate-relations.mjs --check` may fail. \
+        In this job's worktree (Open in Terminal), run `npm ci` and \
+        `node scripts/generate-relations.mjs`, then review again.
+        """
     }
 
+    /// `relations.json` changed the records of `pages`, or what the regions
+    /// of `sections` show, each sorted, and the change leaves them as they
+    /// were. Either they were edited after the generator ran, or the base's
+    /// `relations.json` was already out of date; regenerating clears the
+    /// first and not the second, so the message says how to tell them
+    /// apart.
+    private static func relationsStaleMessage(pages: [String], sections: [String]) -> String {
+        var changed: [String] = []
+        if !pages.isEmpty { changed.append("what it records for \(listed(pages))") }
+        if !sections.isEmpty {
+            changed.append(sections.count == 1
+                ? "what the “Participates in” section of \(listed(sections)) shows"
+                : "what the “Participates in” sections of \(listed(sections)) show")
+        }
+        let left = switch (pages.count, sections.count) {
+        case (0, 1): "that section as it was"
+        case (0, _): "those sections as they were"
+        case (1, 0): "that page as it was"
+        case (_, 0): "those pages as they were"
+        default: "them as they were"
+        }
+        return """
+            `relations.json` changed \(changed.joined(separator: ", and ")), but this change leaves \
+            \(left), so the wiki's `generate-relations.mjs --check` fails, unless the base's \
+            `relations.json` was already out of date. In this job's worktree (Open in Terminal), \
+            run `npm ci` and `node scripts/generate-relations.mjs`, then review again. If this \
+            warning stays, the base was out of date, and this change brings `relations.json` up \
+            to date.
+            """
+    }
+
+    /// Up to three paths, then "and 4 more".
+    private static func listed(_ paths: [String]) -> String {
+        var names = paths.prefix(3).map { "`\($0)`" }
+        if paths.count > 3 { names.append("\(paths.count - 3) more") }
+        return names.count > 1
+            ? names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+            : names.joined()
+    }
+
+    /// Without a regenerated `relations.json`, the pages whose change
+    /// touches what the generator reads (`staleDerivedFiles`). With one, its
+    /// records are compared with the pages instead, since a page edited
+    /// after the generator ran may have been edited back to the base, and
+    /// so look unchanged: each page in the diff its new records disagree
+    /// with; and, in one finding on `relations.json`, the pages of the
+    /// records added, removed or changed since the base that the change
+    /// leaves as they were, and the pages whose “Participates in” section
+    /// it leaves as it was though the records changed what it shows
+    /// (`staleSections`). The generator writes each record from its page
+    /// alone, so, when the base's `relations.json` is the generator's
+    /// output, a record changes only with its page; but a section shows
+    /// other pages' records, as an endpoint's lists a reduction by its
+    /// title. (The wiki's PR checks are off, so a base can be out of date;
+    /// then the records of pages the change leaves alone change too, and
+    /// this warns though `--check` passes.) A `relations.json` that does not
+    /// read proves nothing; a base that does not read has no records.
+    private static func derivedFilesFindings(
+        _ files: [InspectedFile], relations: InspectedFile?, manifest: WrittenManifest?
+    ) -> [DiffFinding] {
+        let pages = files.filter { readsAsGeneratorInput($0) }
+        guard let relations, let manifest else {
+            return pages.filter { staleDerivedFiles($0) }
+                .map { finding(.derivedFilesStale, $0.file.path, derivedFilesMessage) }
+        }
+        var found = pages.filter { !manifest.matches($0) }
+            .map { finding(.derivedFilesStale, $0.file.path, derivedFilesMessage) }
+
+        // The pages in the diff were compared above; one CCwiki could not
+        // read, or a template, blocks on its own.
+        let base = relations.file.oldText.flatMap(WrittenManifest.init(json:))
+        let inDiff = Set(files.flatMap { file in
+            [file.file.path] + (file.file.oldPath.map { [$0] } ?? [])
+        })
+        let untouched = manifest.changedPages(since: base).subtracting(inDiff)
+        // A page the change leaves whole is named once, for its records.
+        let sections = staleSections(files, manifest: manifest, base: base, inDiff: inDiff)
+            .subtracting(untouched)
+        if !untouched.isEmpty || !sections.isEmpty {
+            found.append(finding(.derivedFilesStale, relationsJSON,
+                relationsStaleMessage(pages: untouched.sorted(), sections: sections.sorted())))
+        }
+        return found
+    }
+
+    /// The object pages whose “Participates in” section the new records
+    /// change from the base's records (`WrittenManifest.sectionsChanged`),
+    /// and that the change leaves as it was: not in the diff, or in it with
+    /// its regions as they were at the base, unless the generator writes
+    /// none there and the page has none. So a reduction's `class` changed
+    /// concerns no section, and its `model` changed only the model page's.
+    /// A page renamed, deleted or unreadable blocks on its own.
+    private static func staleSections(
+        _ files: [InspectedFile], manifest: WrittenManifest, base: WrittenManifest?, inDiff: Set<String>
+    ) -> Set<String> {
+        let byPath = Dictionary(files.map { ($0.file.path, $0) }, uniquingKeysWith: { first, _ in first })
+        let stale = manifest.sectionsChanged(since: base).filter { entry in
+            guard let file = byPath[entry.key] else { return !inDiff.contains(entry.key) }
+            guard readsAsGeneratorInput(file), let new = file.new else { return false }
+            let regions = new.regions.regions.map(\.text)
+            if regions.isEmpty, entry.value.isEmpty { return false }
+            return regions == (file.old?.regions.regions.map(\.text) ?? [])
+        }
+        return Set(stale.keys)
+    }
+
+    /// A page the generator reads: a Markdown file under `content/` but not
+    /// `content/Templates/` (generate-relations.mjs 74–75), whose text
+    /// CCwiki could read.
+    private static func readsAsGeneratorInput(_ file: InspectedFile) -> Bool {
+        file.file.isMarkdown && file.file.path.hasPrefix(contentPrefix)
+            && !file.file.path.hasPrefix(contentPrefix + "Templates/") && !file.file.isBinary
+    }
+
+    /// The change touches what the generator reads: a reduction or barrier
+    /// page's frontmatter, an object page's identity, or a heading a
+    /// `variants` anchor names.
     private static func staleDerivedFiles(_ file: InspectedFile) -> Bool {
         let old = file.old
         let new = file.new
-        let types = [old?.frontmatter.string("type"), new?.frontmatter.string("type")]
-            .compactMap { $0?.lowercased() }
+        let types = [old?.type, new?.type].compactMap { $0?.lowercased() }
         let directories = [file.file.path, file.file.oldPath].compactMap { $0 }.map { topDirectory(of: $0) }
 
         if types.contains(where: { $0 == "reduction" || $0 == "barrier" })
@@ -682,7 +867,7 @@ enum DiffGuard {
         }
 
         let isObject = [old, new].contains { side in
-            side.map { isObjectPage(file.file.path, frontmatter: $0.frontmatter) } ?? false
+            side.map { isObjectPage(file.file.path, $0) } ?? false
         }
         guard isObject else { return false }
         if identityFields.contains(where: { old?.field($0) != new?.field($0) }) { return true }
@@ -691,12 +876,17 @@ enum DiffGuard {
         // kept (generate-relations.mjs 101–108, 137), and other pages'
         // "(via …)" lines show that title. So a heading reworded under the
         // same anchor counts, as does one gained or lost. Headings compare
-        // as written, so a change to their math counts too.
+        // as written, so a change to their math counts too. An anchor is
+        // slugged first, as `headingAt` slugs it (markdown-text.mjs 172), so
+        // `#Strong-RSA` names `## Strong RSA`.
         let anchors = Set((old?.variantAnchors ?? []) + (new?.variantAnchors ?? []))
         guard !anchors.isEmpty else { return false }
         let oldHeadings = old?.headingsByAnchor() ?? [:]
         let newHeadings = new?.headingsByAnchor() ?? [:]
-        return anchors.contains { oldHeadings[$0] != newHeadings[$0] }
+        return anchors.contains { anchor in
+            let id = GithubSlugger.slug(anchor)
+            return oldHeadings[id] != newHeadings[id]
+        }
     }
 
     // MARK: - Helpers
@@ -810,12 +1000,13 @@ private struct InspectedFile {
     }
 
     /// A line of the old text that a hand changed: not blank, and not in a
-    /// generated region, unless that region is gone without the generator.
-    func isHandLine(old index: Int, relationsRegenerated: Bool) -> Bool {
+    /// generated region, unless that region is gone and the generator did
+    /// not remove it.
+    func isHandLine(old index: Int, regionsRemovedByScript: Bool) -> Bool {
         guard let text = old, text.lines.indices.contains(index) else { return true }
         guard !text.lines[index].allSatisfy(\.isWhitespace) else { return false }
         guard text.regions.contains(line: index) else { return true }
-        return !relationsRegenerated && removedRegions.contains { $0.lines.contains(index) }
+        return !regionsRemovedByScript && removedRegions.contains { $0.lines.contains(index) }
     }
 
     /// Where the change to these old lines is in the new text: the start of
@@ -838,6 +1029,8 @@ private struct InspectedText {
     let bodyStartLine: Int
     let body: String
     let regions: GeneratedRegions
+    /// Each top-level frontmatter key's first line, the key unquoted.
+    private let keyLines: [String: Int]
 
     init(_ text: String) {
         let lines = LineDiff.lines(of: text).map { line -> Substring in
@@ -856,46 +1049,97 @@ private struct InspectedText {
         }
         let bodyStartLine = close.map { $0 + 1 } ?? 0
         let body = String(text[frontmatter.bodyStart...])
+        let frontmatterLines = close.map { 1..<$0 } ?? 0..<0
 
         self.lines = lines
         self.frontmatter = frontmatter
-        self.frontmatterLines = close.map { 1..<$0 } ?? 0..<0
+        self.frontmatterLines = frontmatterLines
         self.bodyStartLine = bodyStartLine
         self.body = body
         self.regions = GeneratedRegions(body: body, firstLine: bodyStartLine)
+
+        var keyLines: [String: Int] = [:]
+        for index in frontmatterLines {
+            guard let entry = YAMLLine.entry(lines[index]), keyLines[entry.key] == nil else { continue }
+            keyLines[entry.key] = index
+        }
+        self.keyLines = keyLines
     }
 
-    /// The 0-based line of a top-level frontmatter key.
+    /// The 0-based line of a top-level frontmatter key, quoted or not.
     func keyLine(_ key: String) -> Int? {
-        frontmatterLines.first { lines[$0].hasPrefix(key + ":") }
+        keyLines[key]
     }
 
-    /// A top-level key's lines as written, with the indented lines under it:
-    /// `variants` is a mapping, which `Frontmatter` leaves out.
+    /// A top-level key's lines as written: its own, and the lines YAML reads
+    /// as its value, indented under it, or `- ` items flush left when it has
+    /// no value on its line (as `Frontmatter` reads them), with any blank
+    /// or comment lines between them. `variants` is a mapping, which
+    /// `Frontmatter` leaves out.
     func field(_ key: String) -> String? {
         guard let start = keyLine(key) else { return nil }
+        return lines[start..<fieldEnd(from: start)]
+            .map { String($0).trimmedTrailing }.joined(separator: "\n")
+    }
+
+    /// Just past the last line of the key on line `start`.
+    private func fieldEnd(from start: Int) -> Int {
+        let inline = YAMLLine.entry(lines[start])?.value ?? ""
+        let takesFlushItems = YAMLLine.isEmptyValue(inline)
         var end = start + 1
-        while end < frontmatterLines.upperBound,
-              let first = lines[end].first, first == " " || first == "\t" {
-            end += 1
+        var index = start + 1
+        while index < frontmatterLines.upperBound {
+            let line = lines[index]
+            index += 1
+            if YAMLLine.isBlankOrComment(line) { continue }
+            let isIndented = line.first == " " || line.first == "\t"
+            guard isIndented || (takesFlushItems && YAMLLine.isFlushItem(line)) else { break }
+            end = index
         }
-        return lines[start..<end].map { String($0).trimmedTrailing }.joined(separator: "\n")
+        return end
     }
 
     var frontmatterText: String {
         lines[frontmatterLines].joined(separator: "\n")
     }
 
+    /// `type:` as js-yaml reads it: unquoted, a comment after it dropped.
+    var type: String? {
+        guard case .scalar(let type, _) = yamlValue("type"), !type.isEmpty else { return nil }
+        return type
+    }
+
     /// The anchors `variants` names: `weak-prf: "#weak-prfs"` gives
-    /// "weak-prfs".
+    /// "weak-prfs", as written; `headingAt` slugs it.
     var variantAnchors: [String] {
         guard let block = field("variants") else { return [] }
         return block.split(separator: "\n").dropFirst().compactMap { line -> String? in
-            guard let colon = line.firstIndex(of: ":") else { return nil }
-            let value = Frontmatter.unquote(
-                line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces))
+            guard !YAMLLine.isBlankOrComment(line), let colon = line.firstIndex(of: ":"),
+                  let value = YAMLLine.scalar(line[line.index(after: colon)...])?.value
+            else { return nil }
             return value.hasPrefix("#") ? String(value.dropFirst()) : nil
         }
+    }
+
+    /// A top-level key's value as js-yaml reads the forms the wiki writes:
+    /// a scalar, plain or quoted, a comment after it or not; a sequence of
+    /// scalars, flow or block; a mapping of scalars one level deep.
+    /// Anything else, a value over several lines included, is `.unread`,
+    /// and compares with nothing.
+    func yamlValue(_ key: String) -> YAMLValue {
+        guard let start = keyLine(key), let entry = YAMLLine.entry(lines[start]) else { return .absent }
+        let below = lines[(start + 1)..<fieldEnd(from: start)].filter { !YAMLLine.isBlankOrComment($0) }
+        if YAMLLine.isEmptyValue(entry.value) {
+            guard let first = below.first else { return .null }
+            let item = first.drop { $0 == " " || $0 == "\t" }
+            return item.hasPrefix("- ") || item == "-"
+                ? YAMLLine.blockSequence(below) : YAMLLine.mapping(below)
+        }
+        guard below.isEmpty else { return .unread }
+        if entry.value.hasPrefix("[") { return YAMLLine.flowSequence(entry.value) }
+        guard let scalar = YAMLLine.scalar(entry.value) else { return .unread }
+        if scalar.plain, YAMLLine.nulls.contains(scalar.value) { return .null }
+        return .scalar(scalar.value, plain: scalar.plain)
     }
 
     /// Each heading's text as written, by the anchor the site gives it: the
@@ -908,7 +1152,9 @@ private struct InspectedText {
 
         var lineStart = body.startIndex
         while lineStart < body.endIndex {
-            let lineEnd = body[lineStart...].firstIndex(of: "\n") ?? body.endIndex
+            // CRLF too: `"\r\n"` is one Character, never `"\n"`.
+            let lineEnd = body[lineStart...].firstIndex(where: \.isMarkdownLineEnding)
+                ?? body.endIndex
             defer {
                 lineStart = lineEnd < body.endIndex ? body.index(after: lineEnd) : body.endIndex
             }
@@ -932,10 +1178,15 @@ private struct GeneratedRegions {
     struct Region {
         /// 0-based file lines, from the BEGIN marker's to the END marker's.
         let lines: ClosedRange<Int>
+        /// UTF-16 offsets in the body, from the start of the BEGIN marker to
+        /// the end of the END marker: lint.mjs's `generated` span.
+        let span: Range<Int>
         /// The whole region, markers included.
         let text: String
         /// Its contents hash to the checksum its BEGIN marker declares.
         let isIntact: Bool
+        /// Laid out as the generator writes it (`hasGeneratorShape`).
+        let hasGeneratorShape: Bool
     }
 
     static let begin = "<!-- BEGIN GENERATED participates-in"
@@ -951,6 +1202,27 @@ private struct GeneratedRegions {
 
     func contains(line: Int) -> Bool {
         regions.contains { $0.lines.contains(line) }
+    }
+
+    func contains(utf16Offset offset: Int) -> Bool {
+        regions.contains { $0.span.contains(offset) }
+    }
+
+    /// `${BEGIN} ${digest(inner)} -->\n\n${inner}\n\n${END}`, the contents
+    /// trimmed by `trimEnd()` and starting with their heading
+    /// (generate-relations.mjs 309–315, participates-in.mjs 155): a blank
+    /// line after the BEGIN marker, one before the END marker, and no other
+    /// whitespace at either end. The lint's checksum trims, so whitespace
+    /// changed here passes the lint, and fails `generate-relations.mjs
+    /// --check`, which compares bytes.
+    static func hasGeneratorShape(_ inner: String) -> Bool {
+        let scalars = Array(inner.unicodeScalars)
+        let blank: [Unicode.Scalar] = ["\n", "\n"]
+        guard scalars.count > 4, scalars.prefix(2).elementsEqual(blank),
+              scalars.suffix(2).elementsEqual(blank)
+        else { return false }
+        return !DiffGuard.isECMAScriptSpace(scalars[2])
+            && !DiffGuard.isECMAScriptSpace(scalars[scalars.count - 3])
     }
 
     init(body: String, firstLine: Int) {
@@ -993,14 +1265,686 @@ private struct GeneratedRegions {
             let inner = String(body[innerStart..<endMarker.lowerBound])
             regions.append(Region(
                 lines: line(at: found.lowerBound)...line(at: endMarker.lowerBound),
+                span: found.lowerBound.utf16Offset(in: body)..<endMarker.upperBound.utf16Offset(in: body),
                 text: String(body[found.lowerBound..<endMarker.upperBound]),
-                isIntact: DiffGuard.regionChecksum(inner) == declared))
+                isIntact: DiffGuard.regionChecksum(inner) == declared,
+                hasGeneratorShape: Self.hasGeneratorShape(inner)))
             from = endMarker.upperBound
         }
     }
 
     private static func isLowercaseHex(_ scalar: Unicode.Scalar) -> Bool {
         (0x30...0x39).contains(scalar.value) || (0x61...0x66).contains(scalar.value)
+    }
+}
+
+// MARK: - Frontmatter as js-yaml reads it
+
+/// A top-level frontmatter value (`InspectedText.yamlValue`).
+private enum YAMLValue: Equatable {
+    case absent
+    case null
+    case scalar(String, plain: Bool)
+    case sequence([String])
+    case mapping([String: String])
+    /// A form DiffGuard does not read.
+    case unread
+}
+
+/// Frontmatter lines, read as js-yaml reads the forms the wiki writes,
+/// for the rules that must agree with the lint and the generator:
+/// `Frontmatter` keeps a quoted key's quotes.
+private enum YAMLLine {
+
+    /// Plain scalars js-yaml reads as null.
+    static let nulls: Set<String> = ["", "~", "null", "Null", "NULL"]
+
+    /// A top-level `key: value` line: the key, unquoted, and the value after
+    /// the colon, trimmed. An indented line, a comment and a `- ` item are
+    /// not one.
+    static func entry(_ line: Substring) -> (key: String, value: Substring)? {
+        guard let first = line.first, first != " ", first != "\t", first != "#", !isFlushItem(line)
+        else { return nil }
+        if first == "\"" || first == "'" {
+            guard let close = line.dropFirst().firstIndex(of: first) else { return nil }
+            let rest = line[line.index(after: close)...].drop { $0 == " " || $0 == "\t" }
+            guard rest.first == ":" else { return nil }
+            return (Frontmatter.unquote(String(line[...close])), trimmed(rest.dropFirst()))
+        }
+        guard let colon = line.firstIndex(of: ":") else { return nil }
+        return (String(trimmed(line[..<colon])), trimmed(line[line.index(after: colon)...]))
+    }
+
+    /// No value on the key's line, or only a comment.
+    static func isEmptyValue(_ value: Substring) -> Bool {
+        value.isEmpty || value.hasPrefix("#")
+    }
+
+    static func isBlankOrComment(_ line: Substring) -> Bool {
+        let text = line.drop { $0 == " " || $0 == "\t" }
+        return text.isEmpty || text.hasPrefix("#")
+    }
+
+    /// `- item` flush left, as `Frontmatter` reads one: the closing `---`
+    /// never is.
+    static func isFlushItem(_ line: Substring) -> Bool {
+        line.hasPrefix("- ") || String(line).trimmedTrailing == "-"
+    }
+
+    /// A scalar, unquoted, and whether it was plain; nil for what DiffGuard
+    /// does not read: a quote left open, a flow collection, a block scalar,
+    /// an anchor, an alias or a tag, a mapping.
+    static func scalar(_ text: Substring) -> (value: String, plain: Bool)? {
+        let text = trimmed(text)
+        if let quote = text.first, quote == "\"" || quote == "'" {
+            guard let quoted = Frontmatter.quotedValue(String(text)) else { return nil }
+            return (Frontmatter.unquote(quoted), false)
+        }
+        // A plain scalar ends where a comment starts: a `#` first, or after
+        // a space or a tab.
+        var end = text.endIndex
+        var previous: Character = " "
+        for index in text.indices {
+            if text[index] == "#", previous == " " || previous == "\t" {
+                end = index
+                break
+            }
+            previous = text[index]
+        }
+        let value = trimmed(text[..<end])
+        if let first = value.first, "[]{}&*!|>%@`".contains(first) { return nil }
+        if value.contains(": ") || value.hasSuffix(":") { return nil }
+        return (String(value), true)
+    }
+
+    /// `[a, "b, c"]`, with a comment after it or not.
+    static func flowSequence(_ text: Substring) -> YAMLValue {
+        var items: [String] = []
+        var current = ""
+        var quote: Character?
+        var index = text.index(after: text.startIndex)
+        while index < text.endIndex {
+            let character = text[index]
+            index = text.index(after: index)
+            if let open = quote {
+                current.append(character)
+                if open == "\"", character == "\\", index < text.endIndex {
+                    current.append(text[index])
+                    index = text.index(after: index)
+                } else if character == open {
+                    quote = nil
+                }
+                continue
+            }
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+            case "[", "{":
+                return .unread
+            case ",", "]":
+                let item = trimmed(Substring(current))
+                current = ""
+                if item.isEmpty {
+                    // Only `[]`, or a comma before the `]`.
+                    guard character == "]" else { return .unread }
+                } else {
+                    guard let read = Self.scalar(item), !(read.plain && nulls.contains(read.value))
+                    else { return .unread }
+                    items.append(read.value)
+                }
+                if character == "]" {
+                    return isEmptyValue(trimmed(text[index...])) ? .sequence(items) : .unread
+                }
+            default:
+                current.append(character)
+            }
+        }
+        return .unread
+    }
+
+    /// `- item` lines at one indent, each a scalar.
+    static func blockSequence(_ lines: [Substring]) -> YAMLValue {
+        guard let indent = lines.first.map(indentation) else { return .null }
+        var items: [String] = []
+        for line in lines {
+            guard indentation(line) == indent else { return .unread }
+            let item = line.dropFirst(indent)
+            guard item.hasPrefix("- ") || String(item).trimmedTrailing == "-",
+                  let read = Self.scalar(item.dropFirst()), !(read.plain && nulls.contains(read.value))
+            else { return .unread }
+            items.append(read.value)
+        }
+        return .sequence(items)
+    }
+
+    /// `key: scalar` lines at one indent. A plain value js-yaml may read as
+    /// other than a string is not read.
+    static func mapping(_ lines: [Substring]) -> YAMLValue {
+        guard let indent = lines.first.map(indentation) else { return .null }
+        var entries: [String: String] = [:]
+        for line in lines {
+            guard indentation(line) == indent,
+                  let parsed = Self.entry(line.dropFirst(indent)), entries[parsed.key] == nil,
+                  let read = Self.scalar(parsed.value), !(read.plain && isTyped(read.value))
+            else { return .unread }
+            entries[parsed.key] = read.value
+        }
+        return .mapping(entries)
+    }
+
+    /// A null, a boolean, or what may be a number or a date.
+    private static func isTyped(_ plain: String) -> Bool {
+        guard let first = plain.first else { return true }
+        return nulls.contains(plain) || ["true", "True", "TRUE", "false", "False", "FALSE"].contains(plain)
+            || first.isNumber || first == "-" || first == "+" || first == "."
+    }
+
+    private static func indentation(_ line: Substring) -> Int {
+        line.prefix { $0 == " " || $0 == "\t" }.count
+    }
+
+    private static func trimmed(_ text: Substring) -> Substring {
+        var text = text.drop { $0 == " " || $0 == "\t" }
+        while let last = text.last, last == " " || last == "\t" { text = text.dropLast() }
+        return text
+    }
+}
+
+// MARK: - What the generator wrote
+
+/// The records `generate-relations.mjs` wrote to `relations.json` (its
+/// lines 110–192), read as far as DiffGuard compares them with the pages
+/// it wrote them from.
+private struct WrittenManifest {
+    typealias Record = [String: Any]
+
+    let objects: [Record]
+    let reductions: [Record]
+    let barriers: [Record]
+
+    init?(json: String) {
+        guard let root = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
+              let objects = root["objects"] as? [Record],
+              let reductions = root["reductions"] as? [Record],
+              let barriers = root["barriers"] as? [Record]
+        else { return nil }
+        self.objects = objects
+        self.reductions = reductions
+        self.barriers = barriers
+    }
+
+    /// How the generator copies a frontmatter key into a record.
+    enum Copy: Sendable {
+        /// `fm.key`, or `fallback` when it is missing or null.
+        case scalar(fallback: String?)
+        /// `fm.key ?? []`, or `[].concat(fm.key ?? [])`.
+        case list
+        /// `fm.key === true`.
+        case flag
+    }
+
+    /// A value as either side holds it.
+    enum Copied: Equatable {
+        case missing
+        case text(String)
+        case list([String])
+        case flag(Bool)
+        case mapping([String: String])
+    }
+
+    typealias Field = (key: String, record: String, copy: Copy)
+
+    /// Lines 152–172; `rationale` is compared on its own.
+    static let reductionFields: [Field] = [
+        ("id", "id", .scalar(fallback: nil)),
+        ("title", "title", .scalar(fallback: nil)),
+        ("kind", "kind", .scalar(fallback: "implication")),
+        ("hypotheses", "hypotheses", .list),
+        ("conclusion", "conclusion", .scalar(fallback: nil)),
+        ("class", "class", .scalar(fallback: "unstated")),
+        ("model", "model", .scalar(fallback: "standard")),
+        ("source", "source", .list),
+        ("via", "via", .list),
+        ("heuristic", "heuristic", .flag),
+        ("security-loss", "securityLoss", .scalar(fallback: "")),
+        ("status", "status", .scalar(fallback: nil)),
+    ]
+
+    /// Lines 173–190.
+    static let barrierFields: [Field] = [
+        ("id", "id", .scalar(fallback: nil)),
+        ("title", "title", .scalar(fallback: nil)),
+        ("hypotheses", "hypotheses", .list),
+        ("conclusion", "conclusion", .scalar(fallback: nil)),
+        ("class", "class", .scalar(fallback: "unstated")),
+        ("consequences", "consequences", .list),
+        ("strength", "strength", .scalar(fallback: nil)),
+        ("conditional-on", "conditionalOn", .list),
+        ("circumvented-by", "circumventedBy", .list),
+        ("source", "source", .list),
+        ("status", "status", .scalar(fallback: nil)),
+    ]
+
+    /// lint-edges.mjs `RATIONALE_FIELDS`: the `rationale` keys each type
+    /// records, by the record field each explains.
+    static let rationaleFields: [String: [(key: String, record: String)]] = [
+        "reduction": [
+            ("kind", "kind"), ("class", "class"), ("model", "model"), ("source", "source"),
+            ("via", "via"), ("heuristic", "heuristic"), ("security-loss", "securityLoss"),
+        ],
+        "barrier": [
+            ("class", "class"), ("strength", "strength"), ("conditional-on", "conditionalOn"),
+            ("oracle", "oracle"), ("source", "source"),
+        ],
+    ]
+
+    /// The `type:`s the generator writes an object for, case and all.
+    static let objectTypes: Set<String> = [
+        "primitive", "assumption", "complexity-class", "glossary", "folklore", "note",
+    ]
+
+    /// participates-in.mjs `MODEL_PAGES`.
+    static let modelPages = ["rom": "rom", "generic-group": "ggm", "algebraic-group": "agm"]
+
+    /// `[[slug#anchor|text]]`'s page part (participates-in.mjs 31).
+    static let wikilinkTarget = try! NSRegularExpression(pattern: #"\[\[([^\]|#]*)"#)
+
+    // MARK: A page and its records
+
+    /// Whether the records written for this page agree with it as it is
+    /// now. A value either side holds in a form DiffGuard does not read
+    /// agrees with anything, so a page this says is out of date is.
+    func matches(_ file: InspectedFile) -> Bool {
+        let path = file.file.path
+        if let oldPath = file.file.oldPath, oldPath != path, !records(on: oldPath).isEmpty { return false }
+        let written = records(on: path)
+        guard let page = file.new else { return written.isEmpty }
+
+        if let type = page.type, type == "reduction" || type == "barrier" {
+            let edges = type == "reduction" ? Self.on(reductions, path) : Self.on(barriers, path)
+            let fields = type == "reduction" ? Self.reductionFields : Self.barrierFields
+            guard written.count == 1, let record = edges.first else { return false }
+            return fields.allSatisfy({ Self.agrees(page.yamlValue($0.key), $0.copy, record[$0.record]) })
+                && Self.agreesRationale(page, type: type, record["rationale"])
+        }
+        guard let type = page.type, Self.objectTypes.contains(type) else { return written.isEmpty }
+        return objectMatches(page, path: path, written: written)
+    }
+
+    /// Lines 110–143: the page's object, and its variants.
+    private func objectMatches(_ page: InspectedText, path: String, written: [Record]) -> Bool {
+        guard Self.on(reductions, path).isEmpty, Self.on(barriers, path).isEmpty else { return false }
+        let objectRecords = written.filter { $0["kind"] as? String == "object" }
+        let id = page.yamlValue("id")
+        guard case .scalar(let pageID, _) = id, !pageID.isEmpty else {
+            // No object without an id; its variants are not checked.
+            if case .unread = id { return true }
+            return objectRecords.isEmpty
+        }
+        let slug = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+        let fields: [Field] = [
+            ("type", "type", .scalar(fallback: nil)),
+            ("title", "title", .scalar(fallback: slug)),
+            ("aliases", "aliases", .list),
+            ("unlisted", "unlisted", .flag),
+        ]
+        guard objectRecords.count == 1, let record = objectRecords.first,
+              Self.agrees(id, .scalar(fallback: nil), record["id"]),
+              fields.allSatisfy({ Self.agrees(page.yamlValue($0.key), $0.copy, record[$0.record]) })
+        else { return false }
+        let variantRecords = written.filter { $0["kind"] as? String == "variant" }
+        return variantsMatch(page, id: pageID, written: variantRecords)
+    }
+
+    /// Each variant's anchor, its page's id, and its title: the heading
+    /// its anchor names, markdown removed (markdown-text.mjs 114–173). A
+    /// heading with no markdown in it reads as written, its whitespace
+    /// collapsed; another is not compared.
+    private func variantsMatch(_ page: InspectedText, id: String, written: [Record]) -> Bool {
+        let declared: [String: String]
+        switch page.yamlValue("variants") {
+        case .absent, .null: declared = [:]
+        case .mapping(let entries): declared = entries
+        case .scalar, .sequence, .unread: return true
+        }
+        guard written.count == declared.count,
+              Set(written.compactMap { $0["id"] as? String }) == Set(declared.keys)
+        else { return false }
+        let headings = page.headingsByAnchor()
+        return written.allSatisfy { record in
+            guard let variant = record["id"] as? String, let anchor = declared[variant],
+                  record["of"] as? String == id, record["anchor"] as? String == anchor
+            else { return false }
+            let slug = GithubSlugger.slug(anchor.hasPrefix("#") ? String(anchor.dropFirst()) : anchor)
+            guard let heading = headings[slug],
+                  heading.allSatisfy({ !"[]<>*_~`\\$".contains($0) })
+            else { return true }
+            let title = heading.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            return record["title"] as? String == title
+        }
+    }
+
+    private func records(on path: String) -> [Record] {
+        Self.on(objects, path) + Self.on(reductions, path) + Self.on(barriers, path)
+    }
+
+    private static func on(_ records: [Record], _ path: String) -> [Record] {
+        records.filter { $0["page"] as? String == path }
+    }
+
+    /// Nil from either side, a form not read, agrees.
+    private static func agrees(_ value: YAMLValue, _ copy: Copy, _ written: Any?) -> Bool {
+        guard let expected = expected(value, copy), let actual = actual(written, copy) else { return true }
+        return expected == actual
+    }
+
+    /// What the generator writes for a frontmatter value.
+    private static func expected(_ value: YAMLValue, _ copy: Copy) -> Copied? {
+        switch copy {
+        case .scalar(let fallback):
+            switch value {
+            case .absent, .null: return fallback.map(Copied.text) ?? .missing
+            case .scalar(let text, _): return .text(text)
+            case .sequence, .mapping, .unread: return nil
+            }
+        case .list:
+            switch value {
+            case .absent, .null: return .list([])
+            case .scalar(let text, _): return .list([text])
+            case .sequence(let items): return .list(items)
+            case .mapping, .unread: return nil
+            }
+        case .flag:
+            switch value {
+            case .scalar(let text, let plain): return .flag(plain && ["true", "True", "TRUE"].contains(text))
+            case .absent, .null, .sequence, .mapping: return .flag(false)
+            case .unread: return nil
+            }
+        }
+    }
+
+    /// A record's value; nil for a form not compared, a number say.
+    private static func actual(_ written: Any?, _ copy: Copy) -> Copied? {
+        let value: Any? = written is NSNull ? nil : written
+        switch copy {
+        case .scalar:
+            guard let value else { return .missing }
+            return (value as? String).map(Copied.text)
+        case .list:
+            guard let value else { return .list([]) }
+            if let text = value as? String { return .list([text]) }
+            guard let array = value as? [Any] else { return nil }
+            let texts = array.compactMap { $0 as? String }
+            return texts.count == array.count ? .list(texts) : nil
+        case .flag:
+            return (value as? Bool).map(Copied.flag)
+        }
+    }
+
+    /// lint-edges.mjs `rationaleRecord`: the type's keys whose value is
+    /// text, trimmed, by the field each explains; no record when none is.
+    private static func agreesRationale(_ page: InspectedText, type: String, _ written: Any?) -> Bool {
+        let expected: Copied
+        switch page.yamlValue("rationale") {
+        case .mapping(let entries):
+            var record: [String: String] = [:]
+            for field in rationaleFields[type] ?? [] {
+                let text = entries[field.key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !text.isEmpty { record[field.record] = text }
+            }
+            expected = record.isEmpty ? .missing : .mapping(record)
+        case .absent, .null, .scalar, .sequence:
+            expected = .missing
+        case .unread:
+            return true
+        }
+        guard let value = written, !(value is NSNull) else { return expected == .missing }
+        guard let dictionary = value as? [String: Any] else { return true }
+        var actual: [String: String] = [:]
+        for (key, item) in dictionary {
+            guard let text = item as? String else { return true }
+            actual[key] = text
+        }
+        return expected == .mapping(actual)
+    }
+
+    // MARK: What changed since the base
+
+    /// The pages of the records added, removed or changed since `base`,
+    /// matched by id within each list: a changed record names its page on
+    /// both sides. Without a base, every record is added.
+    func changedPages(since base: WrittenManifest?) -> Set<String> {
+        let lists: [(old: [Record], new: [Record])] = [
+            (base?.objects ?? [], objects),
+            (base?.reductions ?? [], reductions),
+            (base?.barriers ?? [], barriers),
+        ]
+        var pages: Set<String> = []
+        for (old, new) in lists {
+            let before = Dictionary(grouping: old) { $0["id"] as? String }
+            let after = Dictionary(grouping: new) { $0["id"] as? String }
+            for id in Set(before.keys).union(after.keys) {
+                let was = before[id] ?? []
+                let now = after[id] ?? []
+                guard !Self.same(was, now) else { continue }
+                pages.formUnion((was + now).compactMap { $0["page"] as? String })
+            }
+        }
+        return pages
+    }
+
+    /// The same records, value for value, compared as JSON with sorted
+    /// keys. Records that do not serialize are not the same. (They are
+    /// checked first: on macOS, serializing one that is not JSON raises an
+    /// exception `try?` does not catch.)
+    private static func same(_ a: [Record], _ b: [Record]) -> Bool {
+        guard JSONSerialization.isValidJSONObject(a), JSONSerialization.isValidJSONObject(b),
+              let left = try? JSONSerialization.data(withJSONObject: a, options: [.sortedKeys]),
+              let right = try? JSONSerialization.data(withJSONObject: b, options: [.sortedKeys])
+        else { return false }
+        return left == right
+    }
+
+    // MARK: A region the generator writes
+
+    /// Whether the generator writes a region on this page, and so
+    /// `--check` fails without one: an object page, by its `type:` and
+    /// `id`, that something relates to (generate-relations.mjs 320–336): an
+    /// edge on the id or one of its variants, a reduction proved in the
+    /// model its page defines, or one whose `via` links to its page. It
+    /// drops the region from one nothing relates to, and passes over a page
+    /// that is not an object page.
+    func expectsRegion(on page: InspectedText) -> Bool {
+        guard let type = page.type, Self.objectTypes.contains(type) else { return false }
+        switch page.yamlValue("id") {
+        case .scalar(let id, _): return !id.isEmpty && !Participation(self).lines(for: id).isEmpty
+        case .unread: return true
+        case .absent, .null, .sequence, .mapping: return false
+        }
+    }
+
+    /// Each object page's section, by its path: the lines `Participation`
+    /// gives for the id its record holds, none where the generator writes
+    /// no region.
+    func sections() -> [String: [String]] {
+        let participation = Participation(self)
+        var sections: [String: [String]] = [:]
+        for object in objects where object["kind"] as? String == "object" {
+            guard let id = object["id"] as? String, let page = object["page"] as? String else { continue }
+            sections[page] = participation.lines(for: id)
+        }
+        return sections
+    }
+
+    /// The pages with an object record on both sides whose section is not
+    /// the base's, with their new lines. Without a base, none.
+    func sectionsChanged(since base: WrittenManifest?) -> [String: [String]] {
+        guard let base else { return [:] }
+        let before = base.sections()
+        return sections().filter { entry in before[entry.key].map { $0 != entry.value } ?? false }
+    }
+
+    /// participates-in.mjs 47–156 over the records: the lines of the
+    /// section the generator writes on an object page, blank ones left out.
+    /// Every link is written `[[target|text]]`, its text trimmed, nothing is
+    /// escaped, and the edges are sorted by id in Swift's order, not
+    /// `localeCompare`'s: not the region's text, but enough to tell whether
+    /// two graphs give a page the same region.
+    private struct Participation {
+
+        /// An edge as a section reads it.
+        struct Edge {
+            let id: String
+            /// `edgeLink`.
+            let link: String
+            let hypotheses: [String]
+            /// None, or the one.
+            let conclusion: [String]
+            /// The id of the page its `model` is defined on.
+            let modelPage: String?
+            /// The ids of the pages its `via` links to.
+            let viaPages: Set<String>
+            /// A barrier's " — circumvented by …"; empty for a reduction.
+            let circumvention: String
+        }
+
+        /// Each sorted by id, as `byId` sorts them.
+        private let reductions: [Edge]
+        private let barriers: [Edge]
+        /// Each object and variant, by its id.
+        private let objects: [String: Record]
+        /// The ids of each page's variants, by the page's id.
+        private let variants: [String: Set<String>]
+
+        init(_ manifest: WrittenManifest) {
+            var objects: [String: Record] = [:]
+            var variants: [String: Set<String>] = [:]
+            for object in manifest.objects {
+                guard let id = object["id"] as? String else { continue }
+                objects[id] = object
+                if object["kind"] as? String == "variant", let page = object["of"] as? String, !page.isEmpty {
+                    variants[page, default: []].insert(id)
+                }
+            }
+            let pageIDs = manifest.pageIDsBySlug()
+            // `reductionById`, for the reductions a barrier names.
+            var links: [String: String] = [:]
+            for reduction in manifest.reductions {
+                guard let id = reduction["id"] as? String else { continue }
+                links[id] = Participation.link(reduction["slug"], reduction["title"], or: id)
+            }
+            func edge(_ record: Record) -> Edge {
+                let id = record["id"] as? String ?? ""
+                let around = WrittenManifest.strings(record["circumventedBy"]).compactMap { links[$0] }
+                return Edge(
+                    id: id,
+                    link: Participation.link(record["slug"], record["title"], or: id),
+                    hypotheses: WrittenManifest.strings(record["hypotheses"]),
+                    conclusion: (record["conclusion"] as? String).map { [$0] } ?? [],
+                    modelPage: (record["model"] as? String).flatMap { WrittenManifest.modelPages[$0] },
+                    viaPages: Set(WrittenManifest.strings(record["via"]).compactMap { link in
+                        WrittenManifest.linkedPage(link, in: pageIDs)
+                    }),
+                    circumvention: around.isEmpty ? "" : " — circumvented by " + around.joined(separator: ", "))
+            }
+            self.reductions = manifest.reductions.map { edge($0) }.sorted { $0.id < $1.id }
+            self.barriers = manifest.barriers.map { edge($0) }.sorted { $0.id < $1.id }
+            self.objects = objects
+            self.variants = variants
+        }
+
+        /// The section on the page whose id is `id`: under each heading
+        /// that has any, its lines. None when nothing relates to the page.
+        func lines(for id: String) -> [String] {
+            let own = variants[id] ?? []
+            // How an edge meets the page through `ends`: nil when it does
+            // not, "" through the page's own id, and otherwise the variants
+            // it meets.
+            func meet(_ ends: [String]) -> String? {
+                if ends.contains(id) { return "" }
+                let met = Set(ends.filter { own.contains($0) }).sorted()
+                return met.isEmpty ? nil : " (via \(met.map { variantLink($0) }.joined(separator: ", ")))"
+            }
+            func matching(_ edges: [Edge], _ ends: (Edge) -> [String]) -> [(id: String, row: String)] {
+                edges.compactMap { edge in
+                    meet(ends(edge)).map { note in (id: edge.id, row: edge.link + note + edge.circumvention) }
+                }
+            }
+            let asHypothesis = matching(reductions) { $0.hypotheses }
+            let asConclusion = matching(reductions) { $0.conclusion }
+            let barriersMet = matching(barriers) { $0.hypotheses + $0.conclusion }
+            // No reduction is listed twice: Proved in skips what Builds on
+            // or Produces lists, and Used via skips all three.
+            var listed = Set((asHypothesis + asConclusion).map { $0.id })
+            let inModel = reductions.filter { $0.modelPage == id && !listed.contains($0.id) }
+            listed.formUnion(inModel.map { $0.id })
+            let usedVia = reductions.filter { $0.viaPages.contains(id) && !listed.contains($0.id) }
+
+            let title = objects[id]?["title"] as? String ?? id
+            let sections: [(heading: String, rows: [String])] = [
+                ("Builds on \(title)", asHypothesis.map { $0.row }),
+                ("Produces \(title)", asConclusion.map { $0.row }),
+                ("Barriers", barriersMet.map { $0.row }),
+                ("Proved in the \(title)", inModel.map { $0.link }),
+                ("Used via \(title)", usedVia.map { $0.link }),
+            ]
+            var lines: [String] = []
+            for section in sections where !section.rows.isEmpty {
+                lines.append("**\(section.heading)**")
+                lines += section.rows.map { "- " + $0 }
+            }
+            return lines
+        }
+
+        /// `linkTo`, for a variant: its page's slug and its anchor.
+        private func variantLink(_ id: String) -> String {
+            let variant = objects[id]
+            let target = (variant?["slug"] as? String ?? "") + (variant?["anchor"] as? String ?? "")
+            return Participation.link(target, variant?["title"], or: id)
+        }
+
+        /// markdown-text.mjs `link`, as a wikilink: the title, or the id
+        /// when it is empty, trimmed.
+        static func link(_ target: Any?, _ title: Any?, or id: String) -> String {
+            let text = (title as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
+            return "[[\(target as? String ?? "")|\(text.trimmingCharacters(in: .whitespacesAndNewlines))]]"
+        }
+    }
+
+    /// Each object's slug, lowercased, then each alias no slug claims, to
+    /// its id (participates-in.mjs 48–65).
+    private func pageIDsBySlug() -> [String: String] {
+        let pages = objects.filter { $0["kind"] as? String != "variant" }
+        var ids: [String: String] = [:]
+        for object in pages {
+            guard let slug = object["slug"] as? String, let id = object["id"] as? String else { continue }
+            ids[slug.lowercased()] = id
+        }
+        for object in pages {
+            guard let id = object["id"] as? String else { continue }
+            for alias in Self.strings(object["aliases"]) where ids[alias.lowercased()] == nil {
+                ids[alias.lowercased()] = id
+            }
+        }
+        return ids
+    }
+
+    /// The id of the page a wikilink names, by the last segment of its
+    /// target (participates-in.mjs 66–69).
+    private static func linkedPage(_ link: String, in ids: [String: String]) -> String? {
+        let text = link as NSString
+        guard let match = wikilinkTarget.firstMatch(in: link, range: NSRange(location: 0, length: text.length))
+        else { return nil }
+        let target = text.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return nil }
+        let last = target.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init) ?? target
+        return ids[last.lowercased()]
+    }
+
+    private static func strings(_ value: Any?) -> [String] {
+        if let text = value as? String { return [text] }
+        return (value as? [Any])?.compactMap { $0 as? String } ?? []
     }
 }
 

@@ -513,6 +513,9 @@ class Fact:
     weak: Weakening | None = None  # R13: only the weaker notion is derived
     weak_inputs: frozenset = frozenset()  # hypotheses consumed as weakened facts
     caveats: frozenset = frozenset()  # comparison policies only
+    # R13: (hypothesis, producer's (edge, reverse)) for each hypothesis whose
+    # requirement was met by a metBy producer's fact kept apart, not by its own
+    est_inputs: frozenset = frozenset()
 
 
 @dataclass
@@ -521,6 +524,9 @@ class Closure:
     include_idealised: bool
     facts: dict = field(default_factory=dict)  # full notion
     weak: dict = field(default_factory=dict)  # weakened notion only (R13)
+    # R13: (edge, reverse) -> the fact a metBy producer concluded, kept apart:
+    # it never blocks or replaces its node's own fact
+    established: dict = field(default_factory=dict)
     blocked: dict = field(default_factory=dict)  # (edge, reverse) -> (step, refusal)
 
     def get(self, oid):
@@ -545,6 +551,15 @@ class Derivation:
         else:
             self.steps, self.quarantined, self.excluded, self.unreviewed = steps, list(quarantined or []), {}, []
         self.default_steps = [s for s in self.steps if s.default and not s.stub]
+        # R13: the steps a requirement's metBy names for its hypothesis. Each
+        # also fires into a fact of its own, kept apart, so a requirement is
+        # met whenever such a producer fires in the closure, not only when it
+        # gave the hypothesis's one fact. A step that concludes only a weaker
+        # notion establishes nothing.
+        self.establishing = frozenset(
+            s.sort_key for s in self.steps
+            if s.weakens is None and any(q.hypothesis == s.concl and s.edge in q.met_by
+                                         for t in self.steps for q in t.requires))
         self.step_index = {s.sort_key: s for s in self.steps + self.quarantined}
         self._closure_cache = {}
         self._sub = {}
@@ -609,37 +624,65 @@ class Derivation:
 
     # -- R5 and R13: may a step fire ------------------------------------------
 
-    def _check(self, s: Step, hf: list, phase: int):
-        """Returns (fires, assumes, caveats, refusal). A refusal of None with
-        fires False means "not yet": a given that needs assuming waits for
-        phase 2."""
-        assumes, caveats = set(), set()
+    @staticmethod
+    def _established(req: Requirement, layer: int, established: dict):
+        """R13: the fact a producer in `req.met_by` concluded for its
+        hypothesis before `layer`, kept apart from the node's own fact; the
+        first found, then the preferred (R7). None when there is none."""
+        found = [f for (edge, _), f in established.items()
+                 if edge in req.met_by and f.id == req.hypothesis and f.depth < layer]
+        if not found:
+            return None
+        return min(found, key=lambda f: (f.depth,) + Derivation.preference(f))
+
+    def _check(self, s: Step, hf: list, phase: int, layer: int, established: dict):
+        """Returns (fires, assumes, caveats, refusal, met). A refusal of None
+        with fires False means "not yet": a given that needs assuming waits
+        for phase 2. `met` maps each hypothesis whose requirement its own fact
+        does not meet, but a metBy producer's fact kept apart does, to that
+        fact, which the step consumes instead (R13)."""
+        assumes, caveats, met = set(), set(), {}
         if not self.rules:
-            return True, assumes, caveats, None
+            return True, assumes, caveats, None, met
         byid = dict(zip(s.hyps, hf))
         for req in s.requires:  # R13
-            f = byid[req.hypothesis]
+            f = byid.get(req.hypothesis)
+            if f is None:
+                # A requirement on a hypothesis the record no longer gives
+                # this step constrains nothing, as Swift's `check` skips it.
+                continue
+            if f.step is not None and f.step.edge in req.met_by:
+                continue
+            # A metBy producer fired in the closure: met, and nothing is
+            # assumed, even of a given.
+            e = self._established(req, layer, established)
+            if e is not None:
+                met[req.hypothesis] = e
+                continue
             if f.step is None:
                 if phase >= 2 and self.allow_assume:
                     assumes.add(req)
                     continue
-                return False, None, None, None
-            if f.step.edge in req.met_by:
-                continue
+                return False, None, None, None, None
             if self.pre_policy == "caveat" and phase >= 2:
                 caveats.add(("requires", s.edge, req.hypothesis))
                 continue
             return False, None, None, {"kind": "requires", "hypothesis": req.hypothesis,
-                                       "notion": req.notion, "producedBy": f.step.edge}
+                                       "notion": req.notion, "producedBy": f.step.edge}, None
+        hf = [met.get(h, f) for h, f in zip(s.hyps, hf)]
         if any(f.scoped for f in hf) and not self.m.implies(s.cls, RELATIVIZING):  # R5
             if s.cls == "unstated" and self.policy == "caveat":
                 caveats.add(("idealised", s.edge))
             else:
                 return False, None, None, {"kind": "idealised-composition", "class": s.cls,
-                                           "scopedHypotheses": [f.id for f in hf if f.scoped]}
-        return True, assumes, caveats, None
+                                           "scopedHypotheses": [f.id for f in hf if f.scoped]}, None
+        return True, assumes, caveats, None, met
 
-    def _fact(self, s: Step, hf: list, weak_in: set, depth: int, assumes, caveats, makes_weak: bool) -> Fact:
+    def _fact(self, s: Step, hf: list, weak_in: set, depth: int, assumes, caveats, makes_weak: bool,
+              met: dict | None = None) -> Fact:
+        # A hypothesis met by a metBy producer's fact is that fact (R13).
+        met = met or {}
+        hf = [met.get(h, f) for h, f in zip(s.hyps, hf)]
         models = frozenset().union(*(f.models for f in hf))
         if s.model != "standard":
             models |= {s.model}
@@ -648,8 +691,9 @@ class Derivation:
         chain = self.chain_class([s.cls] + [f.chain for f in hf])
         return Fact(s.concl, depth, s, models, scoped, chain,
                     frozenset().union(*(f.assumes for f in hf)) | frozenset(assumes),
-                    s.weakens if makes_weak else None, frozenset(weak_in),
-                    frozenset().union(*(f.caveats for f in hf)) | frozenset(caveats))
+                    s.weakens if makes_weak else None, frozenset(set(weak_in) - set(met)),
+                    frozenset().union(*(f.caveats for f in hf)) | frozenset(caveats),
+                    frozenset((h, e.step.sort_key) for h, e in met.items()))
 
     @staticmethod
     def preference(f: Fact):
@@ -662,15 +706,21 @@ class Derivation:
         """Layered Horn chaining. A step fires at layer k when every hypothesis
         is known with depth < k; each new fact takes the preferred candidate
         among the steps firing at its first layer, and never changes after.
-        A weakened fact (R13) is kept apart and never blocks a full one."""
-        known, weak = cl.facts, cl.weak
+        A weakened fact (R13) is kept apart and never blocks a full one. So
+        is a metBy producer's own fact (R13): the producer fires into it at
+        its first layer even when its conclusion is already known, and only
+        a requirement reads it."""
+        known, weak, est = cl.facts, cl.weak, cl.established
         k = 0
         while True:
             k += 1
-            cands, wcands = {}, {}
+            cands, wcands, ecands = {}, {}, {}
             for s in steps:
                 makes_weak = self.rules and s.weakens is not None
-                if s.concl in known or (makes_weak and s.concl in weak):
+                establishes = self.rules and s.sort_key in self.establishing and s.sort_key not in est
+                # Known already: only its own fact is left to find.
+                only_established = s.concl in known or (makes_weak and s.concl in weak)
+                if only_established and not establishes:
                     continue
                 hf, weak_in, extra, ok = [], set(), set(), True
                 for h in s.hyps:
@@ -689,26 +739,34 @@ class Derivation:
                             weak_in.add(h)
                             extra.add(("weakened", w.step.edge, s.edge))
                             continue
-                        cl.blocked.setdefault(s.sort_key, (s, {
-                            "kind": "weakened", "hypothesis": h, "producedBy": w.step.edge,
-                            "notion": w.weak.notion}))
+                        # A step that could only establish refuses nothing.
+                        if not only_established:
+                            cl.blocked.setdefault(s.sort_key, (s, {
+                                "kind": "weakened", "hypothesis": h, "producedBy": w.step.edge,
+                                "notion": w.weak.notion}))
                     ok = False
                     break
                 if not ok:
                     continue
-                fires, assumes, cav, refusal = self._check(s, hf, phase)
+                fires, assumes, cav, refusal, met = self._check(s, hf, phase, k, est)
                 if not fires:
-                    if refusal is not None:
+                    if refusal is not None and not only_established:
                         cl.blocked.setdefault(s.sort_key, (s, refusal))
                     continue
-                c = self._fact(s, hf, weak_in, k, assumes, cav | extra, makes_weak)
+                c = self._fact(s, hf, weak_in, k, assumes, cav | extra, makes_weak, met)
+                if establishes:
+                    ecands[s.sort_key] = c
+                if only_established:
+                    continue
                 into = wcands if makes_weak else cands
                 if s.concl not in into or self.preference(c) < self.preference(into[s.concl]):
                     into[s.concl] = c
             known.update(cands)
             weak.update(wcands)
-            deepest = max((f.depth for f in list(known.values()) + list(weak.values())), default=0)
-            if not cands and not wcands and k > deepest:
+            est.update(ecands)
+            deepest = max((f.depth for f in list(known.values()) + list(weak.values()) + list(est.values())),
+                          default=0)
+            if not cands and not wcands and not ecands and k > deepest:
                 return
 
     def closure(self, start, include_idealised: bool = False) -> Closure:
@@ -739,21 +797,25 @@ class Derivation:
 
     def tree(self, cl: Closure, target: str) -> list:
         """Depth-first, hypotheses in the edge's order. A fact already shown is
-        a reference, never a second copy of its subtree."""
+        a reference, never a second copy of its subtree. A row that consumed
+        a weakened fact, or a metBy producer's fact kept apart (R13), walks
+        to that fact, not to the node's own."""
         rows, seen = [], set()
 
-        def walk(fid, weak, level):
-            f = cl.weak[fid] if weak else cl.facts[fid]
-            ref = (fid, weak) in seen
-            seen.add((fid, weak))
-            rows.append({"fact": fid, "weak": weak, "level": level, "ref": ref, "given": f.step is None,
+        def walk(fid, weak, est, level):
+            f = cl.established[est] if est else cl.weak[fid] if weak else cl.facts[fid]
+            ref = (fid, weak, est) in seen
+            seen.add((fid, weak, est))
+            rows.append({"fact": fid, "weak": weak, "established": est, "level": level, "ref": ref,
+                         "given": f.step is None,
                          "edge": None if f.step is None else f.step.edge,
                          "reverse": False if f.step is None else f.step.reverse})
             if not ref and f.step is not None:
+                met = dict(f.est_inputs)
                 for h in f.step.hyps:
-                    walk(h, h in f.weak_inputs, level + 1)
+                    walk(h, h not in met and h in f.weak_inputs, met.get(h), level + 1)
 
-        walk(target, target not in cl.facts, 0)
+        walk(target, target not in cl.facts, None, 0)
         return rows
 
     def tree_edges(self, cl: Closure, target: str) -> list:
@@ -767,7 +829,8 @@ class Derivation:
         for r in self.tree(cl, target):
             pad = "  " * r["level"]
             name = self.m.title(r["fact"])
-            f = cl.weak[r["fact"]] if r["weak"] else cl.facts[r["fact"]]
+            f = (cl.established[r["established"]] if r["established"]
+                 else cl.weak[r["fact"]] if r["weak"] else cl.facts[r["fact"]])
             if r["given"]:
                 lines.append(f"{pad}{name}  (given)")
             elif r["ref"]:
@@ -1136,8 +1199,8 @@ class Derivation:
                     reasons.append({"kind": "weakened", "hypothesis": h, "producedBy": f.step.edge,
                                     "notion": w.notion})
             for q in s.requires:
-                f = hf[q.hypothesis]
-                if f.step is not None and f.step.edge not in q.met_by:
+                f = hf.get(q.hypothesis)  # None: skipped, as in `_check`
+                if f is not None and f.step is not None and f.step.edge not in q.met_by:
                     reasons.append({"kind": "requires", "hypothesis": q.hypothesis, "notion": q.notion,
                                     "producedBy": f.step.edge})
             if any(f.scoped for f in hf.values()) and not self.m.implies(s.cls, RELATIVIZING) \
@@ -1912,6 +1975,14 @@ GOLDEN_QUERIES = [
     ("ddh-prg", ["ddh"], "prg", False, ["derivable"]),
     ("lwe-com", ["lwe"], "com", False, ["derivable"]),
     ("etdp-mpc", ["enhanced-trapdoor-permutation"], "mpc", False, ["derivable"]),
+    # A requirement is met by any metBy producer that fires, not only by the
+    # one that gave the hypothesis its fact: SPIR's own OT edge gives OT first,
+    # and DMO00's OT through cPIR still meets Kil88's; a start that gives OT
+    # another way never takes MPC away; and nothing is assumed of a given OT
+    # that DMO00 establishes.
+    ("spir-mpc", ["single-server-symmetric-pir"], "mpc", False, []),
+    ("ddh-etdp-mpc", ["ddh", "enhanced-trapdoor-permutation"], "mpc", False, ["derivable"]),
+    ("ddh-ot-mpc", ["ddh", "ot"], "mpc", False, ["derivable", "assumes"]),
     ("bdh-abe", ["bdh"], "abe", False, []),
     ("bdh-ibe", ["bdh"], "ibe", False, []),
     ("bdh-range-query", ["bdh"], "range-query-encryption", False, ["derivable"]),
@@ -2955,8 +3026,9 @@ def inbox_problems(inbox: dict, asks_markdown: str, entry_ids: set) -> list:
 def selftest_units() -> bool:
     """The checks that need no manifest and no clone, run by `make check`:
     the quote-matching cases Python and Swift share, the review document's
-    escaping and fences, the asks' inbox file, and the curation's citations
-    (plans/relations-followups.md §2.6, §4.1)."""
+    escaping and fences, the asks' inbox file, the curation's citations
+    (plans/relations-followups.md §2.6, §4.1), and a requirement on a
+    hypothesis the record no longer gives, on a manifest of its own."""
     check, state = _checker()
 
     print("quote matching (Tests/CCwikiTests/Fixtures/quote-cases.json)")
@@ -3002,6 +3074,36 @@ def selftest_units() -> bool:
     check("every requirement and weakening has a notionMarkdown", all(notions), notions.count(None))
     check("no notionMarkdown has wikilinks, links or emphasis",
           not [n for n in notions if n and any(k in n for k in ("[[", "](", "**"))])
+
+    print("a requirement on a hypothesis the record no longer gives")
+    # The record dropped syn-x from P ⇒ Z after the curation named it: the
+    # requirement constrains nothing, as Swift's `check` skips it, in the
+    # closure and in what the review says was refused. The corpus test still
+    # reports the entry as unresolved.
+    data = {"version": 1, "classSentinels": ["unstated"], "propositions": {}, "barriers": [],
+            "classes": {"fully-black-box": {"implies": ["relativizing"]},
+                        "relativizing": {"implies": ["free"]}, "free": {"implies": []}},
+            "objects": [_obj("syn-y", "assumption"), _obj("syn-p"), _obj("syn-z")],
+            "reductions": [_red("red-syn-y-to-p", ["syn-y"], "syn-p", "fully-black-box"),
+                           _red("red-syn-p-to-z", ["syn-p"], "syn-z", "fully-black-box")]}
+    stale = Curation({"requires": [{"edge": "red-syn-p-to-z", "hypothesis": "syn-x",
+                                    "notion": "syn-x in its strong regime"}]})
+    dv = Derivation(Manifest(data), stale)
+    try:
+        a = dv.query(["syn-y"], "syn-z")
+    except KeyError as e:
+        a = {"error": f"KeyError {e}"}
+    try:
+        refused = dv.refused_on_path(["syn-y"], "syn-z", False)
+    except KeyError as e:
+        refused = [{"reasons": [{"kind": f"KeyError {e}"}]}]
+    check("the query runs, and the step fires",
+          a.get("derivable") and a.get("edges") == ["red-syn-p-to-z", "red-syn-y-to-p"], a)
+    check("nothing is assumed for it", a.get("derivable") and not a.get("assumes"), a.get("assumes"))
+    check("the refused steps list no requires reason for it",
+          not [r for s in refused for r in s["reasons"]], refused)
+    check("the curation is reported unresolved",
+          "hypothesis red-syn-p-to-z:syn-x" in stale.unresolved(Manifest(data)))
 
     print("the wiki asks (plans/wiki-asks.inbox.json)")
     with open(WIKI_ASKS_INBOX, encoding="utf-8") as f:

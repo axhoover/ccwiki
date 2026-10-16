@@ -31,7 +31,7 @@ struct CCwikiApp: App {
             width: Theme.windowDefaultWidth,
             height: Theme.windowDefaultHeight)
         .windowResizability(.contentMinSize)
-        .commands { CCwikiCommands() }
+        .commands { CCwikiCommands(appModel: model) }
 
         // A paper gets a window of its own, one per paper, keyed by its
         // reference page's path: a PDF is a document, and it stays put while
@@ -176,10 +176,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 ///
 /// Two values, both published by the key reader window: its session, for
 /// everything about the page it shows, and the model, for what is app-wide
-/// (sync, updates, text size, ingestion). Neither is published by Jobs, the
-/// explorer, a paper or Settings, so the reader's commands are disabled there
-/// (plans/reader-comforts.md §1.5).
+/// (sync, updates, text size). Neither is published by Jobs, the explorer, a
+/// paper or Settings, so the reader's commands are disabled there
+/// (plans/reader-comforts.md §1.5). Ingest a Paper is the exception: the
+/// Jobs window offers it as ⇧⌘N, so it takes the app's model and works
+/// whichever window is key.
 struct CCwikiCommands: Commands {
+    /// The app's model, for the commands that work in every window.
+    let appModel: AppModel
+
     @FocusedValue(\.appModel) private var model
     @FocusedValue(\.readerSession) private var session
     @FocusedValue(\.findAction) private var findAction
@@ -282,9 +287,8 @@ struct CCwikiCommands: Commands {
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(session == nil)
 
-            Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
+            Button("Ingest a Paper…") { ingestAPaper() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-                .disabled(model == nil)
         }
 
         // Copy Proof As ▸ Text, LaTeX (⌥⌘C), Wiki Markdown (⌥⇧⌘C): the
@@ -450,9 +454,8 @@ struct CCwikiCommands: Commands {
         }
 
         CommandMenu("Jobs") {
-            Button("Ingest a Paper…") { model?.requestIngestSheet(in: session?.id) }
+            Button("Ingest a Paper…") { ingestAPaper() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-                .disabled(model == nil)
 
             Button("Show Jobs") { openWindow(id: CCwikiApp.jobsWindowID) }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
@@ -477,6 +480,30 @@ struct CCwikiCommands: Commands {
     private func beginCorrection(_ route: CorrectionRoute) {
         guard let session else { return }
         Task { await session.beginCorrection(route) }
+    }
+
+    /// File ▸ and Jobs ▸ Ingest a Paper…: on the key reader, else the
+    /// active one.
+    private func ingestAPaper() {
+        IngestCommand.perform(in: session?.id, model: appModel, openWindow: openWindow)
+    }
+}
+
+/// Ingest a Paper, from the menus or the Jobs window: the sheet goes on the
+/// reader that asked, else the active one, which comes forward
+/// (plans/reader-comforts.md §1.8).
+enum IngestCommand {
+
+    /// With no reader open, one is opened to show the sheet, as the explorer
+    /// opens one for a page. A request left waiting would show nothing now,
+    /// then come up in whichever reader opened next, where it would turn
+    /// away a PDF opened from Finder.
+    @MainActor static func perform(
+        in session: UUID?, model: AppModel, openWindow: OpenWindowAction
+    ) {
+        model.requestIngestSheet(in: session)
+        guard model.mainWindowCount == 0 else { return }
+        openWindow(id: CCwikiApp.mainWindowID, value: ReaderWindow())
     }
 }
 

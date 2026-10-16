@@ -317,7 +317,7 @@ struct ProofExportTests {
             #"% OWF ∧ KEM ⇒* PKE: derived by CCwiki from 4 recorded reductions (cryptology.city relations.json at ab81f02ff4a0)."#,
             #"% Each step is a result the wiki records. The chain is CCwiki's composition: the wiki does not state it."#,
             #"% Fully black-box: every step is."#,
-            #"% Math uses no cryptology.city macros."#,
+            "% \(ProofLaTeX.macrosUnavailable)",
             #"% In CryptoBib (crypto.bib): HILL99, GolGolMic86, CraSho03."#,
             #"\begin{enumerate}"#,
             #"  \item OWF $\Rightarrow$ PRG by~\cite{HILL99}. % red-owf-to-prg-hill99 (OWF ⇒ PRG): fully black-box"#,
@@ -340,7 +340,7 @@ struct ProofExportTests {
             #"% cPIR ⇒* MPC: derived by CCwiki from 2 recorded reductions (cryptology.city relations.json at ab81f02ff4a0)."#,
             #"% Each step is a result the wiki records. The chain is CCwiki's composition: the wiki does not state it."#,
             #"% Class unstated: 1 step does not state its."#,
-            #"% Math uses no cryptology.city macros."#,
+            "% \(ProofLaTeX.macrosUnavailable)",
             #"% In CryptoBib (crypto.bib): EC:DiCMalOst00, STOC:Kilian88."#,
             #"% Not in CryptoBib; Copy BibTeX of Cited Works gives their entries: GMW87."#,
             #"\begin{enumerate}"#,
@@ -523,7 +523,7 @@ struct ProofExportTests {
         let latex = ProofLaTeX.write(copy.export, context: context)
         #expect(latex == [
             #"% SSDDH ⇒ KE: recorded in the wiki (cryptology.city relations.json at ab81f02ff4a0)."#,
-            #"% Math uses no cryptology.city macros."#,
+            "% \(ProofLaTeX.macrosUnavailable)",
             #"% In CryptoBib (crypto.bib): EC:CasDec23, PQCRYPTO:JaoDeF11."#,
             #"SSDDH is known to be false~\cite{EC:CasDec23}, so this implication is vacuous."#,
             #"\begin{enumerate}"#,

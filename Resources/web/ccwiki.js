@@ -44,12 +44,12 @@
   var SOURCE_LINES = "data-source-lines";
   var PSEUDOCODE_LINES = "ccwiki-lines";
 
+  /** The notices above a page: Swift's words, as plain text. */
   function noticeHTML(notices) {
     if (!notices || !notices.length) return "";
-    var md = ensureMarkdown();
     return notices.map(function (n) {
       return '<div class="notice notice-' + (n.level === "warning" ? "warning" : "info") +
-        '">' + md.utils.escapeHtml(n.text) + "</div>";
+        '">' + escapeText(n.text) + "</div>";
     }).join("");
   }
 
@@ -115,6 +115,10 @@
       box.setAttribute("data-source", latex);
       var split = /^\s*%\s*oracle-split:\s*(\d+)/m.exec(source);
       if (split) box.setAttribute("data-oracle-split", split[1]);
+      // The first `\algname{…}`, which `groupGames` reads; none at all is
+      // not the same as an empty one.
+      var name = /\\algname\{([^}]*)\}/.exec(source);
+      if (name) box.setAttribute("data-algname", name[1].trim().toLowerCase());
       addCopyRow(box, latex);
     });
     return { count: blocks.length, errors: errors };
@@ -231,17 +235,21 @@
     area.appendChild(row);
   }
 
-  /** Groups a `\algname{Game}` block with the non-Game blocks that immediately
-   *  follow it, so the game and its oracles sit side by side the way they do
-   *  on the site. */
+  /** Groups a `\algname{Game}` block with the named, non-Game blocks that
+   *  immediately follow it, so the game and its oracles sit side by side the
+   *  way they do on the site. Decided as the site decides (quartz
+   *  pseudocode.ts:209), by each block's first `\algname`, trimmed and in
+   *  any case, never by its caption: a block with no `\algname` ends the
+   *  group. */
   function groupGames(root) {
     var boxes = Array.prototype.slice.call(root.querySelectorAll(".pseudocode-container"));
     var i = 0;
     while (i < boxes.length) {
-      if (!isGame(boxes[i])) { i++; continue; }
+      if (algname(boxes[i]) !== "game") { i++; continue; }
       var followers = [];
       var j = i + 1;
-      while (j < boxes.length && !isGame(boxes[j]) && boxes[j].previousElementSibling === boxes[j - 1]) {
+      while (j < boxes.length && boxes[j].previousElementSibling === boxes[j - 1] &&
+             algname(boxes[j]) !== null && algname(boxes[j]) !== "game") {
         followers.push(boxes[j]);
         j++;
       }
@@ -268,9 +276,9 @@
     }
   }
 
-  function isGame(box) {
-    var caption = box.querySelector(".ps-algorithm > .ps-line");
-    return !!caption && /^\s*Game\b/.test(caption.textContent || "");
+  /** A block's `\algname`, as `renderPseudocode` noted it, or null. */
+  function algname(box) {
+    return box.hasAttribute("data-algname") ? box.getAttribute("data-algname") : null;
   }
 
   /** The `**Authors:** … | **Venue:** … | [Source](…)` line under a reference
@@ -325,10 +333,12 @@
    * on a fresh install the clone — and so `macros.ts` — does not exist until
    * after the first sync, and a pull can change it. Rebuilding markdown-it
    * is cheap; rendering a page with a stale table is every `\calA` in red.
+   * With no table, the current one stays: a caller that only wants an
+   * instance must never empty the table pseudocode and copying read.
    */
   function ensureMarkdown(macros) {
     if (macros === undefined || macros === null) {
-      macros = ((global.__CCWIKI__ || {}).macros) || {};
+      macros = currentMacros || {};
     }
     var key = macrosKey(macros);
     if (md && key === currentMacrosKey) return md;
@@ -719,10 +729,11 @@
   // Before WebKit builds the context menu, tell Swift what is under the
   // pointer: a formula's LaTeX, and an algorithm's, as written and with the
   // macros written out; the link, for the menu's Open Link in New Tab, in
-  // New Window and on cryptology.city; and the selection, for the
-  // corrections group: the passage the right-click was on, or else the
-  // block under the pointer, with no text. The message is sent on the same
-  // connection as, and ahead of, the menu request, so it arrives first.
+  // New Window and on cryptology.city, and a web or mail link's, for its
+  // Open Link; and the selection, for the corrections group: the passage
+  // the right-click was on, or else the block under the pointer, with no
+  // text. The message is sent on the same connection as, and ahead of, the
+  // menu request, so it arrives first.
   document.addEventListener("contextmenu", function (event) {
     var target = event.target;
     var host = mathHost(target);
@@ -739,6 +750,7 @@
       algorithm: source,
       algorithmExpanded: source === null ? null : expandMacros(source, currentMacros || {}),
       link: appLink(linkAt(target)),
+      externalLink: webLink(linkAt(target)),
       selection: selection,
     });
   }, true);
@@ -799,6 +811,15 @@
     var href = anchor.getAttribute("href") || "";
     if (!href || href.charAt(0) === "#" || /^https?:|^mailto:/.test(href)) return null;
     return href;
+  }
+
+  /** The href of a link to the web or to mail, for the menu's Open Link,
+   *  which the app opens itself. Null for no link, a dead one, or any
+   *  other. */
+  function webLink(anchor) {
+    if (!anchor || anchor.classList.contains("broken")) return null;
+    var href = anchor.getAttribute("href") || "";
+    return /^https?:|^mailto:/.test(href) ? href : null;
   }
 
   /** Follows a link off the page: the web in the browser, anything else in

@@ -209,6 +209,21 @@ struct JobNotice: Codable, Sendable, Equatable {
     let text: String
 }
 
+/// One push CCwiki sent, or set out to send, for a job: the commit, and
+/// where it went (plans/corrections.md §6.5). Recorded, and the job's
+/// record written, before the push is sent, so a push whose reply was lost
+/// to a crash or a quit is recognised afterwards. Only an attempt for the
+/// same repository and branch makes a tip there CCwiki's own. A confirmed
+/// push is kept the same way (`Job.confirmedPush`), so it too says where
+/// it went.
+struct PushAttempt: Codable, Sendable, Hashable {
+    /// `PublishTarget.repository`: "axhoover/cryptology.city".
+    let repository: String
+    /// "fix/x", not "refs/heads/fix/x".
+    let branch: String
+    let commit: String
+}
+
 // MARK: - Job
 
 /// One job: an ingestion, a correction or an edit. Its state, its
@@ -254,10 +269,24 @@ final class Job: Identifiable {
     private(set) var review: ReviewSnapshot?
     private(set) var findings: [DiffFinding] = []
     /// Persisted before each push is sent, so a crash between the push and
-    /// the PR is recoverable (§4.4).
+    /// the PR is recoverable (§4.4). The next push overwrites it.
     private(set) var pushingCommit: String?
-    /// Persisted once a push is confirmed.
+    /// Persisted once a push is confirmed: `confirmedPush`'s commit, for
+    /// what only asks whether the branch is on GitHub (the review's
+    /// banner, Discard). In a record written before destinations were
+    /// kept, it says nothing of where that push went.
     private(set) var pushedCommit: String?
+    /// The last push confirmed, with the repository and the branch it went
+    /// to: persisted with `pushedCommit`. The next push leases on it only
+    /// when it goes to that same repository and branch, and a tip there
+    /// that is not this job's is refused only after it (§6.5 step 3).
+    private(set) var confirmedPush: PushAttempt?
+    /// Every push CCwiki sent, or set out to send, for this job, each with
+    /// the repository and the branch it went to: persisted before it is
+    /// sent, and never dropped, whatever a later Approve, retry, rename or
+    /// relaunch does. All that makes a tip on GitHub this job's own
+    /// (§6.5 step 3).
+    private(set) var pushAttempts: [PushAttempt] = []
     /// The last publish result, or the tripwire's finding (§5.5).
     private(set) var notice: JobNotice?
     /// Restored without its worktree: Restore applies `patchFile`.
@@ -273,6 +302,11 @@ final class Job: Identifiable {
     /// Set by the runner so the panel's Cancel button has something to cancel,
     /// and by Approve so a quit can interrupt the publish.
     @ObservationIgnored var task: Task<Void, Never>?
+    /// The branches of every other job the job center knows of, those Clear
+    /// Finished has dropped included: asked as the agent exits, for the
+    /// tripwire to take for CCwiki's own (§5.5). Set by the job center as it
+    /// starts the job.
+    @ObservationIgnored var otherJobBranches: (@MainActor () -> Set<String>)?
 
     /// The raw stream, appended to as it arrives. Kept even after the worktree
     /// is pruned — a transcript you cannot re-read is not a transcript.
@@ -327,6 +361,8 @@ final class Job: Identifiable {
         self.pullRequest = record.pullRequest ?? PullRequestDraft(title: "", body: "")
         self.pushingCommit = record.pushingCommit
         self.pushedCommit = record.pushedCommit
+        self.confirmedPush = record.confirmedPush
+        self.pushAttempts = record.pushAttempts
         self.notice = record.notice
 
         let restored = Self.restoration(
@@ -385,7 +421,8 @@ final class Job: Identifiable {
             id: id, kind: kind, branch: branch, state: state, createdAt: createdAt,
             startedAt: startedAt, finishedAt: finishedAt, baseCommit: baseCommit,
             pullRequest: pullRequest, pushingCommit: pushingCommit,
-            pushedCommit: pushedCommit, notice: notice)
+            pushedCommit: pushedCommit, pushAttempts: pushAttempts,
+            confirmedPush: confirmedPush, notice: notice)
     }
 
     private func persist() {
@@ -472,6 +509,23 @@ final class Job: Identifiable {
     /// Whether an editor may write into the worktree.
     var canEdit: Bool { state == .awaitingReview && !needsRestore }
 
+    /// Whether CCwiki has pushed this job's branch, or tried to: a push
+    /// confirmed, one sent and never confirmed, or any recorded attempt.
+    /// Such a job may have a branch, and a pull request, on GitHub, and
+    /// only its record says so.
+    var hasTriedToPush: Bool {
+        pushedCommit != nil || pushingCommit != nil || !pushAttempts.isEmpty
+    }
+
+    /// A record written before pushes were kept with where they went: it
+    /// names a commit pushed, or being pushed, and no repository or branch.
+    /// That push makes nothing on GitHub this job's own, wherever the
+    /// target is now (§6.5 step 3).
+    var hasPushWithoutDestination: Bool {
+        confirmedPush == nil && pushAttempts.isEmpty
+            && (pushedCommit != nil || pushingCommit != nil)
+    }
+
     /// An agent job that ended without a review can be submitted again.
     var canRunAgain: Bool {
         guard kind.tag != .edit else { return false }
@@ -495,6 +549,10 @@ final class Job: Identifiable {
     }
 
     func setState(_ newState: JobState) {
+        // Cancelled stays cancelled, but for Review Anyway. A runner that
+        // was awaiting something when Cancel was pressed must not bring
+        // the job back as it winds down (§4.1).
+        if state == .cancelled, newState != .cancelled, newState != .awaitingReview { return }
         state = newState
         if newState.isActive, startedAt == nil { startedAt = Date() }
         if newState.isTerminal, finishedAt == nil {
@@ -527,8 +585,17 @@ final class Job: Identifiable {
         persist()
     }
 
-    func setPushedCommit(_ sha: String?) {
-        pushedCommit = sha
+    /// The push GitHub confirmed, and where it went, or nil: `pushedCommit`
+    /// with it, and the record written.
+    func setConfirmedPush(_ push: PushAttempt?) {
+        confirmedPush = push
+        pushedCommit = push?.commit
+        persist()
+    }
+
+    /// Adds `attempt`, once, and writes the record: before the push is sent.
+    func recordPushAttempt(_ attempt: PushAttempt) {
+        if !pushAttempts.contains(attempt) { pushAttempts.append(attempt) }
         persist()
     }
 
@@ -653,12 +720,17 @@ struct JobRecord: Codable, Sendable {
     let pullRequest: PullRequestDraft?
     let pushingCommit: String?
     let pushedCommit: String?
+    /// Empty in a record written before attempts were kept.
+    let pushAttempts: [PushAttempt]
+    /// Nil before the first confirmed push, and in a record written before
+    /// confirmed pushes were kept with where they went.
+    let confirmedPush: PushAttempt?
     let notice: JobNotice?
 
     /// Spelled out, so the decoder below and the synthesized encoder agree.
     enum CodingKeys: String, CodingKey {
         case id, kind, branch, state, createdAt, startedAt, finishedAt, baseCommit
-        case pullRequest, pushingCommit, pushedCommit, notice
+        case pullRequest, pushingCommit, pushedCommit, pushAttempts, confirmedPush, notice
     }
 }
 
@@ -668,7 +740,9 @@ extension JobRecord {
 
     /// In an extension, so the memberwise init `Job.record` uses survives.
     /// A record from before 0.3 decodes as `.ingestion(submission)`, with
-    /// `createdAt` its `submittedAt`; the fields it never had are nil.
+    /// `createdAt` its `submittedAt`; the fields it never had are nil, and
+    /// a record from before push attempts were kept has none, and no
+    /// confirmed push.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let kind: JobKind
@@ -692,12 +766,17 @@ extension JobRecord {
         let pullRequest = try container.decodeIfPresent(PullRequestDraft.self, forKey: .pullRequest)
         let pushingCommit = try container.decodeIfPresent(String.self, forKey: .pushingCommit)
         let pushedCommit = try container.decodeIfPresent(String.self, forKey: .pushedCommit)
+        let pushAttempts = try container.decodeIfPresent(
+            [PushAttempt].self, forKey: .pushAttempts) ?? []
+        let confirmedPush = try container.decodeIfPresent(
+            PushAttempt.self, forKey: .confirmedPush)
         let notice = try container.decodeIfPresent(JobNotice.self, forKey: .notice)
         self.init(
             id: id, kind: kind, branch: branch, state: state, createdAt: createdAt,
             startedAt: startedAt, finishedAt: finishedAt, baseCommit: baseCommit,
             pullRequest: pullRequest, pushingCommit: pushingCommit,
-            pushedCommit: pushedCommit, notice: notice)
+            pushedCommit: pushedCommit, pushAttempts: pushAttempts,
+            confirmedPush: confirmedPush, notice: notice)
     }
 }
 

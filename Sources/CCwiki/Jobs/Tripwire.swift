@@ -10,16 +10,17 @@ import Foundation
 ///
 /// 1. **Branches.** A head that is new or moved, and is not another CCwiki
 ///    job's branch, was pushed while the agent ran. That covers the
-///    contract's own `paper-submission/<KEY>-<slug>` too. The job still goes
-///    to review, with an orange notice.
+///    contract's own `paper-submission/<KEY>-<slug>` too. An orange notice
+///    names it, and the job ends as the agent's result says.
 /// 2. **Pull requests.** Open ones by the signed-in account, created since
 ///    a minute before the job started, but for those from another job's
 ///    branch in the target repository. Only one from the job's own branch,
 ///    in the target repository itself, makes the job `opened(url)`, with an
 ///    orange notice. Any other is named in an orange notice, and the job
-///    still goes to review with its own diff: the maintainer may open a
-///    pull request from Terminal while a job runs, and a pull request from
-///    another branch is no evidence that this job's changes are in it.
+///    ends as the agent's result says, in review with its own diff when it
+///    changed something: the maintainer may open a pull request from
+///    Terminal while a job runs, and a pull request from another branch is
+///    no evidence that this job's changes are in it.
 ///
 /// It says what CCwiki knows and no more: the maintainer may push from
 /// Terminal in the same twenty minutes, so a branch it cannot account for is
@@ -193,8 +194,8 @@ struct Tripwire {
     /// Only a pull request from the job's own branch in the target
     /// repository (`OpenedPullRequest.isFrom`) is evidence that this job's
     /// changes left without review, and only it makes the job `opened`. Any
-    /// other is named, with where to look, and the job goes to review with
-    /// its own diff: CCwiki cannot tell the maintainer's pull request from
+    /// other is named, with where to look, and the job ends as the agent's
+    /// result says: CCwiki cannot tell the maintainer's pull request from
     /// Terminal from one the agent opened on a branch of its own, and does
     /// not guess. The push of the job's own branch goes without saying when
     /// its pull request is named.
@@ -209,7 +210,7 @@ struct Tripwire {
         } else if moved.contains(jobBranch) {
             sentences.append("The agent pushed \(jobBranch) itself, bypassing review.")
         }
-        if let sentence = openedSentence(others, inReview: own == nil) {
+        if let sentence = openedSentence(others, jobOpened: own != nil) {
             sentences.append(sentence)
         }
         if let sentence = pushedSentence(moved.filter { $0 != jobBranch }) {
@@ -220,10 +221,13 @@ struct Tripwire {
         return (own?.url, JobNotice(tone: .warning, text: sentences.joined(separator: " ")))
     }
 
-    /// "A pull request from manual/b was opened … : <url>.", and, when the
-    /// job goes to review, where to look and what CCwiki has sent.
+    /// "A pull request from manual/b was opened … : <url>.", and, unless
+    /// the job's own pull request makes it opened, where to look and that
+    /// CCwiki has sent nothing. That stays true however the job ends: the
+    /// runner sets the notice before it settles the job, and an Approve
+    /// replaces it.
     nonisolated private static func openedSentence(
-        _ pullRequests: [OpenedPullRequest], inReview: Bool
+        _ pullRequests: [OpenedPullRequest], jobOpened: Bool
     ) -> String? {
         guard !pullRequests.isEmpty else { return nil }
         let sources = list(pullRequests.map(\.source))
@@ -233,10 +237,10 @@ struct Tripwire {
                 + "and CCwiki did not open it: \(urls)."
             : "Pull requests from \(sources) were opened while the agent ran, "
                 + "and CCwiki did not open them: \(urls)."
-        guard inReview else { return found }
+        guard !jobOpened else { return found }
         let them = pullRequests.count == 1 ? "it" : "them"
         return found + " Look at \(them) on GitHub to see whether the agent made \(them); "
-            + "CCwiki has sent nothing from this job, which waits for your review."
+            + "CCwiki has sent nothing from this job."
     }
 
     /// "fix/a was pushed …", "fix/a and fix/b were pushed …".
@@ -260,9 +264,11 @@ struct Tripwire {
         return items.dropLast().joined(separator: ", ") + " and " + last
     }
 
-    /// The branches of every other job CCwiki knows of, from the records
-    /// beside the transcripts. A push one of them makes while this agent
-    /// runs is CCwiki's own (an Approve), not the agent's.
+    /// The branches of every other job with a record beside the
+    /// transcripts. A push one of them makes while this agent runs is
+    /// CCwiki's own (an Approve), not the agent's. Clear Finished deletes
+    /// records, so the runner adds the branches the job center still knows
+    /// of (`Job.otherJobBranches`).
     nonisolated static func otherJobBranches(logs: URL, excluding jobID: String) -> Set<String> {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: logs, includingPropertiesForKeys: nil)) ?? []

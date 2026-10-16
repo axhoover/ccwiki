@@ -128,7 +128,12 @@ recommendations that need a yes; §8 lists them as questions.
   "↑↓ Move · ↩ Open · ⌘↩ New Tab · esc Cancel". `SearchPalette` keeps its
   count and Done and gains one "⌘↩ New Tab" hint before the `Spacer`, in the
   same keycap style, extracted from QuickSwitcherView's `hint(_:_:)` into a
-  shared `KeyHint` view (`SWIFTUI-RULES` §8.6).
+  shared `KeyHint` view (`SWIFTUI-RULES` §8.6). ⌘S, ⇧⌘R and ⇧⌘F search once
+  typing pauses, so their rows can still be the last query's: a Return, ⌘Return
+  or ⇧⌘Return pressed before the rows are the results for the field's text
+  waits for them (`PaletteReturn`) and then opens the highlighted row, and is
+  dropped if the text changes first. A row opens with the query its results
+  were computed for.
 - **Each tab has** its own page, Back and Forward, scroll position, find bar,
   inspector visibility and tab, sidebar selection and expanded folders, and
   web view.
@@ -272,7 +277,12 @@ another window. A request from outside a reader (the Jobs window's New
 Ingestion Job…, which corrections renames Ingest a Paper) brings the target
 window forward with
 `makeKeyAndOrderFront`. While the sheet is up, a second request only brings
-its window forward, and the other windows' drop targets refuse PDFs. The
+its window forward, and the other windows' drop targets refuse PDFs, as does
+`onOpenURL` for a PDF from Finder: the sheet up reads none, so one staged for
+it would wait and join the next ingestion. A sheet pinned to a window that
+has not started is not up yet, as a waiting request is when the window a PDF
+opens claims it, so that window stages the PDF for it
+(`ReaderSession.stagesOpenedPDF`). The
 bookkeeping is the pure `IngestSheetTarget` (§4.6).
 
 ### 1.4 Opening a page elsewhere
@@ -337,14 +347,15 @@ today, so it lands on the match.
 
 `CCwikiCommands` reads `@FocusedValue(\.readerSession)` for everything about
 a page. It keeps `@FocusedValue(\.appModel)` for app-wide items, so those
-stay enabled exactly when they are today: when a reader window is key.
+stay enabled exactly when they are today: when a reader window is key,
+except Ingest a Paper, which takes the app's own model (below).
 
 | Command | Keys | Goes to | Enabled when |
 |---|---|---|---|
 | New Window | ⌘N | `openWindow(id:value:)` | always |
 | New Tab | ⌘T | the same, as a tab of the key reader window | always; with no reader key, a window |
 | Quick Switcher… | ⌘O | `session.presentQuickSwitcher()` | a reader is key |
-| Ingest a Paper… | ⇧⌘N | `model.requestIngestSheet(in: session.id)` | a reader is key (today) |
+| Ingest a Paper… | ⇧⌘N | `IngestCommand.perform`: `model.requestIngestSheet(in: session?.id)`, with the app's own model, then a reader window if none is open | always, as the Jobs window's button offers it |
 | Find on Page, Next, Previous | ⌘F ⌘G ⇧⌘G | `\.findAction`, from that window's `ReaderView` | as today |
 | Find in All Pages… | ⇧⌘F | `session.grepPresented` | a reader is key |
 | Search the Wiki… | ⌘S | `\.searchAction`, `session.searchPresented` | as today |
@@ -388,7 +399,7 @@ them, one click away (§7).
   query is app-wide. The quick switcher leaves out the page on screen in the
   window that presented it: `session.presentQuickSwitcher()` sets
   `model.quickSwitcherExcludedPath`, which `refreshQuickSwitcher()` reads on
-  every keystroke.
+  every keystroke. Presenting one closes any other window's switcher.
 - **Status bar.** The sync state, warnings, job count and update progress are
   the same in every window. `lastRenderError` is the window's own.
 - **Find.** The find bar's text and state are `@State` in `ReaderView`,
@@ -437,9 +448,11 @@ again for the first after every reader window has closed) and
 3. **Once the wiki is loaded** (`libraryDidLoad`, or at once if it is
    already loaded), a restored history drops pages the wiki no longer has
    (`NavigationHistory.pruned(keeping:)`) and renders at its saved reading
-   anchor. A pending location then opens in any session. A session with
-   neither a restored page nor the launch document opens its opening, else
-   the last page if this is the cold start, else Home.
+   anchor. A pending location then opens in any session. A session with no
+   restored state opens its opening, over the launch document if it shows
+   one, as a paper window's Show Reference Page asks with no reader open.
+   One with neither a restored page nor the launch document opens the last
+   page if this is the cold start, else Home.
 
 So a cold launch opens the last page, and while a reader is open, ⌘N, ⌘T
 and the tab bar's + button open Home. A last page the wiki no longer has
@@ -492,7 +505,10 @@ follows the key reader.
   counted by the registry, one per tab.
 - **Jobs.** New Ingestion Job… calls `model.requestIngestSheet(in: nil)`.
   The sheet appears on the active reader window, which comes forward. With
-  no reader open it waits for the next one, as today.
+  no reader open, Jobs opens one, which claims the request and shows the
+  sheet (`IngestCommand`, as the explorer opens one for a page). As there,
+  `mainWindowCount` counts a window only once it claims its session, so a
+  second click before then opens a second reader, without the sheet.
 - **A paper window's Show Reference Page** is an explicit Show, so it must
   be seen. `model.revealInReader(_:)` prefers a reader tab already showing
   that page, else the active reader, opens the page there and brings that
@@ -515,7 +531,12 @@ cost a few hundred megabytes. Three choices keep that down:
   (`WebController.sharedDataStore`). Today each controller would make its
   own, and with it a separate network process for each.
 - **`paths.stagedWebRoot()` runs once**, in `AppModel.init`, and every
-  session gets the URL. It copies the pipeline on first use.
+  session gets the URL. It copies the pipeline on first use. Reading
+  `model.webRoot` checks the copy (`AppPaths.keepStagedWebRoot`, also on
+  activation, hourly, and before a web view reloads its shell after a
+  WebContent crash, through `WebController.onRendererRestart`): it is marked
+  in use, and staged again at the same path only if Caches lost it while the
+  bundle on disk is still this build.
 - **A closed tab releases its web view.** The session leaves the registry
   when its window posts `willCloseNotification` (§1.3). The `Bridge`,
   `onNavigate` and `onReady` closures capture `[weak self]` already.
@@ -1098,6 +1119,12 @@ decides per tab, purely:
 | `.document` | always: it is one synthetic page, and the first load must bring Welcome's links alive and drop its "The wiki is downloading" notice |
 | `.empty` | never |
 
+In a snapshot store a page also renders again when the load moved the
+revision it was rendered at: a snapshot has no history, so a correction could
+not read that revision's file (corrections §3.5). Every load also prunes each
+tab's history as the first does (§1.7), and a tab whose page went shows the
+nearest one left on Back, or Home (`SessionReloadPlan`).
+
 The page tree, the counts and the quick switcher are rebuilt after every
 load, as today. They are cheap.
 
@@ -1171,7 +1198,7 @@ policy and moves `pageZoom`, so it gets the same review as a track.
 
 | File | Change |
 |---|---|
-| `App/AppModel.swift` | `Location` and `Document` become `Hashable, Codable` (Codable must be synthesized in this file). `let webRoot` (from `stagedWebRoot()`, once). `var pageZoom` is persisted, clamped to `WebController.zoomRange`, applied in `didSet`, and the text-size methods set it. `let papers = PaperLibrary(paths:)`. `loadLibrary(reason:) async -> LibraryUpdate?` is rebuilt on the seams below and serialized (§3.2): `LoadedLibrary.update`, or `build` when nothing is loaded; then `apply`; then `LibraryRefresh.revisionFacts`, keeping `loadedRevision` only if `currentRevision` did not move; then `searchIndex.sync`; worktree housekeeping when `LibraryRefresh.runsJobHousekeeping(reason)`; then a private `libraryDidLoad(_:)` holding today's re-render tail. Add `@ObservationIgnored private var loaded: LoadedLibrary?`. `sync()` asks `LibraryRefresh.needsReload` and `await LibraryRefresh.summary`, and calls `refreshPushCapability()` after every outcome but `.failed`; the load no longer calls it. `rebuildLibrary()`, replacing `rebuildSearchIndex()`, drops `loaded`, resets the search index, then calls `loadLibrary(reason: .rebuild)`. `webController.onNavigate` takes a `LinkDisposition`, and anything but `.here` opens the site, as a modified click does today |
+| `App/AppModel.swift` | `Location` and `Document` become `Hashable, Codable` (Codable must be synthesized in this file). `webRoot` (staged once from `stagedWebRoot()`; now a computed `var` that calls `checkWebRoot()` first, §1.9). `var pageZoom` is persisted, clamped to `WebController.zoomRange`, applied in `didSet`, and the text-size methods set it. `let papers = PaperLibrary(paths:)`. `loadLibrary(reason:) async -> LibraryUpdate?` is rebuilt on the seams below and serialized (§3.2): `LoadedLibrary.update`, or `build` when nothing is loaded; then `apply`; then `LibraryRefresh.revisionFacts`, keeping `loadedRevision` only if `currentRevision` did not move; then `searchIndex.sync`; worktree housekeeping when `LibraryRefresh.runsJobHousekeeping(reason)`; then a private `libraryDidLoad(_:)` holding today's re-render tail. Add `@ObservationIgnored private var loaded: LoadedLibrary?`. `sync()` asks `LibraryRefresh.needsReload` and `await LibraryRefresh.summary`, and calls `refreshPushCapability()` after every outcome but `.failed`; the load no longer calls it. `rebuildLibrary()`, replacing `rebuildSearchIndex()`, drops `loaded`, resets the search index, then calls `loadLibrary(reason: .rebuild)`. `webController.onNavigate` takes a `LinkDisposition`, and anything but `.here` opens the site, as a modified click does today |
 | `App/LoadedLibrary.swift` (new) | `LoadedLibrary`, moved out of `AppModel.swift` and given `fingerprints`. `build(cloneRoot:)` is today's detached body, with relations-followups' `unverifiedCitations` step if that has merged by then (§10). `update(_:cloneRoot:)` calls `build` and reports `changes: nil`, `isFullBuild: true`. Also `LibraryUpdate` (with `requiresRerender` always true) and `LibraryArtifact` |
 | `Wiki/LibraryChanges.swift` (new) | `ContentFingerprints` (`.empty`; `scan` returns `.empty`) and `LibraryChanges` (`.none`; `between` returns `.none`) |
 | `App/LibraryRefresh.swift` (new) | `LibraryLoadReason`, `RevisionFacts` and `LibraryRefresh` with today's behaviour: reload after every outcome but `.failed`, the summary by `git diff` (hence `summary` is `async` and takes the store, git and clone), the revision facts by today's calls, housekeeping on every load |
@@ -1322,7 +1349,7 @@ enum Location: Hashable, Codable, Sendable {
     case document(Document)
     case empty
 }
-let webRoot: URL
+var webRoot: URL { get }             // checkWebRoot(), then the copy staged once in init (§1.9)
 var pageZoom: Double                 // persisted; applied to every reader's web view
 let papers: PaperLibrary
 @discardableResult
@@ -1371,6 +1398,10 @@ extension FocusedValues { var paperZoom: PaperZoomAction? { get set } }
 enum ShowPaperCommand {
     @MainActor static func isEnabled(for page: WikiPage?) -> Bool
     @MainActor static func perform(_ page: WikiPage, model: AppModel,
+                                   openWindow: OpenWindowAction)
+}
+enum IngestCommand {                                 // §1.5, §1.8
+    @MainActor static func perform(in session: UUID?, model: AppModel,
                                    openWindow: OpenWindowAction)
 }
 ```
@@ -1488,6 +1519,8 @@ final class ReaderSession: Identifiable {
     func preferencesDidChange()
     var restorationState: ReaderSessionState { get }
     func handleOpenURL(_ url: URL)                   // ccwiki:// or a PDF
+    nonisolated static func stagesOpenedPDF(sheet: UUID?, window: UUID,
+                                            isStarted: Bool, hasPendingPDF: Bool) -> Bool  // §1.3
 
     func open(_ location: Location, recordHistory: Bool = true)
     func open(_ location: Location, _ disposition: LinkDisposition, find: [String]? = nil)
@@ -1540,6 +1573,7 @@ func noteVisited(_ path: String)                     // recents and lastPage
 func documentRequest(_ document: Document) -> RenderRequest
 var quickSwitcherExcludedPath: String?
 func refreshQuickSwitcher()
+func dismissQuickSwitchers(except id: UUID)          // one switcher up at a time (§1.6)
 var ingestSheetTarget: UUID? { get }                 // IngestSheetTarget.window
 var pendingDroppedPDF: URL?
 func requestIngestSheet(in session: UUID?)
@@ -1634,7 +1668,7 @@ struct FetchedPaper: Sendable { let file: URL; let from: URL }
 struct PaperFetcher: Sendable {
     init(transport: PaperTransport, maximumBytes: Int64 = 100 << 20)
     func fetch(_ source: PaperSource,
-               progress: @escaping @Sendable (Int64, Int64?) -> Void)
+               progress: @escaping @Sendable (Int64, Int64?, URL) -> Void)   // the request's URL
         async -> Result<FetchedPaper, PaperFailure>
 }
 
@@ -1941,6 +1975,9 @@ fixture transport, and keep it in a temporary library.
 - **Per window.**
   - ⌘F's bar and its matches stay with their tab.
   - Text size changes every tab.
+  - With the quick switcher open in one window and something typed in it,
+    ⌘O in another window closes the first switcher and opens the second
+    empty, leaving out the second window's page.
 - **Papers.**
   - The paper window opens at the trailing edge, no taller than the screen,
     and tiles beside the reader (on macOS 15, Window ▸ Move & Resize ▸ Left
@@ -2161,8 +2198,9 @@ for windows that are not readers (§1.8), `mainWindowCount`, and
 
 **Code both specs touch:**
 
-- `webRoot`: corrections' Phase 0 declares the same `let webRoot: URL`, set
-  once in `init` from `paths.stagedWebRoot()`. Its integrator drops its copy.
+- `webRoot`: corrections' Phase 0 declares the same `webRoot`, staged once
+  in `init` from `paths.stagedWebRoot()`, and now a computed `var` that calls
+  `checkWebRoot()` first (§1.9). Its integrator drops its copy.
 - `WikiIndex.assemble(contentRoot:files:pages:)` (§4.6): one function,
   whichever of D6 and corrections' Track D lands first.
 - `GitService.swift`: D's methods beside `modifiedDates(in:)`; corrections'

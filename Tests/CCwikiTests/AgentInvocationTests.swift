@@ -297,8 +297,7 @@ struct TripwireTests {
         #expect(finding.notice == JobNotice(tone: .warning, text:
             "A pull request from manual/B was opened while the agent ran, and CCwiki did not "
             + "open it: https://github.com/axhoover/cryptology.city/pull/53. Look at it on GitHub "
-            + "to see whether the agent made it; CCwiki has sent nothing from this job, which "
-            + "waits for your review."))
+            + "to see whether the agent made it; CCwiki has sent nothing from this job."))
     }
 
     @Test("one opened in the minute's look-back before the job started is still not the job's")
@@ -333,8 +332,8 @@ struct TripwireTests {
         #expect(finding.notice?.text == "A pull request from paper-submission/AB12-x was opened "
             + "while the agent ran, and CCwiki did not open it: "
             + "https://github.com/axhoover/cryptology.city/pull/53. Look at it on GitHub to see "
-            + "whether the agent made it; CCwiki has sent nothing from this job, which waits for "
-            + "your review. paper-submission/AB12-x was pushed to GitHub while the agent ran, "
+            + "whether the agent made it; CCwiki has sent nothing from this job. "
+            + "paper-submission/AB12-x was pushed to GitHub while the agent ran, "
             + "and CCwiki did not push it.")
 
         let two = Tripwire.finding(
@@ -345,8 +344,7 @@ struct TripwireTests {
             + "Pull requests from manual/B and manual/C were opened while the agent ran, and "
             + "CCwiki did not open them: https://github.com/axhoover/cryptology.city/pull/53 and "
             + "https://github.com/axhoover/cryptology.city/pull/54. Look at them on GitHub to see "
-            + "whether the agent made them; CCwiki has sent nothing from this job, which waits "
-            + "for your review.")
+            + "whether the agent made them; CCwiki has sent nothing from this job.")
     }
 
     @Test("a push without a pull request leaves the job for review, with a notice")
@@ -378,7 +376,8 @@ struct TripwireTests {
             let record = JobRecord(
                 id: id, kind: .edit(target), branch: branch, state: .awaitingReview,
                 createdAt: Self.started, startedAt: nil, finishedAt: nil, baseCommit: nil,
-                pullRequest: nil, pushingCommit: nil, pushedCommit: nil, notice: nil)
+                pullRequest: nil, pushingCommit: nil, pushedCommit: nil, pushAttempts: [],
+                confirmedPush: nil, notice: nil)
             try JSONEncoder().encode(record).write(to: logs.appending(path: "\(id).json"))
         }
         try Data("not a record".utf8).write(to: logs.appending(path: "broken.json"))

@@ -5,8 +5,8 @@
 <title>CCwiki</title>
 <!-- Everything here is served by CCwikiSchemeHandler out of the app bundle.
      No inline <script> — the CSP served with this document is script-src 'self',
-     so the only JS that runs is these files plus the WKUserScript the app
-     injects at documentStart. -->
+     so the only JS that runs is these files. The wiki's macros come in each
+     render's payload, not in a script of their own. -->
 <link rel="stylesheet" href="/_/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/_/vendor/pseudocode/pseudocode.min.css">
 <link rel="stylesheet" href="/_/app.css">

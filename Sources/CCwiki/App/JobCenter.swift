@@ -40,6 +40,25 @@ final class JobCenter {
         let privatePaths: [String]
     }
 
+    /// The review as Open Draft PR's click saw it: the snapshot on screen,
+    /// with its tree and the digest of its diff, nil when none was, and its
+    /// DiffGuard findings, which the question the click asks counted.
+    /// Approve publishes only that tree, so a refresh that lands while the
+    /// question is up can bring neither a change nor a warning nobody was
+    /// asked about (§6.5 step 1).
+    struct ShownReview: Sendable {
+        let snapshot: ReviewSnapshot?
+        let findings: [DiffFinding]
+
+        /// The digest of the diff on screen.
+        var digest: String? { snapshot?.digest }
+
+        @MainActor init(of job: Job) {
+            snapshot = job.review
+            findings = job.findings
+        }
+    }
+
     let paths: AppPaths
 
     /// Newest first.
@@ -80,6 +99,11 @@ final class JobCenter {
     @ObservationIgnored private var badgeCount = 0
     /// Snapshots taken, by job id. For the tests of the queue.
     @ObservationIgnored private(set) var snapshotCounts: [String: Int] = [:]
+    /// The branches of the jobs Clear Finished has dropped this launch.
+    /// Their records are gone, and an agent still running must not take a
+    /// push or a pull request CCwiki made for one of them for its own
+    /// (§5.5). A launch is long enough: no agent outlives one.
+    @ObservationIgnored private var clearedBranches: Set<String> = []
 
     /// Loads the job history synchronously.
     init(paths: AppPaths, environment: @escaping @MainActor () -> Environment) {
@@ -108,6 +132,13 @@ final class JobCenter {
 
     func job(id: String) -> Job? {
         jobs.first { $0.id == id }
+    }
+
+    /// The branch of every job but `jobID` that this launch knows of: those
+    /// in Jobs, and those Clear Finished has dropped. With the records on
+    /// disk, what the tripwire takes for CCwiki's own (§5.5).
+    func otherJobBranches(excluding jobID: String) -> Set<String> {
+        Set(jobs.filter { $0.id != jobID }.map(\.branch)).union(clearedBranches)
     }
 
     /// Jobs that are not finished whose target is this page, or whose last
@@ -204,8 +235,8 @@ final class JobCenter {
             return .failure(JobError(
                 "git was not found. Install the Command Line Tools, or set its path in Settings."))
         }
-        guard paths.wikiStore == .git else {
-            return .failure(JobError(CorrectionJobRunner.snapshotStore))
+        if let refusal = CorrectionJobRunner.storeRefusal(paths.wikiStore) {
+            return .failure(JobError(refusal))
         }
 
         let job = Job(kind: .edit(target), paths: paths)
@@ -317,16 +348,21 @@ final class JobCenter {
             guard let git = environment.git else { return }
             guard FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false))
             else {
-                job.setNotice(JobNotice(
-                    tone: .failure, text: "The worktree is gone, so there is nothing to review."))
+                Self.refuseReview(job, .failure, Self.worktreeGone)
+                return
+            }
+            // Before any git there: a record from before 0.3 asks for its
+            // base through the worktree's `.git`, which the agent could have
+            // pointed at a repository of its choosing (§5.1).
+            guard GitService.isWorktree(job.worktree, of: self.paths.clone) else {
+                Self.refuseReview(job, .failure, GitService.redirectedWorktree)
                 return
             }
             if job.baseCommit == nil {
                 let branch = await git.defaultBranch(in: self.paths.clone)
                 guard let base = await git.mergeBase("HEAD", "origin/\(branch)", in: job.worktree)
                 else {
-                    job.setNotice(JobNotice(tone: .failure, text:
-                        "CCwiki could not tell which commit this job started from."))
+                    Self.refuseReview(job, .failure, Self.unknownBase)
                     return
                 }
                 job.setBaseCommit(base)
@@ -337,14 +373,14 @@ final class JobCenter {
             guard let review = await ReviewSnapshotter(git: git).review(
                 of: job, clone: self.paths.clone, privatePaths: environment.privatePaths)
             else {
-                job.setNotice(JobNotice(tone: .failure, text:
-                    "git could not compare the worktree with the commit it started from."))
+                Self.refuseReview(job, .failure, self.snapshotFailure(job))
                 return
             }
             self.snapshotCounts[job.id, default: 0] += 1
             guard !review.snapshot.isEmpty else {
-                job.setNotice(JobNotice(
-                    tone: .warning, text: "The worktree holds no changes to review."))
+                // Kept, empty, so Review Anyway is no longer offered for it.
+                job.setReview(review.snapshot, findings: review.findings)
+                Self.refuseReview(job, .warning, Self.nothingToReview)
                 return
             }
             if job.pullRequest.title.isEmpty {
@@ -356,11 +392,38 @@ final class JobCenter {
             }
             job.append(JobLogEntry(.system,
                 "Review Anyway: the worktree's changes await review. CCwiki has pushed nothing."))
+            // An earlier refusal is out of date now; a tripwire's notice
+            // belongs in the review, and stays.
+            if Self.isReviewRefusal(job.notice) { job.setNotice(nil) }
             job.setReview(review.snapshot, findings: review.findings)
             job.setState(.awaitingReview)
         }
         // Whatever Left Behind showed of this worktree goes with the state.
         await refreshOrphanedWorktrees()
+    }
+
+    /// Why Review Anyway did not go ahead: in the transcript, which the
+    /// job's pane shows whatever its state, and as its notice, unless the
+    /// notice is the tripwire's. That one says the agent pushed or opened
+    /// something itself, belongs in the review, and stays.
+    private static func refuseReview(_ job: Job, _ tone: JobNotice.Tone, _ message: String) {
+        job.append(JobLogEntry(tone == .failure ? .error : .system, message))
+        guard job.notice == nil || isReviewRefusal(job.notice) else { return }
+        job.setNotice(JobNotice(tone: tone, text: message))
+    }
+
+    nonisolated static let worktreeGone = "The worktree is gone, so there is nothing to review."
+    nonisolated static let unknownBase = "CCwiki could not tell which commit this job started from."
+    nonisolated static let cannotCompare =
+        "git could not compare the worktree with the commit it started from."
+    nonisolated static let nothingToReview = "The worktree holds no changes to review."
+
+    /// Whether `notice` is one of `refuseReview`'s, which a Review Anyway
+    /// that goes ahead clears.
+    nonisolated static func isReviewRefusal(_ notice: JobNotice?) -> Bool {
+        guard let text = notice?.text else { return false }
+        return [worktreeGone, unknownBase, cannotCompare, nothingToReview,
+                GitService.redirectedWorktree].contains(text)
     }
 
     /// The states an agent job can be brought to review from, when its
@@ -452,21 +515,21 @@ final class JobCenter {
     /// half done. Acts only from review, and a second press while the first
     /// is answered does nothing.
     ///
-    /// What is approved is the diff on screen when it was pressed. A
-    /// snapshot that finishes while the editors save or the queue drains (a
-    /// refresh after a save, or the first one of a job just shown) was
-    /// never seen, so it is compared with, not taken as, the reviewed one.
+    /// What is approved is `shown`, the review as the click saw it. A
+    /// snapshot that finishes while the question is up, the editors save
+    /// or the queue drains (a refresh after a save, a sync's, or the first
+    /// one of a job just shown) was never seen, so it is compared with, not
+    /// taken as, the reviewed one.
     ///
     /// An editor whose text did not reach the disk, whether the review's
     /// button knew it or the save Approve ran found it, stops it: publishing
     /// would send the file without that text, and close the editor (§4.4).
-    func approve(_ job: Job) async -> ApproveResult {
+    func approve(_ job: Job, shown: ShownReview) async -> ApproveResult {
         guard job.state == .awaitingReview, !job.needsRestore, !approving.contains(job.id) else {
             return .refused(job.state.isPublishing || approving.contains(job.id)
                 ? "The pull request is already being opened."
                 : "Only a job awaiting review can be published.")
         }
-        let shown = job.review
         approving.insert(job.id)
         defer { approving.remove(job.id) }
 
@@ -475,13 +538,23 @@ final class JobCenter {
             return settle(job, .refused(unsettled))
         }
         return await serially(job) { @MainActor () -> ApproveResult in
-            await self.publish(job, shown: shown)
+            await self.publish(job, shown: shown.snapshot, findings: shown.findings)
         }
     }
 
+    /// Approve of the review on screen now, as a click that asks nothing
+    /// approves it.
+    func approve(_ job: Job) async -> ApproveResult {
+        await approve(job, shown: ShownReview(of: job))
+    }
+
     /// `shown` is the snapshot on screen when Open Draft PR was pressed, or
-    /// nil when none was. Its tree is what is committed, or nothing is.
-    private func publish(_ job: Job, shown: ReviewSnapshot?) async -> ApproveResult {
+    /// nil when none was: its tree is what is committed, or nothing is.
+    /// `findings` are that review's DiffGuard findings: a warning they lack
+    /// refuses (§6.5 step 1).
+    private func publish(
+        _ job: Job, shown: ReviewSnapshot?, findings: [DiffFinding]
+    ) async -> ApproveResult {
         guard job.state == .awaitingReview else {
             return .refused("Only a job awaiting review can be published.")
         }
@@ -507,7 +580,8 @@ final class JobCenter {
         // The job's task, so a quit can interrupt the push or the gh call
         // (`Job.interruptPublishing`).
         let publishing = Task { @MainActor in
-            let outcome = await publisher.publish(job, reviewed: reviewed, provenance: provenance)
+            let outcome = await publisher.publish(
+                job, reviewed: reviewed, findings: findings, provenance: provenance)
             self.publishResults[id] = outcome
         }
         job.task = publishing
@@ -573,7 +647,7 @@ final class JobCenter {
     /// The open PR on the job's branch, if any: for Discard's dialog. Asked
     /// of GitHub only when the job has pushed, or tried to.
     func openPullRequest(for job: Job) async -> URL? {
-        guard job.pushedCommit != nil || job.pushingCommit != nil else { return nil }
+        guard job.hasTriedToPush else { return nil }
         let environment = self.environment()
         guard let gh = environment.tools.path(for: .gh) else { return nil }
         let arguments = Publisher.listArguments(target: environment.target, branch: job.branch)
@@ -611,12 +685,11 @@ final class JobCenter {
     /// worktree holds now: its branch may be on GitHub, and only its record
     /// says so. It stays in Jobs, where Discard… names the branch.
     func discardIfUntouched(_ job: Job) async {
-        guard job.kind.tag == .edit, job.state == .awaitingReview,
-              job.pushedCommit == nil, job.pushingCommit == nil
+        guard job.kind.tag == .edit, job.state == .awaitingReview, !job.hasTriedToPush
         else { return }
         await serially(job) { @MainActor in
             guard job.kind.tag == .edit, job.state == .awaitingReview, !job.needsRestore,
-                  job.pushedCommit == nil, job.pushingCommit == nil,
+                  !job.hasTriedToPush,
                   let base = job.baseCommit, let git = self.environment().git,
                   FileManager.default.fileExists(atPath: job.worktree.path(percentEncoded: false)),
                   await git.stageAll(in: job.worktree),
@@ -670,11 +743,19 @@ final class JobCenter {
         guard let review = await ReviewSnapshotter(git: git).review(
             of: job, clone: paths.clone, privatePaths: environment.privatePaths)
         else {
-            job.append(JobLogEntry(.error,
-                "git could not compare the worktree with the commit it started from."))
+            job.append(JobLogEntry(.error, snapshotFailure(job)))
             return
         }
         job.setReview(review.snapshot, findings: review.findings)
+    }
+
+    /// Why `ReviewSnapshotter.review` gave nothing for `job`: its worktree's
+    /// `.git` leads somewhere other than the clone, so no git ran there, or
+    /// git could not answer.
+    private func snapshotFailure(_ job: Job) -> String {
+        GitService.isWorktree(job.worktree, of: paths.clone)
+            ? Self.cannotCompare
+            : GitService.redirectedWorktree
     }
 
     /// Where Restore builds a job's worktree before moving it into place:
@@ -773,6 +854,8 @@ final class JobCenter {
     /// A worktree one of them kept for Review Anyway is a stray from now on.
     func clearFinishedJobs() {
         for job in jobs where job.state.isTerminal {
+            // Its branch may be on GitHub, pushed while an agent runs.
+            clearedBranches.insert(job.branch)
             try? FileManager.default.removeItem(at: job.recordFile)
             try? FileManager.default.removeItem(at: job.patchFile)
             queues[job.id] = nil
@@ -819,6 +902,8 @@ final class JobCenter {
             return
         }
         let paths = self.paths
+        let id = job.id
+        job.otherJobBranches = { [weak self] in self?.otherJobBranches(excluding: id) ?? [] }
         job.task = Task { @MainActor in
             switch job.kind {
             case .ingestion:

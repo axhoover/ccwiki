@@ -224,10 +224,13 @@ site's version does not:
 
 - **Alphabetical dividers that stick** to the top of the viewport while you
   scroll their group. In a 200-row list, knowing you are in the B's without
-  scrolling back is the whole game. The letter comes from the same sort key
-  Quartz uses — the citation key in References, the title everywhere else —
-  and anything not starting with a letter (`#P`, a digit) files under `#`
-  rather than inventing a divider of its own.
+  scrolling back is the whole game. The rows are in the site's order (the
+  lower-cased title under ICU collation, `localeCompare`, not code points),
+  and the letter comes from the same title Quartz groups by — the citation
+  key in References, the title everywhere else. As on the site, anything not
+  starting with a letter A–Z (`#P`, a digit, `$k$`, `Φ`) files under `#`
+  rather than inventing a divider of its own, and each group sits where its
+  first row sorts.
 - **A "Hide stubs" checkbox**, in the info strip and mirrored in Settings.
   The ratio is lopsided and uneven: **19 of 38 Primitives are stubs**, against
   4 of 200 References. Someone reading wants the pages with something on them;

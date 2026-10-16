@@ -203,10 +203,15 @@ struct CorrectionContextCard: View {
 }
 
 /// A job already on the page (§7.1), with Show Job.
+///
+/// The Jobs window is opened here as well as asked for: an editor or the
+/// Jobs window can host this with no reader open, and only a reader
+/// window answers the model's request.
 struct ExistingJobNote: View {
     let job: Job
 
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.small) {
@@ -218,19 +223,25 @@ struct ExistingJobNote: View {
                 .lineLimit(2)
                 .truncationMode(.tail)
             Spacer(minLength: Theme.small)
-            Button("Show Job") { model.requestJobsWindow(selecting: job.id) }
-                .controlSize(.small)
+            Button("Show Job") {
+                // The selection first, for the window that mounts to take.
+                model.requestJobsWindow(selecting: job.id)
+                openWindow(id: CCwikiApp.jobsWindowID)
+            }
+            .controlSize(.small)
         }
     }
 }
 
 /// Why the sheet's button is disabled, listed as IngestSheet lists its
-/// blockers, with Open Settings….
+/// blockers, with Open Settings…. Settings opens from here rather than
+/// through the model's request, which only a reader window answers: an
+/// editor or the Jobs window can host this with none open.
 struct CorrectionBlockerList: View {
     let title: String
     let blockers: [String]
 
-    @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.tight) {
@@ -243,7 +254,7 @@ struct CorrectionBlockerList: View {
                     .foregroundStyle(.orange)
                     .lineLimit(2)
             }
-            Button("Open Settings…") { model.requestSettings() }
+            Button("Open Settings…") { openSettings() }
                 .buttonStyle(.link)
                 .font(Theme.Fonts.meta)
         }

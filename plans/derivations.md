@@ -311,7 +311,7 @@ notion.)
 
 ```
 closure(S, toggle):
-  known := { s ↦ given | s ∈ S };  weak := {}
+  known := { s ↦ given | s ∈ S };  weak := {};  established := {}
   phase 1 (clean) and phase 2 (assumed) over the default steps;
   phase 3 (toggle only) over all eligible steps
   each phase, layer k = 1, 2, …:
@@ -321,6 +321,8 @@ closure(S, toggle):
       its conclusion is not known (a weakening step: not weakly known either),
       R5 allows it, and R13's preconditions are met
     each new conclusion takes the PREFERRED firing step at its first layer
+    a metBy producer (R13) also fires into established[itself] at its first
+      layer, even when its conclusion is known
     stop when a layer adds nothing and k exceeds every known depth
 ```
 
@@ -333,7 +335,9 @@ closure(S, toggle):
   must use this exact order.
 - **Proof trees** are DAGs. Each fact appears once with its subtree; a later
   occurrence is a reference ("shown above"), never a copy. A row that
-  consumed a weakened fact walks to that fact, not to a later full one.
+  consumed a weakened fact walks to that fact, not to a later full one, and
+  one whose precondition a `metBy` producer's established fact met (R13)
+  walks to that fact, not to the node's own.
 - **N recorded reductions** is the number of distinct reduction ids in the
   tree. An equivalence used both ways counts once.
 
@@ -401,7 +405,7 @@ labelled *related by the page, not by a recorded reduction*:
 | Sections of the **target** that are derived | anything ⇒ Hash function: its section *Preimage resistance (one-wayness)* (`owf`) is |
 | The **target's host** is derived | never when the host is a premise (TDP ⇒ ETDP used to suggest "TDP ⇒ TDP"), and never beside a recorded or non-redundant derived barrier, since a section is usually the stronger notion |
 | Sections of a **start** that derive the target | LPN ⇒ PKE: *Low-noise LPN* and *Mid-noise LPN* each do; LWE ⇒ Ring LWE: *Rank-1 module LWE* does |
-| The **host of a start** derives the target | Rabin OT ⇒ MPC: OT does, assuming malicious security (R13) |
+| The **host of a start** derives the target | Strong PRP ⇒ PRF: PRP does, assuming a superpolynomial domain (R13); ISIS ⇒ CRHF: SIS does. Like every hint, it reads full facts only: Rabin OT ⇒ MPC used to suggest OT, which since Kil88's weakening reaches MPC only weakened, so it now has none |
 
 ### R10. The no-path answer
 
@@ -473,11 +477,17 @@ In this order:
   edge itself, with its tags.
 - Caps: 40 single rows and 12 pairs per group, with totals.
 
-PKE, default filter: **27 single objects; 39 pairs in 5 groups**: SW14
-`{owf, io}` 21, CS03 `{kem, ske}` 15, Wat09, GHJS25 and GHJS25 1 each.
-CS03's 15 are a record gap, not a joint requirement: its Statement needs only
-a one-time DEM, so KEM alone gives PKE. NIZK has 8 single objects and 116
-pairs (SW14 87, KMY20 29), all in the CRS model and some quantum.
+PKE, default filter: **27 single objects; 38 pairs in 5 groups**: SW14
+`{owf, io}` 21, CS03 `{kem, ske}` 14, Wat09, GHJS25 and GHJS25 1 each.
+CS03's 14 are a record gap, not a joint requirement: its Statement needs only
+a one-time DEM, so KEM alone gives PKE. They were 15, and the pairs 39,
+until the PR #9 audit's two PRP domain requirements,
+`requires:red-prp-to-prf:prp` and `requires:red-prp-to-invertible-prf:prp`,
+stopped a strong PRP reaching SKE: strong PRP + KEM no longer gives PKE.
+It takes both: without either one, a strong PRP reaches PRF, and so SKE,
+through the other conversion (PRP ⇒ PRF, or PRP ⇒ iPRF ⇒ PRF). NIZK has 8
+single objects and 116 pairs (SW14 87, KMY20 29), all in the CRS model and
+some quantum.
 
 ### R12. Derived barriers
 
@@ -551,11 +561,17 @@ a recorded standard-model reduction on its pair.
 These come from the curation (§2a), never from the engine's own judgement.
 
 - **A requirement** says that a step's hypothesis `h` must be a stronger
-  notion `N` than `h`'s node defines. The step fires only when `h`'s fact is
-  - **given**: the derivation then carries "assuming N" as a tag, found only
-    in phase 2 (R4), so a derivation that needs no assumption wins; or
-  - **concluded by a reduction in `metBy`**, whose own Statement establishes
-    `N` (DMO00 for Kil88's malicious OT).
+  notion `N` than `h`'s node defines. The step fires only when
+  - `h` is **concluded in the closure by a reduction in `metBy`**, whose own
+    Statement establishes `N` (DMO00 for Kil88's malicious OT). That
+    reduction need not be the one that gave `h` its fact: each `metBy`
+    producer also keeps a fact of its own, kept apart like a weakened fact,
+    so it never blocks or replaces `h`'s fact, and the step consumes it
+    (SPIR ⇒ cPIR ⇒ OT by DMO00 meets Kil88 although SPIR's own OT edge
+    gives OT first); or
+  - `h`'s fact is **given** and no `metBy` producer fires: the derivation
+    then carries "assuming N" as a tag, found only in phase 2 (R4), so a
+    derivation that needs no assumption wins.
 
   Otherwise the step is **refused** and named, with `N` and the step that
   produced `h`.
@@ -583,16 +599,21 @@ These come from the curation (§2a), never from the engine's own judgement.
 - **Refuse, never caveat** (decided, §0 item 4). R5 gives the reason: a
   caveated fact composes further, and caveats pile up. The caveat policy
   stays in the reference script (`--precondition-policy caveat`) for
-  comparison only. `--report` prints what it would add: 56 facts from 16
+  comparison only. `--report` prints what it would add: 55 facts from 15
   starts. Nothing in the app reads it.
 
-On this manifest the curation takes 86 default derived pairs out of the
-full ones and adds none (1,084 → 998, of which 44 carry an assumption): 68
-are removed, and 18 are kept apart as weakened only (BDH ⇒ ABE, and the 17
+On this manifest the curation takes 85 default derived pairs out of the
+full ones and adds none (1,084 → 999, of which 44 carry an assumption): 66
+are removed, and 19 are kept apart as weakened only (BDH ⇒ ABE, and the 18
 starts that reach MPC only as Kil88's static MPC with abort). The biggest
 losses are BDH (26: selective ABE, BM84 on BDH's group) and CDH (16: BM84
-needs Z_p^\*, and the record has no DLOG ⇒ OWF, wiki ask 13). Everything
-removed is listed by `--report`.
+needs Z_p^\*, and the record has no DLOG ⇒ OWF, wiki ask 13). `--report`
+prints only the total, 66 removed from 17 starts.
+[curation-review.md](curation-review.md) (`--curation-report`) gives each
+entry's own effect, measured by taking that one entry out: the pairs that
+come back without it, the first 8 where there are more. A pair that two
+entries each block is in neither list, since taking one out leaves the
+other.
 
 ### R14. Refuted assumptions and settings
 
@@ -766,6 +787,7 @@ struct Derivation: Sendable {
         let assumes: Set<DerivationCuration.Requirement>     // R13, on givens
         let weakening: DerivationCuration.Weakening?         // R13: only this notion
         let weakInputs: Set<String>                // hypotheses consumed weakened
+        let establishedInputs: [String: StepKey]   // R13: met by a metBy producer's own fact
     }
 
     struct Closure: Sendable {
@@ -773,6 +795,7 @@ struct Derivation: Sendable {
         let options: Options
         let facts: [String: Fact]                  // full notion
         let weakFacts: [String: Fact]              // weakened notion only (R13)
+        let established: [StepKey: Fact]           // each metBy producer's own (R13)
         let refused: [Refusal]                     // R5, R13, for explanations
         func proof(of id: String) -> ProofTree?
     }
@@ -831,7 +854,7 @@ objects, and L ≤ 10 layers per phase (the maximum default depth is 9).
 | Derived barriers, all | O(barriers · E) | 2 ms |
 | Implied-by PKE | candidate pairs × closure | 122 ms cold, 1 ms warm |
 | Invariants (every barrier, every derived barrier) | restricted closures | 90 ms |
-| Whole golden file (81 queries, 16 patched manifests) | — | 7.8 s |
+| Whole golden file (84 queries, 16 patched manifests) | — | 11.0 s |
 
 These are CPython timings on the Linux container; nothing was compiled here.
 A Swift port of the same loops should be at least an order of magnitude
@@ -854,12 +877,12 @@ quarantined. By model: standard 188, ROM 22, CRS 7, generic group 7, quantum
 stub). Default: 200.
 
 **Closures.** 234 objects can start a query, and 118 derive something. Over
-all single starts there are **998** derived (start, target) pairs: chain
-class fully black-box 539, unstated 444, free 15; **44 carry an assumed
-precondition**; 18 more are weakened only (BDH ⇒ ABE, and 17 X ⇒ MPC as
-Kil88's static MPC with abort). Model tags: none 904, quantum 86, CRS 6,
-both 2. Depth: 1→173, 2→190, 3→184, 4→171, 5→139, 6→91, 7→34, 8→10, 9→6.
-With the toggle there are 1,181 pairs, 183 of them model-scoped. 35 objects
+all single starts there are **999** derived (start, target) pairs: chain
+class fully black-box 539, unstated 445, free 15; **44 carry an assumed
+precondition**; 19 more are weakened only (BDH ⇒ ABE, and 18 X ⇒ MPC as
+Kil88's static MPC with abort). Model tags: none 905, quantum 86, CRS 6,
+both 2. Depth: 1→173, 2→190, 3→185, 4→171, 5→139, 6→91, 7→34, 8→10, 9→6.
+With the toggle there are 1,182 pairs, 183 of them model-scoped. 35 objects
 gain facts with the toggle.
 
 | Object | Default | With toggle | Max depth (default) | Note |
@@ -888,7 +911,7 @@ gain facts with the toggle.
 | AGM | 0 | 1 | — | KEA (depth 1) |
 
 **Backward.** PKE: 27 single sources, 38 pairs (above). OT: 22 single
-sources (2 with an assumption), no pairs. MPC: 17 single sources, each only
+sources (2 with an assumption), no pairs. MPC: 18 single sources, each only
 as Kil88's static MPC with abort (2 with an assumption), two settings
 apart.
 
@@ -1071,7 +1094,7 @@ and regenerates byte-identically. It records the wiki commit, the manifest's
 and the curation's SHA-256, counts, policy constants, closure sizes (15
 objects, with weakened counts), backward summaries for PKE, OT and MPC with
 group tags, the invariants and sentinels by name, `curatedEdges`, a snapshot
-of every reduction the curation names, **81 query records** and
+of every reduction the curation names, **84 query records** and
 **16 mutation records**. A query record holds the start, target and toggle and
 the expected answer: *supported*, *derivable*, vacuous, model start, recorded
 barriers with qualifiers, reverse barriers, **derived barriers in full**
@@ -1157,9 +1180,9 @@ propagate.
    the explorer does.
 5. **Kil88's `metBy`.** Only DMO00's Statement claims completeness for MPC.
    BH26's, YZ16's, Cre87's and the SPIR edge's OT are not stated to be
-   malicious-secure, so OIHF, subexponential LPN, Rabin OT, random OT and
-   SPIR no longer reach MPC. Should the wiki state the security of each OT
-   edge?
+   malicious-secure, so OIHF, subexponential LPN, Rabin OT and random OT no
+   longer reach MPC. (SPIR still does, through cPIR and DMO00.) Should the
+   wiki state the security of each OT edge?
 6. **`model: other` on DLO24.** Should the wiki name the generic ring model
    as a model?
 7. **"Free" as a chain class.** The wording avoids the bare word; should the

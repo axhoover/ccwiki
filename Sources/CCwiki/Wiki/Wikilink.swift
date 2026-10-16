@@ -99,7 +99,7 @@ enum CodeMask {
 
         var lineStart = text.startIndex
         while lineStart < text.endIndex {
-            let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
+            let lineEnd = text[lineStart...].firstIndex(where: \.isMarkdownLineEnding) ?? text.endIndex
             let line = text[lineStart..<lineEnd]
             defer { lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex }
 
@@ -184,6 +184,13 @@ enum CodeMask {
         }
         return ranges
     }
+}
+
+extension Character {
+    /// A line ending as markdown-it reads one: `\n`, `\r\n` or a lone `\r`.
+    /// `"\r\n"` is a single Character, so a search for `"\n"` alone reads a
+    /// page saved with CRLF endings as one long line.
+    var isMarkdownLineEnding: Bool { self == "\n" || self == "\r\n" || self == "\r" }
 }
 
 /// One inline markdown link to a wiki page: `[text](slug#anchor)`, or

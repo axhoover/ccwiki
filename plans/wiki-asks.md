@@ -361,7 +361,7 @@ the rows marked so.
 
 - **Need.** The KEM + SKE ⇒ PKE Statement says "a one-time-secure SKE (the
   DEM)", but the hypothesis is the whole `ske` node. So KEM alone never
-  gives PKE: the 15 pairs under CS03 in the backward list are a record gap
+  gives PKE: the 14 pairs under CS03 in the backward list are a record gap
   (derivations.md R11).
 - **Change.**
   - Add the heading "One-time security" on `symmetric-key-encryption.md`,
@@ -383,17 +383,17 @@ the rows marked so.
 - **Need.** derivations.md §1 lists folklore and textbook X ⇒ OWF results
   the wiki does not record. Each is measured by adding it alone, as an
   unstated, standard-model, folklore implication, and counting the new
-  default derived pairs (998 today, after the PR #9 audit; the counts were
-  1,022 and 432 before it). All 10 together add **373**; the counts overlap
-  (SIS also reaches OWF through Ajt96's CRHF once CRHF ⇒ OWF exists).
-  DLOG ⇒ OWF, measured here before the audit, is now ask 13, with the
-  audit's exact formulation; with it, all 11 add 405.
+  default derived pairs (999 today, with the PR #9 audit and R13's `metBy`;
+  the counts were 1,022 and 432 before the audit). All 10 together add
+  **372**; the counts overlap (SIS also reaches OWF through Ajt96's CRHF once
+  CRHF ⇒ OWF exists). DLOG ⇒ OWF, measured here before the audit, is now
+  ask 13, with the audit's exact formulation; with it, all 11 add 404.
 
   | Edge | Proposed source | New pairs |
   |---|---|---|
-  | `{ot} ⇒ owf` | semi-honest OT gives OWFs: Hai08, Theorem 4 (p. 425), per the PR #9 audit; or IL89 (`needs_paper`: which theorem) | 170 |
+  | `{ot} ⇒ owf` | semi-honest OT gives OWFs: Hai08, Theorem 4 (p. 425), per the PR #9 audit; or IL89 (`needs_paper`: which theorem) | 169 |
   | `{ske} ⇒ owf` | IL89 (`needs_paper`) | 93 |
-  | `{com} ⇒ owf` | IL89 (`needs_paper`) | 90 |
+  | `{com} ⇒ owf` | IL89 (`needs_paper`) | 105 |
   | `{crhf} ⇒ owf` | folklore, for a compressing family | 47 |
   | `{mac} ⇒ owf` | IL89 (`needs_paper`) | 48 |
   | `{prf} ⇒ owf` | folklore | 33 |
@@ -405,7 +405,10 @@ the rows marked so.
   The audit's curation changes lowered five counts (SKE 104 → 93, CRHF
   63 → 47, MAC 59 → 48, PRF 44 → 33, SIS 32 → 16): the starts that lost
   their answers (a strong PRP, whose domain may be small, no longer reaches
-  PRF; ISIS no longer reaches SIS) gain less from an OWF edge.
+  PRF; ISIS no longer reaches SIS) gain less from an OWF edge. R13's
+  `metBy` then moved two (OT 170 → 169, COM 90 → 105): single-server
+  symmetric PIR reaches COM through DMO00's malicious OT without the OT
+  edge, and reaches OWF's consequences through it with the COM edge.
 - **Pages.** Ten new reduction pages in `content/Reductions/`. The
   reference pages for IL89, Ajt96 and Rom90 exist; BFKL93's and Hai08's are
   new.
@@ -531,7 +534,7 @@ regimes.
   `content/Primitives/attribute-based-encryption.md` (link it from
   § Selective Security).
 - **Effect,** measured with ask 5's GPSW06 conclusion in place and its
-  weakening dropped: +41 default derived pairs (998 → 1,039). BDH ⇒ PKE is
+  weakening dropped: +41 default derived pairs (999 → 1,040). BDH ⇒ PKE is
   derived through GPSW06, assuming DBDH (from a DBDH start with ask 11, with
   no assumption); BDH ⇒ IBE and BDH ⇒ BE stay underived.
 - **Sources.** GPSW06, §2 and §4.3, Theorem 1, for the selective KP-ABE
@@ -567,7 +570,7 @@ regimes.
   integer reading of group elements, and is not BM84's.
 - **Pages.** `content/Reductions/dlog-to-owf.md` (new);
   `content/Assumptions/discrete-logarithm.md` (Known Results).
-- **Effect.** +32 default derived pairs (998 → 1,030), among them CDH ⇒
+- **Effect.** +32 default derived pairs (999 → 1,031), among them CDH ⇒
   PRG (CDH ⇒ DLOG ⇒ OWF ⇒ PRG, fully black-box) and BDH ⇒ PRG.
 - **Sources.** BM84, §§3–4, Theorem 4 (pp. 861–862), for what BM84 proves
   and needs; HILL99, Theorem 6.2.2 (manuscript p. 33), for OWF ⇒ PRG.
@@ -636,12 +639,12 @@ regimes.
   `content/Primitives/oblivious-transfer.md` (the variant's notion, with
   ask 4).
 - **Effect,** measured with ask 4's re-pointing and its two requirements
-  dropped: +33 default full pairs (998 → 1,031): 23 X ⇒ malicious OT, 7
+  dropped: +32 default full pairs (999 → 1,031): 23 X ⇒ malicious OT, 6
   X ⇒ COM (ETDP ⇒ COM among them), and malicious OT ⇒ OT, Rabin OT and
-  OIHF; and 7 new weakened-only X ⇒ MPC pairs (18 → 25), ETDP ⇒ MPC
+  OIHF; and 6 new weakened-only X ⇒ MPC pairs (19 → 25), ETDP ⇒ MPC
   among them (EGL, the compiler, Kil88),
   as static malicious MPC with abort only: Kil88's weakening accepts
-  nothing. Ask 4 alone adds 21 full pairs net and leaves ETDP ⇒ MPC
+  nothing. Ask 4 alone adds 20 full pairs net and leaves ETDP ⇒ MPC
   underived. The golden mutations `ask-14-etdp-mpc` and `ask-14-etdp-com`
   replay both.
 - **Sources.** Haitner, TCC 2008: Theorem 2 and Corollary 2 (p. 415),
@@ -913,11 +916,11 @@ regimes.
   imply MPC (each variant instead lists `secure-channels-model` as its
   setting); and with ask 11, BDH no longer reaches ABE through GPSW06,
   which DBDH then does with no assumption.
-- **Asks 8, 9 and 12–15 add answers:** 373 default pairs from ask 8's ten
-  OWF edges (405 with ask 13's DLOG ⇒ OWF, which alone adds 32, CDH ⇒ PRG
+- **Asks 8, 9 and 12–15 add answers:** 372 default pairs from ask 8's ten
+  OWF edges (404 with ask 13's DLOG ⇒ OWF, which alone adds 32, CDH ⇒ PRG
   among them); 41 from selective KP-ABE ⇒ PKE with ask 5 (ask 12), BDH ⇒
-  PKE among them; 33 full pairs from Haitner's compiler with ask 4 (ask
-  14), ETDP ⇒ COM among them, and 7 weakened-only pairs, ETDP ⇒ MPC
+  PKE among them; 32 full pairs from Haitner's compiler with ask 4 (ask
+  14), ETDP ⇒ COM among them, and 6 weakened-only pairs, ETDP ⇒ MPC
   among them as static malicious MPC with abort; 1 from KP-ABE ⇒ BE
   recorded with no requirement (ask 15); and classical lattice chains
   (ask 9).

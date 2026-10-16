@@ -46,8 +46,8 @@ struct CorrectionJobRunner {
 
         // The sheet refuses all of these first; a job run again later may
         // find the world changed.
-        guard paths.wikiStore == .git else {
-            job.setState(.failed(Self.snapshotStore))
+        if let refusal = Self.storeRefusal(paths.wikiStore) {
+            job.setState(.failed(refusal))
             return
         }
         guard page.region == .body else {
@@ -112,4 +112,17 @@ struct CorrectionJobRunner {
 
     nonisolated static let snapshotStore = "This copy of the wiki is a snapshot. Sync (⌘R) to "
         + "replace it with a git clone."
+    nonisolated static let notCloned = "The wiki has not been cloned yet. Sync first (⌘R)."
+
+    /// Why no job can run on the wiki as it is kept: a job's worktree is
+    /// made from the clone's git, which a snapshot has not got, and before
+    /// the first sync, or after a reset, nothing is there at all. Nil for a
+    /// clone.
+    nonisolated static func storeRefusal(_ store: AppPaths.WikiStore) -> String? {
+        switch store {
+        case .git: return nil
+        case .snapshot: return snapshotStore
+        case .none: return notCloned
+        }
+    }
 }

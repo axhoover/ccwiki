@@ -21,6 +21,11 @@ final class WebController: NSObject {
 
     /// Set by the owner to act on a link click, and on what the click meant.
     var onNavigate: ((CCwikiURL.Destination, LinkDisposition) -> Void)?
+    /// Whether a link's context menu offers a new tab and a new window: a
+    /// reader's does. The review and an editor's preview follow a link in
+    /// the active reader whatever is asked (corrections §17), so theirs
+    /// offer the site alone.
+    @ObservationIgnored var opensLinksInTabs = false
     /// The page's own address on the site, for the page context menu.
     var siteURLProvider: (() -> URL?)?
     /// What "Explore From This Page…" would ask, for the page context menu;
@@ -46,8 +51,14 @@ final class WebController: NSObject {
 
     /// Called when the shell has (re)loaded and there is nothing queued: the
     /// owner should render whatever it is showing again. That is how the
-    /// reader comes back from a WebContent crash or a stray Reload.
+    /// reader comes back from a WebContent crash; any other reload of the
+    /// shell is cancelled (`CCwikiURL.allowsShellNavigation`).
     var onReady: (() -> Void)?
+    /// Called when WebKit's content process has stopped, before the shell
+    /// is loaded again: the owner makes sure the staged pipeline it is
+    /// served from is still there (`AppModel.checkWebRoot`), since Caches
+    /// may have lost it after this view was made.
+    var onRendererRestart: (() -> Void)?
 
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private var pendingRequest: RenderRequest?
@@ -126,7 +137,15 @@ final class WebController: NSObject {
             pendingRequest = request
             return
         }
-        guard request.path != loadedPath || request.anchor != nil else { return }
+        switch RenderStep(request, loadedPath: loadedPath) {
+        case .render:
+            break
+        case .scroll(let anchor):
+            scrollTo(anchor: anchor)
+            return
+        case .skip:
+            return
+        }
         loadedPath = request.path
         // A page replaces a review: a reload brings back the page.
         pendingReviewJSON = nil
@@ -193,11 +212,11 @@ final class WebController: NSObject {
 
     /// `.findNavigator` is macOS 26, so the reader ships its own find bar over
     /// `WKWebView.find`, which has been available since macOS 11.
-    func find(_ needle: String, backwards: Bool) async -> Bool {
+    func find(_ needle: String, backwards: Bool, caseSensitive: Bool = false) async -> Bool {
         guard !needle.isEmpty else { return false }
         let configuration = WKFindConfiguration()
         configuration.backwards = backwards
-        configuration.caseSensitive = false
+        configuration.caseSensitive = caseSensitive
         configuration.wraps = true
         guard let result = try? await webView.find(needle, configuration: configuration)
         else { return false }
@@ -205,10 +224,17 @@ final class WebController: NSObject {
     }
 
     /// The first of `candidates` that occurs on the page, found and shown
-    /// with the system's find highlight.
+    /// with the system's find highlight. A candidate with a capital is
+    /// looked for in its own case first, as ⇧⌘F matched it (smart case,
+    /// search-v2 §6.6), so `OT` lands on OT and not on "not"; then in any
+    /// case, for text the rendering changed.
     func findFirst(of candidates: [String]) async -> Bool {
-        for candidate in candidates where await find(candidate, backwards: false) {
-            return true
+        for candidate in candidates {
+            if TextGrep.options(for: candidate).isEmpty,
+               await find(candidate, backwards: false, caseSensitive: true) {
+                return true
+            }
+            if await find(candidate, backwards: false) { return true }
         }
         return false
     }
@@ -306,6 +332,33 @@ final class WebController: NSObject {
     }
 }
 
+/// What a render request asks of a web view that may already show its
+/// page. Pure, so the rule is tested without a web view.
+enum RenderStep: Equatable, Sendable {
+    /// Lay the page out.
+    case render
+    /// The page is on screen: go to a place on it, "" for the top.
+    case scroll(anchor: String)
+    /// The page is on screen, and nothing asks to move.
+    case skip
+
+    init(_ request: RenderRequest, loadedPath: String?) {
+        guard request.path == loadedPath else {
+            self = .render
+            return
+        }
+        if request.restoresScroll {
+            // Back or Forward between two places on the page on screen
+            // goes to the place. Laying the page out again would restore
+            // where it is being left, since the page keeps one position
+            // per page, and without an anchor it was not laid out at all.
+            self = .scroll(anchor: request.anchor ?? "")
+        } else {
+            self = request.anchor == nil ? .skip : .render
+        }
+    }
+}
+
 // MARK: - Corrections and the review
 
 /// What a correction, the editor's preview and the review ask of the page
@@ -390,6 +443,7 @@ extension WebController: WKNavigationDelegate {
     /// blank: `isReady` would still be true and every render would be
     /// evaluated on a dead page.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        onRendererRestart?()
         isReady = false
         loadedPath = nil
         outline = []
@@ -414,9 +468,12 @@ extension WebController: WKNavigationDelegate {
             return
         }
 
-        // The shell and its assets are the only things that may ever load.
+        // The shell, loaded by this controller, and a place on it are the
+        // only documents that may ever load; its assets are not navigations.
         if url.scheme == CCwikiURL.scheme,
-           case .shell = CCwikiURL.destination(of: url.absoluteString) ?? .shell {
+           CCwikiURL.allowsShellNavigation(
+               to: url, isReady: isReady,
+               isReload: navigationAction.navigationType == .reload) {
             decisionHandler(.allow)
             return
         }
@@ -499,27 +556,33 @@ final class ReaderWebView: WKWebView {
             }
             menu.insertItem(.separator(), at: copyItems.count)
         }
+        let onNavigate = controller?.onNavigate
+        let identifiers = menu.items.map { $0.identifier?.rawValue }
+        let afterOpenLink = ReaderContextTarget.indexAfterOpenLink(in: identifiers)
+        // WebKit's Open Link loads the link with no click behind it, a
+        // navigation the delegate cancels, so the app's own Open Link, under
+        // WebKit's title, takes its place for every link the app can open:
+        // a page, a folder or a file of the wiki, and the web or mail. A
+        // place on this page keeps WebKit's, which scrolls there.
+        if let afterOpenLink, let openLink = target?.openLink {
+            let action: @MainActor () -> Void
+            switch openLink {
+            case .follow(let destination): action = { onNavigate?(destination, .here) }
+            case .external(let url): action = { NSWorkspace.shared.open(url) }
+            }
+            let index = afterOpenLink - 1
+            let title = menu.items[index].title
+            menu.removeItem(at: index)
+            menu.insertItem(ClosureMenuItem(title, handler: action), at: index)
+        }
         // A link to a page opens in a new tab, a new window or on the site,
         // and a link to a folder in the first two, in place of WebKit's Open
-        // Link in New Window. The items follow WebKit's Open Link, as
-        // Safari's do; without it they make a group of their own after the
-        // copy items.
-        let linkItems = target?.linkItems ?? []
-        if let destination = linkItems.first?.destination {
-            let onNavigate = controller?.onNavigate
-            let identifiers = menu.items.map { $0.identifier?.rawValue }
-            let afterOpenLink = ReaderContextTarget.indexAfterOpenLink(in: identifiers)
-            if let afterOpenLink {
-                // WebKit's Open Link loads the link with no click behind it,
-                // a navigation the delegate cancels, so the app's own Open
-                // Link, under WebKit's title, takes its place.
-                let openLink = afterOpenLink - 1
-                let title = menu.items[openLink].title
-                menu.removeItem(at: openLink)
-                menu.insertItem(ClosureMenuItem(title) {
-                    onNavigate?(destination, .here)
-                }, at: openLink)
-            }
+        // Link in New Window: in a reader, as the review and an editor's
+        // preview offer the site alone. The items follow WebKit's Open Link,
+        // as Safari's do; without it they make a group of their own after
+        // the copy items.
+        let linkItems = target?.linkItems(inReader: controller?.opensLinksInTabs ?? false) ?? []
+        if !linkItems.isEmpty {
             var index = afterOpenLink ?? (copyItems.isEmpty ? 0 : copyItems.count + 1)
             for entry in linkItems {
                 menu.insertItem(ClosureMenuItem(entry.title) {
@@ -634,17 +697,21 @@ struct ReaderContextTarget: Equatable, Sendable {
     /// under the pointer with no text (plans/corrections.md §3.3): what the
     /// corrections group acts on, and whether it says Passage or Page.
     let selection: ReaderSelection?
+    /// The `href` of a link to the web or to mail under the pointer, for
+    /// the menu's Open Link.
+    let externalLink: String?
 
     /// An empty string counts as absent: there is nothing to copy or open.
     init(
         tex: String? = nil, algorithm: String? = nil, algorithmExpanded: String? = nil,
-        link: String? = nil, selection: ReaderSelection? = nil
+        link: String? = nil, selection: ReaderSelection? = nil, externalLink: String? = nil
     ) {
         self.tex = tex?.isEmpty == false ? tex : nil
         self.algorithm = algorithm?.isEmpty == false ? algorithm : nil
         self.algorithmExpanded = algorithmExpanded?.isEmpty == false ? algorithmExpanded : nil
         self.link = link?.isEmpty == false ? link : nil
         self.selection = selection
+        self.externalLink = externalLink?.isEmpty == false ? externalLink : nil
     }
 
     /// The bridge message. A JavaScript `null` arrives as `NSNull`, which
@@ -657,7 +724,30 @@ struct ReaderContextTarget: Equatable, Sendable {
             link: message["link"] as? String,
             selection: (message["selection"] as? [String: Any]).flatMap {
                 ReaderSelection(message: $0)
-            })
+            },
+            externalLink: message["externalLink"] as? String)
+    }
+
+    /// What the app's own Open Link does, in place of WebKit's.
+    enum OpenLink: Equatable, Sendable {
+        /// A page, a folder or a file of the wiki, opened here.
+        case follow(CCwikiURL.Destination)
+        /// The web or mail, in its own app.
+        case external(URL)
+    }
+
+    /// Nil for no link the app opens, such as a place on this page, which
+    /// WebKit's own Open Link scrolls to. WebKit's would load the others
+    /// with no click behind them, which the navigation delegate cancels.
+    var openLink: OpenLink? {
+        if let link, let destination = CCwikiURL.destination(of: link), destination != .shell {
+            return .follow(destination)
+        }
+        if let externalLink, let url = URL(string: externalLink),
+           let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) {
+            return .external(url)
+        }
+        return nil
     }
 
     /// In menu order: the formula, then the algorithm, then the algorithm
@@ -703,6 +793,13 @@ struct ReaderContextTarget: Equatable, Sendable {
                                   disposition: .onSite))
         }
         return items
+    }
+
+    /// `linkItems` in a reader, and the site alone elsewhere: the review
+    /// and an editor's preview follow a link in the active reader whatever
+    /// is asked (corrections §17), so a new tab or window would not be one.
+    func linkItems(inReader: Bool) -> [LinkItem] {
+        inReader ? linkItems : linkItems.filter { $0.disposition == .onSite }
     }
 
     /// One entry of the corrections group.

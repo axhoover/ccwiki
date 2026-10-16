@@ -235,9 +235,7 @@ struct PageRenderer: Sendable {
             $0.slug.hasPrefix(slug + "/") && !hiddenPaths.contains($0.path)
         }
         let hidden = hidingStubs ? all.count { $0.status == .stub } : 0
-        let children = all
-            .filter { !hidingStubs || $0.status != .stub }
-            .sorted { sortKey($0) < sortKey($1) }
+        let children = Self.listingOrder(all.filter { !hidingStubs || $0.status != .stub })
 
         var html = "<h1>\(Self.escape(slug))</h1>\n"
         html += "<p class=\"folder-count\">\(children.count) page"
@@ -245,23 +243,26 @@ struct PageRenderer: Sendable {
         if hidden > 0 { html += " · \(hidden) stub\(hidden == 1 ? "" : "s") hidden" }
         html += "</p>\n"
 
-        // Group by the first character of the sort key — a citation key in
-        // References, a title everywhere else.
-        var currentLetter: String?
-        var open = false
+        // Group by the first letter of the title — a citation key in
+        // References — as the site's folder page does: one group per letter,
+        // in the order each first appears, so `#` holds a `$k$-…` title that
+        // sorts first and a Greek one that sorts last.
+        var groups: [(letter: String, pages: [WikiPage])] = []
         for page in children {
-            let letter = Self.dividerLetter(sortKey(page))
-            if letter != currentLetter {
-                if open { html += "</ul>\n</section>\n" }
-                currentLetter = letter
-                open = true
-                html += "<section class=\"folder-group\">\n"
-                html += "<h2 class=\"folder-letter\">\(Self.escape(letter))</h2>\n"
-                html += "<ul class=\"folder-list\">\n"
+            let letter = Self.dividerLetter(page.title)
+            if let existing = groups.firstIndex(where: { $0.letter == letter }) {
+                groups[existing].pages.append(page)
+            } else {
+                groups.append((letter: letter, pages: [page]))
             }
-            html += row(for: page)
         }
-        if open { html += "</ul>\n</section>\n" }
+        for group in groups {
+            html += "<section class=\"folder-group\">\n"
+            html += "<h2 class=\"folder-letter\">\(Self.escape(group.letter))</h2>\n"
+            html += "<ul class=\"folder-list\">\n"
+            for page in group.pages { html += row(for: page) }
+            html += "</ul>\n</section>\n"
+        }
 
         if children.isEmpty {
             html += "<p class=\"placeholder\">Nothing here"
@@ -292,14 +293,32 @@ struct PageRenderer: Sendable {
         return html + "</li>\n"
     }
 
-    /// Quartz sorts folder listings by `frontmatter.title` lower-cased.
-    private func sortKey(_ page: WikiPage) -> String { page.title.lowercased() }
+    /// The site's folder order: `frontmatter.title` lower-cased, compared with
+    /// `localeCompare` (`quartz.config.ts`), which is ICU collation rather
+    /// than code-point order — `CRHF ⇒ PCS` before `CRHF + One-time
+    /// signature ⇒ DS`, `IND-CPA ⇔ …` before `IND-CPA PKE ⇒ …`. A fixed
+    /// locale, so the order does not follow the reader's region, and the path
+    /// breaks a tie, so it is the same every time.
+    static func listingOrder(_ pages: [WikiPage]) -> [WikiPage] {
+        let keyed = pages.map { (page: $0, key: $0.title.lowercased()) }
+        let ordered = keyed.sorted { lhs, rhs in
+            let order = lhs.key.compare(rhs.key, locale: Self.collationLocale)
+            return order == .orderedSame
+                ? lhs.page.path < rhs.page.path
+                : order == .orderedAscending
+        }
+        return ordered.map { $0.page }
+    }
 
-    /// The heading a page files under. Anything not starting with a letter —
-    /// `#P`, a digit — groups together rather than making a divider of its own.
-    static func dividerLetter(_ key: String) -> String {
-        guard let first = key.first, first.isLetter else { return "#" }
-        return String(first).uppercased()
+    private static let collationLocale = Locale(identifier: "en_US")
+
+    /// The heading a page files under, as `FolderContent.tsx` picks it: the
+    /// title's first character upper-cased if that is a letter A–Z, and `#`
+    /// for anything else — `#P`, a digit, `$k$`, a Greek letter.
+    static func dividerLetter(_ title: String) -> String {
+        guard let first = title.unicodeScalars.first else { return "#" }
+        let letter = String(first).uppercased()
+        return letter.unicodeScalars.contains { (0x41...0x5A).contains($0.value) } ? letter : "#"
     }
 
     static func escape(_ text: String) -> String {

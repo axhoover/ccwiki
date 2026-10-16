@@ -192,8 +192,13 @@ struct PaperFetcher: Sendable {
         self.maximumBytes = maximumBytes
     }
 
+    /// `progress` hears each request's bytes with the URL it asked for, so
+    /// the paper window names the host of the request running now (a
+    /// landing page's PDF, or the next link after one that failed) rather
+    /// than the reference's first link's (§2.7).
     func fetch(
-        _ source: PaperSource, progress: @escaping @Sendable (Int64, Int64?) -> Void
+        _ source: PaperSource,
+        progress: @escaping @Sendable (_ received: Int64, _ expected: Int64?, _ url: URL) -> Void
     ) async -> Result<FetchedPaper, PaperFailure> {
         guard !source.candidates.isEmpty else { return .failure(.noLink(source: source.sourceURL)) }
 
@@ -235,15 +240,15 @@ struct PaperFetcher: Sendable {
 
     /// One request, and what its answer means.
     private func attempt(
-        _ url: URL, progress: @escaping @Sendable (Int64, Int64?) -> Void
+        _ url: URL, progress: @escaping @Sendable (Int64, Int64?, URL) -> Void
     ) async -> Attempt {
         // Every request counts from nothing: a landing page's bytes and size
         // are not its PDF's.
-        progress(0, nil)
+        progress(0, nil, url)
         let download: PaperDownload
         do {
             download = try await transport.download(
-                url, maximumBytes: maximumBytes, progress: progress)
+                url, maximumBytes: maximumBytes, progress: { progress($0, $1, url) })
         } catch let error as URLError {
             return .failed(Self.failure(for: error, url: url))
         } catch {

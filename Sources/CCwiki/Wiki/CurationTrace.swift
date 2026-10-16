@@ -159,11 +159,13 @@ struct CurationTrace: Sendable, Hashable {
     }
 
     /// The step that concluded a row's fact: its own, or, for "shown
-    /// above", the first occurrence's. `nil` for a given.
+    /// above", the first occurrence's: the same notion, and the same
+    /// `metBy` producer's fact or the node's own (R13). `nil` for a given.
     private static func step(of row: Row, in rows: [Row]) -> Derivation.Step? {
         if let step = row.step { return step }
         return rows.first {
-            $0.objectID == row.objectID && $0.isWeakened == row.isWeakened && $0.step != nil
+            $0.objectID == row.objectID && $0.isWeakened == row.isWeakened
+                && $0.establishedBy == row.establishedBy && $0.step != nil
         }?.step
     }
 

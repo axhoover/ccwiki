@@ -299,7 +299,9 @@ answer is "*PKE* is one of your premises", with no proof and no footer.
   gives double-click and Return, and `.copyable` makes ⌘C copy the selected
   rows' statements.
 - **Context menu:** Open Reduction ("CS03: KEM + SKE ⇒ PKE"), Open *object*,
-  Explore From Here…, Copy Statement, then the submenu **Copy Proof As ▸
+  Explore From Here…, Copy Statement (a fact's carries ", assuming …" and
+  ", only …" inside its parentheses when the fact has them, as the
+  inspector's does, §3.4), then the submenu **Copy Proof As ▸
   Text, LaTeX, Wiki Markdown**, and **Copy BibTeX of Cited Works** only when
   a cited work has an inline entry (hidden, not dimmed, otherwise). The
   forms are [relations-followups.md](relations-followups.md) §3; the Edit
@@ -698,9 +700,10 @@ section at all.
     records, which is not everything known. Combinations of several objects
     are in the Relations Explorer."
 - **A row's tooltip:** "DDH ⇒* Oblivious transfer", then "Derived by CCwiki
-  from 3 recorded reductions; 3 steps.", then the chain class in §2.6's words
-  ("Class unstated: 3 steps do not state theirs"), then "Click to see the
-  proof."
+  from 3 recorded reductions; 3 steps.", then, for a row that assumes a
+  precondition or derives only a weaker notion, "Assuming …" and "only …"
+  on one line, then the chain class in §2.6's words ("Class unstated: 3
+  steps do not state theirs"), then "Click to see the proof."
 - **The last row of each "implied by" block** is a link-styled "Combinations
   of several objects…", which opens backward mode on that object. No count is
   shown, because counting pairs means the backward search the inspector must
@@ -715,7 +718,9 @@ section at all.
   derivable in the default models keeps its default-model proof either way.
 - **Context menu:** Show Proof, Explore From Here… (From = the row's object),
   Open *label*, Copy Statement ("DDH ⇒* Oblivious transfer (derived by
-  CCwiki from 3 recorded reductions)"), and last the submenu **Copy Proof
+  CCwiki from 3 recorded reductions)", with ", assuming …" and ", only …"
+  inside the parentheses when the row has them, since a pasted line leaves
+  its group's heading behind), and last the submenu **Copy Proof
   As ▸ Text, LaTeX, Wiki Markdown**, whose proof is computed on click with
   the default models ([relations-followups.md](relations-followups.md) §3.1;
   no BibTeX item here).
@@ -727,7 +732,8 @@ section at all.
   a set of `implies` / `impliedBy`), not per page. That is how an Xcode
   inspector section behaves: open it once and it stays open as you move
   around.
-- **VoiceOver:** "Oblivious transfer, derived in 3 steps, quantum setting".
+- **VoiceOver:** "Oblivious transfer, derived in 3 steps, quantum setting", then
+  any "assuming …" and "only …".
   Hint: "Shows the proof in the Relations Explorer."
 
 ### 3.5 Cost
@@ -815,7 +821,8 @@ and tested:
   prose.
 - **Reduce to inline markdown without links:**
   - `[[target|alias]]` → its display text, by the same rule as `displayText`
-    in `ccwiki.js` (alias, else the last path segment, plus ` › anchor`);
+    in `ccwiki-markdown.js` (alias, else the heading, else the last path
+    segment);
   - `[text](dest)` → its text;
   - footnote markers, images and inline HTML tags dropped.
   - **`$…$`, `**`, `_` and backticks are kept**, so JS renders math and

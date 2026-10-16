@@ -28,7 +28,18 @@ final class AppModel {
     private(set) var needsDeveloperTools = false
     private var discoveryGeneration = 0
     private(set) var isGitHubAuthenticated = false
+    /// gh is there, but GitHub could not be asked whether it is signed in:
+    /// offline, no answer before the deadline, or an error from GitHub
+    /// other than a refused token. Settings and the ingest sheet say
+    /// offline, not "not signed in" (plans/corrections.md §7.1).
+    private(set) var isGitHubUnreachable = false
     private(set) var canPushToRemote = false
+    /// True while gh is asked whether it is signed in, and the clone whether
+    /// it can push (`askGitHub`). Settings and the ingest sheet say
+    /// "checking" meanwhile, not "not signed in": both answers start false.
+    private(set) var isCheckingGitHub = false
+    /// Which `askGitHub` is the latest; an earlier one's answer is dropped.
+    @ObservationIgnored private var gitHubAsk = 0
     private(set) var vendorManifest: String?
 
     /// Fast-forward the clone at launch. Persisted; see `CCwikiSettings`.
@@ -355,7 +366,10 @@ final class AppModel {
         switch destination {
         case .page(let path, let anchor): open(.page(path: path, anchor: anchor))
         case .folder(let slug): open(.folder(slug: slug))
-        case .asset(let path): NSWorkspace.shared.open(paths.content.appending(path: path))
+        case .asset(let path):
+            if let file = CCwikiURL.assetFile(path, in: paths.content) {
+                NSWorkspace.shared.open(file)
+            }
         case .shell: break
         }
     }
@@ -414,6 +428,10 @@ final class AppModel {
         didSet { scheduleSearch() }
     }
     private(set) var searchResults: [SearchHit] = []
+    /// The query `searchResults` are for. The search runs once typing
+    /// pauses, so until it lands this is the last query, and the palette's
+    /// Return waits for it to be `searchQuery` (`PaletteReturn`).
+    private(set) var searchResultsQuery = ""
     /// Set when nothing matched as typed and the results are for this
     /// corrected query instead.
     private(set) var searchCorrection: String?
@@ -426,6 +444,8 @@ final class AppModel {
         didSet { scheduleReferenceSearch() }
     }
     private(set) var referenceResults: [ReferenceHit] = []
+    /// The query `referenceResults` are for, as `searchResultsQuery`.
+    private(set) var referenceResultsQuery = ""
     private(set) var referenceError: String?
     private var referenceTask: Task<Void, Never>?
 
@@ -435,6 +455,8 @@ final class AppModel {
         didSet { scheduleGrep() }
     }
     private(set) var grepResults: [TextGrep.Hit] = []
+    /// The query `grepResults` are for, as `searchResultsQuery`.
+    private(set) var grepResultsQuery = ""
     private var grepTask: Task<Void, Never>?
     @ObservationIgnored private var textGrep = TextGrep.empty
     /// Setting the query recomputes the results, so the two can never drift —
@@ -545,7 +567,10 @@ final class AppModel {
     }
 
     /// Each open editor's text and preview, by window (corrections §7.5).
-    @ObservationIgnored var editorSessions: [EditorTarget: EditorSession] = [:]
+    /// Observed, so Open Draft PR's gate, which asks each of a job's
+    /// editors whether it is settled, sees one that opens after it was
+    /// drawn. Changed only from actions and closing tasks, never in a body.
+    var editorSessions: [EditorTarget: EditorSession] = [:]
 
     // MARK: Review
 
@@ -554,9 +579,13 @@ final class AppModel {
 
     /// The review's own web view: the reader's shell, pipeline and macros,
     /// rendering changed blocks (corrections §6.3). Made on first use; it
-    /// shares the readers' data store.
-    @ObservationIgnored private(set) lazy var reviewWeb: WebController =
-        WebController(paths: paths, webRoot: webRoot, pageZoom: pageZoom)
+    /// shares the readers' data store, and a WebContent restart checks the
+    /// staged pipeline first, as a reader's does.
+    @ObservationIgnored private(set) lazy var reviewWeb: WebController = {
+        let web = WebController(paths: self.paths, webRoot: self.webRoot, pageZoom: self.pageZoom)
+        web.onRendererRestart = { [weak self] in self?.checkWebRoot() }
+        return web
+    }()
 
     /// The model a described correction runs with: a `claude --model`
     /// alias, or "" for the CLI's default. Persisted; see `CCwikiSettings`.
@@ -593,7 +622,7 @@ final class AppModel {
     /// Whether this build may replace itself: only the release, and only
     /// when it can verify a download at all. See `BuildIdentity`, `ReleaseKey`.
     var canInstallUpdates: Bool { BuildIdentity.isRelease && ReleaseKey.isConfigured }
-    static let updateInterval: TimeInterval = 24 * 60 * 60
+    nonisolated static let updateInterval: TimeInterval = 24 * 60 * 60
     /// "X is available": replaced on every check.
     static let updateWarningPrefix = "Update: "
     /// "X is installed, relaunch": survives checks; cleared by the relaunch.
@@ -608,7 +637,21 @@ final class AppModel {
     /// updater swaps the bundle under the running app, and a WebContent
     /// restart after that must not load the new release's JavaScript
     /// against this release's Swift.
-    let webRoot: URL
+    ///
+    /// Read as each web view is made, so the copy is checked first
+    /// (`checkWebRoot`): one cleared from Caches since launch would leave
+    /// the new view blank.
+    var webRoot: URL {
+        checkWebRoot()
+        return stagedWebCopy
+    }
+    /// What `paths.stagedWebRoot()` gave at launch. Staging it again gives
+    /// the same path.
+    private let stagedWebCopy: URL
+    /// Said when the staged copy is gone and only a relaunch can bring it
+    /// back.
+    static let webRootWarning = "CCwiki's page renderer was removed from Caches while it was "
+        + "open. Relaunch CCwiki to read pages in new tabs and windows."
     /// The papers behind reference pages, fetched when asked (§2).
     let papers: PaperLibrary
 
@@ -651,7 +694,7 @@ final class AppModel {
         // the real one as soon as the clone lands.
         let macros = MacroTable.load(cloneRoot: paths.clone)
         self.macros = macros
-        self.webRoot = paths.stagedWebRoot()
+        self.stagedWebCopy = paths.stagedWebRoot()
         self.storedPageZoom = AppModel.clampedZoom(CCwikiSettings.pageZoom)
         self.papers = PaperLibrary(paths: paths)
         let publishTarget = PublishTarget.resolve(
@@ -704,6 +747,14 @@ final class AppModel {
            !requested.isEmpty, !PublishTarget.isRepositorySlug(requested) {
             warn("CCWIKI_TARGET_REPO is ignored: “\(requested)” is not owner/name. "
                 + "Pull requests and issues go to \(publishTarget.repository).")
+        }
+
+        // Coming back to CCwiki, from Terminal or Apple's installer, is when
+        // a tool someone was sent to install turns up (`appDidBecomeActive`).
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.appDidBecomeActive() }
         }
     }
 
@@ -764,6 +815,43 @@ final class AppModel {
         let launchFetch = syncsAtLaunch && ScreenshotRunner.directory == nil
         if index == nil || launchFetch { sync() }
         if ScreenshotRunner.directory == nil { await checkForUpdatesIfDue() }
+        startHourlyChores()
+    }
+
+    /// The hourly chores, from the end of the launch until the app quits.
+    @ObservationIgnored private var hourlyChores: Task<Void, Never>?
+    nonisolated static let choresInterval: Duration = .seconds(60 * 60)
+
+    /// What a copy left open for days, across sleeps, still owes: the daily
+    /// update check, which the launch alone would make once per launch
+    /// rather than once a day, and a mark on the staged web copy, which
+    /// another build prunes after a week without one (`checkWebRoot`).
+    /// Cheap each hour: `checkForUpdatesIfDue` asks GitHub only once a day
+    /// has passed since its last answer, so a launch that was offline is
+    /// retried within the hour, and a check turned back on in Settings runs
+    /// within the hour too.
+    private func startHourlyChores() {
+        guard hourlyChores == nil else { return }
+        hourlyChores = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: AppModel.choresInterval)
+                guard let self else { return }
+                checkWebRoot()
+                if ScreenshotRunner.directory == nil { await checkForUpdatesIfDue() }
+            }
+        }
+    }
+
+    /// Keeps the staged web copy fit to serve (`AppPaths.keepStagedWebRoot`):
+    /// marked in use, or staged again if Caches lost it. When it is gone
+    /// and the bundle is no longer this build, only a relaunch helps, and
+    /// the status bar says so. Before each web view is made, on coming back
+    /// to the app, and hourly.
+    func checkWebRoot() {
+        guard !paths.keepStagedWebRoot(stagedWebCopy, bundleBuild: AppPaths.bundleBuildOnDisk)
+        else { return }
+        // Not inside the update that may be making a web view.
+        Task { @MainActor [weak self] in self?.warn(AppModel.webRootWarning) }
     }
 
     /// Whether a session has taken the cold start since the process began,
@@ -791,6 +879,8 @@ final class AppModel {
         discoveryGeneration += 1
         let generation = discoveryGeneration
         isDiscoveringTools = true
+        // Until this discovery's own ask has answered (`askGitHub`).
+        isCheckingGitHub = true
         let overrides = toolOverrides
 
         let reading = await Task.detached(priority: .userInitiated) { () -> (ToolLocator, Bool) in
@@ -824,9 +914,42 @@ final class AppModel {
         // GitHub, if it was asked before gh was found, and any review still
         // without a snapshot, asked again now (corrections §7.1).
         Task { await jobCenter.toolsDidChange() }
-        isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: all)
-        guard generation == discoveryGeneration else { return }
+        await askGitHub(generation: generation)
+    }
+
+    /// Ask whether gh is signed in, then whether the clone can push, with
+    /// `isCheckingGitHub` set until both are known: a signed-in user is not
+    /// told "not signed in" while gh answers, for up to its deadline. An
+    /// answer a later ask or discovery has overtaken is dropped; that one
+    /// answers instead.
+    private func askGitHub(generation: Int) async {
+        gitHubAsk += 1
+        let ask = gitHubAsk
+        isCheckingGitHub = true
+        let answer = await GitHubAuth.isAuthenticated(tools: tools)
+        guard generation == discoveryGeneration, ask == gitHubAsk else { return }
+        isGitHubAuthenticated = answer == true
+        isGitHubUnreachable = answer == nil && tools.path(for: .gh) != nil
         await refreshPushCapability()
+        guard generation == discoveryGeneration, ask == gitHubAsk else { return }
+        isCheckingGitHub = false
+    }
+
+    /// Ask gh again when it gave no answer: a launch offline, or one with
+    /// no answer before the deadline, leaves `isGitHubUnreachable` set with
+    /// nothing cached (`GitHubAuth.isAuthenticated`). On coming back to the
+    /// app and when the ingest sheet opens, so a network that has returned
+    /// is noticed without Settings ▸ Re-check. A "no" that was an answer is
+    /// kept, and costs nothing: after `gh auth login`, Re-check, as the
+    /// advice says. An answer a correction's ask has cached since is taken:
+    /// a "yes", or a "no" in place of offline.
+    func refreshGitHubIfUnanswered() {
+        guard !isDiscoveringTools, !isCheckingGitHub, !isGitHubAuthenticated,
+              tools.path(for: .gh) != nil,
+              isGitHubUnreachable || GitHubAuth.cachedAnswer != false
+        else { return }
+        let generation = discoveryGeneration
+        Task { await askGitHub(generation: generation) }
     }
 
     /// Nothing to warn about any more: reading works without git (the wiki
@@ -846,24 +969,110 @@ final class AppModel {
         }
     }
 
+    /// Something a job needs was not there at the last look.
+    private var isMissingTools: Bool {
+        needsDeveloperTools || !tools.missingForIngestion.isEmpty
+    }
+
+    @ObservationIgnored private var activationObserver: (any NSObjectProtocol)?
+
+    /// CCwiki is the active app again. A tool missing at the last look may
+    /// have been installed meanwhile: the blockers send the person to
+    /// Terminal or to Apple's installer, and coming back, not a relaunch,
+    /// should be what makes it count. Only the cheap stages are asked here,
+    /// a `stat` per directory (`toolArrived`) and `xcode-select -p`, never a
+    /// login shell. When something has turned up, every tool is looked for
+    /// again, which asks GitHub and the clone afresh too. The staged web
+    /// copy is checked as well, in case Caches was cleared meanwhile, and
+    /// gh is asked again if its last "no" was not an answer.
+    private func appDidBecomeActive() {
+        checkWebRoot()
+        guard !isDiscoveringTools else { return }
+        refreshGitHubIfUnanswered()
+        guard isMissingTools else { return }
+        let missing = tools.missingForIngestion
+        let stubbedGit = needsDeveloperTools
+        Task {
+            let arrived = await Task.detached(priority: .utility) { () -> Bool in
+                if stubbedGit, ToolLocator.developerToolsInstalled() { return true }
+                let inherited = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+                    .components(separatedBy: ":").filter { !$0.isEmpty }
+                return AppModel.toolArrived(
+                    missing, stubbedGit: stubbedGit,
+                    in: inherited + ToolLocator.commonDirectories)
+            }.value
+            guard arrived, !isDiscoveringTools else { return }
+            GitHubAuth.invalidate()
+            await discoverTools()
+        }
+    }
+
+    /// Whether one of `missing` is in `directories` now, as the first two
+    /// stages of `ToolLocator.locate` would find it: the first executable
+    /// in the order given. While git is only Apple's stub (`stubbedGit`),
+    /// finding that stub first again is no news; the Command Line Tools
+    /// arriving behind it is, and the caller asks `xcode-select` for that.
+    nonisolated static func toolArrived(
+        _ missing: [ToolLocator.Tool], stubbedGit: Bool, in directories: [String]
+    ) -> Bool {
+        missing.contains { tool in
+            let found = directories.lazy
+                .map { $0 + "/" + tool.rawValue }
+                .first { FileManager.default.isExecutableFile(atPath: $0) }
+            guard let found else { return false }
+            return !(tool == .git && stubbedGit && ToolLocator.isAppleStub(found))
+        }
+    }
+
     /// Why a job could not start right now, in the order the sheet shows them.
     /// Empty means the pre-flight checks that concern tooling would pass.
     var ingestionBlockers: [String] {
+        Self.ingestionBlockers(
+            store: index == nil ? nil : paths.wikiStore,
+            missing: tools.missingForIngestion, needsDeveloperTools: needsDeveloperTools,
+            ghPresent: tools.path(for: .gh) != nil,
+            isGitHubAuthenticated: isGitHubAuthenticated, canPushToRemote: canPushToRemote,
+            isGitHubUnreachable: isGitHubUnreachable)
+    }
+
+    /// The blocker while GitHub could not be asked, in the words of the
+    /// editor's offline banner (plans/corrections.md §7.1). The sheet shows
+    /// it without the warning triangle: offline is not a fault.
+    nonisolated static let gitHubUnreachableBlocker =
+        "Offline. A job needs a connection to GitHub; CCwiki asks again when you come back to it."
+
+    /// `ingestionBlockers`, pure. `store` is nil while no wiki is loaded.
+    ///
+    /// A snapshot blocks a job as it blocks a correction (`CorrectionBlockers`):
+    /// the job's worktree is made from the clone's git, which a snapshot has
+    /// not got. The push blocker is about a clone, so a snapshot leaves it
+    /// to that one. A GitHub that could not be asked is offline, never
+    /// "not signed in": `gh auth login` cannot bring a network back.
+    nonisolated static func ingestionBlockers(
+        store: AppPaths.WikiStore?, missing: [ToolLocator.Tool], needsDeveloperTools: Bool,
+        ghPresent: Bool, isGitHubAuthenticated: Bool, canPushToRemote: Bool,
+        isGitHubUnreachable: Bool = false
+    ) -> [String] {
         var blockers: [String] = []
-        if index == nil {
-            blockers.append("The wiki has not been cloned yet. Sync first (⌘R).")
+        if store == nil {
+            blockers.append(CorrectionJobRunner.notCloned)
         }
         if needsDeveloperTools {
             blockers.append("git needs Apple's Command Line Tools (reading does not; "
                 + "jobs do). Settings > Jobs has the installer.")
         }
-        for tool in tools.missingForIngestion where !(tool == .git && needsDeveloperTools) {
+        for tool in missing where !(tool == .git && needsDeveloperTools) {
             blockers.append("\(tool.rawValue) was not found. It is needed for \(tool.purpose).")
         }
-        if tools.path(for: .gh) != nil, !isGitHubAuthenticated {
+        if store == .snapshot {
+            blockers.append(CorrectionBlockers.snapshot)
+        }
+        if ghPresent, isGitHubUnreachable {
+            blockers.append(Self.gitHubUnreachableBlocker)
+        } else if ghPresent, !isGitHubAuthenticated {
             blockers.append("The GitHub CLI is not signed in. Run `gh auth login` in Terminal.")
         }
-        if tools.path(for: .gh) != nil, isGitHubAuthenticated, !canPushToRemote {
+        if ghPresent, isGitHubAuthenticated, !canPushToRemote, store != .snapshot {
             blockers.append("CCwiki's clone cannot authenticate a push. Sync again (⌘R) to configure it.")
         }
         return blockers
@@ -1039,9 +1248,16 @@ final class AppModel {
     /// What a load means for the readers: each window's session decides
     /// what to render again (`ReaderSession.libraryDidLoad`), and the quick
     /// switcher's list follows the new wiki.
+    ///
+    /// The open queries of ⌘S, ⇧⌘R and ⇧⌘F run again too: one typed during
+    /// the launch load was answered by an index with nothing in it yet, and
+    /// one answered before a pull lists the pages as they were.
     private func libraryDidLoad(_ update: LibraryUpdate) {
         for session in sessions.values { session.libraryDidLoad(update) }
         refreshQuickSwitcher()
+        scheduleSearch()
+        scheduleReferenceSearch()
+        scheduleGrep()
     }
 
     var gitService: GitService? {
@@ -1417,6 +1633,7 @@ final class AppModel {
         let query = searchQuery
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             searchResults = []
+            searchResultsQuery = query
             searchCorrection = nil
             searchError = nil
             return
@@ -1430,10 +1647,12 @@ final class AppModel {
                 let results = try await searchIndex.conceptSearch(query)
                 guard !Task.isCancelled else { return }
                 searchResults = results.hits
+                searchResultsQuery = query
                 searchCorrection = results.correction
                 searchError = nil
             } catch {
                 searchResults = []
+                searchResultsQuery = query
                 searchCorrection = nil
                 searchError = error.localizedDescription
             }
@@ -1445,6 +1664,7 @@ final class AppModel {
         let query = referenceQuery
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             referenceResults = []
+            referenceResultsQuery = query
             referenceError = nil
             return
         }
@@ -1455,9 +1675,11 @@ final class AppModel {
                 let hits = try await searchIndex.referenceSearch(query)
                 guard !Task.isCancelled else { return }
                 referenceResults = hits
+                referenceResultsQuery = query
                 referenceError = nil
             } catch {
                 referenceResults = []
+                referenceResultsQuery = query
                 referenceError = error.localizedDescription
             }
         }
@@ -1469,6 +1691,7 @@ final class AppModel {
         let grep = textGrep
         guard query.trimmingCharacters(in: .whitespaces).count >= TextGrep.minimumLength else {
             grepResults = []
+            grepResultsQuery = query
             return
         }
         grepTask = Task { [weak self] in
@@ -1479,6 +1702,7 @@ final class AppModel {
             }.value
             guard !Task.isCancelled, let self else { return }
             grepResults = hits
+            grepResultsQuery = query
         }
     }
 
@@ -1504,6 +1728,15 @@ final class AppModel {
         quickSwitcherRecentCount = isEmptyQuery
             ? quickSwitcherResults.prefix(recent.count).count { recent.contains($0.path) }
             : 0
+    }
+
+    /// Closes every quick switcher but `id`'s. The query, results and left-out
+    /// page are app-wide, so only one switcher is up at a time
+    /// (plans/reader-comforts.md §1.6).
+    func dismissQuickSwitchers(except id: UUID) {
+        for session in sessions.values where session.id != id {
+            session.quickSwitcherPresented = false
+        }
     }
 
     /// A reader opened `path`: it is the page read last, for the next cold
@@ -1586,15 +1819,24 @@ final class AppModel {
 
     func recheckGitHubAuth() {
         GitHubAuth.invalidate()
-        let tools = tools
-        Task { @MainActor in
-            isGitHubAuthenticated = await GitHubAuth.isAuthenticated(tools: tools)
-            await refreshPushCapability()
+        // A tool missing at the last look may have been installed since, as
+        // the advice beside it says: every tool is looked for again, and
+        // that asks GitHub and the clone afresh too.
+        if isMissingTools {
+            Task { await discoverTools() }
+            return
         }
+        let generation = discoveryGeneration
+        Task { await askGitHub(generation: generation) }
     }
 
+    /// Only a git clone is asked. Run against a snapshot, which has no
+    /// `.git`, git would walk up to any repository enclosing Application
+    /// Support (a `~/.git` for dotfiles), write the credential helper into
+    /// its config, and answer for the push from the global and system
+    /// config: "Configured" with no clone at all.
     private func refreshPushCapability() async {
-        guard let git = gitService else {
+        guard let git = gitService, paths.wikiStore == .git else {
             canPushToRemote = false
             return
         }
@@ -1995,23 +2237,29 @@ final class AppModel {
 
     // MARK: Update check
 
-    /// The daily check, from the launch task. Silent whatever happens: an
+    /// The daily check, at the end of the launch and then every hour while
+    /// the app runs (`startHourlyChores`). Silent whatever happens: an
     /// update is a note in the status bar, and a failure is nothing at all.
     /// CCwiki Dev never checks, whatever its version says.
     func checkForUpdatesIfDue() async {
         guard BuildIdentity.isRelease, checksForUpdates,
-              !UpdateChecker.isDevelopmentVersion(appVersion)
+              !UpdateChecker.isDevelopmentVersion(appVersion),
+              Self.isUpdateCheckDue(lastCheck: lastUpdateCheck, now: Date())
         else { return }
-        if let last = lastUpdateCheck, Date().timeIntervalSince(last) < Self.updateInterval {
-            return
-        }
         if case .available(let release) = await performUpdateCheck() {
             await installFoundUpdateIfAllowed(release)
         }
     }
 
+    /// A day has passed since the last answer, or none has come yet.
+    nonisolated static func isUpdateCheckDue(lastCheck: Date?, now: Date) -> Bool {
+        guard let lastCheck else { return true }
+        return now.timeIntervalSince(lastCheck) >= updateInterval
+    }
+
     /// `nil` when GitHub could not be reached or understood. The time of the
-    /// check is recorded only when an answer came back.
+    /// check is recorded only when an answer came back, and kept for the
+    /// next launch only as `persistedUpdateCheck` says.
     private func performUpdateCheck() async -> UpdateChecker.Outcome? {
         guard !isCheckingForUpdates else { return nil }
         isCheckingForUpdates = true
@@ -2021,7 +2269,7 @@ final class AppModel {
             return nil
         }
         lastUpdateCheck = Date()
-        CCwikiSettings.lastUpdateCheck = lastUpdateCheck
+        CCwikiSettings.lastUpdateCheck = Self.persistedUpdateCheck(lastUpdateCheck, after: outcome)
         warnings.removeAll { $0.hasPrefix(Self.updateWarningPrefix) }
         if case .available(let release) = outcome {
             availableUpdate = release
@@ -2033,6 +2281,19 @@ final class AppModel {
             availableUpdate = nil
         }
         return outcome
+    }
+
+    /// The check time the next launch reads. Only an answer that nothing is
+    /// newer holds that launch's check off. A release that was found is
+    /// asked for again: `availableUpdate`, its status-bar note and a failed
+    /// install's note all go with the process, and a launch that skipped
+    /// the check would know of no update, say "Up to date" in Settings, and
+    /// never retry the install.
+    nonisolated static func persistedUpdateCheck(
+        _ checked: Date?, after outcome: UpdateChecker.Outcome
+    ) -> Date? {
+        if case .available = outcome { return nil }
+        return checked
     }
 
     /// The daily check's second half: install what it found, if allowed,

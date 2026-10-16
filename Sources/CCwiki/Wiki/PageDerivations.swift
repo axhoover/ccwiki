@@ -59,7 +59,9 @@ struct PageDerivations: Sendable {
         /// never passes for the full node.
         let weakening: String?
         /// Copy Statement: "DDH ⇒* Oblivious transfer (derived by CCwiki
-        /// from 3 recorded reductions)".
+        /// from 3 recorded reductions)". An assumed precondition and a
+        /// weakened conclusion are part of the claim (derivations.md §7), so
+        /// they follow in the parentheses: "…, assuming …", "…, only …".
         let statement: String
         let help: String
         let accessibilityLabel: String
@@ -207,31 +209,39 @@ struct PageDerivations: Sendable {
         let models = fact.models.sorted(by: Derivation.precedes).map(DerivationWording.modelName)
         let modelsLine = models.isEmpty ? nil : models.joined(separator: " · ")
         let weakening = fact.weakening.map { "only " + $0.notion }
+        // The group heading says "Assuming …" on screen; a copied line and a
+        // tooltip leave that context, so each carries the condition itself.
+        let assumed = writer.assuming(fact.assumes.map { $0.notion })
+        let qualifiers = [assumed, weakening].compactMap { $0 }
 
-        let statement = "\(writer.label(source)) \(DerivationWording.derivedArrow) "
+        let claim = "\(writer.label(source)) \(DerivationWording.derivedArrow) "
             + writer.label(target)
         let proof = writer.derivation.closure(from: [source], options: .standard).proof(of: target)
         let unstated = proof.map { writer.unstatedSteps($0) } ?? 0
         let provenance = DerivationWording.derivedBy(link.relationCount) + "; "
             + DerivationWording.steps(fact.depth) + "."
-        let helpLines: [String] = [
-            statement,
-            provenance,
-            DerivationWording.chainClass(fact.chainClass, unstatedSteps: unstated),
-            "Click to see the proof.",
-        ]
+        var helpLines = [claim, provenance]
+        if !qualifiers.isEmpty {
+            let qualified = qualifiers.joined(separator: "; ")
+            helpLines.append(qualified.prefix(1).uppercased() + qualified.dropFirst())
+        }
+        helpLines.append(DerivationWording.chainClass(fact.chainClass, unstatedSteps: unstated))
+        helpLines.append("Click to see the proof.")
         let help = helpLines.joined(separator: "\n")
 
         var spoken = "\(label), derived in \(DerivationWording.steps(fact.depth))"
         if !models.isEmpty { spoken += ", " + models.joined(separator: ", ") }
+        if let assumed { spoken += ", " + assumed }
         if let weakening { spoken += ", " + weakening }
+
+        let statement = claim + " ("
+            + DerivationWording.derivedBy(link.relationCount).lowercasedFirst
+            + qualifiers.map { ", " + $0 }.joined() + ")"
 
         return Row(
             link: link, label: label,
             query: ExplorerQuery(from: [source], to: target),
             modelsLine: modelsLine, weakening: weakening,
-            statement: statement + " (" + DerivationWording.derivedBy(link.relationCount)
-                .lowercasedFirst + ")",
-            help: help, accessibilityLabel: spoken)
+            statement: statement, help: help, accessibilityLabel: spoken)
     }
 }

@@ -33,6 +33,12 @@ struct SettingsView: View {
 
     // MARK: Tools
 
+    /// Until gh and the clone have answered, after discovery or Re-check,
+    /// both answers read false; they are not shown as answers meanwhile.
+    private var isCheckingGitHub: Bool {
+        model.isDiscoveringTools || model.isCheckingGitHub
+    }
+
     private var toolsTab: some View {
         Form {
             Section {
@@ -53,7 +59,7 @@ struct SettingsView: View {
             Section("GitHub") {
                 LabeledContent("Authentication") {
                     HStack(spacing: Theme.small) {
-                        if model.isDiscoveringTools {
+                        if isCheckingGitHub {
                             Label("Checking…", systemImage: "hourglass")
                                 .foregroundStyle(.secondary)
                                 .font(Theme.Fonts.row)
@@ -61,6 +67,16 @@ struct SettingsView: View {
                             Label("Signed in", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                                 .font(Theme.Fonts.row)
+                        } else if model.isGitHubUnreachable {
+                            // Not knowing is not a fault (design-system §4b):
+                            // the glyph tertiary, like the status bar's.
+                            Label {
+                                Text("Offline")
+                            } icon: {
+                                Image(systemName: "wifi.slash").foregroundStyle(.tertiary)
+                            }
+                            .foregroundStyle(.secondary)
+                            .font(Theme.Fonts.row)
                         } else {
                             Label("Not signed in", systemImage: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
@@ -68,22 +84,33 @@ struct SettingsView: View {
                         }
                         Button("Re-check") { model.recheckGitHubAuth() }
                             .controlSize(.small)
-                            .disabled(model.isDiscoveringTools)
+                            .disabled(isCheckingGitHub)
                     }
                 }
-                if !model.isDiscoveringTools, !model.isGitHubAuthenticated {
+                if !isCheckingGitHub, model.isGitHubUnreachable {
+                    Text("GitHub could not be reached, so gh could not say whether it is signed "
+                        + "in. CCwiki asks again when you come back to it.")
+                        .font(Theme.Fonts.meta)
+                        .foregroundStyle(.secondary)
+                } else if !isCheckingGitHub, !model.isGitHubAuthenticated {
                     Text("Run `gh auth login` in a terminal, then re-check. Jobs need an "
                         + "account that can push a branch to the wiki.")
                         .font(Theme.Fonts.meta)
                         .foregroundStyle(.secondary)
                 }
                 LabeledContent("Push credentials") {
-                    Text(model.canPushToRemote
-                        ? "Configured on CCwiki's clone"
-                        : "Missing — jobs are blocked")
-                        .font(Theme.Fonts.meta)
-                        .foregroundStyle(model.canPushToRemote
-                            ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                    if isCheckingGitHub {
+                        Text("Checking…")
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(model.canPushToRemote
+                            ? "Configured on CCwiki's clone"
+                            : "Missing — jobs are blocked")
+                            .font(Theme.Fonts.meta)
+                            .foregroundStyle(model.canPushToRemote
+                                ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                    }
                 }
             }
 

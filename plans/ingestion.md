@@ -76,6 +76,11 @@ prompt so the agent does not repeat the work:
 - Does the proposed key match `^[A-Za-z][A-Za-z+]*\d{2}[a-z]?$`?
 - Is `vendor/cryptobib/crypto.bib` present?
 - Are `git`, `gh`, `claude` and `node` all resolvable? (`ToolLocator`.)
+- Is `gh` signed in to github.com (`GitHubAuth.isAuthenticated`), may that
+  account push to the wiki, and can CCwiki's clone authenticate a push? A
+  GitHub that could not be asked (offline, a timeout, a 5xx) blocks the job
+  as "GitHub could not be reached", never as signed out, and the sheet says
+  "Offline." ([corrections.md](corrections.md) §7.1).
 
 ## 4. Post-flight: the diff ceiling
 
@@ -189,13 +194,18 @@ is what a push sends. Every git command from the check to the push runs with
 all, and the push names that commit, never HEAD, with no tag
 (plans/corrections.md §6.1, §6.5).
 
-**No pull request twice, no branch overwritten.** The commit being pushed is
-recorded before the push is sent, and the push leases on the last one GitHub
-confirmed, or on absence before the first. A refused lease asks GitHub where
-the branch is: a commit CCwiki pushed (it is in the branch's reflog) is
-adopted and pushed over; a branch someone else made is left alone and the job
-takes the next free name; commits someone else added after CCwiki's are never
-overwritten. Before opening a pull request, CCwiki asks for an open one from
+**No pull request twice, no branch overwritten.** Each push is recorded, with
+the repository and the branch it goes to, before it is sent, and so is the
+one GitHub confirmed. The push leases on that confirmed one only when it went
+to the same repository and branch, and on absence otherwise: before the
+first, and after a Dev build's target or the branch changed. A refused lease
+asks GitHub where the branch is: a commit recorded as sent to that very
+repository and branch (a push whose reply a crash lost is one) is pushed
+over; a branch someone else made is left alone, even one made at the job's
+own base or at a commit this job pushed elsewhere, and the job takes the next
+free name; commits someone else added after CCwiki's are never overwritten.
+The local branch's reflog is no evidence of what CCwiki pushed, and nor is a
+record that names a pushed commit without saying where it went. Before opening a pull request, CCwiki asks for an open one from
 the branch, in the repository itself (a fork's branch of the same name is not
 ours), and updates it instead. A push that fails may still have landed, and
 the notice says so; the next one's lease finds out. A publish a quit
@@ -217,8 +227,9 @@ agent starts and again after it exits, and asks `gh` for pull requests opened
 meanwhile; anything CCwiki did not make is named in an orange notice. Only a
 pull request from the job's own branch in the target repository makes the job
 `opened`; one from any other branch, which may be the maintainer's own from
-Terminal, is named with where to look, and the job still goes to review with
-its own diff (corrections.md §5.5). Other jobs' branches
+Terminal, is named with where to look, and the job ends as the agent's result
+says, in review with its own diff when it changed something (corrections.md
+§5.5). Other jobs' branches
 are CCwiki's own, but never this job's: a branch name is used again once its
 local branch is gone, so an old record can carry it. The review is the gate.
 
@@ -322,10 +333,12 @@ its worktree and is never offered.
 ### The review
 
 A job enters review with a **snapshot** (`ReviewSnapshotter`, corrections.md
-§6.1): everything in the worktree but `.ccwiki/` is staged, and git is asked,
-as bytes, for the name-status, the binary files, the patch and each changed
-file's old and new text (the new from the index, so what is shown is exactly
-what was digested). The patch is written to `logs/<id>.patch`, beside the
+§6.1): everything in the worktree but `.ccwiki/` is staged and written as a
+tree (`git write-tree`), and git is asked, as bytes, for that tree's
+name-status, binary files and patch against the base, and each changed
+file's old and new text (the new from the staged tree, by name, never from
+the index again, so what is shown is exactly what was digested and what
+Approve commits). The patch is written to `logs/<id>.patch`, beside the
 transcript and outside Caches, at every snapshot: a worktree deleted with
 Caches comes back with Restore, which makes it again at the base and applies
 the patch. It builds the worktree in the job's scratch directory and moves it

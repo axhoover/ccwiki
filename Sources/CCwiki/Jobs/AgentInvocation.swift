@@ -351,10 +351,13 @@ struct AgentRun {
         }
 
         // What the agent says is prose; what GitHub says is fact. Asked
-        // after every exit but a cancel, whatever the agent reports.
+        // after every exit but a cancel, whatever the agent reports. Other
+        // jobs' branches come from their records and from the job center,
+        // which also knows the jobs Clear Finished has dropped meanwhile.
+        let otherBranches = Tripwire.otherJobBranches(logs: paths.logs, excluding: job.id)
+            .union(job.otherJobBranches?() ?? [])
         let caught = await tripwire.check(
-            job, headsBefore: headsBefore,
-            otherBranches: Tripwire.otherJobBranches(logs: paths.logs, excluding: job.id))
+            job, headsBefore: headsBefore, otherBranches: otherBranches)
         if Task.isCancelled {
             await cleanUpDespiteCancellation(keep: true)
             return
@@ -366,7 +369,8 @@ struct AgentRun {
             // repository, that CCwiki did not open: the change is already on
             // GitHub, and there is nothing to review. The worktree stays, for
             // inspection. Any other pull request is only the notice's, and
-            // the job goes on to review with its own diff.
+            // the job ends as the agent's result says: in review with its
+            // own diff when it changed something.
             await cleanUp(keep: true)
             job.setState(.opened(url: url))
             return
@@ -431,6 +435,14 @@ struct AgentRun {
             handover: handover.flatMap { PullRequestDraft.parse(handover: $0) },
             siteURL: siteURL)
 
+        // CCwiki's git here is unsealed, and finds the repository through
+        // the worktree's `.git`, which the agent could have rewritten (§5.1).
+        guard GitService.isWorktree(job.worktree, of: paths.clone) else {
+            job.append(JobLogEntry(.error, GitService.redirectedWorktree))
+            await cleanUp(keep: true)
+            job.setState(.failed(Self.redirectedAtHandOver))
+            return
+        }
         var diff: (tree: String, nameStatus: Data, numstat: Data, patch: Data)?
         if await git.stageAll(in: job.worktree) {
             diff = await git.stagedDiff(in: job.worktree, base: base)
@@ -463,6 +475,8 @@ struct AgentRun {
     }
 
     nonisolated static let nothingChanged = "The agent finished without changing anything."
+    nonisolated static let redirectedAtHandOver =
+        "The agent changed the worktree's .git. CCwiki ran no git in it; the worktree has been kept."
 
     // MARK: Cleaning up
 

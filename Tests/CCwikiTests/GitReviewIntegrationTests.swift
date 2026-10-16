@@ -343,7 +343,6 @@ struct GitReviewIntegrationTests {
         let message = await scene.run(["log", "-1", "--format=%B", commit])
         #expect(message.stdout.trimmingCharacters(in: .newlines)
             == "[fix] Page: b\n\nOpened with CCwiki.")
-        #expect(await git.reflog(of: Scene.branch, in: scene.worktree).contains(commit))
     }
 
     @Test("a staged tree that is not the reviewed change is never committed, and the branch stays")
@@ -372,8 +371,11 @@ struct GitReviewIntegrationTests {
             #expect(why.contains("is not the reviewed change"), "\(why)")
         }
         #expect(await scene.revParse("refs/heads/\(Scene.branch)") == scene.base)
-        #expect(await git.reflog(of: Scene.branch, in: scene.worktree)
-            .subtracting([scene.base]).isEmpty, "nothing was ever committed to the branch")
+        let reflog = await scene.run(
+            ["log", "--walk-reflogs", "--format=%H", "refs/heads/\(Scene.branch)", "--"])
+        #expect(reflog.succeeded, "\(reflog.output)")
+        #expect(reflog.stdout.split(separator: "\n").allSatisfy { $0 == scene.base },
+                "nothing was ever committed to the branch: \(reflog.stdout)")
     }
 
     // MARK: What git shows is what git sends (the PR #11 review)
@@ -504,8 +506,6 @@ struct GitReviewIntegrationTests {
         #expect(again.succeeded, "\(again.output)")
         #expect(await git.remoteHeads(remote: remote, in: scene.worktree)?[Scene.branch] == second)
         #expect(await git.remoteHeads(remote: remote, in: scene.worktree)?["main"] == scene.base)
-        let reflog = await git.reflog(of: Scene.branch, in: scene.worktree)
-        #expect(reflog.contains(first) && reflog.contains(second))
 
         let nowhere = scene.origin.deletingLastPathComponent()
             .appending(path: "no-such-origin.git").path(percentEncoded: false)

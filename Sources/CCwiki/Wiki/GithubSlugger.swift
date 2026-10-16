@@ -21,35 +21,55 @@ struct GithubSlugger {
 
     /// The non-deduplicating slug, used for *link* anchors.
     ///
-    /// The deleted set is generated upstream from Unicode categories: letters,
-    /// marks and numbers survive, along with space, `-` and `_`. Everything
-    /// else — including `.` `,` `!` `?` `'` `(` `)` `/` `:` `+` `&` `$` `#`,
-    /// em/en dashes and emoji — is deleted outright.
+    /// The kept set is generated upstream from Unicode 13.0: Alphabetic
+    /// scalars (letters, letter numbers like `Ⅻ`, and symbols like `Ⓐ`),
+    /// marks, decimal digits and connector punctuation (`_`, `‿`) survive,
+    /// along with space and `-`. Everything else — including `.` `,` `!` `?`
+    /// `'` `(` `)` `/` `:` `+` `&` `$` `#`, em/en dashes, emoji, and other
+    /// numbers such as `²`, `₁` and `½` — is deleted outright.
     static func slug(_ value: String) -> String {
+        let scalars = Array(value.unicodeScalars)
         var out = String.UnicodeScalarView()
-        out.reserveCapacity(value.unicodeScalars.count)
+        out.reserveCapacity(scalars.count)
 
-        for scalar in value.lowercased().unicodeScalars {
-            if scalar == " " {
-                out.append("-")
-            } else if survives(scalar) {
-                out.append(scalar)
+        for (index, scalar) in scalars.enumerated() {
+            // JavaScript's `toLowerCase`: Swift's `lowercased()` maps each
+            // scalar the same way, except a word-final capital sigma.
+            let lower = scalar == "\u{03A3}" && isFinalSigma(scalars, at: index)
+                ? "\u{03C2}" : scalar.properties.lowercaseMapping
+            for mapped in lower.unicodeScalars {
+                if mapped == " " {
+                    out.append("-")
+                } else if survives(mapped) {
+                    out.append(mapped)
+                }
             }
         }
         return String(out)
     }
 
     private static func survives(_ scalar: Unicode.Scalar) -> Bool {
-        if scalar == "-" || scalar == "_" { return true }
-        switch scalar.properties.generalCategory {
-        case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter,
-             .modifierLetter, .otherLetter,
-             .nonspacingMark, .spacingMark, .enclosingMark,
-             .decimalNumber, .letterNumber, .otherNumber:
+        if scalar == "-" { return true }
+        let properties = scalar.properties
+        // Assigned after the regex was generated, so not in its kept set.
+        guard let age = properties.age, (age.major, age.minor) <= (13, 0) else { return false }
+        if properties.isAlphabetic { return true }
+        switch properties.generalCategory {
+        case .nonspacingMark, .spacingMark, .enclosingMark,
+             .decimalNumber, .connectorPunctuation:
             return true
         default:
             return false
         }
+    }
+
+    /// Unicode's Final_Sigma condition, as ICU tests it for `toLowerCase`:
+    /// a cased letter before the sigma and none after it, skipping
+    /// case-ignorable scalars (`'`, `.`, combining marks) either way.
+    private static func isFinalSigma(_ scalars: [Unicode.Scalar], at index: Int) -> Bool {
+        let before = scalars[..<index].reversed().first { !$0.properties.isCaseIgnorable }
+        let after = scalars[(index + 1)...].first { !$0.properties.isCaseIgnorable }
+        return before?.properties.isCased == true && after?.properties.isCased != true
     }
 
     // MARK: - Deduplicating instance

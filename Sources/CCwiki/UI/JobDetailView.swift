@@ -17,7 +17,9 @@ struct JobDetailView: View {
     @State private var pane: Pane = .changes
     @State private var discardRequest: DiscardRequest?
     /// What Open Draft PR asks before it runs, while it asks.
-    @State private var draftPRQuestion: JobReview.Question?
+    @State private var draftPRQuestion: DraftPRQuestion?
+    /// Why Open Draft PR, enabled when drawn, could not run when pressed.
+    @State private var draftPRRefusal: String?
     @State private var isApproving = false
     @State private var isRestoring = false
     /// Open an Issue… from the GitHub line: a sheet on this window, not on
@@ -28,6 +30,13 @@ struct JobDetailView: View {
 
     enum Pane: Hashable {
         case changes, transcript
+    }
+
+    /// Open Draft PR's question, with the review its click saw: what the
+    /// alert's Open Draft PR approves, whatever a refresh has shown since.
+    private struct DraftPRQuestion {
+        let question: JobReview.Question
+        let shown: JobCenter.ShownReview
     }
 
     /// Waiting for a person, or on its way to GitHub from there.
@@ -69,15 +78,21 @@ struct JobDetailView: View {
         }
         .discardConfirmation($discardRequest)
         .alert(
-            draftPRQuestion?.title ?? "",
+            draftPRQuestion?.question.title ?? "",
             isPresented: Binding(
                 get: { draftPRQuestion != nil }, set: { if !$0 { draftPRQuestion = nil } }),
             presenting: draftPRQuestion
-        ) { _ in
-            Button("Open Draft PR") { approve() }
+        ) { asked in
+            Button("Open Draft PR") { approve(asked.shown) }
             Button("Cancel", role: .cancel) {}
-        } message: { question in
-            if let message = question.message { Text(message) }
+        } message: { asked in
+            if let message = asked.question.message { Text(message) }
+        }
+        .alert("Can't Open the Draft PR Yet", isPresented: Binding(
+            get: { draftPRRefusal != nil }, set: { if !$0 { draftPRRefusal = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(draftPRRefusal ?? "")
         }
         .sheet(item: $issueRequest) { request in
             IssueSheet(request: request)
@@ -173,6 +188,7 @@ struct JobDetailView: View {
                 gitHubLine
             } else {
                 outcomeBanner
+                outcomeNotice
                 metadataRow
                 if !job.preflight.isEmpty { preflightList }
             }
@@ -302,6 +318,22 @@ struct JobDetailView: View {
         }
     }
 
+    /// A finished job's notice, under its banner: why Review Anyway did not
+    /// go ahead, or what the tripwire found before the job ended. Drawn
+    /// whether or not the banner is: a cancelled job whose worktree has
+    /// gone has none. An opened job's banner says its own.
+    @ViewBuilder
+    private var outcomeNotice: some View {
+        switch job.state {
+        case .aborted, .failed, .cancelled:
+            if let notice = job.notice {
+                JobNoticeLine(notice: notice)
+            }
+        case .queued, .preparing, .running, .awaitingReview, .publishing, .opened, .discarded:
+            EmptyView()
+        }
+    }
+
     private func pullRequestLink(_ url: URL) -> some View {
         Link(url.absoluteString, destination: url)
             .font(Theme.Fonts.meta)
@@ -412,26 +444,35 @@ struct JobDetailView: View {
     }
 
     /// Open Draft PR: asks first with warnings or in a Dev build, then
-    /// approves. Read at the click, not when the button was drawn.
+    /// approves. Read at the click, not when the button was drawn: an
+    /// editor opened since may hold text it could not save, which the
+    /// button had no way to see. The click then says why, never nothing.
+    /// The review is read at the click too, and approved as it was then,
+    /// so a refresh while the question is up cannot add a warning it did
+    /// not count (§6.5 step 1).
     private func openDraftPR() {
         guard !isApproving else { return }
         let gate = JobReview.draftPR(for: job, privatePaths: privatePaths, model: model)
-        guard gate.isEnabled else { return }
+        guard gate.isEnabled else {
+            draftPRRefusal = gate.disabledReason
+            return
+        }
+        let shown = JobCenter.ShownReview(of: job)
         if let question = gate.confirmation {
-            draftPRQuestion = question
+            draftPRQuestion = DraftPRQuestion(question: question, shown: shown)
         } else {
-            approve()
+            approve(shown)
         }
     }
 
     /// Every outcome but a pull request leaves the job in review, with a
     /// notice saying why (§6.5); the review is what to look at then.
-    private func approve() {
+    private func approve(_ shown: JobCenter.ShownReview) {
         guard !isApproving else { return }
         isApproving = true
         let job = self.job
         Task {
-            let result = await model.jobCenter.approve(job)
+            let result = await model.jobCenter.approve(job, shown: shown)
             isApproving = false
             if case .opened = result { return }
             pane = .changes

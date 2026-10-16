@@ -19,17 +19,18 @@ extension AppModel {
             store: paths.wikiStore)
     }
 
-    /// The signed-in account's login, for the issue sheet's footer: `gh api
-    /// user --jq .login`, asked once and cached for the session. Nil when gh
-    /// is missing, signed out or offline, or does not answer in time; asked
-    /// again next time.
+    /// The signed-in account's login on github.com, for the issue sheet's
+    /// footer: `gh api user --hostname github.com --jq .login`, asked once and
+    /// cached for the session. Nil when gh is missing, signed out or offline,
+    /// or does not answer in time; asked again next time.
     func githubLogin() async -> String? {
         if let login = IssueSession.login { return login }
         guard let gh = tools.path(for: .gh) else { return nil }
         let environment = tools.childEnvironment()
         let answer = await Subprocess.withDeadline(GitHubAuth.deadline) {
             await Subprocess.run(
-                executable: gh, arguments: ["api", "user", "--jq", ".login"],
+                executable: gh,
+                arguments: ["api", "user", "--hostname", "github.com", "--jq", ".login"],
                 environment: environment)
         }
         guard let result = answer else { return nil }

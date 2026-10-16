@@ -162,7 +162,8 @@ extension ExplorerResult {
             id: "proof",
             rows: rootStatements(ProofOutline.attaching(copy, to: proofRows), start: start,
                                  target: answer.target, depth: fact.depth,
-                                 proof: answer.proof, writer: writer),
+                                 proof: answer.proof, qualifiers: writer.qualifiers(of: fact),
+                                 writer: writer),
             note: stubNote(answer.proof)))
 
         if let stronger = answer.stronger {
@@ -219,9 +220,10 @@ extension ExplorerResult {
     /// came from; the steps under it state their own reductions.
     private static func rootStatements(_ rows: [ExplorerRow], start: [String], target: String,
                                        depth: Int, proof: Derivation.ProofTree,
+                                       qualifiers: [String],
                                        writer: ExplorerWriter) -> [ExplorerRow] {
         let statement = writer.factStatement(from: start, to: target, depth: depth,
-                                             relationIDs: proof.relationIDs)
+                                             relationIDs: proof.relationIDs, qualifiers: qualifiers)
         return rows.map { (root) -> ExplorerRow in
             var root = root
             root.statement = statement
@@ -282,7 +284,8 @@ extension ExplorerResult {
         let section = ExplorerSection(
             id: "proof",
             rows: rootStatements(outline, start: start, target: target, depth: stronger.depth,
-                                 proof: proof, writer: writer),
+                                 proof: proof, qualifiers: writer.qualifiers(of: proof),
+                                 writer: writer),
             note: stubNote(proof))
         return Stronger(
             line: DerivationWording.strongerChain(stronger.chainClass, depth: stronger.depth),
