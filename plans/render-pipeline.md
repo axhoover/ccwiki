@@ -161,7 +161,18 @@ and with nothing left it is the type, capitalised.
 **The site's text transform** (ofm.ts:179) runs before the parse here too:
 `%%` comments are deleted, and in a table each wikilink's pipes are escaped,
 so `[[slug|Name]]` stays one cell (and `\|` in a table's math keeps its
-backslash). A wikilink shows its alias decoded (`IND\$-CPA` reads
+backslash). Those escapes count on markdown-it's cell split to take one
+backslash off again, so they stay only on the lines markdown-it splits into
+cells (`splitRowsOnly`, from a block parse of the escaped text). Rows the
+site's regex finds that make no table (a header with another number of
+cells than the line under it, or rows that continue a list item's or a
+quote's paragraph) are a paragraph's lines, where the site decodes each `\|`
+it added; here they are put back as written, so their links resolve and
+their math reads as written. A row put back that would make a table of its
+own keeps its escapes, and the tables stay the site's (see "Still
+different" below).
+
+A wikilink shows its alias decoded (`IND\$-CPA` reads
 `IND$-CPA`); without one, `[[page#Heading]]` shows `Heading` (in a table,
 `page`, as the site's `#` escape there leaves it) and `[[page]]` the last
 segment of the target. A link preview card shows a wikilink's text by the
@@ -172,7 +183,7 @@ block is shown as written, its cells never split, so it gets the site's edit
 exactly (ofm.ts:196: in each link, the first `#` and each unescaped `|`
 escaped) and nothing more: `| $\|x\|$ | [[a\|b]] |` in a fence reads as
 written, and `[[a|b]]` reads `[[a\|b]]`, as the site's code block shows it.
-Which lines those are comes from a block parse of its own (`verbatimLines`),
+Which lines those are comes from a block parse of its own (`linesInBlocks`),
 whose tokens and `env` are thrown away. An indented code block never holds
 one: the regex wants a `|` at the start of the line.
 
@@ -193,6 +204,12 @@ one: the regex wants a `|` at the start of the line.
   code block, `[[https://x|y]]` reads `[y](https://x)`); the reader shows
   code as written, but for a table in it (above), where the table's escapes
   stop the rewrite of every link but an external one.
+- A header row the site's regex escapes into a paragraph (without the
+  escape, its link's `|` ends a cell, and the row has as many cells as the
+  line under it) keeps its escape here, with the rows that table would
+  take: they are a paragraph's lines as on the site, but their wikilinks
+  show as broken and `\|` in their math as `\\|`. No page in the wiki has
+  one (2026-10).
 - A wikilink in a heading counts towards the id as its alias, decoded, or as
   its target, as `WikiPage.Heading.plainText` reads it; the site slugs the
   text the link shows, which for `[[page#Section]]` is `Section`, and which

@@ -3,9 +3,9 @@ import Testing
 @testable import CCwiki
 
 /// The reader's Markdown, closer to the site's: a wikilink in a table, a
-/// table in a code block, a link's text decoded and educated, the site's
-/// dashes, ellipses and arrows, callouts and their markers, `%%` comments,
-/// and how a Game block groups
+/// table in a code block, rows that make no table, a link's text decoded
+/// and educated, the site's dashes, ellipses and arrows, callouts and their
+/// markers, `%%` comments, and how a Game block groups
 /// (`ccwiki-markdown.js`, `ccwiki.js`; plans/render-pipeline.md §3).
 @Suite("Renderer parity fixes")
 struct FixesRenderjsTests {
@@ -86,6 +86,42 @@ struct FixesRenderjsTests {
         #expect(html.contains(#"<td><a class="internal" href="/prf">PRF</a></td>"#),
                 "a table outside the fence is still rewritten")
         #expect(html.contains(#"<td><span class="math" data-tex="\|x\|">"#))
+    }
+
+    @Test("rows the site's regex finds that make no table keep their links and math as written")
+    func tableRowsOutsideATable() throws {
+        let html = try render(#"""
+            | Link | Norm |
+            | ---- |
+            | [[one-way-function|OWF]] | $\|x\|$ |
+
+            - An item
+            | Link | Norm |
+            | ---- | ---- |
+            | [[pseudorandom-function|PRF]] | x |
+
+            > A quote
+            | Link | Norm |
+            | ---- | ---- |
+            | [[one-way-function|OWF]] | $\|x\|$ |
+            """#)
+        #expect(!html.contains("<table>"), "each is a paragraph, as on the site")
+        #expect(html.contains(#"| <a class="internal" href="/owf">OWF</a> | <span class="math" data-tex="\|x\|">"#),
+                "a header with more cells than the line under it")
+        #expect(html.contains(#"| <a class="internal" href="/prf">PRF</a> | x |</li>"#),
+                "rows that continue a list item's paragraph")
+        #expect(html.contains(#"| <a class="internal" href="/owf">OWF</a> | <span class="math" data-tex="\|x\|">"#
+            + #"\|x\|</span> |</p>"#), "and a quote's")
+        #expect(!html.contains("broken"))
+        #expect(!html.contains(#"\\|"#), "no backslash left over")
+
+        let header = try render("""
+            | [[one-way-function|OWF]] |
+            | --- | --- |
+            | a | b |
+            """)
+        #expect(!header.contains("<table>"),
+                "the site's escape leaves the header one cell: no table, so the row keeps its escape")
     }
 
     @Test("[[page#Heading]] shows the heading; in a table, the page, as the site does")

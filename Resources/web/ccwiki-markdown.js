@@ -464,6 +464,8 @@
 
   /** The blocks markdown-it shows as written, at any depth. */
   var VERBATIM = { fence: true, code_block: true, math_block: true, html_block: true };
+  /** A table, whose lines markdown-it splits into cells. */
+  var TABLE_OPEN = { table_open: true };
 
   function textTransform(md) {
     md.core.ruler.after("normalize", "ccwiki_text_transform", function (state) {
@@ -474,12 +476,12 @@
         state.ccwikiLineOf = kept.lineOf;
       }
       var verbatim = null;
-      state.src = src.replace(TABLE, function (table) {
+      var escaped = src.replace(TABLE, function (table) {
         // A table inside fenced code (or display math, or HTML) is shown as
         // written, its cells never split: it gets the site's edit and
         // nothing more, so it reads as it does on the site, and a `\|` in
         // it, or in its math, stays as written.
-        verbatim = verbatim || verbatimLines(state.md, src);
+        verbatim = verbatim || linesInBlocks(state.md, src, VERBATIM);
         if (verbatim[lineAt(src, arguments[arguments.length - 2])]) {
           return table.replace(TABLE_LINK, siteTableLink);
         }
@@ -492,6 +494,7 @@
           return link.replace(/\|/g, "\\|");
         }).split("\n").map(mathPipes).join("\n");
       });
+      state.src = escaped === src ? src : splitRowsOnly(state.md, src, escaped, verbatim);
     });
 
     md.core.ruler.before("ccwiki_source_lines", "ccwiki_comment_lines", function (state) {
@@ -509,14 +512,40 @@
     return link.replace("#", "\\#").replace(/((^|[^\\])(\\\\)*)\|/g, "$1\\|");
   }
 
-  /** For each line of `src`, whether it is in a block markdown-it shows as
-   *  written. From a parse of its own, whose tokens and `env` are thrown
-   *  away; a table's escapes change no block's lines. */
-  function verbatimLines(md, src) {
+  /** `src` with the escapes `escaped` adds kept on the lines markdown-it
+   *  splits into cells or shows as written, and on no other: only the cell
+   *  split takes the second backslashes off again. Rows the site's regex
+   *  finds that make no table (a header with another number of cells than
+   *  the line under it, or rows that continue a list item's or a quote's
+   *  paragraph) are a paragraph's lines, where the site decodes each `\|`
+   *  it added, so the link and the math there read as written. A row put
+   *  back that would make a table of its own (its link's `|` the end of a
+   *  cell again) keeps its escapes, so the tables stay the site's. */
+  function splitRowsOnly(md, src, escaped, verbatim) {
+    var lines = escaped.split("\n"), written = src.split("\n");
+    var keep = linesInBlocks(md, escaped, TABLE_OPEN);
+    for (;;) {
+      var text = lines.map(function (line, n) {
+        return keep[n] || verbatim[n] ? line : written[n];
+      }).join("\n");
+      var grew = false;
+      linesInBlocks(md, text, TABLE_OPEN).forEach(function (inTable, n) {
+        if (keep[n]) return;
+        keep[n] = true;
+        grew = true;
+      });
+      if (!grew) return text;
+    }
+  }
+
+  /** For each line of `src`, whether it is in a block of one of `types`, at
+   *  any depth. From a parse of its own, whose tokens and `env` are thrown
+   *  away; a table's escapes add no line. */
+  function linesInBlocks(md, src, types) {
     var tokens = [], lines = [];
     md.block.parse(src, md, {}, tokens);
     tokens.forEach(function (token) {
-      if (!token.map || !VERBATIM[token.type]) return;
+      if (!token.map || !types[token.type]) return;
       for (var line = token.map[0]; line < token.map[1]; line++) lines[line] = true;
     });
     return lines;
