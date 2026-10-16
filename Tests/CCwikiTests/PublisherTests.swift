@@ -134,8 +134,8 @@ struct PublisherTests {
             == .retry(expecting: nil), "absent is absent, whoever asks")
         #expect(Self.recovery(tip: "c1", pushed: nil, attempts: [Self.attempt("c1")])
             == .retry(expecting: "c1"), "the push being made")
-        #expect(Self.recovery(tip: "c0", pushed: "c0", attempts: [])
-            == .retry(expecting: "c0"), "the last confirmed push, in a record without attempts")
+        #expect(Self.recovery(tip: "c0", pushed: "c0", attempts: [Self.attempt("c0")])
+            == .retry(expecting: "c0"), "the last confirmed push")
         #expect(Self.recovery(
             tip: "c-old", pushed: nil, attempts: [Self.attempt("c-old"), Self.attempt("c2")])
             == .retry(expecting: "c-old"), "an earlier push whose reply was lost")
@@ -180,6 +180,11 @@ struct PublisherTests {
             remoteTip: "c2", pushed: nil, attempts: renamed,
             repository: "axhoover/cryptology.city", branch: "fix/x-2") == .retry(expecting: "c2"))
         #expect(Self.recovery(tip: "c2", pushed: nil, attempts: renamed) == .rename)
+        // A push confirmed somewhere else is not one here: neither its
+        // commit nor the fact of a confirmed push says anything of fix/x.
+        let forked = [Self.attempt("c0", to: "fix/x", in: "someone/fork")]
+        #expect(Self.recovery(tip: "c0", pushed: "c0", attempts: forked) == .rename)
+        #expect(Self.recovery(tip: "theirs", pushed: "c0", attempts: forked) == .rename)
     }
 
     // MARK: Confirming the pull request

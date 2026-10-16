@@ -1223,10 +1223,11 @@ is also written to the job's log file.
      the same way;
    - `git update-ref refs/heads/<branch> <commit>`, by name.
 3. **"Pushing fix/pseudorandom-function…"**
-   - a `pushingCommit` that no recorded attempt names (a record written
-     before attempts were kept) is first recorded as an attempt for the
-     job's branch and `PublishTarget.repository`, so the push it was making
-     is not lost when the next line overwrites it;
+   - a `pushingCommit` or `pushedCommit` that no recorded attempt names (a
+     record written before attempts were kept) is first recorded as an
+     attempt for the job's branch and `PublishTarget.repository`, so the
+     push it was making is not lost when the next line overwrites it, and
+     the push it confirmed counts as one here;
    - persist `pushingCommit` = the new commit;
    - before each send, the first and the retry alike, record and persist
      the attempt `PushAttempt(repository: PublishTarget.repository,
@@ -1247,12 +1248,13 @@ is also written to the job's log file.
    - **If the lease is refused**, ask GitHub: `git ls-remote <pushURL>
      refs/heads/<branch>`, then `Publisher.leaseRecovery` decides:
      - the branch is absent: retry, leasing on absence;
-     - the tip is `pushedCommit`, or a commit recorded as an attempt for
-       this very repository and branch (the push being made is one, and so
-       is an earlier one whose reply was lost to a crash or a quit, even
-       across a relaunch): it is ours. Retry once, leasing on it;
-     - the tip is anything else and this job has never confirmed a push:
-       someone else's branch. Take the next name free both locally and on
+     - the tip is a commit recorded as an attempt for this very repository
+       and branch (the push being made is one, the confirmed
+       `pushedCommit` is another, and so is an earlier one whose reply was
+       lost to a crash or a quit, even across a relaunch): it is ours.
+       Retry once, leasing on it;
+     - the tip is anything else and this job has never confirmed a push to
+       this repository and branch: someone else's branch. Take the next name free both locally and on
        GitHub, `git branch -m <branch> <new>`, log "fix/x was taken on
        GitHub; using fix/x-2", and retry once, recording the attempt for the
        new name first;
@@ -1264,8 +1266,9 @@ is also written to the job's log file.
      the job took it, and any commit the branch was moved through. A
      branch someone else made at the base is therefore renamed from, and
      the pull request lookup in step 4 never meets the pull request they
-     may have opened from it. Nor is an attempt for another branch (the one
-     a rename left) or another repository (a Dev build pointed at a fork).
+     may have opened from it. Nor is an attempt, or a confirmed push, for
+     another branch (the one a rename left) or another repository (a Dev
+     build pointed at a fork).
 4. **"Opening the pull request…"** The body is written to
    `<scratch>/pull-request-body.md` first.
    - `gh pr list --repo R --head <branch> --state open --json

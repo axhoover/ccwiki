@@ -274,10 +274,11 @@ struct Publisher {
         let remote = target.pushURL
         step(job, "Pushing \(job.branch)…")
         // A record written before attempts were kept has only the commit
-        // its last push was sending, which this overwrites: that push went
-        // to this branch, and is taken to have gone to this repository.
-        if let earlier = job.pushingCommit,
-           !job.pushAttempts.contains(where: { $0.commit == earlier }) {
+        // its last push was sending, which this overwrites, and the one it
+        // confirmed: those pushes went to this branch, and are taken to have
+        // gone to this repository.
+        for earlier in [job.pushingCommit, job.pushedCommit].compactMap({ $0 })
+        where !job.pushAttempts.contains(where: { $0.commit == earlier }) {
             job.recordPushAttempt(PushAttempt(
                 repository: target.repository, branch: job.branch, commit: earlier))
         }
@@ -582,27 +583,30 @@ struct Publisher {
     /// where `branch` is there, in `repository`:
     ///
     /// - absent: push again, leasing on absence;
-    /// - at `pushed`, or at a commit `attempts` records for this very
-    ///   `repository` and `branch` (the push being made is one, and so is
-    ///   one whose reply was lost): ours, so push again expecting it;
-    /// - anywhere else, and this job never confirmed a push: someone else's
-    ///   branch, so take another name;
-    /// - anywhere else after a confirmed push: refuse.
+    /// - at a commit `attempts` records for this very `repository` and
+    ///   `branch` (the push being made is one, the confirmed one `pushed`
+    ///   is another, and so is one whose reply was lost): ours, so push
+    ///   again expecting it;
+    /// - anywhere else, and this job never confirmed a push to this
+    ///   `repository` and `branch`: someone else's branch, so take another
+    ///   name;
+    /// - anywhere else after a confirmed push here: refuse.
     ///
     /// The local branch's reflog is no evidence: it has the job's base,
     /// which anyone may push as that branch, and whatever else the branch
     /// was moved through. An attempt for another branch, the one a rename
-    /// left, or for another repository, says nothing about this one.
+    /// left, or for another repository, says nothing about this one, and
+    /// nor does a push confirmed there.
     nonisolated static func leaseRecovery(
         remoteTip: String?, pushed: String?, attempts: [PushAttempt],
         repository: String, branch: String
     ) -> LeaseRecovery {
-        guard let tip = remoteTip else { return .retry(expecting: nil) }
-        let here = PushAttempt(repository: repository, branch: branch, commit: tip)
-        if tip == pushed || attempts.contains(here) {
-            return .retry(expecting: tip)
+        func isHere(_ commit: String) -> Bool {
+            attempts.contains(PushAttempt(repository: repository, branch: branch, commit: commit))
         }
-        return pushed == nil ? .rename : .refuse
+        guard let tip = remoteTip else { return .retry(expecting: nil) }
+        if isHere(tip) { return .retry(expecting: tip) }
+        return pushed.map(isHere) == true ? .refuse : .rename
     }
 
     /// `push --no-verify --no-follow-tags --recurse-submodules=no
