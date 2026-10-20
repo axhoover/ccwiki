@@ -5,6 +5,139 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-20 — Three reading features
+
+The efficiency plan's second PR, on `claude/reading-features`, from
+`claude/efficiency`'s head (`d1797ac`). Three of the product analysis's top
+five ([efficiency.md](plans/efficiency.md) §3), chosen for what they give a
+reader and for how much of them CI can check:
+
+- **Backlinks that land on the mention (F1).** The Backlinks tab groups its
+  rows by the linking page's kind: Mentioned in, then Reductions and
+  Barriers, then References, each under a header with a count that opens
+  and closes it. A row still shows the line that mentions the page. A page
+  that mentions it on several lines adds "N mentions", which lists every
+  line; 702 mentions, 22%, were hidden before. A click on the title or a
+  line opens the linking page scrolled to that line's block, outlined for a
+  moment. ⌘-click and Open in New Tab land there too.
+- **Section links (F2).** A right-click under a heading, or on an outline
+  heading, copies the section three ways: its cryptology.city URL, a
+  `[[stem#Heading]]` wikilink that resolves back to it, and a
+  `ccwiki://…#id` link that opens CCwiki there from another app
+  (`ccwiki-dev://` from CCwiki Dev). An outline heading also opens its
+  section in a new tab or window.
+- **Saved pages (F3).** Wiki ▸ Save Page (⌘D) keeps the page in a Saved
+  section at the top of the sidebar, the same in every window and kept
+  between launches. Wiki ▸ Saved Pages lists them for the keyboard. Save
+  Section, the last item of F2's group, keeps a section, which reads as
+  its page's title over "§ Heading". After a pull, a saved page whose file
+  went is found by its title. If it cannot be, it stays, dimmed, as "No
+  longer in the wiki", and a click searches for it.
+
+**How it was built.** Two tracks over disjoint files, F (F1, F2) and G
+(F3), each built, then reviewed and fixed on its own branch. They merged
+without a conflict, F then G. Save Section needs both, so it is the
+integrator's one commit after the merges.
+- **F1.** `WikiIndex.Backlink` keeps every distinct line that links to the
+  target (`mentions`), as slices of the body, so a load still copies
+  nothing for them. `mentions[0]` is L3's `line`, so ReferenceRanker,
+  search and the sidebar's Cited by read what they read before. A click
+  counts the line ends before the mention with L1's `MarkdownLineEnd`, maps
+  that body line through a new body form of `SourceLineMap`, and asks
+  `WebController` to reveal the rendered line once its page has rendered,
+  with the editor preview's `revealSourceLines`. No JavaScript changed. A
+  new tab or window carries the line as it carries a search's `find`.
+- **F2.** `WikiIndex.wikilink(toSection:text:onPage:)` names the page by
+  its stem, else its path, and the section by its heading, else its id,
+  and offers only a form that `resolve` takes back to the section.
+  `CCwikiURL.external(page:anchor:channel:)` writes the link in the scheme
+  of the build it was copied from. Outline rows became equatable leaves,
+  so a scroll that moves the highlight does not resolve every wikilink
+  again.
+- **F3.** A pure `SavedPages` value, kept as JSON in the user defaults
+  and held once by `AppModel`, reconciled with each load in the step that
+  installs the new index. A missing page is looked up as `[[title]]`
+  resolves it, a whole page only, and then as the one page with exactly
+  that title.
+- **Save Section.** An entry keeps the section's heading in an optional
+  `sectionTitle`, so a list saved before reads unchanged.
+  `ReaderContextTarget.saveSectionItem(isSaved:)` builds the page menu's
+  item, and the outline's menu reads the saved state from the model, so a
+  save from anywhere retitles it Remove Section from Saved.
+
+**Review.** F's review found six problems, fixed in four commits:
+- a row with several mentions had lost its first line, on 428 of 2,474
+  rows;
+- on a page no prose mentions, all its groups started closed, on 181 of
+  818 targets, and now the first opens;
+- hiding the inspector forgot the groups, which now live in the window's
+  session;
+- an open "N mentions" came along to the next page, so each page's list
+  now starts fresh;
+- a mention clicked, then another page opened at once, outlined a block
+  of that other page;
+- another page's render could use a reveal up, and the mention's page
+  opened at its top. A reveal now waits for its own page's render.
+
+G's review found nine. Six were fixed in five commits:
+- a renamed page with no alias for its old title read as missing. The
+  one page with exactly that title now finds 43 of the wiki's 51 renames,
+  where the link alone found 25, and no wrong page;
+- a stored title with a `#` could point at a section of another page;
+- the keyboard and VoiceOver could not reorder the list, so each row has
+  Move Up and Move Down;
+- nothing listed the saved pages for the keyboard, so Wiki ▸ Saved Pages
+  does;
+- Saved opened again in every new window, and its state is now app-wide;
+- no test loaded a real model, and `SavedPagesModelTests` now does.
+
+Two of G's findings were the plan's text and design-system.md's, fixed
+here. The last is the shots. Where each build departed from the plan,
+and why, is in the plan's "As built" note under each feature. The
+swiftui-pro, typography-designer and macos-design skills were not
+installed in any of these sessions. The tracks followed SWIFTUI-RULES.md
+and used only existing `Theme.Fonts` roles; no type style was added.
+
+**Tests.** None of this has been compiled: there is no Swift toolchain
+here, and CI is the first compiler.
+- BacklinkMentionTests covers mentions, code, markdown links, the landing
+  on LF, CR LF and a lone CR and past the relation-meta splice, a new
+  window's line, and the groups. On the corpus, every target's linking
+  pages and first lines equal `Legacy.Backlinks.backlinkMap`'s. The
+  mentions equal the distinct (source, target, line) triples. The body's
+  line map equals the file's on every line of every page.
+- SectionLinkCorpusTests checks every heading of every page: the site
+  fragment is the id, the wikilink resolves to the section, and the CCwiki
+  link reads back from both channels.
+- ReaderContextMenuTests covers the section group and Save Section.
+- SavedPagesTests and SavedPagesModelTests cover the list, its JSON, a
+  section's heading, and reconciliation (a rename, a deletion, an exact
+  title, a `#` in a title, a section following its page). A model load
+  writes the reconciled list back.
+
+**To check on a Mac** (`make shots` has no step for these yet):
+- the grouped Backlinks tab, a row with several mentions closed and open,
+  and key exchange's tab opening on its Reductions and Barriers rows;
+- a landing, and a quick mention click followed by another page landing
+  nowhere stray;
+- ⌥⌘I keeping the groups' state;
+- the section group and Save Section in the page's menu and the outline's,
+  and a link copied from CCwiki Dev opening Dev;
+- dragging a Saved row, which is a plain button, Move Up and Move Down,
+  and the VoiceOver actions;
+- Wiki ▸ Saved Pages with a missing page;
+- closing Saved in one window closing it in every window, and its staying
+  closed after a relaunch.
+
+**Left:**
+- Screenshot steps for the grouped pane, a landing and the Saved section.
+  A `save:` step must remove in its teardown only an entry it added.
+- `WebController.pendingFind` has the race the reveal had. It predates
+  F1, and the same rule would fix it.
+- The Backlinks tab's groups are kept per window, not between launches.
+- A renamed page whose title changed with its file name is not found.
+  That is 8 of the wiki's 51 renames.
+
 ## 2026-10-20 — An efficiency pass, measured first
 
 On CI, a load's backlinks phase went from 680 to 1,605 ms between D1

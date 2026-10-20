@@ -164,7 +164,7 @@ What stays and what moves:
 | `pageTree`, the counts, `isBrowsable`, `title(forPath:)` | `sidebarSelection` |
 | Sync state and log, warnings, jobs, updates, the installation check | `expandedFolders`, `inspectorTab`, `showInspector`: seeded from `CCwikiSettings` and written back, so a new window starts as the last one was left |
 | Search: every query, its results and its debounce task; the quick switcher's query, results and `quickSwitcherExcludedPath`; `recentPages` | `quickSwitcherPresented`, `searchPresented`, `referenceSearchPresented`, `grepPresented`, `syncLogPresented` |
-| The explorer's question, recents and window requests; `derivedSectionsExpanded` | The page on screen: `currentPage`, `currentBacklinks`, `currentRelations`, `currentDerivations`, `citingPages`, `currentSiteURL`, `currentTitle`, `currentPageExplorerQuery`, `canExploreCurrentPage` |
+| The explorer's question, recents and window requests; `derivedSectionsExpanded`; the saved pages and whether Saved is open, `savedPages` and `showsSavedPages` ([efficiency.md](efficiency.md) §3.3) | The page on screen: `currentPage`, `currentBacklinks`, `currentRelations`, `currentDerivations`, `citingPages`, `currentSiteURL`, `currentTitle`, `currentPageExplorerQuery`, `canExploreCurrentPage` |
 | `ingestSheetTarget` and `pendingDroppedPDF`: the ingest sheet, pinned to one window (§1.3) | Navigation: `open`, `openPage`, `navigate`, `goBack`, `goForward`, `openHome`, `openRandomPage`, the `open…Result` trio, `openRelationObject`, `showWelcome`, `showWhatsNew`, `presentQuickSwitcher`, `printCurrentPage`, `renderCurrent` |
 | `changelog`, `whatsNewSince`, `documentRequest(_:)` | |
 | New: the session registry, the active session, tabbing requests, `launchIfNeeded`, the launch document, the cold start | `openInReader`, set by its window's view (§1.4) |
@@ -391,10 +391,15 @@ them, one click away (§7).
 
 - **Inspector.** Visibility and tab are per window. A new window starts as
   the most recently changed one was left. The outline, backlinks and
-  relations are the window's own page's.
+  relations are the window's own page's. The Backlinks tab's open and
+  closed groups are the window's too, kept in its session from page to
+  page and while the inspector is hidden, but not between launches
+  ([efficiency.md](efficiency.md) §3.1).
 - **Sidebar.** The selection and the expanded folders are per window. Opening
   a page reveals it in its own window's sidebar only. The tree, the counts
-  and Hide stubs are app-wide.
+  and Hide stubs are app-wide, and so is the Saved section: its pages and
+  whether it is open, kept between launches ([efficiency.md](efficiency.md)
+  §3.3).
 - **Palettes.** Each is a sheet on the window that opened it (§1.3). The
   query is app-wide. The quick switcher leaves out the page on screen in the
   window that presented it: `session.presentQuickSwitcher()` sets

@@ -1,9 +1,10 @@
 # Efficiency: a quicker load and sync, a cheaper renderer, and three reading features
 
 **Plan, 2026-10-20. Phase 0 and the six tracks are built and merged on
-`claude/efficiency`; §5 records what CI measures of them.** Each track
-section ends with an "As built" note: where the build departed from this
-plan, and why. It lands as two draft PRs:
+`claude/efficiency`; §5 records what CI measures of them. The three reading
+features (§3) are built on `claude/reading-features`.** Each track section,
+and each feature's, ends with an "As built" note: where the build departed
+from this plan, and why. It lands as two draft PRs:
 `claude/efficiency` (Phase 0 and six tracks), then
 `claude/reading-features` (three features), which starts from the first and
 merges after it (§2.10).
@@ -1680,7 +1681,10 @@ its commits and what it expects CI to print.
 These are three of the product analysis's top five: its #1 and #2, and #5
 in place of #3 and #4. They are ranked by value for effort and by how much
 CI can verify. They build on the efficiency PR's seams and make the second
-PR, in two tracks: **F** (F1, F2) and **G** (F3).
+PR, in two tracks: **F** (F1, F2) and **G** (F3). As built, each track was
+reviewed and fixed on its own branch, and both merged without a conflict.
+Save Section, which needs both tracks, is the integrator's one commit
+after the merges (§3.3).
 
 ### 3.1 F1. Backlinks that land on the mention (M, 1–2 days; product #1)
 
@@ -1689,7 +1693,8 @@ PR, in two tracks: **F** (F1, F2) and **G** (F3).
   - **Mentioned in:** every page that is not a reduction, barrier or
     reference. Open by default.
   - **Reductions and Barriers**, then **References:** collapsed by default,
-    each with a count in its header.
+    each with a count in its header. On a page no prose mentions, the
+    first group there opens instead.
 
   On primitive and assumption pages, 82% of today's rows (517 of 629) are
   reductions or barriers, which the Relations tab already lists.
@@ -1757,6 +1762,44 @@ click:
 `App/ReaderSession.swift`, `Reader/WebController.swift`,
 `Corrections/SourceLineMap.swift`.
 
+**As built** (track F: `aa37e65`, a typing fix, then four commits for a
+review's six findings). The model, the line map and the landing are as
+specified. The tests are `BacklinkMentionTests` and `SourceLineMapTests`.
+- **The groups' open state is the window's.** `ReaderSession` keeps what
+  the reader opened and closed (`isBacklinkGroupOpen(_:among:)`,
+  `toggleBacklinkGroup(_:among:)`). Held in the inspector's view, it was
+  lost when ⌥⌘I hid the inspector. It is not kept across launches, as the
+  Relations tab's derived sections are: that would have touched
+  `AppModel` and `Settings`, which are G's. A group nobody has touched
+  follows `BacklinkGroup.opensByDefault(among:)`.
+- **A page no prose mentions opens its first group.** Otherwise the tab
+  opened on closed headers alone on 181 of the corpus's 818 targets. 126
+  of them are references, where the reason to close a group, that the
+  Relations tab lists its rows, does not hold.
+- **A row keeps its first line.** With several mentions, the first shows
+  under the title until "N mentions" is opened, and the open list holds
+  every line. The first build hid it, on 428 of 2,474 rows.
+- **Each page's list starts at the top, its rows closed.** A row is known
+  by its linking page, so an open "N mentions" came along to the next page
+  that the same page links to. The List takes the page's path as its id.
+- **A reveal waits for its own page.** `WebController` holds it with the
+  page's path. Only that page's "rendered" message, or a failed render,
+  ends the wait, and another page asked for drops it. The first build let
+  any message use it up, so a quick second click could outline a block of
+  the wrong page.
+- **The mention is looked up at the click.** `openMention(_:of:_:)` reads
+  the window's backlinks then, not the row's slices, which a load may have
+  replaced (SWIFTUI-RULES §3.5).
+- **A new tab or window lands too.** `ReaderWindow` and `SessionStartPlan`
+  carry the body line as `revealing`, beside `find`. That touched
+  `OpenInReader.swift`, `ReaderWindowView.swift`, `ReaderWindow.swift` and
+  `ReaderSessionState.swift`, outside F's files in §2.10, since they are
+  the path `find` already takes.
+- **Not built:** the shots. `ScreenshotRunner` has no step for the grouped
+  pane or a landing yet.
+- **Left open:** `pendingFind` has the race the reveal had. It predates
+  F, and the same rule would fix it.
+
 ### 3.2 F2. Section links (S, ≤ 1 day; product #2)
 
 **What the reader sees.**
@@ -1808,6 +1851,22 @@ click:
 `UI/InspectorView.swift`, plus the section items' wiring in
 `App/ReaderSession.swift`.
 
+**As built** (track F: `e6396e9`). As specified, with three details. The
+tests are `ReaderContextMenuTests` and `SectionLinkCorpusTests`.
+- **The wikilink is read back before it is offered.**
+  `WikiIndex.wikilink(toSection:text:onPage:)` tries the stem, then the
+  path, each with the heading's text, then its id. It returns the first
+  form that `WikilinkParser` and `resolve` take back to the section, and
+  nil when none does, which leaves the item out. A heading's text also
+  may not hold a `\`.
+- **The outline's rows are equatable leaves** (`OutlineRow`). A context
+  menu's content is built with the row's body. Without `.equatable()`,
+  every scroll that moved the highlight parsed and resolved every
+  heading's wikilink again (SWIFTUI-RULES §6.3). `.listRowSeparator` sits
+  outside it.
+- **Save Section joined the group at integration** (§3.3), as its last
+  item in both menus.
+
 ### 3.3 F3. Saved pages (S–M, 1–2 days; product #5)
 
 **What the reader sees.**
@@ -1815,16 +1874,27 @@ click:
   today) saves the page. When the page is already saved, the item reads
   Remove from Saved.
 - **The list.** A **Saved** section sits at the top of the sidebar, above
-  Cited by. It is collapsible and hidden when empty. Rows can be reordered
-  by dragging, and each has `OpenElsewhereItems` and Remove. It persists
-  across launches and is the same in every window.
-- **After a pull.** A saved page whose file went is looked up by its stored
-  title among the new index's aliases and basenames. If found, the row
-  points there. If not, it stays, dimmed, reading "No longer in the wiki",
-  and a click searches ⌘S for its title. The 2026-10-04 pull deleted 101
-  pages, so this case is real.
-- **Sections.** "Save Section" joins F2's section group in one final commit
-  of track F, after G's model is on the branch.
+  Cited by. It is collapsible and hidden when empty. Whether it is open is
+  the same in every window and kept between launches
+  (`AppModel.showsSavedPages`). New entries go to the end. Rows can be
+  reordered by dragging, or with Move Up and Move Down in each row's menu
+  and as VoiceOver actions. Each row has `OpenElsewhereItems` and Remove
+  from Saved. A missing page's row offers Search the Wiki for “title”
+  instead of `OpenElsewhereItems`. Wiki ▸ Saved Pages lists the entries
+  for the keyboard, as Safari's Bookmarks menu does; a missing page is
+  disabled there. It persists across launches and is the same in every
+  window.
+- **After a pull.** In `AppModel.apply`, in the same step that installs
+  the new index, a saved page whose file went is looked up by its stored
+  title. First it is tried as `[[title]]` resolves it (aliases and
+  basenames), taking a whole page only and never a section. Then it is
+  tried as the one page with exactly that title. Found, the row points
+  there and takes that page's title. Not found, it stays, dimmed, reading
+  "No longer in the wiki", and a click searches ⌘S for its title. The
+  2026-10-04 pull deleted 101 pages, so this case is real.
+- **Sections.** "Save Section" joins F2's section group, after G's model
+  is on the branch. A saved section's row reads its page's title over
+  "§ Heading", and Wiki ▸ Saved Pages names it "Page § Heading".
 
 **Model.**
 - A pure `SavedPages` value with `{path, anchor?, title, savedAt}` and
@@ -1843,6 +1913,45 @@ click:
 
 **Files.** New `Wiki/SavedPages.swift`, `App/Settings.swift`,
 `App/AppModel.swift`, `UI/SidebarView.swift`, `App/CCwikiApp.swift`.
+
+**As built** (track G: `9b73789` to `de0340c`, then five commits for six
+of a review's nine findings; two more were this section's text and
+design-system.md's, and the ninth is the shots. Save Section is one
+commit at integration). The model, its JSON and the sidebar section are
+as specified. The tests are `SavedPagesTests`, and `SavedPagesModelTests`,
+which loads a real `AppModel` over the fixture clone.
+- **Reconciliation also takes the one page with exactly the title.** A
+  slug keeps its case, so no link with the old title finds a file renamed
+  from `Oblivious RAM.md` to `oblivious-ram.md`. Over the wiki's 51
+  renames, the link alone finds 25. With the exact title it finds 43, and
+  never a wrong page. The other 8 changed their title with their file
+  name, before the wiki had frontmatter titles, and no lookup finds them.
+  Neither finds any of the 101 pages the 2026-10-04 pull deleted, so they
+  read as missing, as they should. The link is taken only when it
+  resolves to a whole page: a stored title with a `#` would otherwise
+  point at a section of another page.
+- **Open or closed is app-wide.** As a fresh `@State` per sidebar, Saved
+  opened again in every new tab and window and after a relaunch. It is now
+  `AppModel.showsSavedPages`, kept in the user defaults, as the derived
+  sections are.
+- **Move Up, Move Down and Wiki ▸ Saved Pages are additions.** A drag has
+  no keyboard or VoiceOver form on macOS, and the rows are
+  selection-disabled buttons that ↑ and ↓ skip. Someone using only the
+  keyboard can open a saved page from the menu and remove the page being
+  read with ⌘D, but cannot reorder or remove the other entries.
+- **Save Section** is the last item of F2's section group, in the page's
+  menu under a heading and in the outline's, and reads Remove Section from
+  Saved once the section is saved. The entry keeps the heading as the
+  outline showed it, in an optional `sectionTitle`, so a list written
+  before reads unchanged. Reconciliation still looks up the page's title
+  alone, and a section follows its page. A heading with math shows its
+  source, as the outline does: 14 of the 1,772 headings below a page's
+  title. No title or heading holds a §, so "Page § Heading" is never
+  ambiguous. `ReaderContextTarget.saveSectionItem(isSaved:)` builds the
+  page menu's item and is tested without a menu, as the section links are.
+- **Not built:** the shots. They need a `save:` step in
+  `ScreenshotRunner`, which removes in its teardown only an entry it
+  added, so CCwiki Dev's own list is left as it was.
 
 ### 3.4 Deferred, and why
 
