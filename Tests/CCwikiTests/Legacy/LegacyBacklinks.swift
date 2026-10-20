@@ -59,13 +59,16 @@ extension Legacy {
         private let basenameIndex: [String: [String]]
         private let folders: Set<String>
 
-        /// The path over `index`'s pages. `WikiIndex` keeps its tables
+        /// The path over `index`'s pages, for an index from
+        /// `WikiIndex.build(contentRoot:)`. `WikiIndex` keeps its tables
         /// private, so they are built again here as 21df5d7's `assemble`
-        /// builds them, from the files `overlaying` lists. They are the index
-        /// phase's, not the backlinks phase's: 21df5d7 changed them only for
-        /// an alias ending in `.md`.
+        /// builds them, from the files `build` lists: not from `pages` and
+        /// `assets`, which leave out a page that did not load and all but
+        /// one of the files that share a slug. They are the index phase's,
+        /// not the backlinks phase's: 21df5d7 changed them only for an alias
+        /// ending in `.md`.
         init(index: WikiIndex, changes: Changes) {
-            let files = Set(index.pages.keys).union(index.assets.values).sorted()
+            let files = WikiIndex.contentFiles(root: index.contentRoot)
             var slugToPath: [String: String] = [:]
             var allSlugs: [String] = []
             var seen: Set<String> = []
