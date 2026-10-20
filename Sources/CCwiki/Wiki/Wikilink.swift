@@ -285,8 +285,13 @@ enum MarkdownLinkParser {
     /// whose text holds a `[[wikilink]]` or another link, and an image is not
     /// one. Code and comments are masked exactly as `WikilinkParser` masks
     /// them, so the two parsers agree on what is inert.
+    ///
+    /// It finds the inert ranges and the wikilinks itself, as it did before
+    /// `LinkParse` shared them (plans/efficiency.md, L2): the equivalence
+    /// tests read it as the old code, so it must not go through `LinkParse`.
     static func links(in text: String) -> [MarkdownLink] {
-        LinkParse.links(in: text).markdownLinks
+        let inert = CodeMask.inertRanges(in: text)
+        return LinkScanner(text, inert: inert, wikilinks: WikilinkParser.links(in: text)).links()
     }
 
     /// `links(in:)`, with `CodeMask.inertRanges(in: text)` and
