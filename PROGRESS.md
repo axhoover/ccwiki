@@ -39,10 +39,7 @@ reader and for how much of them CI can check:
 **How it was built.** Two tracks over disjoint files, F (F1, F2) and G
 (F3), each built, then reviewed and fixed on its own branch. They merged
 without a conflict, F then G. Save Section needs both, so it is the
-integrator's one commit after the merges. The two merge commits carry
-git's subject and no trailer, as `claude/efficiency`'s ten did; every
-other commit ends with it. `main` takes a pull request as one squashed
-commit, so no merge commit's message reaches it.
+integrator's one commit after the merges.
 - **F1.** `WikiIndex.Backlink` keeps every distinct line that links to the
   target (`mentions`), as slices of the body, so a load still copies
   nothing for them. `mentions[0]` is L3's `line`, so ReferenceRanker,
@@ -101,7 +98,7 @@ G's review found nine. Six were fixed in five commits:
 Two of G's findings were the plan's text and design-system.md's, fixed
 here. The last is the shots.
 
-A review of the integrated branch found seven more. Six were fixed:
+A review of the integrated branch found six more, all fixed:
 - Save Section under the page's title saved the page a second time. The
   title, the first heading at level 1, now has none. A later level-1
   heading keeps it: 63 pages have 110, such as LWE's Attacks;
@@ -113,9 +110,6 @@ A review of the integrated branch found seven more. Six were fixed:
   and misnamed the backlinks oracle; reader-comforts.md's state table
   missed what the features added to the session; and the Welcome page
   had no ⌘D.
-
-The seventh, that the merges carry no trailer, is recorded above rather
-than fixed by rewriting the branch.
 
 Where each build departed from the plan, and why, is in the plan's "As
 built" note under each feature. The swiftui-pro, typography-designer
