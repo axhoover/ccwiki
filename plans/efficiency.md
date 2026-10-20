@@ -1,6 +1,6 @@
 # Efficiency: a quicker load and sync, a cheaper renderer, and three reading features
 
-**Plan, 2026-10-20. Nothing here is built yet.** It lands as two draft PRs:
+**Plan, 2026-10-20. Phase 0 is built; the tracks are being integrated.** It lands as two draft PRs:
 `claude/efficiency` (Phase 0 and six tracks), then
 `claude/reading-features` (three features), which starts from the first and
 merges after it (§2.10).
@@ -274,13 +274,15 @@ attributable.
 
 1. **Before changing a function, keep the old one where a test can run
    it.**
-   - **Swift goes to `Tests/CCwikiTests/Legacy/`.** M0 declares the
-     namespace once, in `Legacy/Legacy.swift`: `enum Legacy`, holding only
-     `struct Backlink: Equatable, Sendable { let sourcePath: String; let
-     context: String }`, the shape `WikiIndex.Backlink` had before L3. Every
-     other file there is an `extension Legacy`, so two tracks never declare
-     it twice, and a copied `backlinkMap` builds `Legacy.Backlink` without a
-     change, however L3 and F1 reshape the module's. Each copy starts:
+   - **Swift goes to `Tests/CCwikiTests/Legacy/`.** As built, the one
+     top-level `enum Legacy` is L's, in `Legacy/LegacyWiki.swift`, with
+     `Legacy.Backlink`, the shape `WikiIndex.Backlink` had before L3; S and
+     U nest their copies inside their test types, and X keeps its old loops
+     behind a parameter. Another file there would be an `extension Legacy`,
+     so no two declare it, and a copied `backlinkMap` builds
+     `Legacy.Backlink` without a change, however L3 and F1 reshape the
+     module's. M0's measurement copy has a namespace of its own, `LegacyD1`,
+     so it builds beside L's whichever lands first. Each copy starts:
      "Verbatim copy of <file> at 21df5d7 for equivalence tests. Do not
      edit; delete in the next batch." (M0's copy names `46685be` and the
      backlinks timing instead. It is also the one copy with switches: it
@@ -396,8 +398,8 @@ M0 is one commit, test and CI only, landed before any track. CI's run of it
 is the baseline, copied into §5. It owns:
 - `Tests/CCwikiTests/IncrementalCorpusTests.swift`;
 - the new `Tests/CCwikiTests/RenderCorpusTests.swift`;
-- the new `Tests/CCwikiTests/Legacy/Legacy.swift` (`enum Legacy` and
-  `Legacy.Backlink`, §2.1 rule 1) and `Legacy/LegacyBacklinks46685be.swift`;
+- the new `Tests/CCwikiTests/Legacy/LegacyBacklinks.swift` (`enum
+  LegacyD1`, §2.1 rule 1);
 - `.github/workflows/ci.yml`.
 
 **1. Per-phase minimums.** Each `LoadTimings` phase is reported as its own
@@ -412,12 +414,12 @@ keeps the existing "beside the other suites" otherwise. So the copy inside
 `make test-corpus` is attributable too, not only the standalone step.
 
 **3. Backlinks, `46685be` against `21df5d7`, in one run.**
-- **The copy.** `Legacy/LegacyBacklinks46685be.swift` holds, inside
-  `extension Legacy`, a `struct D1` made by `D1(index:changes:)` from the
-  loaded index and a set of switches. `D1.Changes` is an `OptionSet` with
+- **The copy.** `Legacy/LegacyBacklinks.swift` holds, inside
+  `extension LegacyD1`, a `struct D1Backlinks` made from the loaded index
+  and a set of switches. `D1Backlinks.Changes` is an `OptionSet` with
   one switch for each change in §1.3: CodeMask's line ends, `context`'s line
   ends, the slugger, and `resolve`'s segment split. The copied functions
-  are methods of `D1`, so each reads its switch, and their calls to each
+  are methods of `D1Backlinks`, so each reads its switch, and their calls to each
   other reach the copies. The copy holds, as `46685be` wrote them:
   - `Wikilink.swift`'s `WikilinkParser`, `CodeMask`, `MarkdownLinkParser`
     and the private `LinkScanner`, plus its private `UInt8` extension,
@@ -429,8 +431,8 @@ keeps the existing "beside the other suites" otherwise. So the copy inside
     `WikiIndex.plainText(_:)`.
   - `resolve`'s tables. `slugToPath`, `aliasOwners` and `basenameIndex` are
     private to `WikiIndex`, so `init` builds them again as `assemble` does,
-    from the files `overlaying` lists (`index.pages`' keys and
-    `index.assets`' values), outside the timed code. They are the index
+    from the files `build` assembled from (`WikiIndex.contentFiles(root:)`),
+    outside the timed code. They are the index
     phase's work, so they are built as `21df5d7` builds them, which differs
     from `46685be` only for an alias that ends in `.md`. The first
     assertion below catches any table that comes out different.
@@ -444,7 +446,7 @@ keeps the existing "beside the other suites" otherwise. So the copy inside
   a file-private copy of `isMarkdownLineEnding`, under another name since a
   same-named `Character` property would be ambiguous beside the module's,
   so the line keeps its meaning whatever L1 does to the module's. The loop
-  builds `Legacy.Backlink`, so it still compiles after L3 and F1 change
+  builds its own `D1Backlinks.Backlink`, so it still compiles after L3 and F1 change
   the module's `Backlink`.
 - **The lines.** Seven, each the minimum of 5 on the loaded library,
   interleaved run by run so that whatever slows the runner slows them
@@ -457,7 +459,7 @@ keeps the existing "beside the other suites" otherwise. So the copy inside
 - **Assertions.**
   - With all four on, the copy's `outgoingLinks` and `resolve` equal the
     app's for every link on every page. Its map equals `backlinkMap()`'s,
-    each list mapped to `Legacy.Backlink(sourcePath:context:)`, in order.
+    each list mapped to `D1Backlinks.Backlink(sourcePath:context:)`, in order.
     So the copy is the code being timed.
   - It counts the bodies that hold `\r` and the links whose page the
     copy's `46685be` `resolve` changes, and prints both. When both are 0,
@@ -1411,7 +1413,7 @@ test.*
 
 | Owner | Writes |
 |---|---|
-| M0 | `Tests/CCwikiTests/IncrementalCorpusTests.swift`, new `RenderCorpusTests.swift`, new `Legacy/Legacy.swift`, new `Legacy/LegacyBacklinks46685be.swift`, `.github/workflows/ci.yml` |
+| M0 | `Tests/CCwikiTests/IncrementalCorpusTests.swift`, new `RenderCorpusTests.swift`, new `Legacy/LegacyBacklinks.swift`, `.github/workflows/ci.yml` |
 | L | `Sources/CCwiki/Wiki/{Wikilink,WikiPage,WikiIndex,PreviewExcerpt,LinkPreview}.swift`, new `Wiki/MarkdownLineEnd.swift`, `Reader/RenderRequest.swift`, `UI/InspectorView.swift`; tests: new `LoadEquivalenceCorpusTests.swift`, new `Legacy/LegacyWiki.swift`, `ReferenceRankerTests.swift` (three constructors), `FixesWikiparseTests.swift` (fixtures) |
 | S | `Sources/CCwiki/Search/{SearchIndex,ConceptRanker,ReferenceRanker}.swift`; new `SearchEquivalenceTests.swift` |
 | X | `Sources/CCwiki/Wiki/{Derivation,DerivationChecks,CurationQuote,DerivationAnswer,DerivationBackward,DerivationBarriers,PageDerivations}.swift`; tests: `DerivationTests.swift`, `DerivationCorpusTests.swift`, `ExplorerResultTests.swift`, new `DerivationEquivalenceTests.swift` |
