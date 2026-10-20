@@ -1651,8 +1651,8 @@ final class AppModel {
         savedPages.move(fromOffsets: source, toOffset: destination)
     }
 
-    /// Move Up and Move Down on a saved row: a drag's form for the keyboard
-    /// and VoiceOver.
+    /// Move Up and Move Down on a saved row: a drag's form in the row's menu
+    /// and for VoiceOver.
     func moveSaved(_ entry: SavedPages.Entry, by step: Int) {
         savedPages.move(entry.id, by: step)
     }

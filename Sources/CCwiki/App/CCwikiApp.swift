@@ -406,6 +406,20 @@ struct CCwikiCommands: Commands {
             .keyboardShortcut("d", modifiers: .command)
             .disabled(session?.currentPage == nil)
 
+            // The saved pages for the keyboard, as Safari's Bookmarks menu
+            // lists its bookmarks: the sidebar's rows are buttons, which ↑
+            // and ↓ skip. A page the wiki no longer has is dimmed here, as
+            // its row is.
+            Menu("Saved Pages") {
+                ForEach(model?.savedPages.entries ?? []) { entry in
+                    Button(entry.title) {
+                        session?.open(.page(path: entry.path, anchor: entry.anchor), .here)
+                    }
+                    .disabled(model?.index?.pages[entry.path] == nil)
+                }
+            }
+            .disabled(session == nil || model?.savedPages.isEmpty != false)
+
             Button("Open on cryptology.city") {
                 guard let url = session?.currentSiteURL else { return }
                 NSWorkspace.shared.open(url)
