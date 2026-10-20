@@ -22,11 +22,22 @@ import Testing
 ///   every page, as a correction's review does (J2).
 ///
 /// No assertion is about time. One is that every page renders the same the
-/// second time, and the same in either order, which J1 has to keep.
+/// second time, and the same in either order, which J1 has to keep. Others
+/// are that the figures time a renderer that works: no page fails to render,
+/// and KaTeX's output is among the pages and the review's entries.
 @Suite(.serialized) struct RenderCorpusTests {
 
     /// The page every efficiency figure names: the slowest to render.
     static let longest = "Assumptions/learning-with-errors.md"
+
+    /// How `CCwiki.render` shows a page it could not render, whatever threw.
+    /// The test's payloads carry no notices, so a page's HTML starts with
+    /// this only when its render failed.
+    static let renderFailed = #"<div class="notice notice-warning">Render failed"#
+
+    /// What KaTeX's output carries and a formula it failed on does not: that
+    /// shows as `math-error`, or `katex-error` when KaTeX could not parse it.
+    static let katexOutput = #"class="katex""#
 
     /// The web view's scripts, in `index.html`'s order, without pseudocode.js.
     static let scripts = [
@@ -135,10 +146,13 @@ import Testing
           reviewResults[i] = CCwikiMarkdown.reviewEntries(reviewMarkdown, JSON.parse(reviewFiles[i]));
           return reviewResults[i].length;
         }
-        function reviewHTMLCount() {
+        // The entries whose HTML contains `containing`; "" counts every one with HTML.
+        function reviewHTMLCount(containing) {
           var count = 0;
           reviewResults.forEach(function (entries) {
-            entries.forEach(function (entry) { if (entry.html) count++; });
+            entries.forEach(function (entry) {
+              if (entry.html && entry.html.indexOf(containing) >= 0) count++;
+            });
           });
           return count;
         }
@@ -308,6 +322,10 @@ import Testing
         var unlike: [String] = []
         var unlikeAcrossOrders: [String] = []
         var firstHTML: [String] = []
+        // A render that throws is caught and shown as a notice, so a broken
+        // renderer would render every page the same twice: these say it ran.
+        var failed: Set<String> = []
+        var withKaTeX = 0
 
         for order in Order.allCases {
             var runs: [Run] = []
@@ -348,6 +366,10 @@ import Testing
                 let html = try pages.indices.map { i in
                     try Self.call(script, "firstHTML", [i])?.toString() ?? ""
                 }
+                for i in pages.indices where html[i].hasPrefix(Self.renderFailed) {
+                    failed.insert(pages[i].path)
+                }
+                withKaTeX = html.count(where: { $0.contains(Self.katexOutput) })
                 if firstHTML.isEmpty {
                     firstHTML = html
                 } else {
@@ -367,9 +389,13 @@ import Testing
             lines.append(line)
         }
 
+        #expect(failed.isEmpty, "every page renders: \(failed.sorted().prefix(10))")
+        #expect(withKaTeX > 0, "KaTeX renders the wiki's math")
         #expect(unlike.isEmpty, "a page renders the same the second time: \(unlike.prefix(10))")
         #expect(unlikeAcrossOrders.isEmpty,
                 "a page's first render is the same in either order: \(unlikeAcrossOrders.prefix(10))")
+        lines.append("\(pages.count - failed.count) of \(pages.count) pages rendered, "
+            + "\(withKaTeX) with KaTeX's output, \(failed.count) failed")
         lines.append(unlike.isEmpty && unlikeAcrossOrders.isEmpty
             ? "every page rendered the same the second time, and the same in either order"
             : "\(unlike.count) pages rendered differently the second time, "
@@ -392,6 +418,7 @@ import Testing
         var longest: [Duration] = []
         var entries = 0
         var shown = 0
+        var withKaTeX = 0
 
         for attempt in 0..<3 {
             let script = try Self.freshScript()
@@ -414,15 +441,20 @@ import Testing
             totals.append(total)
             if attempt == 0 {
                 entries = count
-                let withHTML = try Self.call(script, "reviewHTMLCount")
+                let withHTML = try Self.call(script, "reviewHTMLCount", [""])
                 shown = Int(withHTML?.toInt32() ?? 0)
+                let math = try Self.call(script, "reviewHTMLCount", [Self.katexOutput])
+                withKaTeX = Int(math?.toInt32() ?? 0)
             }
         }
 
         #expect(entries >= files.count, "every edited page has at least its edit to show")
+        // A block that fails to render shows its lines, and a formula that
+        // fails shows its source, so a broken renderer still makes entries.
+        #expect(withKaTeX > 0, "KaTeX renders the review's math")
         var line = "reviewEntries, a one-line edit to the middle non-blank line of each of "
             + "\(files.count) pages: \(LoadTimings.format(totals.min() ?? .zero)) "
-            + "(\(entries) entries, \(shown) with HTML)"
+            + "(\(entries) entries, \(shown) with HTML, \(withKaTeX) with KaTeX's output)"
         if let fastest = longest.min() {
             line += "; \(Self.longest) \(LoadTimings.format(fastest))"
         }
