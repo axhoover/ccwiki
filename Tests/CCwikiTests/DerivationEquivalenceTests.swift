@@ -69,7 +69,8 @@ struct DerivationEquivalenceTests {
         let starts = Self.startSets(corpus)
         let mismatches = await withTaskGroup(of: [String].self, returning: [String].self) { group in
             for (name, engine) in derivation.namedEngines {
-                // Below the other tests' priority, as `hornPrefilter`'s are.
+                // Asked at low priority, which may not hold: a group's child
+                // can start at its parent's priority. One task per engine.
                 group.addTask(priority: .low) {
                     var found: [String] = []
                     for start in starts {
@@ -251,7 +252,8 @@ struct DerivationEquivalenceTests {
         // reaches too. Every engine, every object, both settings.
         let escapes = await withTaskGroup(of: [String].self, returning: [String].self) { group in
             for (name, engine) in derivation.namedEngines {
-                // Below the other tests' priority, as the implied-by jobs are.
+                // Asked at low priority, which may not hold: a group's child
+                // can start at its parent's priority. One task per engine.
                 group.addTask(priority: .low) {
                     var found: [String] = []
                     for id in ids {
@@ -277,10 +279,11 @@ struct DerivationEquivalenceTests {
         // Implied-by for every target in both settings: the pair closures the
         // prefilter skips are all run here, once.
         let targets = ids.filter { derivation.nodeType($0) != Derivation.excludedType }
-        // A few at a time, below the other tests' priority: all of them
-        // (468 on the wiki) queued at once held every cooperative thread for
-        // about a minute of debug CPU, and a test racing a deadline behind
-        // them lost.
+        // A few at a time: all of them (468 on the wiki) queued at once held
+        // every cooperative thread for about a minute of debug CPU, and a
+        // test racing a deadline behind them lost. The width is what leaves
+        // a thread free. The low priority asked for may not hold, since a
+        // group's child can start at its parent's priority.
         let jobs: [(target: String, options: Derivation.Options)] = targets.flatMap { target in
             [Derivation.Options.standard, .all].map { (target: target, options: $0) }
         }
