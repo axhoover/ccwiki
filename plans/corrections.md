@@ -1616,6 +1616,11 @@ overlaid with the job's added pages (§6.3), with:
 - the manifest and the labels, so the relation-meta line appears;
 - `buildsPreviews = false`, because hover cards are noise while editing.
 
+Each editor keeps that overlaid index as a `PreviewOverlay`
+([efficiency.md](efficiency.md), W4), kept while the library generation
+and the pages the review adds are unchanged, so a pause in typing neither
+assembles the index again nor parses the added pages again.
+
 It renders 300 ms after typing stops, with `preservesScroll`, after
 `invalidate()` (`render` skips a path it already shows). When the cursor
 moves, the preview calls `revealSourceLines`, through
