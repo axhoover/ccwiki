@@ -298,7 +298,7 @@
     row.className = "copy-row";
     row.appendChild(copyButton("Copy LaTeX (macros)", function () { return latex; }));
     row.appendChild(copyButton("Copy LaTeX (no macros)", function () {
-      return expandMacros(latex, currentMacros || {});
+      return expandMacros(latex, sentMacros);
     }));
     box.appendChild(row);
   }
@@ -309,7 +309,7 @@
    *  crosses from Swift as a dictionary, so the order of macros.ts is gone. */
   function fillMacrosCopyArea(root) {
     var area = root.querySelector("#macros-copy-area");
-    var macros = currentMacros || {};
+    var macros = sentMacros;
     var names = Object.keys(macros).sort();
     if (!area || !names.length) return;
 
@@ -407,6 +407,12 @@
   // ================================================================= API ===
 
   var currentMacros = null;
+  /** The table as the wiki sent it, for what copies or expands the wiki's
+   *  macros. KaTeX writes into `currentMacros` as formulas render: its own
+   *  names (`\@eqnsw` after an `align` or a `\nonumber`, `\df@tag` after a
+   *  `\tag`) and a page's `\gdef`s, some as token lists that point back at
+   *  themselves, which `JSON.stringify` cannot write. */
+  var sentMacros = {};
   var currentMacrosKey = null;
   var md = null;
   var previewMarkdown = null;
@@ -431,11 +437,14 @@
    */
   function ensureMarkdown(macros) {
     if (macros === undefined || macros === null) {
-      macros = currentMacros || {};
+      // As sent: the live table also holds what KaTeX wrote into it, so its
+      // key no longer matches, and the table would be installed again.
+      macros = sentMacros;
     }
     var key = macrosKey(macros);
     if (md && key === currentMacrosKey) return md;
     currentMacros = macros;
+    sentMacros = Object.assign({}, macros);
     currentMacrosKey = key;
     // Formulas rendered with another table are of no use, and none is kept
     // while a macro could reach what one formula leaves for the next, or
@@ -852,7 +861,7 @@
       type: "contextTarget",
       tex: host ? texOf(host) : null,
       algorithm: source,
-      algorithmExpanded: source === null ? null : expandMacros(source, currentMacros || {}),
+      algorithmExpanded: source === null ? null : expandMacros(source, sentMacros),
       link: appLink(linkAt(target)),
       externalLink: webLink(linkAt(target)),
       selection: selection,

@@ -208,7 +208,7 @@ struct RenderMemoTests {
         #expect(delimited[0] != delimited[1], #"\right, after a formula"#)
     }
 
-    @Test("a formula the memo gives back deletes the `\\df@tag` a `\\tag` left, as KaTeX does")
+    @Test("the copy area reads the table as sent, whatever a formula left in KaTeX's")
     func tagLeftForTheCopyArea() throws {
         // The web view's scripts with the vendored KaTeX, the messages
         // `ccwiki.js` posts, and Glossary/latex-macros's copy area, which
@@ -242,13 +242,22 @@ struct RenderMemoTests {
             """#, named: "copy-area.js")
         try script.evaluate(try Self.source("ccwiki.js"), named: "ccwiki.js")
 
-        // The macros page's formula comes back from the memo the second
-        // time, after a page whose last formula is tagged.
+        // The macros page renders again, its formula from the memo while the
+        // memo is on, after a page that leaves a token list in KaTeX's table,
+        // which `JSON.stringify` cannot write: a `\tag`'s `\df@tag`, a
+        // `\nonumber`'s or a `\notag`'s `\@eqnsw`, a page's `\gdef`.
         let macrosPage = #"<div id="macros-copy-area"></div>"# + "\n\nA formula $x$.\n"
-        let tagged = "# Tagged\n\n$$\nE = mc^2 \\tag{1}\n$$\n"
-        for (step, markdown) in [macrosPage, tagged, macrosPage].enumerated() {
-            #expect(try script.text("show(\(MarkdownScript.literal(markdown)))") == "[true]",
-                    "render \(step + 1)")
+        let leavers = [
+            "# Tagged\n\n$$\nE = mc^2 \\tag{1}\n$$\n",
+            "# Unnumbered\n\n$$\nx \\nonumber\n$$\n",
+            "# Untagged\n\n$$\nx \\notag\n$$\n",
+            "# Defining\n\n$\\gdef\\foo{x}\\foo$\n",
+        ]
+        for leaver in leavers {
+            for (step, markdown) in [macrosPage, leaver, macrosPage].enumerated() {
+                #expect(try script.text("show(\(MarkdownScript.literal(markdown)))") == "[true]",
+                        "after \(leaver.prefix(14)), render \(step + 1)")
+            }
         }
     }
 
