@@ -120,8 +120,9 @@ extension AppModel {
     }
 
     /// The overlay the preview of `job`'s files resolves against: `cached`
-    /// while the library and the job's review are the ones it was built
-    /// from, a new one otherwise. Nil before the library has loaded.
+    /// while the library and the pages the job's review adds are the ones
+    /// it was built from, a new one otherwise. Nil before the library has
+    /// loaded.
     func previewOverlay(for job: Job?, reusing cached: PreviewOverlay?) -> PreviewOverlay? {
         guard let index else { return nil }
         return PreviewOverlay.reusing(
@@ -162,10 +163,14 @@ extension AppModel {
 /// ones it was built from, so a pause in typing neither assembles the
 /// index again (about 900 files) nor parses the added pages again. The
 /// library is known by its generation, which `AppModel` bumps with every
-/// index it puts up, and the review by value.
+/// index it puts up. The review is known by the files it adds or renames,
+/// the only ones the overlay reads: each save takes the review again, with
+/// a new tree and the edited page's new text, and that alone changes
+/// nothing here.
 struct PreviewOverlay: Sendable {
     let generation: Int
-    let review: ReviewSnapshot?
+    /// The review's added and renamed files, as they were.
+    let addedFiles: [ChangedFile]
     /// The reader's index with the added pages in it.
     let index: WikiIndex
     /// The added pages the reader does not have: a link to one is `new`.
@@ -174,18 +179,27 @@ struct PreviewOverlay: Sendable {
     init(index: WikiIndex, generation: Int, review: ReviewSnapshot?) {
         let added = review.map(ReviewPayload.addedPages(in:)) ?? []
         self.generation = generation
-        self.review = review
+        self.addedFiles = Self.files(addedBy: review)
         self.index = index.overlaying(added)
         self.newPages = ReviewPayload.newPagePaths(added, in: index)
     }
 
-    /// `cached` when it was built from this generation and this review;
-    /// otherwise a new overlay of `index`.
+    /// `cached` when it was built from this generation and the same added
+    /// and renamed files; otherwise a new overlay of `index`.
     static func reusing(
         _ cached: PreviewOverlay?, index: WikiIndex, generation: Int, review: ReviewSnapshot?
     ) -> PreviewOverlay {
-        if let cached, cached.generation == generation, cached.review == review { return cached }
+        if let cached, cached.generation == generation,
+           cached.addedFiles == files(addedBy: review) {
+            return cached
+        }
         return PreviewOverlay(index: index, generation: generation, review: review)
+    }
+
+    /// The files `ReviewPayload.addedPages(in:)` reads, whole: two reviews
+    /// with the same ones add the same pages.
+    private static func files(addedBy review: ReviewSnapshot?) -> [ChangedFile] {
+        review?.files.filter { $0.status == .added || $0.status == .renamed } ?? []
     }
 
     /// `page` rendered against the overlay, links to the added pages

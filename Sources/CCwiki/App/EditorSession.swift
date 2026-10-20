@@ -78,8 +78,8 @@ final class EditorSession {
     @ObservationIgnored private var previewLineMap: SourceLineMap?
     @ObservationIgnored private var hasRenderedPreview = false
     /// The index the preview resolves links against, kept while the library
-    /// and the job's review are the ones it was built from: rebuilt when
-    /// either changes, never patched (`PreviewOverlay`).
+    /// and the pages the job's review adds are the ones it was built from:
+    /// rebuilt when either changes, never patched (`PreviewOverlay`).
     @ObservationIgnored private var previewOverlay: PreviewOverlay?
 
     static let saveDelay: Duration = .milliseconds(500)

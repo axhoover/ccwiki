@@ -137,7 +137,7 @@ struct WindowObservationTests {
         return WikiPage(path: "Primitives/pseudorandom-function.md", text: text)
     }
 
-    @Test("the preview's overlay is kept while the library and the review are the same")
+    @Test("the preview's overlay is kept while the library and the added pages are the same")
     func overlayKept() throws {
         let index = ReviewPayloadTests.readerIndex()
         let review = ReviewPayloadTests.ingestion()
@@ -162,7 +162,40 @@ struct WindowObservationTests {
         #expect(citation?.kind == "new")
     }
 
-    @Test("a new review or a new library builds the preview's overlay again")
+    /// What happens after every pause in typing: the editor saves, and a
+    /// second later the review is taken again, with a new tree and the
+    /// edited page's new text.
+    @Test("a review taken again after a save of the edited page keeps the preview's overlay")
+    func overlayKeptAcrossSaves() throws {
+        let index = ReviewPayloadTests.readerIndex()
+        let review = ReviewPayloadTests.ingestion()
+        let kept = PreviewOverlay(index: index, generation: 1, review: review)
+
+        // PRF saved with a line more; the reference page as it was. Handed
+        // an empty index, the kept overlay comes back, nothing assembled.
+        let prf = try #require(review.files.first)
+        let reference = try #require(review.files.last)
+        let saved = try #require(prf.newText)
+        let typed = saved + "\nMore.\n"
+        let retaken = ReviewSnapshot(
+            baseCommit: review.baseCommit, tree: "9f1c2e7",
+            files: [ReviewPayloadTests.file(old: prf.oldText, new: typed, hunks: prf.hunks), reference],
+            digest: "4567")
+        #expect(retaken != review)
+        let other = WikiIndex.assemble(
+            contentRoot: URL(fileURLWithPath: "/nonexistent/content"), files: [], pages: [:])
+        let reused = PreviewOverlay.reusing(kept, index: other, generation: 1, review: retaken)
+        #expect(reused.index.pages.count == index.pages.count + 1)
+        #expect(reused.newPages == kept.newPages)
+
+        // The text as typed renders through it as the old path rendered it
+        // against the review taken again.
+        let page = WikiPage(path: "Primitives/pseudorandom-function.md", text: typed)
+        #expect(Self.facts(reused, page)
+            == Self.facts(Self.legacyRequest(page, index: index, review: retaken)))
+    }
+
+    @Test("other added pages, or a new library, build the preview's overlay again")
     func overlayRebuilt() throws {
         let index = ReviewPayloadTests.readerIndex()
         let review = ReviewPayloadTests.ingestion()
@@ -178,6 +211,21 @@ struct WindowObservationTests {
         #expect(Self.facts(refreshed, page) != before)
         #expect(Self.facts(refreshed, page)
             == Self.facts(Self.legacyRequest(page, index: index, review: edited)))
+
+        // The reference page saved again: the overlay reads it anew.
+        let reference = try #require(review.files.last)
+        let revised = ReviewPayloadTests.file(
+            ReviewPayloadTests.ggmPath, status: .added, old: nil,
+            new: FixtureClone.page(
+                type: "reference", title: "GGM86",
+                body: "# How to construct random functions\n\nThe tree construction, revised.\n"),
+            hunks: reference.hunks)
+        let rewritten = ReviewPayloadTests.snapshot(try #require(review.files.first), revised)
+        let reread = PreviewOverlay.reusing(kept, index: index, generation: 1, review: rewritten)
+        let ggm = try #require(ReviewPayload.contentPath(ReviewPayloadTests.ggmPath))
+        #expect(reread.index.pages[ggm]?.body.contains("revised") == true)
+        #expect(Self.facts(reread, page)
+            == Self.facts(Self.legacyRequest(page, index: index, review: rewritten)))
 
         // A sync brought the page into the library: a page now, not new.
         let synced = index.overlaying(ReviewPayload.addedPages(in: review))
