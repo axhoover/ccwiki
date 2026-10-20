@@ -117,7 +117,7 @@ struct LoadEquivalenceCorpusTests {
         }
     }
 
-    @Test("on the corpus, CodeMask, headings() and the backlinks are what they were")
+    @Test("on the corpus, CodeMask and headings() find what they found before")
     func lineEndsOnCorpus() {
         guard let corpus = Self.corpus else { return }
         let pages = corpus.pages
@@ -133,18 +133,55 @@ struct LoadEquivalenceCorpusTests {
         let headings = Self.differing(pages, oldHeadings.value, newHeadings.value)
         #expect(headings.isEmpty, "headings() differs on \(headings)")
 
+        Self.report("L1 line ends on bytes", [
+            "CodeMask.inertRanges " + Self.change(oldMasks.duration, newMasks.duration),
+            "headings() " + Self.change(oldHeadings.duration, newHeadings.duration),
+        ])
+    }
+
+    // MARK: The backlinks
+
+    /// What a reader sees of every target's backlinks: the linking pages, in
+    /// order, each with its context. Held to the old `backlinkMap`, which
+    /// found the line on Characters and reduced it at load (L1, L3).
+    @Test("on the corpus, every target's backlinks read as they did, one per linking page")
+    func backlinksOnCorpus() {
+        guard let corpus = Self.corpus else { return }
         let oldBacklinks = Self.timed { Legacy.backlinkMap(of: corpus.index) }
         let newBacklinks = Self.timed { corpus.index.backlinkMap() }
+        // Every context, as the panes would read them all.
+        let contexts = Self.timed { Self.pairs(newBacklinks.value) }
         let old = Self.pairs(oldBacklinks.value)
-        let new = Self.pairs(newBacklinks.value)
+        let new = contexts.value
         #expect(new.count == old.count && new.count > 500, "\(new.count) targets, \(old.count) before")
         let targets = old.keys.filter { new[$0] != old[$0] }.sorted()
         #expect(targets.isEmpty, "backlinks differ for \(targets)")
 
-        Self.report("L1 line ends on bytes", [
-            "CodeMask.inertRanges " + Self.change(oldMasks.duration, newMasks.duration),
-            "headings() " + Self.change(oldHeadings.duration, newHeadings.duration),
+        let repeated = newBacklinks.value.filter { Set($0.value.map(\.id)).count != $0.value.count }
+        #expect(repeated.isEmpty, "ids repeat in the backlinks of \(repeated.keys.sorted())")
+
+        let busiest = newBacklinks.value.values.max { $0.count < $1.count } ?? []
+        let shown = Self.timed { busiest.map(\.context) }
+        Self.report("Backlinks (L1, L3)", [
             "backlinkMap() " + Self.change(oldBacklinks.duration, newBacklinks.duration),
+            "every context read afterwards \(LoadTimings.format(contexts.duration))",
+            "the busiest page's \(shown.value.count) \(LoadTimings.format(shown.duration))",
         ])
+    }
+
+    // MARK: L3. Backlink contexts when shown
+
+    @Test("a backlink is its linking page's, and its line reads as the context the load used to store")
+    func backlinkLines() throws {
+        let a = WikiPage(path: "Primitives/a.md",
+                         text: "# A\n\n- Uses [[b]] and [[b|B again]].\n\nLater, [[b]].\n")
+        let c = WikiPage(path: "Primitives/c.md", text: "# C\n\n- Uses [[b]] and [[b|B again]].\n")
+        let index = Self.index([a, WikiPage(path: "Primitives/b.md", text: "# B\n"), c])
+        let links = try #require(index.backlinkMap()["Primitives/b.md"])
+        #expect(links.map(\.id) == ["Primitives/a.md", "Primitives/c.md"])
+        #expect(links.map { String($0.line) }
+            == ["- Uses [[b]] and [[b|B again]].", "- Uses [[b]] and [[b|B again]]."])
+        #expect(links.map(\.context) == ["Uses b and B again.", "Uses b and B again."])
+        #expect(Self.pairs(index.backlinkMap()) == Self.pairs(Legacy.backlinkMap(of: index)))
     }
 }

@@ -98,38 +98,9 @@ struct InspectorView: View {
             } else {
                 List {
                     ForEach(links) { link in
-                        // A button, so ⌘-click is a link's: a tab behind
-                        // this one (reader-comforts §1.1).
-                        let location = AppModel.Location.page(path: link.sourcePath, anchor: nil)
-                        Button {
-                            session.open(location, LinkDisposition.current)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(model.title(forPath: link.sourcePath))
-                                    .font(Theme.Fonts.row)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                // The line that mentions this page — *why* it
-                                // links here, which is the useful half.
-                                Text(link.context)
-                                    .font(Theme.Fonts.rowSubtitle)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-                        .listRowSeparator(.hidden)
-                        .contextMenu {
-                            OpenElsewhereItems { session.open(location, $0) }
-                            if let page = model.index?.pages[link.sourcePath],
-                               let url = AppModel.siteURL(slug: page.slug) {
-                                Divider()
-                                Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
-                                Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
-                            }
-                        }
+                        BacklinkRow(link: link)
+                            .equatable()
+                            .listRowSeparator(.hidden)
                     }
                 }
                 .listStyle(.inset)
@@ -155,5 +126,55 @@ struct InspectorView: View {
         }
         .padding(Theme.large)
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// One page that links to the page being read, and the line that mentions
+/// it.
+///
+/// A view of its own, compared by its backlink, so the line is reduced to
+/// plain text (`Backlink.context`) when the backlink changes rather than on
+/// every redraw of the pane (SWIFTUI-RULES §6.3).
+private struct BacklinkRow: View, Equatable {
+    @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
+    let link: WikiIndex.Backlink
+
+    nonisolated static func == (lhs: BacklinkRow, rhs: BacklinkRow) -> Bool {
+        lhs.link == rhs.link
+    }
+
+    var body: some View {
+        // A button, so ⌘-click is a link's: a tab behind this one
+        // (reader-comforts §1.1).
+        let location = AppModel.Location.page(path: link.sourcePath, anchor: nil)
+        Button {
+            session.open(location, LinkDisposition.current)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.title(forPath: link.sourcePath))
+                    .font(Theme.Fonts.row)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                // The line that mentions this page — *why* it links here,
+                // which is the useful half.
+                Text(link.context)
+                    .font(Theme.Fonts.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            OpenElsewhereItems { session.open(location, $0) }
+            if let page = model.index?.pages[link.sourcePath],
+               let url = AppModel.siteURL(slug: page.slug) {
+                Divider()
+                Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
+                Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
+            }
+        }
     }
 }

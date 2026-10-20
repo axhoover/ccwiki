@@ -306,7 +306,7 @@ struct WikiIndex: Sendable {
                       seen.insert(targetPath).inserted
                 else { continue }
                 result[targetPath, default: []].append(
-                    Backlink(sourcePath: page.path, context: Self.context(of: link, in: page.body)))
+                    Backlink(sourcePath: page.path, line: Self.line(of: link, in: page.body)))
             }
         }
         return result
@@ -314,22 +314,29 @@ struct WikiIndex: Sendable {
 
     struct Backlink: Identifiable, Hashable, Sendable {
         let sourcePath: String
-        /// The line the link appeared on, so the pane can show *why* the page
-        /// links here rather than just that it does.
-        let context: String
+        /// The line the link appeared on, as markdown: a slice of the linking
+        /// page's body, so a load copies nothing and reduces nothing for it.
+        let line: Substring
 
-        var id: String { sourcePath + context }
+        /// The line the link appeared on, reduced to plain text, so the pane
+        /// can show *why* the page links here rather than just that it does.
+        ///
+        /// The raw line is full of `[[wikilinks]]`, `$math$` and `_emphasis_`,
+        /// and a backlinks pane that shows markup instead of prose is
+        /// unreadable. Worked out when read: a load finds about 2,500
+        /// backlinks, and the busiest page shows 44 (plans/efficiency.md, L3).
+        var context: String { WikiIndex.plainText(String(line)) }
+
+        /// `backlinkMap` keeps one backlink per linking page for each target,
+        /// so the linking page tells a target's backlinks apart.
+        var id: String { sourcePath }
     }
 
-    /// The line a link appeared on, reduced to plain text.
-    ///
-    /// The raw line is full of `[[wikilinks]]`, `$math$` and `_emphasis_`, and
-    /// a backlinks pane that shows markup instead of prose is unreadable — the
-    /// whole point of the pane is to tell you *why* another page links here.
-    private static func context(of link: Wikilink, in body: String) -> String {
+    /// The line a link appeared on.
+    private static func line(of link: Wikilink, in body: String) -> Substring {
         let start = MarkdownLineEnd.start(in: body, before: link.range.lowerBound)
         let end = MarkdownLineEnd.next(in: body, from: link.range.upperBound).end
-        return plainText(String(body[start..<end]))
+        return body[start..<end]
     }
 
     /// Strip the markdown that carries no meaning once it is out of context.
