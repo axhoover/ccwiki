@@ -162,8 +162,10 @@ struct DerivedRelationsSections: View {
         .help(row.help)
         .contextMenu {
             Button("Show Proof") { showProof(row) }
-            if let query = model.explorerQuestion(from: [row.link.objectID]) {
-                Button("Explore From Here…") { model.explore(query) }
+            // Offered from the wiki alone; the explorer's toggle is read on
+            // the click, so editing its question leaves this tab be.
+            if model.canExplore(from: [row.link.objectID]) {
+                Button("Explore From Here…") { model.explore(from: [row.link.objectID]) }
             }
             Button("Open “\(row.label)”") { session.openRelationObject(row.link.objectID) }
             // After the row's Open, not first: its click shows a proof, not

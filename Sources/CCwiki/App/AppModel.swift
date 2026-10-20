@@ -1606,19 +1606,35 @@ final class AppModel {
                               includesIdealisedModels: explorerQuery.includesIdealisedModels))
     }
 
-    /// A question the explorer can ask about these objects, or `nil` when it
-    /// would only be turned away: a complexity class is related by
-    /// containment, never derived (R2), and an id the manifest does not have
-    /// is no question at all. Nor is any question when nothing can be
-    /// derived, as without the bundled curation. For "Explore From Here…" on
-    /// recorded rows.
+    /// A question the explorer can ask about these objects, with its models
+    /// toggle as it is now, or `nil` when it would only be turned away
+    /// (`canExplore`).
     func explorerQuestion(from: [String], to: String? = nil) -> ExplorerQuery? {
-        let named = from + (to.map { [$0] } ?? [])
-        guard !named.isEmpty, !derivation.participants(.all).isEmpty, named.allSatisfy({ id in
-            relations.object(id).map { $0.type != Derivation.excludedType } ?? false
-        }) else { return nil }
+        guard canExplore(from: from, to: to) else { return nil }
         return ExplorerQuery(from: from, to: to,
                              includesIdealisedModels: explorerQuery.includesIdealisedModels)
+    }
+
+    /// Whether the explorer can ask about these objects. It reads the wiki,
+    /// never the explorer's question, so a view deciding whether to offer
+    /// "Explore From Here…" is not redrawn by every edit in the explorer:
+    /// the item asks through `explore(from:to:)`, which reads the toggle when
+    /// it is clicked (SWIFTUI-RULES §3.5).
+    func canExplore(from: [String], to: String? = nil) -> Bool {
+        Self.canExplore(from: from, to: to, manifest: relations, derivation: derivation)
+    }
+
+    /// `canExplore(from:to:)` over a given wiki. A complexity class is
+    /// related by containment, never derived (R2), and an id the manifest
+    /// does not have is no question at all. Nor is any question when nothing
+    /// can be derived, as without the bundled curation.
+    nonisolated static func canExplore(
+        from: [String], to: String?, manifest: RelationsManifest, derivation: Derivation
+    ) -> Bool {
+        let named = from + (to.map { [$0] } ?? [])
+        return !named.isEmpty && !derivation.participants(.all).isEmpty && named.allSatisfy { id in
+            manifest.object(id).map { $0.type != Derivation.excludedType } ?? false
+        }
     }
 
     /// Put the current question on Recent, newest first, once. Called when a

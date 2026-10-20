@@ -3,11 +3,13 @@ import Testing
 @testable import CCwiki
 
 /// The app model as the main window reads it (plans/efficiency.md, track U):
-/// what a load does for the windows, and when.
+/// what a load does for the windows, and when; ⌘O's list; and where the
+/// Relations inspector offers Explore From Here.
 ///
-/// Each test makes its own `AppModel` over an Application Support folder of
-/// its own, holding `FixtureClone.standard` and no git, so nothing here
-/// reaches the network, a real clone or a web view.
+/// A test that needs a model makes its own, over an Application Support
+/// folder of its own holding `FixtureClone.standard` and no git, so nothing
+/// here reaches the network, a real clone or a web view. Serialized: ⌘O's
+/// recent pages are a user default, which each model reads when it is made.
 @MainActor
 @Suite(.serialized)
 struct AppModelObservationTests {
@@ -89,6 +91,100 @@ struct AppModelObservationTests {
         #expect(Self.paths(model) == Self.emptyQueryList(in: model, recent: [Self.owf]))
         #expect(model.quickSwitcherRecentCount == 1)
         #expect(Self.isFresh(model))
+    }
+
+    // MARK: Explore From Here (U3)
+
+    @Test("the inspector offers Explore From Here wherever it did, on the fixture graph")
+    func canExploreAsTheQuestionDid() throws {
+        let manifest = try ExplorerFixture.manifest()
+        let derivation = try ExplorerFixture.derivation()
+        let checked = Self.expectCanExploreAsTheQuestionDid(manifest: manifest, derivation: derivation)
+        #expect(checked.offered > 0 && checked.withheld > 0, "\(checked)")
+
+        // A class is never derived, an unknown id is no question, and with
+        // nothing derivable there is no question at all.
+        let explore = { (from: [String], to: String?, derivation: Derivation) in
+            AppModel.canExplore(from: from, to: to, manifest: manifest, derivation: derivation)
+        }
+        #expect(explore(["owf"], "pke", derivation))
+        #expect(!explore(["bpp"], nil, derivation))
+        #expect(!explore(["lwe"], "bpp", derivation))
+        #expect(!explore(["nobody"], nil, derivation))
+        #expect(!explore([], nil, derivation))
+        #expect(explore([], "pke", derivation))
+        #expect(!explore(["owf"], "pke", .empty))
+        let none = Self.expectCanExploreAsTheQuestionDid(manifest: manifest, derivation: .empty)
+        #expect(none.offered == 0)
+    }
+
+    @Test("the inspector offers Explore From Here wherever it did, on the real wiki")
+    func canExploreAsTheQuestionDidOnTheCorpus() {
+        guard let cloneRoot = RelationsTests.cloneRoot else { return }
+        let manifest = RelationsManifest.load(cloneRoot: cloneRoot)
+        let checked = Self.expectCanExploreAsTheQuestionDid(
+            manifest: manifest, derivation: Derivation(manifest: manifest))
+        print("Explore From Here on the corpus: \(checked.offered) offered, "
+            + "\(checked.withheld) withheld")
+        // Without the bundled curation nothing is derived, and nothing offered.
+        if DerivationCuration.bundled != nil {
+            #expect(checked.offered > 0)
+        }
+    }
+
+    /// Asks `canExplore` every question the Relations inspector asks, and
+    /// what the question used to be built from, and expects the same answer:
+    /// each object alone; each reduction's hypotheses, its conclusion and,
+    /// for an equivalence, its other end; each barrier's edge; and ids the
+    /// manifest does not have.
+    private static func expectCanExploreAsTheQuestionDid(
+        manifest: RelationsManifest, derivation: Derivation
+    ) -> (offered: Int, withheld: Int) {
+        var questions: [(from: [String], to: String?)] = [([], nil), (["nobody"], nil)]
+        for id in manifest.objectsByID.keys.sorted() {
+            questions.append(([id], nil))
+            questions.append(([], id))
+        }
+        for relation in manifest.reductions {
+            questions.append((relation.hypotheses, nil))
+            questions.append(([relation.conclusion], nil))
+            if let first = relation.hypotheses.first { questions.append(([first], nil)) }
+            questions.append((relation.hypotheses, relation.conclusion))
+        }
+        for barrier in manifest.barriers {
+            questions.append((barrier.hypotheses, barrier.conclusion))
+        }
+
+        var offered = 0
+        var withheld = 0
+        for question in questions {
+            let offers = AppModel.canExplore(
+                from: question.from, to: question.to, manifest: manifest, derivation: derivation)
+            let asked = Legacy.explorerQuestion(
+                from: question.from, to: question.to, relations: manifest,
+                derivation: derivation, explorerQuery: ExplorerQuery())
+            #expect(offers == (asked != nil), "\(question.from) → \(question.to ?? "–")")
+            if offers { offered += 1 } else { withheld += 1 }
+        }
+        return (offered, withheld)
+    }
+
+    /// Verbatim copy of AppModel.swift's `explorerQuestion(from:to:)` at
+    /// 21df5d7 for equivalence tests, with the model's `relations`,
+    /// `derivation` and `explorerQuery` as parameters. Do not edit; delete in
+    /// the next batch.
+    private enum Legacy {
+        static func explorerQuestion(
+            from: [String], to: String? = nil, relations: RelationsManifest,
+            derivation: Derivation, explorerQuery: ExplorerQuery
+        ) -> ExplorerQuery? {
+            let named = from + (to.map { [$0] } ?? [])
+            guard !named.isEmpty, !derivation.participants(.all).isEmpty, named.allSatisfy({ id in
+                relations.object(id).map { $0.type != Derivation.excludedType } ?? false
+            }) else { return nil }
+            return ExplorerQuery(from: from, to: to,
+                                 includesIdealisedModels: explorerQuery.includesIdealisedModels)
+        }
     }
 
     // MARK: Helpers
