@@ -276,6 +276,48 @@ struct WikiIndex: Sendable {
         segment == "." || segment == ".."
     }
 
+    /// `resolve` for a sweep over every page, which repeats most links (the
+    /// corpus has 3,447 links and 972 distinct ones): each distinct link is
+    /// resolved once. `resolve` reads only what `Key` keeps of a link, and
+    /// never the page it is on, so a link resolves alike from any page.
+    /// Lives as long as the sweep, one `backlinkMap` (plans/efficiency.md, L4).
+    struct LinkResolutions {
+        private let index: WikiIndex
+        private var targets: [Key: Target] = [:]
+
+        init(_ index: WikiIndex) {
+            self.index = index
+        }
+
+        /// How many distinct links have been resolved.
+        var count: Int { targets.count }
+
+        /// `index.resolve(link, from: sourcePath)`.
+        mutating func target(of link: Wikilink, from sourcePath: String) -> Target {
+            let key = Key(link)
+            if let known = targets[key] { return known }
+            let target = index.resolve(link, from: sourcePath)
+            targets[key] = target
+            return target
+        }
+
+        /// What `resolve` reads of a link: its target, its raw anchor (which
+        /// says whether it is a block reference), and whether it is an embed.
+        /// Compared byte for byte: `String`'s `==` is canonical equivalence,
+        /// and two spellings of one accented letter need not slug alike.
+        private struct Key: Hashable {
+            let target: [UInt8]
+            let rawAnchor: [UInt8]?
+            let isEmbed: Bool
+
+            init(_ link: Wikilink) {
+                target = Array(link.target.utf8)
+                rawAnchor = link.rawAnchor.map { Array($0.utf8) }
+                isEmbed = link.isEmbed
+            }
+        }
+    }
+
     /// Every link on a page, paired with what it resolves to.
     func links(on page: WikiPage) -> [(link: Wikilink, target: Target)] {
         Self.outgoingLinks(in: page.body).map { ($0, resolve($0, from: page.path)) }
@@ -298,10 +340,11 @@ struct WikiIndex: Sendable {
     /// this takes a few milliseconds.
     func backlinkMap() -> [String: [Backlink]] {
         var result: [String: [Backlink]] = [:]
+        var resolutions = LinkResolutions(self)
         for page in pages.values.sorted(by: { $0.path < $1.path }) {
             var seen: Set<String> = []
             for link in Self.outgoingLinks(in: page.body) {
-                guard case .page(let targetPath, _) = resolve(link, from: page.path),
+                guard case .page(let targetPath, _) = resolutions.target(of: link, from: page.path),
                       targetPath != page.path,
                       seen.insert(targetPath).inserted
                 else { continue }

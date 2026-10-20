@@ -166,7 +166,8 @@ struct LoadEquivalenceCorpusTests {
 
     /// What a reader sees of every target's backlinks: the linking pages, in
     /// order, each with its context. Held to the old `backlinkMap`, which
-    /// found the line on Characters and reduced it at load (L1, L3).
+    /// found the line on Characters, reduced it at load and resolved every
+    /// link it met (L1, L3, L4).
     @Test("on the corpus, every target's backlinks read as they did, one per linking page")
     func backlinksOnCorpus() {
         guard let corpus = Self.corpus else { return }
@@ -185,7 +186,7 @@ struct LoadEquivalenceCorpusTests {
 
         let busiest = newBacklinks.value.values.max { $0.count < $1.count } ?? []
         let shown = Self.timed { busiest.map(\.context) }
-        Self.report("Backlinks (L1, L3)", [
+        Self.report("Backlinks (L1, L3, L4)", [
             "backlinkMap() " + Self.change(oldBacklinks.duration, newBacklinks.duration),
             "every context read afterwards \(LoadTimings.format(contexts.duration))",
             "the busiest page's \(shown.value.count) \(LoadTimings.format(shown.duration))",
@@ -265,5 +266,49 @@ struct LoadEquivalenceCorpusTests {
             "outgoingLinks(in:) over every body " + Self.change(oldLinks.duration, newLinks.duration),
             "a render's link list for every page " + Self.change(oldKeyed.duration, newKeyed.duration),
         ])
+    }
+
+    // MARK: L4. Each distinct link resolved once per sweep
+
+    @Test("a sweep resolves each distinct link once, to what it resolves to from its own page")
+    func resolutionsOnFixtures() {
+        let pages = [
+            WikiPage(path: "Primitives/a.md",
+                     text: "[[b]] [[b#Syntax]] ![[b]] [[b#^block]] [[b|B]] [[Caf\u{E9}]] [[x]] [[#Syntax]]"),
+            WikiPage(path: "Primitives/b.md",
+                     text: "# B\n## Syntax\n[[b]] [[b#Syntax]] [[Cafe\u{301}]] [[../b]] [[./a]] [[x]]"),
+            WikiPage(path: "Notes/caf\u{E9}.md", text: "# Café\n[[b]] [[Primitives/b#syntax]] [[a]]"),
+        ]
+        let index = Self.index(pages)
+        var resolutions = WikiIndex.LinkResolutions(index)
+        var links = 0
+        for page in pages.sorted(by: { $0.path < $1.path }) {
+            for link in WikiIndex.outgoingLinks(in: page.body) {
+                links += 1
+                let target = resolutions.target(of: link, from: page.path)
+                #expect(target == index.resolve(link, from: page.path), "\(page.body[link.range]) on \(page.path)")
+            }
+        }
+        #expect(resolutions.count < links, "\(resolutions.count) distinct links of \(links)")
+        #expect(Self.pairs(index.backlinkMap()) == Self.pairs(Legacy.backlinkMap(of: index)))
+    }
+
+    @Test("on the corpus, a sweep resolves each link as its own page does")
+    func resolutionsOnCorpus() {
+        guard let corpus = Self.corpus else { return }
+        var resolutions = WikiIndex.LinkResolutions(corpus.index)
+        var links = 0
+        var differing: [String] = []
+        for page in corpus.pages {
+            for link in WikiIndex.outgoingLinks(in: page.body) {
+                links += 1
+                if resolutions.target(of: link, from: page.path)
+                    != corpus.index.resolve(link, from: page.path) {
+                    differing.append("\(page.path): \(page.body[link.range])")
+                }
+            }
+        }
+        #expect(differing.isEmpty, "resolved differently in a sweep: \(differing)")
+        print("L4 resolutions per sweep: \(links) links, \(resolutions.count) resolved")
     }
 }
