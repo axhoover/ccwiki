@@ -369,10 +369,18 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
   `\begin`, any `\begin`, since a macro can spell an environment's name.
   A formula naming `\tag` is never kept either: a remembered one would not
   leave `\df@tag` in the table. And a hit deletes `\df@tag`, as KaTeX does
-  when a formula starts, so the table's other readers (the copy area,
-  `expandMacros`) see what they would without the memo. Before that, a
-  `\tag` followed by a remembered formula left a `\df@tag` the copy area's
-  `JSON.stringify` could not read, and the page failed to render.
+  when a formula starts, so the table KaTeX keeps between formulas is what
+  it would be without the memo.
+- **The copy area and `expandMacros` read the table as sent.** KaTeX writes
+  into the live table as formulas render: its own names, and a page's
+  `\gdef`s, some as token lists that point back at themselves. So
+  `ensureMarkdown` keeps a copy of the table the wiki sent (`sentMacros`),
+  and the macros page's copy buttons, Copy LaTeX (no macros) and
+  pseudocode's expanded source read that. Before, a `\nonumber`, a
+  `\notag`, a `\tag` or a page's `\gdef` anywhere in a web view made the
+  copy area's `JSON.stringify` throw, and the macros page failed to render
+  from then on; that was so on `main` too, where no wiki page has any of
+  them yet.
 - **Off**, for as long as a table stands, when any macro body holds a
   global definition, an `@`, `\begin`, `\nonumber`, `\notag` or `\tag`: every
   formula using that macro could change the table, or read what another

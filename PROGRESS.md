@@ -373,6 +373,15 @@ code:
 - two of the memo's corpus tests checked the wiki's content rather than
   the code, and would have failed on an ordinary wiki edit.
 
+The maintainer's review of `d1797ac` noted failures older than this pass:
+the macros page's copy area read the live table, into which KaTeX writes
+token lists that point back at themselves (after a `\nonumber`, a
+`\notag` or a page's `\gdef`), so its `JSON.stringify` threw and the page
+failed to render from then on. `ccwiki.js` now keeps the table as sent
+(`sentMacros`) for the copy area, Copy LaTeX (no macros) and pseudocode's
+expansion, and `tagLeftForTheCopyArea` covers all four cases; it failed
+on three of them before the change.
+
 **Results** (efficiency.md §5, measured alone, debug build, the same
 wiki, before → the six tracks in two runs):
 - §1.3's cause is confirmed: CodeMask's line ends by key path cost
