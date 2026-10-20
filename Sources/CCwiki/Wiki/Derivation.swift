@@ -945,9 +945,10 @@ extension Derivation {
         /// anything but `.current`.
         enum Loop: Sendable {
             /// The loop as of 21df5d7: every step at every layer, with R13's
-            /// flags looked up on each visit, and all three phases. Kept so
-            /// DerivationEquivalenceTests can hold `.current` to it on the
-            /// real manifest; delete it with the Legacy files.
+            /// flags looked up on each visit, all three phases, and every
+            /// object read back. Kept so DerivationEquivalenceTests can hold
+            /// `.current` to it on the real manifest; delete it with the
+            /// Legacy files.
             case legacy
             /// Semi-naive layers, R13's flags worked out once, and only the
             /// phases that can add a fact.
@@ -1090,7 +1091,8 @@ extension Derivation {
                     runIdealisedPhase(&state)
                 }
             }
-            return result(of: state, start: start, outside: seed.outside, options: options)
+            return result(of: state, start: start, outside: seed.outside, options: options,
+                          dense: loop == .legacy)
         }
 
         /// Both settings of one closure from a single run. Phases 1 and 2 are
@@ -1122,15 +1124,25 @@ extension Derivation {
             return (state, outside)
         }
 
+        /// `dense` reads every object back, as 21df5d7 did, so `.legacy`
+        /// holds the read-back from `reached` to it as well as the loop.
+        /// Delete it with `Loop.legacy`.
         private func result(of state: State, start: Set<String>, outside: [String: Fact],
-                            options: Options) -> Closure {
+                            options: Options, dense: Bool = false) -> Closure {
             var facts = outside
             var weakFacts: [String: Fact] = [:]
-            // Every object with a fact is in `reached`; the rest go unread.
-            for indexes in state.reached {
-                for index in indexes {
-                    if let fact = state.facts[index] { facts[objects.ids[index]] = fact }
-                    if let fact = state.weak[index] { weakFacts[objects.ids[index]] = fact }
+            if dense {
+                for (index, id) in objects.ids.enumerated() {
+                    if let fact = state.facts[index] { facts[id] = fact }
+                    if let fact = state.weak[index] { weakFacts[id] = fact }
+                }
+            } else {
+                // Every object with a fact is in `reached`; the rest go unread.
+                for indexes in state.reached {
+                    for index in indexes {
+                        if let fact = state.facts[index] { facts[objects.ids[index]] = fact }
+                        if let fact = state.weak[index] { weakFacts[objects.ids[index]] = fact }
+                    }
                 }
             }
             let refused = state.blocked.values.sorted { Derivation.stepPrecedes($0.step, $1.step) }
