@@ -99,9 +99,9 @@ enum CodeMask {
 
         var lineStart = text.startIndex
         while lineStart < text.endIndex {
-            let lineEnd = text[lineStart...].firstIndex(where: \.isMarkdownLineEnding) ?? text.endIndex
+            let (lineEnd, next) = MarkdownLineEnd.next(in: text, from: lineStart)
             let line = text[lineStart..<lineEnd]
-            defer { lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex }
+            defer { lineStart = next }
 
             let trimmed = line.drop { $0 == " " }
             if let marker = trimmed.first, marker == "`" || marker == "~" {
@@ -189,7 +189,8 @@ enum CodeMask {
 extension Character {
     /// A line ending as markdown-it reads one: `\n`, `\r\n` or a lone `\r`.
     /// `"\r\n"` is a single Character, so a search for `"\n"` alone reads a
-    /// page saved with CRLF endings as one long line.
+    /// page saved with CRLF endings as one long line. The load's own walks
+    /// find the same ends on bytes, with `MarkdownLineEnd`.
     var isMarkdownLineEnding: Bool { self == "\n" || self == "\r\n" || self == "\r" }
 }
 

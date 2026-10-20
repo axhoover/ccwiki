@@ -327,13 +327,8 @@ struct WikiIndex: Sendable {
     /// a backlinks pane that shows markup instead of prose is unreadable — the
     /// whole point of the pane is to tell you *why* another page links here.
     private static func context(of link: Wikilink, in body: String) -> String {
-        var start = link.range.lowerBound
-        while start > body.startIndex {
-            let previous = body.index(before: start)
-            if body[previous].isMarkdownLineEnding { break }
-            start = previous
-        }
-        let end = body[link.range.upperBound...].firstIndex(where: \.isMarkdownLineEnding) ?? body.endIndex
+        let start = MarkdownLineEnd.start(in: body, before: link.range.lowerBound)
+        let end = MarkdownLineEnd.next(in: body, from: link.range.upperBound).end
         return plainText(String(body[start..<end]))
     }
 
