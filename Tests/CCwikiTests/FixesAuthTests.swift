@@ -65,40 +65,39 @@ struct FixesAuthTests {
     /// by every test whose gh answers, all running at once.
     @Test("isAuthenticated asks github.com alone, and caches only a definite answer")
     func isAuthenticatedCaches() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        /// A gh whose `auth status` for github.com and whose probe say
-        /// what they are given. Asked of every host, it fails, as it does
-        /// when an Enterprise host's token has expired.
-        func gh(_ name: String, status: String, probe: String) throws -> ToolLocator {
-            let file = directory.appending(path: name)
-            let script = """
-                #!/bin/sh
-                case "$*" in
-                  "auth status --hostname github.com") \(status) ;;
-                  "api --hostname github.com user --jq .login") \(probe) ;;
-                  "auth status") echo "X Failed to log in to ghe.example.com account me" >&2; exit 1 ;;
-                  *) echo "unexpected: $*" >&2; exit 2 ;;
-                esac
-
-                """
-            try Data(script.utf8).write(to: file)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
-            var tools = ToolLocator(overrides: [.gh: file.path(percentEncoded: false)])
-            tools.locate([.gh])
-            try #require(tools.path(for: .gh) != nil)
-            return tools
-        }
-        let invalid = "echo '  - The token in keyring is invalid.' >&2; exit 1"
-
-        // Each ask waits as long as it takes: gh answers at once, but in a
-        // test run every suite runs at once, and 15 seconds can pass before
-        // its answer is heard. The deadline is not what is tested here.
+        // This gh answers at once. Under the whole parallel suite, 15 s
+        // would time only the scheduler.
         try await GitHubAuth.$deadline.withValue(.seconds(600)) {
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+            /// A gh whose `auth status` for github.com and whose probe say
+            /// what they are given. Asked of every host, it fails, as it does
+            /// when an Enterprise host's token has expired.
+            func gh(_ name: String, status: String, probe: String) throws -> ToolLocator {
+                let file = directory.appending(path: name)
+                let script = """
+                    #!/bin/sh
+                    case "$*" in
+                      "auth status --hostname github.com") \(status) ;;
+                      "api --hostname github.com user --jq .login") \(probe) ;;
+                      "auth status") echo "X Failed to log in to ghe.example.com account me" >&2; exit 1 ;;
+                      *) echo "unexpected: $*" >&2; exit 2 ;;
+                    esac
+
+                    """
+                try Data(script.utf8).write(to: file)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
+                var tools = ToolLocator(overrides: [.gh: file.path(percentEncoded: false)])
+                tools.locate([.gh])
+                try #require(tools.path(for: .gh) != nil)
+                return tools
+            }
+            let invalid = "echo '  - The token in keyring is invalid.' >&2; exit 1"
+
             // Signed in to github.com; another host's trouble is not ours.
             let signedIn = try gh("signed-in", status: "exit 0", probe: "exit 7")
             await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {

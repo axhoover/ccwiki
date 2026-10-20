@@ -707,7 +707,11 @@ struct PublisherTests {
         try scene.write("content/page.md", "a\nB\nc", in: job)
         await scene.center.refreshReview(job)
         job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
-        let result = await scene.center.approve(job)
+        // This gh answers at once. Under the whole parallel suite, 15 s
+        // would time only the scheduler, and Approve would say offline.
+        let result = await GitHubAuth.$deadline.withValue(.seconds(600)) {
+            await scene.center.approve(job)
+        }
 
         let url = try #require(URL(string: "https://github.com/axhoover/cryptology.city/pull/99"))
         #expect(result == .opened(url), "\(result); \(job.log.map(\.text))")
@@ -905,7 +909,11 @@ struct PublisherTests {
         // configuration names; post-commit amends HEAD with extra.md, and
         // the clone's configuration names a file-system monitor too.
         let trap = try await HookTrap.install(beside: scene.clone)
-        let result = await scene.center.approve(job)
+        // This gh answers at once. Under the whole parallel suite, 15 s
+        // would time only the scheduler, and Approve would say offline.
+        let result = await GitHubAuth.$deadline.withValue(.seconds(600)) {
+            await scene.center.approve(job)
+        }
         let ran = trap.ran()
 
         let url = try #require(URL(string: "https://github.com/axhoover/cryptology.city/pull/99"))
@@ -963,7 +971,12 @@ struct PublisherTests {
         await scene.center.refreshReview(job)
         job.pullRequest = PullRequestDraft(title: "[fix] Page: B", body: "Capitalised b.")
 
-        let result = await scene.center.approve(job)
+        // This gh answers at once, and only its push question stages the
+        // file. Under the whole parallel suite, 15 s would time only the
+        // scheduler, and Approve would say offline without asking it.
+        let result = await GitHubAuth.$deadline.withValue(.seconds(600)) {
+            await scene.center.approve(job)
+        }
         #expect(result == .refused(Publisher.notReviewed), "\(result)")
         #expect(job.state == .awaitingReview)
         #expect(job.notice == JobNotice(tone: .warning, text: Publisher.notReviewed))

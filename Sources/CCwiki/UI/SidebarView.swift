@@ -24,6 +24,9 @@ struct SidebarView: View {
                             ForEach(session.citingPages) { backlink in
                                 CitingRow(backlink: backlink)
                                     .equatable()
+                                    // A list trait: inside the EquatableView
+                                    // it never reaches the row.
+                                    .selectionDisabled()
                             }
                         }
                         .listSectionSeparator(.hidden)
@@ -230,7 +233,9 @@ struct SidebarView: View {
 /// A page that cites the reference being read. Not part of the selection
 /// binding — the tree owns selection, and these rows are a way back rather
 /// than a place in the hierarchy. A button, so ⌘-click is a link's: a tab
-/// behind this one (reader-comforts §1.1).
+/// behind this one (reader-comforts §1.1). The sidebar applies
+/// `.selectionDisabled()` outside `.equatable()`: list traits do not pass
+/// through an `EquatableView`.
 ///
 /// Equatable on its backlink, and drawn `.equatable()`, so its tooltip, the
 /// citing line as plain text, is worked out when the row changes rather
@@ -265,7 +270,6 @@ private struct CitingRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .help(backlink.context)
-        .selectionDisabled()
         .contextMenu {
             OpenElsewhereItems { session.open(location, $0) }
         }

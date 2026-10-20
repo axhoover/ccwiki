@@ -34,8 +34,10 @@ struct Tripwire {
     let target: PublishTarget
 
     /// How long either question to GitHub may take before the tripwire
-    /// says it did not run.
-    nonisolated static let deadline: Duration = .seconds(30)
+    /// says it did not run. Task-local, as `GitHubAuth.deadline` is: a test
+    /// whose git and gh answer at once scopes a long one around starting
+    /// the job, whose task inherits it.
+    @TaskLocal static var deadline: Duration = .seconds(30)
 
     /// Every branch on GitHub, by name. Nil when GitHub could not be asked.
     func headsBefore() async -> [String: String]? {

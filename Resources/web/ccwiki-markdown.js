@@ -954,8 +954,9 @@
    *  after it: a global definition (`\gdef`, `\xdef`, `\global`), and what
    *  sets KaTeX's own `\@eqnsw`: `\nonumber`, `\notag` and a numbered
    *  environment, any `\begin` since a macro can spell its name (ccwiki.js,
-   *  "KaTeX memo"). */
-  var CHANGES_KATEX_TABLE = /\\(?:gdef|xdef|global|begin|nonumber|notag)(?![A-Za-z@])/;
+   *  "KaTeX memo"). And `\tag`, which leaves `\df@tag` in the table until
+   *  the next formula starts, for the copy area and `expandMacros` to read. */
+  var CHANGES_KATEX_TABLE = /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/;
 
   /** The top-level blocks of `source`: their lines, `[start, end)` and
    *  0-based, their source text, and their HTML, rendered from the tokens

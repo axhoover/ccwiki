@@ -70,6 +70,8 @@ struct RenderMemoTests {
             (MarkdownScript.literal(#"\begin{pmatrix}a\end{pmatrix}"#), "undefined"),
             (MarkdownScript.literal(#"x\nonumber"#), "undefined"),
             (MarkdownScript.literal(#"x\notag"#), "undefined"),
+            // What `\gdef`s KaTeX's own `\df@tag`, which the copy area reads.
+            (MarkdownScript.literal(#"x\tag{1}"#), "{ displayMode: true }"),
             (#"new String("x")"#, "undefined"),
         ]
         for call in calls {
@@ -206,6 +208,50 @@ struct RenderMemoTests {
         #expect(delimited[0] != delimited[1], #"\right, after a formula"#)
     }
 
+    @Test("a formula the memo gives back deletes the `\\df@tag` a `\\tag` left, as KaTeX does")
+    func tagLeftForTheCopyArea() throws {
+        // The web view's scripts with the vendored KaTeX, the messages
+        // `ccwiki.js` posts, and Glossary/latex-macros's copy area, which
+        // reads the whole table.
+        let script = MarkdownScript(context: JSContext())
+        try script.evaluate(MarkdownScript.prelude, named: "prelude.js")
+        for name in Self.vendored + MarkdownScript.scripts {
+            try script.evaluate(try Self.source(name), named: name)
+        }
+        try script.evaluate(Self.shell, named: "shell.js")
+        try script.evaluate(#"""
+            var posted = [];
+            var webkit = { messageHandlers: { ccwiki: { postMessage: function (m) { posted.push(m); } } } };
+            var copyArea = stubElement();
+            stubPage.querySelector = function (selector) {
+              return selector === "#macros-copy-area" &&
+                stubPage.innerHTML.indexOf("macros-copy-area") >= 0 ? copyArea : null;
+            };
+            /** Each render's `ok`, or what it threw. A table of its own each
+             *  time, as each payload from Swift is. */
+            function show(markdown) {
+              posted = [];
+              try {
+                CCwiki.render({ path: "p", markdown: markdown, links: {}, macros: { "\\calA": "\\mathcal{A}" } });
+              } catch (e) {
+                return "threw " + e;
+              }
+              return JSON.stringify(posted.filter(function (m) { return m.type === "rendered"; })
+                .map(function (m) { return m.ok; }));
+            }
+            """#, named: "copy-area.js")
+        try script.evaluate(try Self.source("ccwiki.js"), named: "ccwiki.js")
+
+        // The macros page's formula comes back from the memo the second
+        // time, after a page whose last formula is tagged.
+        let macrosPage = #"<div id="macros-copy-area"></div>"# + "\n\nA formula $x$.\n"
+        let tagged = "# Tagged\n\n$$\nE = mc^2 \\tag{1}\n$$\n"
+        for (step, markdown) in [macrosPage, tagged, macrosPage].enumerated() {
+            #expect(try script.text("show(\(MarkdownScript.literal(markdown)))") == "[true]",
+                    "render \(step + 1)")
+        }
+    }
+
     // MARK: - The corpus
 
     private struct Corpus {
@@ -257,17 +303,25 @@ struct RenderMemoTests {
         let reached = try #require(report["reached"] as? [Int])
         let simulated = try #require(report["simulated"] as? Int)
         let lines = try #require(report["lines"] as? [String])
+        // Whether ccwiki.js kept nothing for a while, which the model leaves
+        // out: a macro that could share KaTeX's state, or a global
+        // definition. Then the hit rates are the wiki's, not the code's.
+        let memoOff = report["memoOff"] as? Bool ?? false
         #expect(formulas > 0)
         try #require(reached.count == 2)
         // The memo as the hit rates below model it: 1,000 formulas, the
         // least recently used going first.
-        #expect(reached.reduce(0, +) == simulated)
-        #expect(reached.allSatisfy { $0 < formulas }, "formulas the wiki repeats were remembered")
+        #expect(memoOff || reached.reduce(0, +) == simulated)
+        #expect(memoOff || reached.allSatisfy { $0 < formulas }, "formulas the wiki repeats were remembered")
 
         func remembered(_ rendered: Int) -> String {
             String(format: "%.1f%%", 100 * Double(formulas - rendered) / Double(formulas))
         }
-        let summary: [String] = [
+        let off: [String] = memoOff
+            ? ["the memo was off for some or all of this wiki (a macro that could share KaTeX's state, "
+               + "or a global definition), so the hit rates were not checked"]
+            : []
+        let summary: [String] = off + [
             "KaTeX through the patch before the memo: \(times[0]) ms",
             "pass 1: \(reached[0]) rendered, \(remembered(reached[0])) remembered, \(times[1]) ms",
             "pass 2: \(reached[1]) rendered, \(remembered(reached[1])) remembered, \(times[2]) ms",
@@ -399,6 +453,9 @@ struct RenderMemoTests {
             // A macro of the table defines another.
             (#"{ "\\mk": "\\gdef\\made{M}" }"#,
              [lastLineChanged("$\\mk$ makes.\n\nB.\n\nC.\n\nD.\n\nUses $\\made$ here.")]),
+            // A `\tag` in a gap leaves `\df@tag` in the table for what
+            // reads it after the review: the copy area, `expandMacros`.
+            (calA, [lastLineChanged("$$z \\tag{1}$$\n\nB.\n\nC.\n\nD.\n\nE.")]),
         ]
     }
 
@@ -414,6 +471,9 @@ struct RenderMemoTests {
                 #expect(try after.text(call) == before.text(call), "\(old)")
                 #expect(try after.count("blockRenders") == before.count("blockRenders"), "every block of \(old)")
             }
+            // What the reviews left in KaTeX's table, for what reads it next.
+            let names = "Object.keys(TABLE).sort().join()"
+            #expect(try after.text(names) == before.text(names), "the table after \(table)")
         }
     }
 
@@ -474,7 +534,27 @@ struct RenderMemoTests {
         var renders: [String: (before: Int, after: Int)] = [:]
         var different: [String] = []
         var count = 0
+        // Whether a macro could change KaTeX's table, as `mayChangeKatexTable`
+        // asks: then every review renders every block. Read before the
+        // reviews, whose formulas can write into the table.
+        let tableShares = try after.evaluate(#"""
+            Object.keys(TABLE).some(function (n) {
+              var b = TABLE[n];
+              return n === "\\color" || n.indexOf("@") >= 0 || typeof b !== "string" ||
+                /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/.test(b);
+            });
+            """#)?.toBool() == true
         for page in corpus.pages {
+            // Each page's reviews start from the table as it was sent, both
+            // before and after. Left there, what one page's formula wrote
+            // (`\@eqnsw` after an align) made every later review render every
+            // block, as `mayChangeKatexTable` asks, so one align on the first
+            // page in path order failed the fewer-blocks check below with
+            // every review the same. What one review leaves for the next is
+            // `reviewTableChanges`'s to check.
+            for script in [before, after] {
+                try script.evaluate("resetTable();", named: "reset.js")
+            }
             for (name, file) in Self.reviewFiles(page) {
                 let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
                     + MarkdownScript.literal(file) + "))"
@@ -496,7 +576,7 @@ struct RenderMemoTests {
         }
         #expect(different.isEmpty, "reviewed otherwise:\n  \(different.prefix(20).joined(separator: "\n  "))")
         let middle = try #require(renders["middle"])
-        #expect(middle.after < middle.before, "the blocks in gaps are never rendered")
+        #expect(tableShares || middle.after < middle.before, "the blocks in gaps are never rendered")
         #expect(renders["added"].map { $0.after == $0.before } == true, "a new file shows every block")
 
         let lines = ["middle", "ends", "added", "deleted"].compactMap { name -> String? in
@@ -552,7 +632,7 @@ struct RenderMemoTests {
 
     /// `file`, a `ccwiki-markdown.js`, behind the vendored KaTeX and
     /// markdown-it; `md` is made with `table` and counts in `blockRenders`
-    /// the blocks it renders.
+    /// the blocks it renders, and `resetTable()` puts the table back as sent.
     private static func reviewer(_ file: URL, table: String) throws -> MarkdownScript {
         let script = MarkdownScript(context: JSContext())
         try script.evaluate(MarkdownScript.prelude, named: "prelude.js")
@@ -573,6 +653,18 @@ struct RenderMemoTests {
           blockRenders++;
           return renderBlocks.apply(this, arguments);
         };
+
+        /** `TABLE` as it was sent, in place, since `md` and KaTeX hold that
+         *  object: what formulas wrote there goes (`\@eqnsw` after an align,
+         *  a `\gdef`'s macro), and a macro one redefined is as sent again. */
+        var SENT = JSON.stringify(TABLE);
+        function resetTable() {
+          var sent = JSON.parse(SENT);
+          Object.keys(TABLE).forEach(function (name) {
+            if (!(name in sent)) delete TABLE[name];
+          });
+          Object.assign(TABLE, sent);
+        }
         """#
 
     /// Ahead of `MarkdownScript.scripts`, as `index.html` loads them. They
@@ -648,6 +740,13 @@ struct RenderMemoTests {
     /// Counts the calls that reach KaTeX, and records each formula's key,
     /// as `ccwiki.js` makes it, and its HTML's length, for `report`.
     private static let rendererSetup = #"""
+        /** The table as Swift sends it with every page: a new object each
+         *  time, never the one KaTeX writes into. Sent `TABLE` itself, the
+         *  next page's table held what a formula had left there (`\@eqnsw`,
+         *  a `\tag`'s `\df@tag`), so ccwiki.js took it for another table and
+         *  emptied the memo, and its `@` turned the memo off, as the app's
+         *  tables never do. */
+        var SENT = JSON.stringify(TABLE);
         var reached = 0;
         var vendoredKatex = katex.renderToString;
         katex.renderToString = function () {
@@ -672,17 +771,28 @@ struct RenderMemoTests {
         function page(markdown) {
           formulas = [];
           rendered.push(formulas);
-          CCwiki.render({ path: "page", markdown: markdown, links: {}, macros: TABLE });
+          CCwiki.render({ path: "page", markdown: markdown, links: {}, macros: JSON.parse(SENT) });
           var html = stubPage.innerHTML;
           return html + pseudocodeOf(html);
         }
+
+        /** ccwiki.js keeps nothing while a macro could share KaTeX's state
+         *  (`ensureMarkdown`), nor from a global definition on (`writesMacros`).
+         *  Neither is modelled below, so `report` says when either applies. */
+        var tableShares = Object.keys(TABLE).some(function (name) {
+          var body = String(TABLE[name]);
+          return name === "\\color" || name.indexOf("@") >= 0 || body.indexOf("@") >= 0 ||
+            /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/.test(body);
+        });
+        var wrote = false;
 
         /** The memo's key for a call, as ccwiki.js makes it; null for one it
          *  never keeps. */
         function memoKey(expr, options) {
           var merged = Object.assign({ macros: TABLE, throwOnError: false, strict: "ignore" }, options || {});
+          if (merged.globalGroup || /\\(?:gdef|xdef|global)(?![A-Za-z@])/.test(String(expr))) wrote = true;
           if (typeof expr !== "string" || merged.macros !== TABLE || merged.globalGroup ||
-              /\\(?:gdef|xdef|global|begin|nonumber|notag)(?![A-Za-z@])/.test(expr) ||
+              /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/.test(expr) ||
               expr.indexOf("@") >= 0) return null;
           var parts = [];
           for (var name in merged) {
@@ -748,7 +858,8 @@ struct RenderMemoTests {
             lines.push([limit === Infinity ? "none" : String(limit), share(a), share(b), share(again),
               (memo.most / 1e6).toFixed(2) + " M characters"].join("   "));
           });
-          return { formulas: formulaCount, reached: reachedByPass, simulated: simulated, lines: lines };
+          return { formulas: formulaCount, reached: reachedByPass, simulated: simulated, lines: lines,
+                   memoOff: tableShares || wrote };
         }
         """#
 

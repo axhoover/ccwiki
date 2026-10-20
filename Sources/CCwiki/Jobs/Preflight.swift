@@ -207,9 +207,8 @@ enum GitHubAuth {
     @TaskLocal static var cache: Cache = Cache()
 
     /// How long to wait on each of gh's answers before treating it as none.
-    /// A test that expects an answer scopes a longer one with
-    /// `$deadline.withValue`: in a test run every suite runs at once, and a
-    /// gh that answers at once can still take longer than this to be heard.
+    /// Task-local, as `cache` is: a test whose gh answers at once scopes a
+    /// long one, so the deadline times gh and not how busy the test run is.
     @TaskLocal static var deadline: Duration = .seconds(15)
 
     /// The cached answer, or `signedIn`'s, which caches only a definite one.
