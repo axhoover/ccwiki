@@ -1651,6 +1651,12 @@ final class AppModel {
         savedPages.move(fromOffsets: source, toOffset: destination)
     }
 
+    /// Move Up and Move Down on a saved row: a drag's form for the keyboard
+    /// and VoiceOver.
+    func moveSaved(_ entry: SavedPages.Entry, by step: Int) {
+        savedPages.move(entry.id, by: step)
+    }
+
     // MARK: Relations explorer
 
     /// Every way into the explorer ends here: the menu commands, the reader's

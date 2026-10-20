@@ -26,8 +26,12 @@ struct SidebarView: View {
                     // selection-disabled.
                     if !model.savedPages.isEmpty {
                         Section("Saved", isExpanded: $showsSaved) {
-                            ForEach(model.savedPages.entries) { entry in
-                                SavedRow(entry: entry, page: model.index?.pages[entry.path])
+                            let saved = model.savedPages.entries
+                            ForEach(saved) { entry in
+                                SavedRow(
+                                    entry: entry, page: model.index?.pages[entry.path],
+                                    isFirst: entry.id == saved.first?.id,
+                                    isLast: entry.id == saved.last?.id)
                                     .selectionDisabled()
                             }
                             .onMove { model.moveSaved(fromOffsets: $0, toOffset: $1) }
@@ -301,12 +305,19 @@ private struct CitingRow: View, Equatable {
 /// A page the wiki no longer has, and that reconciliation could not find by
 /// its title, stays where the reader put it, dimmed, and a click searches
 /// the wiki for its title.
+///
+/// Move Up and Move Down, in its menu and as VoiceOver actions, reorder the
+/// list without a drag.
 private struct SavedRow: View {
     @Environment(AppModel.self) private var model
     @Environment(ReaderSession.self) private var session
     let entry: SavedPages.Entry
     /// Nil when the wiki no longer has the page.
     let page: WikiPage?
+    /// At the top of the list, where Move Up has nowhere to go.
+    let isFirst: Bool
+    /// At the bottom, where Move Down has nowhere to go.
+    let isLast: Bool
 
     var body: some View {
         let location = AppModel.Location.page(path: entry.path, anchor: entry.anchor)
@@ -354,10 +365,24 @@ private struct SavedRow: View {
                 OpenElsewhereItems { session.open(location, $0) }
             }
             Divider()
+            Button("Move Up") { model.moveSaved(entry, by: -1) }
+                .disabled(isFirst)
+            Button("Move Down") { model.moveSaved(entry, by: 1) }
+                .disabled(isLast)
+            Divider()
             Button("Remove from Saved") { model.removeSaved(entry) }
         }
-        // The context menu is invisible to VoiceOver; a named action is not.
+        // The context menu is invisible to VoiceOver; named actions are not.
+        // A move with nowhere to go is left out, as the menu disables it.
         .accessibilityAction(named: "Remove from Saved") { model.removeSaved(entry) }
+        .accessibilityActions {
+            if !isFirst {
+                Button("Move Up") { model.moveSaved(entry, by: -1) }
+            }
+            if !isLast {
+                Button("Move Down") { model.moveSaved(entry, by: 1) }
+            }
+        }
     }
 
     /// The second line: the paper a reference's key stands for, as in the

@@ -75,6 +75,15 @@ struct SavedPages: Equatable, Sendable {
         entries = rest
     }
 
+    /// Move Up and Move Down: `step` places toward the bottom, or toward the
+    /// top when negative. Past either end, nothing.
+    mutating func move(_ id: Entry.Key, by step: Int) {
+        guard let from = entries.firstIndex(where: { $0.id == id }),
+              entries.indices.contains(from + step) else { return }
+        let entry = entries.remove(at: from)
+        entries.insert(entry, at: from + step)
+    }
+
     // MARK: After a load
 
     /// The list as a new wiki has it. A page still at its path keeps its

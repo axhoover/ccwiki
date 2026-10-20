@@ -97,6 +97,27 @@ struct SavedPagesTests {
         #expect(moved([], to: 0) == ["A", "B", "C", "D"])
     }
 
+    @Test("Move Up and Move Down take a row one place, and past an end nowhere")
+    func moveByStep() {
+        func moved(_ name: String, by step: Int) -> [String] {
+            var saved = Self.four
+            saved.move(SavedPages.Entry.Key(path: "\(name).md", anchor: nil), by: step)
+            return Self.paths(saved).map { String($0.prefix(1)) }
+        }
+        #expect(moved("A", by: 1) == ["B", "A", "C", "D"])
+        #expect(moved("C", by: -1) == ["A", "C", "B", "D"])
+        #expect(moved("D", by: -2) == ["A", "D", "B", "C"])
+        #expect(moved("A", by: -1) == ["A", "B", "C", "D"], "the top row has nowhere up to go")
+        #expect(moved("D", by: 1) == ["A", "B", "C", "D"], "the bottom row has nowhere down to go")
+        #expect(moved("Z", by: 1) == ["A", "B", "C", "D"], "a row not in the list moves nothing")
+
+        var saved = Self.four
+        saved.add(path: "B.md", anchor: "proof", title: "B", at: Self.earlier)
+        saved.move(SavedPages.Entry.Key(path: "B.md", anchor: "proof"), by: -3)
+        #expect(saved.entries.map(\.anchor) == [nil, "proof", nil, nil, nil], "a section moves, not its page")
+        #expect(Self.paths(saved) == ["A.md", "B.md", "B.md", "C.md", "D.md"])
+    }
+
     // MARK: JSON
 
     @Test("the list reads back from its JSON as it was written, order, sections and dates")
