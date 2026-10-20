@@ -408,12 +408,13 @@ struct CCwikiCommands: Commands {
 
             // The saved pages for the keyboard, as Safari's Bookmarks menu
             // lists its bookmarks: the sidebar's rows are buttons, which ↑
-            // and ↓ skip. A section reads "Page § Heading". A page the wiki
-            // no longer has is dimmed here, as its row is.
+            // and ↓ skip. A section reads "Page § Heading", and once it is
+            // no longer on its page, opens the page at its top. A page the
+            // wiki no longer has is dimmed here, as its row is.
             Menu("Saved Pages") {
                 ForEach(model?.savedPages.entries ?? []) { entry in
                     Button(entry.menuTitle) {
-                        session?.open(.page(path: entry.path, anchor: entry.anchor), .here)
+                        session?.open(.page(path: entry.path, anchor: entry.anchorToOpen), .here)
                     }
                     .disabled(model?.index?.pages[entry.path] == nil)
                 }

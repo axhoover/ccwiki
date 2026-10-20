@@ -1943,8 +1943,16 @@ which loads a real `AppModel` over the fixture clone.
   menu under a heading and in the outline's, and reads Remove Section from
   Saved once the section is saved. The entry keeps the heading as the
   outline showed it, in an optional `sectionTitle`, so a list written
-  before reads unchanged. Reconciliation still looks up the page's title
-  alone, and a section follows its page. A heading with math shows its
+  before reads unchanged. Reconciliation looks up a page by its title
+  alone, and a section follows its page. On the page, the section is
+  found by its id and takes its heading's text as it is now, or else by
+  its heading and takes that heading's id. Found neither way, its heading
+  was renamed or removed: its row's second line is dimmed and reads
+  "§ Heading — no longer on the page", and the row and Wiki ▸ Saved
+  Pages open the page at its top. That state is worked out with each
+  load and never stored. The outline's headings are the ATX headings
+  `WikiPage.headings()` reads: rendered in node, each of the 877 pages'
+  outlines has as many, at the same levels. A heading with math shows its
   source, as the outline does: 14 of the 1,772 headings below a page's
   title. No title or heading holds a §, so "Page § Heading" is never
   ambiguous. `ReaderContextTarget.saveSectionItem(outline:isSaved:)` builds

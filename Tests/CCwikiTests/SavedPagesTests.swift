@@ -326,6 +326,79 @@ struct SavedPagesTests {
         #expect(reconciled.entries.map(\.anchor) == [nil, "definition"])
         #expect(reconciled.entries.map(\.menuTitle) == ["One-way functions", "One-way functions § Definition"])
     }
+
+    /// PRF's page with `body` under its frontmatter.
+    private static func writePRF(_ body: String, in clone: FixtureClone) throws {
+        try clone.write(FixtureClone.prf, FixtureClone.page(
+            type: "primitive", title: "Pseudorandom function", aliases: ["PRF"],
+            body: "# Pseudorandom function\n\n" + body))
+    }
+
+    /// Section `anchor` of PRF, saved with heading `heading`.
+    private static func savedPRFSection(_ anchor: String, heading: String) -> SavedPages {
+        var saved = SavedPages()
+        saved.add(
+            path: Self.prf, anchor: anchor, sectionTitle: heading, title: "Pseudorandom function",
+            at: Self.earlier)
+        return saved
+    }
+
+    @Test("a saved section takes its heading as the page has it now, and its id when only the id changed")
+    func reconcilesChangedHeading() throws {
+        let clone = try FixtureClone()
+        defer { clone.delete() }
+        let syntax = Self.savedPRFSection("syntax", heading: "Syntax")
+        #expect(syntax.reconciled(with: WikiIndex.build(contentRoot: clone.content)) == syntax,
+                "nothing moved, so nothing changes")
+
+        // The heading is recased, and keeps its id.
+        try Self.writePRF("## SYNTAX\n\nA keyed family.\n", in: clone)
+        let recased = syntax.reconciled(with: WikiIndex.build(contentRoot: clone.content))
+        #expect(recased.entries.map(\.anchor) == ["syntax"])
+        #expect(recased.entries.map(\.menuTitle) == ["Pseudorandom function § SYNTAX"])
+        #expect(recased.entries.map(\.isSectionMissing) == [false])
+
+        // The second of two Syntax headings, saved as syntax-1. The first
+        // goes, and the second's id loses its -1.
+        let second = Self.savedPRFSection("syntax-1", heading: "Syntax")
+        try Self.writePRF("## Syntax\n\nA keyed family.\n", in: clone)
+        let moved = second.reconciled(with: WikiIndex.build(contentRoot: clone.content))
+        #expect(moved.entries.map(\.anchor) == ["syntax"], "found by its heading")
+        #expect(moved.entries.map(\.anchorToOpen) == ["syntax"])
+        #expect(moved.entries.map(\.isSectionMissing) == [false])
+    }
+
+    @Test("a section whose heading was renamed or removed stays, missing, and opens its page at the top")
+    func reconcilesMissingSection() throws {
+        let clone = try FixtureClone()
+        defer { clone.delete() }
+        let syntax = Self.savedPRFSection("syntax", heading: "Syntax")
+
+        for body in ["## Signature\n\nA keyed family.\n", "A keyed family.\n"] {
+            try Self.writePRF(body, in: clone)
+            let index = WikiIndex.build(contentRoot: clone.content)
+            let missing = syntax.reconciled(with: index)
+            #expect(missing.entries.map(\.isSectionMissing) == [true], "\(body.debugDescription)")
+            #expect(missing.entries.map(\.anchor) == ["syntax"], "it keeps its id")
+            #expect(missing.entries.map(\.menuTitle) == ["Pseudorandom function § Syntax"], "and its heading")
+            #expect(missing.entries.map(\.anchorToOpen) == [nil], "it opens the page at its top")
+            #expect(missing.reconciled(with: index) == missing, "a second load changes nothing")
+
+            let json = try #require(missing.json)
+            #expect(SavedPages(json: json) == syntax, "whether it is missing is never stored")
+        }
+
+        // The heading comes back.
+        try Self.writePRF("## Signature\n", in: clone)
+        let missing = syntax.reconciled(with: WikiIndex.build(contentRoot: clone.content))
+        try Self.writePRF("## Syntax\n", in: clone)
+        #expect(missing.reconciled(with: WikiIndex.build(contentRoot: clone.content)) == syntax)
+
+        // A page the wiki no longer has is missing, not its section.
+        try clone.remove(FixtureClone.prf)
+        let gone = missing.reconciled(with: WikiIndex.build(contentRoot: clone.content))
+        #expect(gone.entries.map(\.isSectionMissing) == [false])
+    }
 }
 
 /// Saved pages in the app model: what it reads from the user defaults when

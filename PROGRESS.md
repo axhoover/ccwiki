@@ -32,7 +32,9 @@ reader and for how much of them CI can check:
   Section, the last item of F2's group, keeps a section, which reads as
   its page's title over "§ Heading". After a pull, a saved page whose file
   went is found by its title. If it cannot be, it stays, dimmed, as "No
-  longer in the wiki", and a click searches for it.
+  longer in the wiki", and a click searches for it. A saved section whose
+  heading was renamed or removed reads "no longer on the page", and opens
+  the page at its top.
 
 **How it was built.** Two tracks over disjoint files, F (F1, F2) and G
 (F3), each built, then reviewed and fixed on its own branch. They merged
@@ -114,8 +116,9 @@ here, and CI is the first compiler.
 - ReaderContextMenuTests covers the section group and Save Section.
 - SavedPagesTests and SavedPagesModelTests cover the list, its JSON, a
   section's heading, and reconciliation (a rename, a deletion, an exact
-  title, a `#` in a title, a section following its page). A model load
-  writes the reconciled list back.
+  title, a `#` in a title, a section following its page, a heading
+  recased, renamed or removed, a duplicate heading's id losing its `-1`).
+  A model load writes the reconciled list back.
 
 **To check on a Mac** (`make shots` has no step for these yet):
 - the grouped Backlinks tab, a row with several mentions closed and open,
@@ -128,6 +131,9 @@ here, and CI is the first compiler.
 - dragging a Saved row, which is a plain button, Move Up and Move Down,
   and the VoiceOver actions;
 - Wiki ▸ Saved Pages with a missing page;
+- a saved section whose heading a pull renamed: its row's dimmed "§
+  Heading — no longer on the page", and a click opening the page at its
+  top;
 - closing Saved in one window closing it in every window, and its staying
   closed after a relaunch.
 

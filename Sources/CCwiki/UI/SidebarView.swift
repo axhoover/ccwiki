@@ -302,7 +302,8 @@ private struct CitingRow: View, Equatable {
 /// `.selectionDisabled()`.
 ///
 /// A saved section reads as its page's title over its heading, and opens
-/// the page there.
+/// the page there. Once a load finds the heading no longer on the page, its
+/// line is dimmed and says so, and the row opens the page at its top.
 ///
 /// A page the wiki no longer has, and that reconciliation could not find by
 /// its title, stays where the reader put it, dimmed, and a click searches
@@ -322,7 +323,7 @@ private struct SavedRow: View {
     let isLast: Bool
 
     var body: some View {
-        let location = AppModel.Location.page(path: entry.path, anchor: entry.anchor)
+        let location = AppModel.Location.page(path: entry.path, anchor: entry.anchorToOpen)
         Button {
             if page == nil {
                 searchForTitle()
@@ -348,7 +349,7 @@ private struct SavedRow: View {
                     if let subtitle {
                         Text(subtitle)
                             .font(Theme.Fonts.rowSubtitle)
-                            .foregroundStyle(page == nil
+                            .foregroundStyle(page == nil || entry.isSectionMissing
                                 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -392,13 +393,18 @@ private struct SavedRow: View {
     /// stands for, as in the tree.
     private var subtitle: String? {
         guard let page else { return "No longer in the wiki" }
-        if let section = entry.sectionName { return "§ " + section }
+        if let section = entry.sectionName {
+            return entry.isSectionMissing ? "§ \(section) — no longer on the page" : "§ " + section
+        }
         return page.kind == .reference ? page.displayTitle : nil
     }
 
     private var tooltip: Text {
         guard page != nil else {
             return Text("No longer in the wiki. Click to search for “\(entry.title)”.")
+        }
+        guard !entry.isSectionMissing else {
+            return Text("No longer on the page. Click to open the page.")
         }
         return Text("Saved \(entry.savedAt, format: .dateTime.day().month().year())")
     }

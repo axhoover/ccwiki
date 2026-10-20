@@ -18,13 +18,28 @@ struct SavedPages: Equatable, Sendable {
         var path: String
         /// A heading's id, for a saved section; nil for the page.
         var anchor: String?
-        /// A saved section's heading as the outline showed it when it was
-        /// saved; nil for the page. Shown, never looked up.
+        /// A saved section's heading as the outline showed it, and as the
+        /// page has it after each load; nil for the page. Shown, and looked
+        /// up when the page no longer has the id.
         var sectionTitle: String?
         /// The page's title, never a section's heading: reconciliation looks
         /// it up.
         var title: String
         var savedAt: Date
+        /// Whether the page, after the last load, has no heading with
+        /// `anchor`, by its id or by `sectionTitle`. Worked out with each
+        /// load, and never stored.
+        var isSectionMissing = false
+
+        private enum CodingKeys: String, CodingKey {
+            case path, anchor, sectionTitle, title, savedAt
+        }
+
+        /// Where the page opens: at the section, or at its top once the
+        /// section is missing.
+        var anchorToOpen: String? {
+            isSectionMissing ? nil : anchor
+        }
 
         /// A saved section's name: its heading, or its id where an entry
         /// has no heading. Nil for the page.
@@ -114,8 +129,9 @@ struct SavedPages: Equatable, Sendable {
     /// names, as a wikilink with that text resolves it (`WikiIndex.resolve`),
     /// and then as the one page with exactly that title. Found, the entry
     /// points there. Not found, it stays as it was, and the sidebar says it
-    /// is no longer in the wiki. An entry that comes to name a page already
-    /// saved is that page twice, and the first is kept.
+    /// is no longer in the wiki. A saved section is then looked up on its
+    /// page (`section(_:of:on:)`). An entry that comes to name a page or
+    /// section already saved is that one twice, and the first is kept.
     func reconciled(with index: WikiIndex) -> SavedPages {
         SavedPages(entries.map { entry in
             var entry = entry
@@ -126,8 +142,31 @@ struct SavedPages: Equatable, Sendable {
                 entry.path = page.path
                 entry.title = page.title
             }
+            entry.isSectionMissing = false
+            if let anchor = entry.anchor, let page = index.pages[entry.path] {
+                entry = Self.section(anchor, of: entry, on: page)
+            }
             return entry
         })
+    }
+
+    /// Saved section `anchor` as `page` has it now. Found by its id, it
+    /// takes its heading's text as the page has it. Else it is found by its
+    /// heading, and takes that heading's id: a heading of the same text
+    /// above it went, and its `-1` with it. Found neither way, the heading
+    /// was renamed or removed, and the entry keeps both and is missing.
+    private static func section(_ anchor: String, of entry: Entry, on page: WikiPage) -> Entry {
+        var entry = entry
+        let headings = page.headings()
+        if let heading = headings.first(where: { $0.id == anchor }) {
+            entry.sectionTitle = heading.text
+        } else if let title = entry.sectionTitle,
+                  let heading = headings.first(where: { $0.text == title }) {
+            entry.anchor = heading.id
+        } else {
+            entry.isSectionMissing = true
+        }
+        return entry
     }
 
     /// The page a `[[title]]` written on the page at `sourcePath` would
