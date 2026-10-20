@@ -275,13 +275,16 @@ actor SearchIndex {
 
     /// The rankers, from pages sorted by path: their ties then fall the same
     /// way whichever build made the rows. `outlines` holds the headings
-    /// already parsed for the rows, by path, which are not parsed again.
+    /// already parsed for the rows, by path, which are not parsed again, and
+    /// the reference ranker names the pages citing a paper with the names
+    /// the concept ranker gave them.
     private func rank(
         _ pages: [WikiPage], outlines: [String: ConceptRanker.Outline],
         backlinks: [String: [WikiIndex.Backlink]]
     ) {
         ranker = ConceptRanker(pages: pages, headings: outlines)
-        referenceRanker = ReferenceRanker(pages: pages, backlinks: backlinks)
+        referenceRanker = ReferenceRanker(
+            pages: pages, backlinks: backlinks, citerNames: ranker.citerNames)
     }
 
     private static func sortedByPath(_ pages: [WikiPage]) -> [WikiPage] {

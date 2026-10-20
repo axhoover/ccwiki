@@ -205,7 +205,7 @@ struct SearchEquivalenceTests {
     }
 
     /// Asserts that `index`, synced with `library`, holds what the code
-    /// before track S built for it: the concept ranker and every row.
+    /// before track S built for it: both rankers and every row.
     static func expectLegacy(
         _ index: SearchIndex, file: URL, _ library: Library, fingerprinted: Bool = true,
         after step: String
@@ -224,6 +224,16 @@ struct SearchEquivalenceTests {
             """)
         let sameVocabulary = ranker.vocabulary == legacy.vocabulary
         #expect(sameVocabulary, "\(step): concept vocabulary")
+
+        let referenceRanker = await index.referenceRanker
+        let references = referenceRanker.entries
+        let legacyReferences = Legacy.References(
+            pages: library.pages, backlinks: library.backlinks).entries
+        let sameReferences = references == legacyReferences
+        #expect(sameReferences, """
+            \(step): reference entries, \
+            \(Self.firstDifference(references, legacyReferences, path: \.path))
+            """)
     }
 
     static func milliseconds(_ duration: Duration) -> String {
@@ -527,17 +537,76 @@ struct SearchEquivalenceTests {
             over an older index \(Self.milliseconds(rewriteTime))
             """)
     }
+
+    // MARK: S3. Citing pages named once
+
+    @Test("the reference ranker, naming citers with the concept ranker's names, is the old one")
+    func citerNames() throws {
+        let clone = try Self.hazardClone()
+        defer { clone.delete() }
+        let library = Library(cloneRoot: clone.root)
+        let legacy = Legacy.References(pages: library.pages, backlinks: library.backlinks)
+        let citers = legacy.entries.flatMap(\.citers)
+        #expect(citers.contains { $0.via == nil }, "a page cites the paper")
+        #expect(citers.contains { $0.via != nil }, "and one cites it through a reduction")
+
+        let names = ConceptRanker(pages: library.pages).citerNames
+        let handed = ReferenceRanker(
+            pages: library.pages, backlinks: library.backlinks, citerNames: names)
+        #expect(handed.entries == legacy.entries)
+        let named = ReferenceRanker(pages: library.pages, backlinks: library.backlinks)
+        #expect(named.entries == legacy.entries)
+        // Every page that cites a paper has the concept ranker's names.
+        #expect(citers.allSatisfy { names[$0.path] == $0.names })
+    }
+
+    @Test("on the real wiki: the reference ranker from the concept ranker's names, as before")
+    func corpusCiterNames() async throws {
+        guard let library = Self.corpus else { return }
+        let clock = ContinuousClock()
+
+        var start = clock.now
+        let legacy = Legacy.References(pages: library.pages, backlinks: library.backlinks)
+        let legacyTime = start.duration(to: clock.now)
+        let concepts = ConceptRanker(pages: library.pages)
+        start = clock.now
+        let citerNames = concepts.citerNames
+        let handed = ReferenceRanker(
+            pages: library.pages, backlinks: library.backlinks, citerNames: citerNames)
+        let handedTime = start.duration(to: clock.now)
+        start = clock.now
+        let named = ReferenceRanker(pages: library.pages, backlinks: library.backlinks)
+        let namedTime = start.duration(to: clock.now)
+
+        for (name, ranker) in [("handed the names", handed), ("naming once", named)] {
+            let same = ranker.entries == legacy.entries
+            #expect(same,
+                    "\(name): \(Self.firstDifference(ranker.entries, legacy.entries, path: \.path))")
+        }
+        let citers = legacy.entries.flatMap(\.citers)
+        let allNamed = citers.allSatisfy { citerNames[$0.path] == $0.names }
+        #expect(allNamed, "every citing page is a concept page the concept ranker named")
+
+        print("""
+            Search sync, citing pages named once (S3), on \(library.pages.count) pages, \
+            \(citers.count) citers from \(Set(citers.map(\.path)).count) pages:
+              ReferenceRanker as before \(Self.milliseconds(legacyTime)); \
+            handed the concept ranker's names \(Self.milliseconds(handedTime)); \
+            naming each page once itself \(Self.milliseconds(namedTime))
+            """)
+    }
 }
 
 // MARK: - Legacy
 
 extension SearchEquivalenceTests {
 
-    /// Verbatim copy of Sources/CCwiki/Search/{ConceptRanker,SearchIndex}.swift
+    /// Verbatim copy of Sources/CCwiki/Search/{ConceptRanker,ReferenceRanker,SearchIndex}.swift
     /// at 21df5d7 for equivalence tests. Do not edit; delete in the next batch.
     ///
-    /// The parts track S replaced: what `ConceptRanker.init(pages:)` built,
-    /// and the row `SearchIndex.write` bound.
+    /// The parts track S replaced: what `ConceptRanker.init(pages:)` and
+    /// `ReferenceRanker.init(pages:backlinks:)` built, and the row
+    /// `SearchIndex.write` bound.
     enum Legacy {
 
         /// `ConceptRanker.init(pages:)`, which parsed every concept page's
@@ -576,6 +645,97 @@ extension SearchEquivalenceTests {
                 }
                 self.entries = entries
                 self.vocabulary = vocabulary
+            }
+        }
+
+        /// `ReferenceRanker.init(pages:backlinks:)`, which named every citing
+        /// page again for each paper it cites, with the helpers it called.
+        struct References {
+            typealias Name = ConceptRanker.Name
+            typealias Entry = ReferenceRanker.Entry
+            typealias Citer = ReferenceRanker.Citer
+
+            let entries: [Entry]
+
+            init(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]]) {
+                let byPath = Dictionary(pages.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+                entries = pages.filter { $0.kind == .reference }.map { page in
+                    let authors = page.frontmatter.string("authors") ?? ""
+                    let venue = page.frontmatter.string("venue")
+                    let keys = [page.title] + page.aliases + [page.frontmatter.string("cryptobib_key")]
+                        .compactMap { $0 }
+                    let citers = Self.citers(of: page.path, byPath: byPath, backlinks: backlinks)
+                    let titleName = Name(page.displayTitle)
+                    let authorNames = Self.authorNames(authors)
+                    let authorWords = Set(authorNames.flatMap { Name($0).words })
+                    return Entry(
+                        path: page.path,
+                        key: page.title,
+                        title: page.displayTitle,
+                        status: page.status,
+                        authors: authors,
+                        venue: venue,
+                        year: Self.year(page.frontmatter.string("published")),
+                        keys: keys.map(Name.init),
+                        titleName: titleName,
+                        firstAuthorWords: Set(authorNames.first.map { Name($0).words } ?? []),
+                        authorWords: authorWords,
+                        otherWords: authorWords
+                            .union(titleName.words)
+                            .union(Name(venue ?? "").words),
+                        citers: citers)
+                }
+            }
+
+            /// The pages citing `path`: every non-reference page linking to it, and
+            /// for each reduction or barrier among them, the concept pages linking
+            /// to that.
+            static func citers(
+                of path: String, byPath: [String: WikiPage], backlinks: [String: [WikiIndex.Backlink]]
+            ) -> [Citer] {
+                func isEdge(_ kind: PageKind) -> Bool { kind == .reduction || kind == .barrier }
+                func citer(_ page: WikiPage, via: WikiPage?) -> Citer {
+                    Citer(
+                        path: page.path, title: page.title,
+                        names: ([page.title] + page.aliases).map(Name.init),
+                        via: via.map { RelationText.plain($0.title) })
+                }
+
+                var result: [Citer] = []
+                var seen: Set<String> = []
+                for link in backlinks[path] ?? [] {
+                    guard let source = byPath[link.sourcePath], source.kind != .reference,
+                          seen.insert(source.path).inserted
+                    else { continue }
+                    result.append(citer(source, via: nil))
+                    guard isEdge(source.kind) else { continue }
+                    for hop in backlinks[source.path] ?? [] {
+                        guard let concept = byPath[hop.sourcePath],
+                              concept.kind != .reference, !isEdge(concept.kind),
+                              seen.insert(concept.path + "\u{0}" + source.path).inserted
+                        else { continue }
+                        result.append(citer(concept, via: source))
+                    }
+                }
+                return result
+            }
+
+            /// `Alice, Bob, and Carol` or `Alice and Bob`: one name per author.
+            static func authorNames(_ authors: String) -> [String] {
+                authors
+                    .replacingOccurrences(
+                        of: #",\s*(?:and\s+)?|\s+and\s+"#, with: "\n", options: .regularExpression)
+                    .split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            }
+
+            /// The year of `1986` or `2005-05-01`.
+            static func year(_ published: String?) -> Int? {
+                guard let published, published.count >= 4,
+                      let year = Int(published.prefix(4))
+                else { return nil }
+                return year
             }
         }
 

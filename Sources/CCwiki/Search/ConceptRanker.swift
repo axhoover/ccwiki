@@ -188,6 +188,17 @@ struct ConceptRanker: Sendable {
         headings.map { (text: $0.text, id: $0.id) }
     }
 
+    /// Each page's title and alias names, by path: its names without the
+    /// filename's, which `Entry.init` puts last. They are the names
+    /// `ReferenceRanker` gives a page that cites a paper, and every such
+    /// page is a concept page, so the search index hands them over rather
+    /// than have the same pages named twice.
+    var citerNames: [String: [Name]] {
+        Dictionary(
+            entries.map { ($0.path, Array($0.names.dropLast())) },
+            uniquingKeysWith: { first, _ in first })
+    }
+
     /// The maintainer's order of sections. References never reach this.
     static func priority(_ kind: PageKind) -> Int {
         switch kind {
