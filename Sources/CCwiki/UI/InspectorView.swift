@@ -236,10 +236,12 @@ private struct OutlineRow: View, Equatable {
 /// One page that links to the page being read, and the lines that mention
 /// it.
 ///
-/// One mention shows as the line itself. Several show as "N mentions", a
-/// disclosure that lists each line (plans/efficiency.md §3.1). The title
-/// opens the page at its first mention, and a listed line at that line:
-/// scrolled to the block holding it, and outlined for a moment.
+/// The first line that mentions the page shows under the title, as it
+/// always has. A page that mentions it on several lines adds "N mentions",
+/// a disclosure that lists each line; while it is open, the list holds the
+/// first line, and the title stands alone (plans/efficiency.md §3.1). The
+/// title opens the page at its first mention, and a listed line at that
+/// line: scrolled to the block holding it, and outlined for a moment.
 ///
 /// A view of its own, compared by its backlink, so the lines are reduced to
 /// plain text (`Backlink.context`) when the backlink changes rather than on
@@ -268,8 +270,9 @@ private struct BacklinkRow: View, Equatable {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     // The line that mentions this page — *why* it links
-                    // here, which is the useful half.
-                    if link.mentions.count == 1 {
+                    // here, which is the useful half. The first, until the
+                    // list of every line takes its place.
+                    if link.mentions.count == 1 || !listsMentions {
                         mentionLine(link.context)
                     }
                 }
