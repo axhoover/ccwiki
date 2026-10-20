@@ -1,6 +1,9 @@
 # Efficiency: a quicker load and sync, a cheaper renderer, and three reading features
 
-**Plan, 2026-10-20. Phase 0 is built; the tracks are being integrated.** It lands as two draft PRs:
+**Plan, 2026-10-20. Phase 0 and the six tracks are built and merged on
+`claude/efficiency`; §5 records what CI measures of them.** Each track
+section ends with an "As built" note: where the build departed from this
+plan, and why. It lands as two draft PRs:
 `claude/efficiency` (Phase 0 and six tracks), then
 `claude/reading-features` (three features), which starts from the first and
 merges after it (§2.10).
@@ -251,7 +254,8 @@ attributable.
   `init` stages the web root, loads the job history and observes the app's
   activation, and the suite has never constructed one. So U's and W's checks
   are pure seams, test-local probes and the maintainer's `make shots`
-  (§2.8, §2.9).
+  (§2.8, §2.9). As built, U's and W's suites do construct one, on
+  temporary paths, and W's an `EditorSession` too.
 - **The ports and references the measurements used:**
   - Python ports of CodeMask, WikilinkParser, LinkScanner, QuartzSlug,
     `resolve`, `backlinkMap`, PreviewExcerpt, ConceptRanker,
@@ -310,7 +314,8 @@ attributable.
      could get wrong, and a wrong copy would make the differential test
      meaningless. So the old loop stays in production behind a parameter,
      `visits: .everyStep`, with the new loop the default. `check` and `fact`
-     stay shared, and the test compares only the loop.
+     stay shared, and the test compares only the loop. (As built, the
+     parameter is `loop: .legacy`, §2.6.)
    - **JavaScript goes to `Tests/CCwikiTests/Fixtures/legacy/`**, with the
      same header as a comment.
    - **The track's corpus test compares old and new** on every input the
@@ -331,8 +336,8 @@ attributable.
    J1, W4) are pure functions of immutable inputs. Each lives and dies with
    one load, one call, one web view or one library generation.
 6. **Swift 6 strict concurrency.** No `static var`. Switches that exist for
-   tests are parameters with defaults: X1's and X5's `visits`, X4's
-   `prefilter`.
+   tests are parameters with defaults: X1's and X5's `visits` (as built,
+   `loop`), X4's `prefilter`.
 7. **M0's report calls only entry points every track keeps:**
    - `CodeMask.inertRanges(in:)`, `WikilinkParser.links(in:)`,
      `MarkdownLinkParser.links(in:)`, `WikiIndex.outgoingLinks(in:)`,
@@ -514,7 +519,9 @@ already loaded:
   `refreshQuickSwitcher` does on the main actor per keystroke, with no
   debounce: 2,977 `FuzzyMatcher` calls and 8,931 arrays. It prints the
   slowest prefix, and the empty-query sort on its own. §4.2's deferral of
-  FuzzyMatcher rests on this line.
+  FuzzyMatcher rests on this line. As built, it times the query empty
+  (opening ⌘O), "p", "pr" and "prf", and prints how many pages and names
+  the matcher searches.
 
 **5. Counts beside the times.** These are deterministic: pages, links,
 distinct resolve keys, backlinks, targets, the maximum backlinks per target,
@@ -815,6 +822,38 @@ counts.*
   `LinkPreviews.sectionCard(...)` called directly, and equals
   `Legacy.LinkPreviews`' `preview(path: P, anchor: A)`.
 
+**As built** (`eff/L`: one commit per item in §2.2's order, then one
+review fix). The tests are in `LoadEquivalenceCorpusTests.swift`, with
+fixtures there and in FixesWikiparseTests (`lineEnds`, `loneCRLines`).
+- **L5 is removed work.** `scope` still splits the whole body, because
+  LinkPreviewTests reads `Scope.lines` as an array. With no anchor it stops
+  at the first level-1 heading outside a fence whose text is not empty,
+  and takes the old path when the text without comments still has a CR or
+  a `%%`. The siblings that return the reduced text are
+  `firstParagraphInline(in:anchor:)` and `firstParagraphInline(inLines:)`.
+  No `card(forPath:)` was added: the card test compares
+  `preview(path:anchor: nil)`.
+- **`MarkdownLinkParser.links(in:)` keeps its own parse.** It finds
+  CodeMask's ranges and the wikilinks itself, as `LinkScanner(text)` did,
+  not through `LinkParse`. L's copies read their markdown links through
+  it, so the markdown half of L2's test compares the old code with the
+  new; through `LinkParse` it compared the new code with itself (the
+  review's finding). No production code calls it.
+- **L4 and L6 key exactly.** `WikiIndex.LinkResolutions` keys on (target,
+  rawAnchor, isEmbed) compared byte for byte, since String's `==` is
+  canonical equivalence and two spellings of an accented letter need not
+  slug alike. `SectionCards` keys on a (path, anchor) struct, not
+  `"path#anchor"`, so no path or anchor can collide.
+- **One difference from the old code, outside the corpus.** For a
+  markdown link right after a Unicode Prepend character (U+0600, say) at
+  the start of a line, the old code began the line inside that grapheme
+  cluster, or trapped at the start of the text. The new code begins it
+  right after the line end. No page has such a character, and wikilinks
+  never reach that code.
+- **L1's form still waits on M0's A/B line.** If (d) is no faster than
+  (b), `MarkdownLineEnd`'s body becomes the closure, and its callers stay
+  as they are.
+
 ### 2.5 Track S: search sync
 
 **S1. Compute headings once per page in a full sync.** *S, removed work,
@@ -919,6 +958,29 @@ counts.*
   - `syncEqualsFreshBuild`, and the relevance reports unchanged.
 - **Rank.** Last in S, because U1 already takes the sync off the first
   page's path.
+
+**As built** (`eff/S`: one commit per item; the review found nothing).
+The tests are in `SearchEquivalenceTests.swift`: six on fixtures, and
+four on the corpus that print a line each (§5).
+- **The legacy copies are nested,** as `SearchEquivalenceTests.Legacy` at
+  the end of that file, since `Legacy/` was not in S's files. Nested, they
+  cannot clash with L's top-level `enum Legacy`.
+- **S4 reads about 72 k characters of JSON** on a no-op, not the 28 k
+  above, which is the `headings` column's size. That is the port's count.
+  `doc.outline` is `TEXT NOT NULL DEFAULT ''`, written by
+  `SearchIndex.encoded(_:)`. Of the rows kept, only a non-reference page's
+  outline is decoded, since the concept ranker parses only those pages.
+- **The rankers are built in a `defer`,** after the writes rather than
+  before them, so they are rebuilt however the writing ends. They are
+  built from the outlines of the rows written and kept, and parse only the
+  pages they lack. Their final state is the same, and the logged sync time
+  still includes them.
+- **S2** drops `doc_ai` and `doc_ad` with `IF EXISTS`, and makes them
+  again from `insertDeleteTriggers`, the constant the schema interpolates.
+  `populatedRewrite` compares a rewrite over a populated index, and an
+  update, a delete and an insert after it, with a fresh build and with
+  every row inserted through `doc_ai`.
+- SearchIndexSyncTests' `version2Resets` now expects `user_version` 4.
 
 ### 2.6 Track X: derivation and explorer
 
@@ -1089,6 +1151,30 @@ counts and timing.*
   included, is the guard. X5 lands last in X, in its own commit, and can be
   reverted alone.
 
+**As built** (`eff/X`: one commit per item, then one review fix). The
+tests are the new `DerivationEquivalenceTests.swift` (four corpus tests
+that print a line each, §5, and `quotePageReused` on the shared quote
+cases) and new DerivationTests on an every-rule fixture (`loopsAgree`,
+`prefilterAgrees`, `inspectorUnstatedSteps`). The golden file is
+unchanged.
+- **The old loop is `Engine.Loop.legacy`,** not `visits: .everyStep`.
+  `Engine.closure(from:options:loop:)` defaults to `.current`, which is X1
+  and X5 together; there is no `.flagged` or `.semiNaive`. `.legacy` runs
+  `legacyRun`, the `21df5d7` `run` byte for byte, for all three phases,
+  and reads the closure back densely, scanning every object as `21df5d7`
+  did (`result(of:…dense:)`). Before the review's fix both loops shared
+  X5's read-back from `reached`, so the tests never held it to the old one.
+- **The prefilter switches** are `prefilter: Bool = true` on `implying`,
+  `completions`, `chainExists` and `isDerivable`.
+- **X3(b) has ten read sites,** as listed above, not the critic's seven.
+  Each calls `allDerivedBarriers()` by name. X3(a)'s six DerivationTests
+  calls exist too, and drop `options:`.
+- **X5** gives both settings of a single closure from one run,
+  `Engine.closures(from:)`, which `Derivation.init` uses. Phase 3 also
+  runs when a non-default step has no hypothesis.
+- No legacy file was written. When the copies go, `Engine.Loop.legacy`,
+  `legacyRun`, `dense:` and the `prefilter:` switches go with them.
+
 ### 2.7 Track J: the renderer's JavaScript
 
 **J1. Memoise KaTeX per web view.** *S, asymptotic on re-render, CI: counts
@@ -1102,14 +1188,16 @@ and JSC timing.*
     function; when the merged macros are not `currentMacros`; or when the
     expression matches `/\\(?:gdef|xdef|global)(?![A-Za-z@])/`, which also
     clears the map. A call that throws caches nothing.
-  - **Size:** first in, first out, capped at **2,500** entries (below).
+  - **Size:** **1,000** entries, the least recently used going first (as
+    built; below).
   - **Macro table changes:** `ensureMarkdown` clears the map when it
     rebuilds, and turns caching off if any macro body holds a global
     definition.
   - **Coverage:** prose and display math, preview cards and pseudocode,
     since `pseudocode.js` calls the same patched function.
 - **The cap, from measured hit rates.** On the corpus's real call sequence
-  (7,320 calls, 3,299 distinct keys, 4.39 M characters of HTML), node 22:
+  (7,320 calls, 3,299 distinct keys, 4.39 M characters of HTML), node 22,
+  with first in, first out, as the plan first had it:
 
   | Second render | Cap 1,000 | Cap 2,000 | Cap 2,500 | Cap 3,300 |
   |---|---|---|---|---|
@@ -1129,17 +1217,25 @@ and JSC timing.*
   re-render the app makes is of a page that web view rendered recently:
   Back and Forward, the editor's preview of the page being edited, the
   current page after a pull or a preference change, a review refresh. So
-  the cap is sized to hold a whole Back history
-  (`NavigationHistory.capacity` is 100). 2,000 holds every formula of the
-  87 primitive and assumption pages (1,599), but only 92.8% of the
-  worst-case history. **The cap is 2,500**: it holds that history's 2,234
-  formulas with about 10% to spare as the wiki grows, at a cost of at most
-  0.6 M characters more than 2,000 (3.51 M against 2.88 M). A second pass
-  over the whole corpus in one web view thrashes any FIFO smaller than its
-  3,299 formulas. No reader does that, so the cap is not sized for it, and
-  M0's path-order line is expected to move little.
+  the plan sized a first-in-first-out cap to hold a whole Back history
+  (`NavigationHistory.capacity` is 100), and chose 2,500.
+
+  **As built, the cap is 1,000, the least recently used going first.** The
+  build measured both on the same call sequence. A hit moves its entry to
+  the end, so a page rendered again keeps the formulas it just used, which
+  first in, first out drops from among the oldest: at 1,000 it missed 0.1%
+  even on a page rendered right after itself. At 1,000, least recently
+  used holds 82.1% of a 100-page Back history in path order and 100% in
+  shuffled orders, all of a 50-page one, and at most about 1.6 M
+  characters. render-pipeline.md §3, "The KaTeX memo", has its hit rates
+  for each limit. The worst-case row above was measured first in, first
+  out only. A second pass over the whole corpus in one web view thrashes
+  any cap smaller than its 3,299 formulas. No reader does that, so the cap
+  is not sized for it, and M0's path-order line is expected to move
+  little.
 - **Effect.** In V8 (markdown-it, KaTeX and pseudocode; no DOM; min of 5,
-  all caps in one run), the second render of the corpus:
+  all caps in one run, first in, first out), the second render of the
+  corpus:
 
   | Order | No memo | Cap 1,000 | Cap 2,000 | Cap 2,500 | Cap 3,300 |
   |---|---|---|---|---|---|
@@ -1152,9 +1248,10 @@ and JSC timing.*
   11–14%: 54% of its calls repeat a formula already rendered, on that page
   or an earlier one. Re-renders happen on Back and Forward, at every 300 ms
   pause in the editor preview, after a pull or a preference change, and
-  when the review refreshes. Memory is at most about 3.5 M characters of
-  HTML per web view, reached only after 2,500 distinct formulas in that
-  view. This is JavaScript, so the Swift build does not change it.
+  when the review refreshes. As built, memory is at most about 1.6 M
+  characters of HTML and keys per web view, reached only after 1,000
+  distinct formulas in that view. This is JavaScript, so the Swift build
+  does not change it.
 - **Why it is exact.** In jsdom running the real `ccwiki.js`, 1,766 of 1,766
   renders were byte-identical with and without the memo: the corpus twice in
   one web view, also with a cap of 50, and rendered twice. In KaTeX 0.16.47
@@ -1210,6 +1307,52 @@ and JSC timing.*
   path, at debug level under category `render`.
 - **Effect.** No change in behaviour. It gives WebKit before and after
   numbers for J1 and J2 on a Mac.
+
+**As built** (`eff/J`: one commit per item, then four fixes after the
+review and a record of how they were checked). The tests are in
+`RenderMemoTests.swift`: rule tests on a KaTeX stub that numbers its
+answers, `sharedTable` against the vendored KaTeX, the review against
+`Fixtures/legacy/ccwiki-markdown.js` (`reviewHazards`,
+`reviewLinkDestinations`, `reviewTableChanges`,
+`reviewRendersShownBlocks`), and two corpus tests that print a line each
+(§5). render-pipeline.md §3 documents the memo ("The KaTeX memo") and the
+lazy review ("Blocks render when shown").
+- **J1 is least recently used, capped at 1,000** (above), not first in,
+  first out at 2,500.
+- **J1's rules are wider than above.** §2.7's KaTeX facts were incomplete:
+  KaTeX 0.16.47 also keeps `\@eqnsw` in the shared table between formulas,
+  set by numbered environments, `\nonumber` and `\notag`; `\tag` sets
+  `\df@tag`; and after every formula KaTeX deletes `\color` and
+  `\current@color` from the table. So:
+  - a formula with an `@`, or naming `\begin`, `\nonumber` or `\notag`, is
+    never kept;
+  - a global definition (`\gdef`, `\xdef` or `\global` as a control word,
+    or a `globalGroup` call) empties the memo and turns it off until
+    `ensureMarkdown` installs another table, since what it defined can
+    define more when a later formula uses it;
+  - the memo is off for a table with a macro body that holds a global
+    definition, an `@`, `\begin`, `\nonumber` or `\notag`, or a macro named
+    `\color` or with an `@` in its name.
+
+  No wiki formula or macro meets any of these, so the hit rates do not
+  move.
+- **J2 replays link destinations.** The risk §2.7 accepted does change
+  output: 3 hazard fixtures differed. Each text's parse records the
+  destinations it asks `normalizeLink` about (`parseWithDestinations`), and
+  a block's first read asks again before it renders.
+- **J2 renders every block,** the old text's first, as they rendered
+  before, when a block's formula or the live table could change KaTeX's
+  table. A formula that only reads the table still renders lazily. No wiki
+  page has such a formula, so the corpus counts stand: 3,512 blocks
+  instead of 12,748 for a middle-line edit, 5,240 instead of 12,814 for
+  the first and last lines.
+- **J3** also sends the page's `path` in its `rendered` message, since
+  another render may have been asked for before the message arrives.
+- **The JSC expectations in §2.3** were made at 2,500 first in, first out.
+  In V8 the built memo gave −60% on each page rendered again right after
+  itself, −5% on a first render of every page, and nothing on the corpus
+  a second time in path order (render-pipeline.md §3). The first is the
+  case Back, Forward and the editor's preview resemble.
 
 ### 2.8 Track U: the app model and the main window
 
@@ -1344,6 +1487,35 @@ with L3, CI: UI.*
   its backlink changes, not at every evaluation of the sidebar.
 - **Tests.** Shots of the sidebar on a reference page.
 
+**As built** (`eff/U`: one commit per item; the review found only an
+error in the builder's report, so nothing was fixed in the code).
+- **⇧⌘F's open query runs again in `sessionsDidLoad`,** before the sync,
+  not after it as step 5 has it: TextGrep reads the pages `apply` sets, not
+  the search index. `searchDidSync` runs ⌘S's and ⇧⌘R's again.
+  reader-comforts.md §3.2 records the new order, and architecture.md §3
+  shows it.
+- **The tests construct a real `AppModel`,** contrary to §1.5 and the
+  first paragraph above. `AppModelObservationTests.swift`, in place of
+  `MainWindowSeamTests.swift`, builds one on temporary paths with a fixture
+  clone. Its init and load reach no git and no network, and the suite runs
+  serialized. It has 8 tests; the 2 on the real wiki return early without
+  `CCWIKI_WIKI`. U1's test checks that a query typed during a load is
+  answered from the index the load wrote; it does not prove the order.
+- **U2** is `AppModel.resetQuickSwitcher(excluding:)`, which
+  `presentQuickSwitcher` calls, with the empty query as its own branch.
+  `quickSwitcherExcludedPath` is `private(set)`. A load with no switcher up
+  sorts nothing, and a test checks it (it fails at `21df5d7`).
+- **U3's legacy copy is nested,** a `private enum Legacy` in that file,
+  since `Legacy/` was not in U's files. The static `canExplore` is compared
+  with the copy of `explorerQuestion` on the fixture manifest, with and
+  without derivations, and on the real one.
+- **U4.** Every write of `syncState` goes through `enterSyncPhase`, which
+  clears `syncProgress`. The status bar moved to `UI/StatusBar.swift`,
+  unchanged but for its running line, with the leaf `SyncProgressText`. A
+  `withObservationTracking` test checks that `syncState`'s readers are
+  told once per phase, never per line.
+- **U5's `CitingRow`** is private to `SidebarView.swift`.
+
 ### 2.9 Track W: the other windows
 
 No test builds an `EditorSession`, which needs an `AppModel` (§1.5). W's
@@ -1409,6 +1581,34 @@ test.*
   page's links as one built fresh (each link's href and kind), and the cache
   rebuilds when the generation or the snapshot changes.
 
+**As built** (`eff/W`: one commit per item, then two review fixes). The
+tests are in `WindowObservationTests.swift`.
+- **W3: `followsTail` stays `@State` in `JobDetailView`,** and reaches
+  `TranscriptView` as a `@Binding`, so Follow survives a switch to Changes
+  and back, as it did. **`ElapsedTime` ticks only while the job
+  `isActive`:** preparing, running or publishing. A job awaiting review
+  has no `finishedAt`, so the first version ticked for as long as a review
+  was shown, which may be days; it now shows a fixed time, as `21df5d7`
+  did.
+- **W4 is `PreviewOverlay`,** keyed on the library generation plus the
+  review's added and renamed files, compared whole, not on the snapshot's
+  identity. Every autosave takes the review again, with a new tree, digest
+  and text, so a key on the whole review rebuilt the overlay at nearly
+  every pause (the review's blocking finding). The added and renamed files
+  are all `ReviewPayload.addedPages(in:)` reads, so the key is exact.
+  `overlayKept`, `overlayKeptAcrossSaves` and `overlayRebuilt` compare each
+  request with a private copy of the `21df5d7` request body.
+- **W2's probe** prints "window observation: @Observable notifies
+  observers of an equal assignment on this toolchain; the editor's
+  save-state guard is removed work: its test fails without it", or "does
+  not notify" and "insurance: its test passes without it".
+  `keystrokeKeepsSaving` builds a real `AppModel` and an `EditorSession`
+  on a restored awaiting-review job, with a `.txt` file so no web view is
+  made. There were no EditorSession save or conflict tests at `21df5d7` to
+  run.
+- **W1** moved VoiceOver's count announcement into the suggestion pane,
+  `onChange(of: items.map(\.id), initial: true)`.
+
 ### 2.10 File ownership, merge order and the two PRs
 
 | Owner | Writes |
@@ -1457,7 +1657,8 @@ its commits and what it expects CI to print.
      as they are. M0's `46685be` copy builds on all but the last two, and
      checks itself against those two;
    - X keeps `answer` and `implying`, which M0 calls, and every existing
-     `closure(from:options:)` call compiles through the defaulted `visits`;
+     `closure(from:options:)` call compiles through the defaulted `visits`
+     (as built, `loop`);
    - J keeps `CCwiki.render`'s payload and `reviewEntries`' signature, which
      M0's `RenderCorpusTests` uses;
    - no track changes an entry point §2.1 item 7 lists.
@@ -1674,7 +1875,8 @@ click:
    with new; the copies' enums are named to avoid it.
 3. **L5 and X5 carry logic of their own.** Each lands last in its track, in
    its own commit, and can be reverted alone. X5's old loop stays in
-   production behind `visits: .everyStep` for one release.
+   production behind `visits: .everyStep` (as built, `loop: .legacy`) for
+   one release.
 4. **U1 reorders a launch** and supersedes reader-comforts' documented
    order. Something may assume search is ready when the page appears. The
    revision check stays before the render, and the maintainer's shots check
@@ -1685,22 +1887,26 @@ click:
 6. **S4's schema bump** resets the index on the new build's first launch,
    which then writes a fresh file. Every app update already pays a full
    rewrite.
-7. **J1 and global definitions.** A future page using `\gdef` turns
-   caching off for that formula and clears the map: correct, only slower.
-   Document it in render-pipeline.md §3.
+7. **J1 and global definitions.** A future page using `\gdef` empties the
+   memo and, as built, turns it off until another macro table is
+   installed: correct, only slower. render-pipeline.md §3 documents it,
+   with the other ways KaTeX changes its table.
 8. **CI time.** The standalone timing step adds about 2–3 minutes, only on
    pull requests, `main` and manual runs. The new corpus equivalence tests
    add about 1–2 minutes to `make test-corpus` on every push. All are
    debug.
-9. **Memory.** J1 holds at most 2,500 entries, about 3.5 M characters of
-   HTML, per web view. L6 holds at most a few hundred cards per load. L3 and
-   F1 slices share the bodies' storage.
+9. **Memory.** J1 holds at most 1,000 entries, about 1.6 M characters of
+   HTML and keys, per web view. L6 holds at most a few hundred cards per
+   load. L3 and F1 slices share the bodies' storage.
 10. **Debug versus release.** CI measures debug. The constant-factor items
     (L1, X1) stay only if CI shows them. A user may never notice them, but
     they keep the project's own measurements attributable.
 11. **U and W are checked mostly by eye.** No test builds an `AppModel` or
     an `EditorSession`, so their behaviour rests on pure seams, the W2
-    probe and `make shots`, which only the maintainer can run.
+    probe and `make shots`, which only the maintainer can run. As built,
+    two suites construct an `AppModel` and one an `EditorSession` (§2.8,
+    §2.9); the views still rest on `make shots`. No test did before, so if
+    CI fails at `AppModel`'s init, those two suites are the place to look.
 
 ### 4.2 Left out on purpose
 
@@ -1749,34 +1955,75 @@ click:
 ## 5. Results, filled in from CI
 
 The integrator fills this in, one column per push, from the
-`pull_request` run's "measured alone" report (§2.10 item 1).
+`pull_request` run's "measured alone" report (§2.10 item 1). The rows
+follow M0's five reports in the order they print. In the `main` column,
+"—" means the line did not exist at `main`, and an empty cell that it did
+but this plan does not record its figure.
 
 | Report line | `main` (21df5d7) | M0 baseline | After L | After S | After X | After J | After U and W |
 |---|---|---|---|---|---|---|---|
 | wiki commit / Swift version | `ab81f02` (inferred) / — | | | | | | |
-| counts: pages / links / distinct resolve keys / backlinks / targets / max per target / headings, non-reference pages (vs §1.2) | from the ports: 877 / 3,447 / 972 / 2,492 / 821 / 44 / not counted | | | | | | |
-| backlinks | 1,605 ms | | | | | | |
-| backlinks: `46685be` copy / all four switches / as built (same run) | — | | | | | | |
+| full build, each phase the fastest of 5: `read` / `index` / `manifest` / `labels` / `grep` | 207 / 16 / 7.6 / 6.8 / 19 ms (the fastest run's phases) | | | | | | |
+| … `backlinks` | 1,605 ms | | | | | | |
+| … `derivation` | 640 ms | | | | | | |
+| … `previews` | 1,051 ms | | | | | | |
+| full build in memory: fastest / median | 3,553 ms / not recorded | | | | | | |
+| fingerprint scan alone | | | | | | | |
+| update after a one-page edit | 4,059 ms | | | | | | |
+| update after an alias change / a manifest change | | | | | | | |
+| search sync, one run each: in full / as a no-op / after one page changed | 2,984 / 1,125 / 1,291 ms | | | | | | |
+| counts: pages / scalars of body / bodies with `\r` (vs §1.2) | from the ports: 877 / 1,091,044 / 0 | | | | | | |
+| counts: links (wikilinks, markdown links) / distinct resolve keys / distinct targets | 3,447 (3,412, 35) / 972 / 831 | | | | | | |
+| counts: backlinks / pages linked to / most to one page / headings on non-reference pages | 2,492 / 821 / 44 / 1,882 on 447 pages | | | | | | |
+| line ends A/B, every body: (a) / (b) / (c) / (d) | — | | | | | | |
+| load path: `CodeMask.inertRanges`, every body | — | | | | | | |
+| … `outgoingLinks(in:)`, every body | — | | | | | | |
+| … `resolve`, every link | — | | | | | | |
+| … `plainText`, every backlink's line | — | | | | | | |
+| … `backlinkMap()` | — | | | | | | |
+| previews: `PreviewExcerpt.scope`, every body / `LinkPreviews` | — | | | | | | |
+| derivation: `Derivation(manifest:)` / `missingQuotes` | — | | | | | | |
+| explorer, standard / idealised: answer `owf` ⇒ `pke`, `pke` ⇒ `ot`, `ddh` ⇒ `io` | — | | | | | | |
+| explorer, standard / idealised: implying `pke`, `ot`, `mpc`, `nizk` | — | | | | | | |
+| search: `ConceptRanker` / `ReferenceRanker` | — | | | | | | |
+| search: `headings()`, non-reference pages / `indexableBody`, every body | — | | | | | | |
+| search: sync as a no-op (fastest of 5) / full sync into a fresh file (fastest of 3) | — | | | | | | |
+| ⌘O, one keystroke: opening with no query / "p" / "pr" / "prf" | — | | | | | | |
+| backlinks, one process: the `46685be` copy / all four switches / `backlinkMap()` as built | — | | | | | | |
 | … each switch alone, Δ from the `46685be` copy: CodeMask line ends / `context` line ends / slugger / segment split | — | | | | | | |
-| line ends A/B (a)/(b)/(c)/(d) | — | | | | | | |
-| `CodeMask.inertRanges`, all bodies | — | | | | | | |
-| `outgoingLinks`, all bodies | — | | | | | | |
-| `resolve`, every link | — | | | | | | |
-| context `plainText`, every backlink | — | | | | | | |
-| previews | 1,051 ms | | | | | | |
-| `PreviewExcerpt.scope`, all bodies / `LinkPreviews(...)` | — | | | | | | |
-| derivation | 640 ms | | | | | | |
-| `Derivation(manifest:)` / `missingQuotes` | — | | | | | | |
-| `answer` / `implying` lines | — | | | | | | |
-| full build total | 3,553 ms | | | | | | |
-| update after one-page edit | 4,059 ms | | | | | | |
-| `ConceptRanker(pages:)` / `ReferenceRanker` | — | | | | | | |
-| `headings()`, non-reference pages / `indexableBody`, all bodies | — | | | | | | |
-| search sync, full (min of 3) / no-op (min of 5) | 2,984 / 1,125 ms (one run each) | | | | | | |
-| ⌘O, slowest keystroke / empty-query sort | — | | | | | | |
-| JSC first render | — | | | | | | |
-| JSC, each page again right after itself | — | | | | | | |
-| JSC, LWE again right after itself | — | | | | | | |
-| JSC, the corpus a second time in path order | — | | | | | | |
-| JSC review entries | — | | | | | | |
-| W2 probe: equal assignment notifies? | — | | | | | | |
+| … the six maps the same, or why they were not compared | — | | | | | | |
+| JSC, each page twice in a row: first / again | — | | | | | | |
+| … LWE in that order: first / again | — | | | | | | |
+| JSC, the corpus twice in path order: first / again | — | | | | | | |
+| … LWE in that order: first / again | — | | | | | | |
+| JSC: pages rendered / with KaTeX's output / failed; the same the second time and in either order? | — | | | | | | |
+| JSC review, a one-line edit to every page: all pages / LWE | — | | | | | | |
+| … entries / with HTML / with KaTeX's output | — | | | | | | |
+
+**The tracks' own lines.** These come from `make test-corpus`, beside the
+other suites, and W2's from `make check`. Each times the old code and the
+new in one process, or only counts, so one CI run fills it. The expected
+values are the builders' ports and counts at `ab81f02`; CI's counts move
+with the live wiki.
+
+| Line, as printed | Item | Expected | CI |
+|---|---|---|---|
+| "L1 line ends on bytes": `CodeMask.inertRanges`, `headings()`, old → new | L1 | both faster; with M0's A/B line, it decides L1's form | |
+| "Backlinks (L1, L3, L4)": `backlinkMap()` old → new; every context read afterwards; the busiest page's | L1, L3, L4 | a large drop; the busiest page has 44 | |
+| "L2 links parsed once": `outgoingLinks(in:)` over every body, a render's link list for every page, old → new | L2 | new below old | |
+| "L4 resolutions per sweep": links, resolved | L4 | about 3,447 links, about 972 resolved | |
+| "L6 section cards once per load": anchors, worked out directly; the first time; the second time | L6 | about 2,742 anchors; the second time near 0 | |
+| "L5 scope stops at the first H1": every whole-page scope, old → new; anchored scopes compared | L5 | a large drop | |
+| "L5 cards": `LinkPreviews(index:manifest:labels:)`; the old excerpts alone; every label, read afterwards | L5 | | |
+| "Search sync, headings parsed once (S1)": `ConceptRanker` as before; `headings()` on every page; `ConceptRanker` from those outlines; full sync | S1 | a full sync makes 877 `headings()` calls instead of 1,324 | |
+| "Search sync, the full rewrite through 'rebuild' (S2)": every row through the triggers; a fresh file; over an older index | S2 | the fresh file well below the triggers (in C: 82–87 against 195–233 ms) | |
+| "Search sync, citing pages named once (S3)": `ReferenceRanker` as before; handed the concept ranker's names; naming each page once itself | S3 | 6,781 `Name` inits instead of 13,495 | |
+| "Search sync, the concept ranker from stored outlines (S4)": both rankers as a no-op built them before; a no-op after a relaunch (fastest of 3); after one page changed | S4 | a no-op parses no page (447 before) | |
+| "derivation loops": closures compared, differing; a load's single-object closures with the `21df5d7` loop / the current one / sharing a run; `Derivation.init` | X1, X5 | about 11,000 closures, 0 differ; the current loop far below the old (about 199× fewer visits), sharing below that | |
+| "derivation quotes": citations, pages, missing; a parse per citation / once per page | X2 | 117 citations on 50 pages, 0 missing; once per page about a third of the time | |
+| "derivation links": inspector rows, with unstated steps, differing | X3 | about 1,663 rows, about 800 with unstated steps, 0 differ | |
+| "derivation prefilter": implied-by for every target in both settings, with / without; differing; no-path completions, chains and circumventions compared | X4 | 234 targets, 0 differ; 46, 439 and 4 compared; with well below without | |
+| "The KaTeX memo on the real wiki": formulas a pass; before the memo; pass 1 and pass 2 rendered and remembered; remembered by limit | J1 | about 7,320 formulas; about 3,621 then 3,538 rendered (50.5% and 51.7% remembered); at 1,000, page again 100% and about 1.57 M characters | |
+| "The review's blocks rendered when shown": middle, ends, added and deleted, blocks and ms before and after | J2 | middle 12,748 → 3,512; ends 12,814 → 5,240; added and deleted the same | |
+| "Explore From Here on the corpus": offered, withheld | U3 | offered above 0 | |
+| "window observation" (`make check`): `@Observable` notifies, or does not, on an equal assignment | W2 | "notifies" on Swift 6.1, so W2 removes work; "does not notify" makes it insurance | |

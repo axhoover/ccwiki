@@ -9,7 +9,7 @@ impossible to accidentally violate.
 ## 1. Why JavaScript renders the markdown
 
 KaTeX and pseudocode.js exist only in JavaScript, and there is no Swift KaTeX.
-The wiki's 122 custom macros have to reach KaTeX's `macros` option, and 58
+The wiki's 126 custom macros have to reach KaTeX's `macros` option, and 58
 `pseudocode` blocks have to reach pseudocode.js — which itself calls
 `katex.renderToString`. So a JS engine is mandatory regardless.
 
@@ -400,11 +400,12 @@ KaTeX deletes and for what sets `\@eqnsw`, differed in 8 of 400 runs of
 **The limit, from the corpus.** A render of every page calls KaTeX 7,320
 times (6,605 in prose, 92 of them display math, and 715 in pseudocode),
 on 3,299 distinct formulas and options, 4.39 M characters of HTML. The
-most on one page is 166 (`Assumptions/learning-with-errors.md`). The share
-of calls the memo answers, for each limit, simulated on that call
-sequence and checked against the real memo (`RenderMemoTests` prints all
-but the Back columns on every corpus run); "back k" is a page rendered
-again after k others, as Back does:
+most distinct ones on one page is 166
+(`Assumptions/learning-with-errors.md`). The share of calls the memo
+answers, for each limit, simulated on that call sequence and checked
+against the real memo (`RenderMemoTests` prints the least recently used
+rows, without the Back columns, on every corpus run); "back k" is a page
+rendered again after k others, as Back does:
 
 | Limit | First pass | Second pass | Each page twice | Back 10 | Back 50 | Back 100 | Most kept |
 |---|---|---|---|---|---|---|---|
