@@ -545,6 +545,16 @@ struct RenderMemoTests {
             });
             """#)?.toBool() == true
         for page in corpus.pages {
+            // Each page's reviews start from the table as it was sent, both
+            // before and after. Left there, what one page's formula wrote
+            // (`\@eqnsw` after an align) made every later review render every
+            // block, as `mayChangeKatexTable` asks, so one align on the first
+            // page in path order failed the fewer-blocks check below with
+            // every review the same. What one review leaves for the next is
+            // `reviewTableChanges`'s to check.
+            for script in [before, after] {
+                try script.evaluate("resetTable();", named: "reset.js")
+            }
             for (name, file) in Self.reviewFiles(page) {
                 let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
                     + MarkdownScript.literal(file) + "))"
@@ -622,7 +632,7 @@ struct RenderMemoTests {
 
     /// `file`, a `ccwiki-markdown.js`, behind the vendored KaTeX and
     /// markdown-it; `md` is made with `table` and counts in `blockRenders`
-    /// the blocks it renders.
+    /// the blocks it renders, and `resetTable()` puts the table back as sent.
     private static func reviewer(_ file: URL, table: String) throws -> MarkdownScript {
         let script = MarkdownScript(context: JSContext())
         try script.evaluate(MarkdownScript.prelude, named: "prelude.js")
@@ -643,6 +653,18 @@ struct RenderMemoTests {
           blockRenders++;
           return renderBlocks.apply(this, arguments);
         };
+
+        /** `TABLE` as it was sent, in place, since `md` and KaTeX hold that
+         *  object: what formulas wrote there goes (`\@eqnsw` after an align,
+         *  a `\gdef`'s macro), and a macro one redefined is as sent again. */
+        var SENT = JSON.stringify(TABLE);
+        function resetTable() {
+          var sent = JSON.parse(SENT);
+          Object.keys(TABLE).forEach(function (name) {
+            if (!(name in sent)) delete TABLE[name];
+          });
+          Object.assign(TABLE, sent);
+        }
         """#
 
     /// Ahead of `MarkdownScript.scripts`, as `index.html` loads them. They
