@@ -25,6 +25,27 @@ struct SearchEquivalenceTests {
             backlinks = index.backlinkMap()
             fingerprints = ContentFingerprints.scan(cloneRoot: cloneRoot)
         }
+
+        init(
+            pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]],
+            fingerprints: ContentFingerprints
+        ) {
+            self.pages = pages
+            self.backlinks = backlinks
+            self.fingerprints = fingerprints
+        }
+
+        /// This library with `page` written again as `text`: its file
+        /// changed, so its fingerprint too.
+        func replacing(_ page: WikiPage, with text: String) -> Library {
+            var digests = fingerprints.pages
+            digests[page.path] = ContentFingerprints.digest(Data(text.utf8))
+            return Library(
+                pages: pages.map { $0.path == page.path ? WikiPage(path: page.path, text: text) : $0 },
+                backlinks: backlinks,
+                fingerprints: ContentFingerprints(
+                    pages: digests, manifest: fingerprints.manifest, macros: fingerprints.macros))
+        }
     }
 
     /// The clone `CCWIKI_WIKI` names, when it has a `content/`.
@@ -305,6 +326,205 @@ struct SearchEquivalenceTests {
             headings() on every page \(Self.milliseconds(headingsTime)); \
             ConceptRanker from those outlines \(Self.milliseconds(handedTime))
               full sync \(Self.milliseconds(syncTime)) (\(full.summary))
+            """)
+    }
+
+    // MARK: S2. The full rewrite through FTS5's 'rebuild'
+
+    /// One query's answer from one kind of search, flattened for exact
+    /// comparison: the order, the snippets, the sections, the fields and
+    /// the scores.
+    struct Answer: Equatable {
+        let query: String
+        let lines: [String]
+        let scores: [Double]
+    }
+
+    /// Words of the fixtures and of the real wiki, single letters (the
+    /// widest prefixes) and words nothing contains.
+    static let queries = [
+        "o", "p", "th", "pseudorandom", "function", "one-way", "invert", "GGM86",
+        "random functions", "LWE", "learning with errors", "noisy linear", "tree construction",
+        "garbled", "Goldreich", "goldwasser micali", "regev 2005", "statement", "syntax",
+        "carriage", "vigenere", "line break", "zero knowledge", "oblivious transfer",
+        "lattice", "NC^0", "\\classNP", "zzqx", "qqqqqqqq",
+    ]
+
+    /// What every kind of search answers for every query.
+    static func answers(_ index: SearchIndex) async throws -> [Answer] {
+        var answers: [Answer] = []
+        for query in queries {
+            let hits = try await index.search(query)
+            answers.append(Answer(
+                query: "search " + query,
+                lines: hits.map {
+                    "\($0.path) \($0.slug) \($0.title) \($0.kind) \($0.status) \($0.snippet)"
+                },
+                scores: hits.map(\.score)))
+            let concepts = try await index.conceptSearch(query)
+            var lines = concepts.hits.map {
+                "\($0.path)#\($0.anchor ?? "") \($0.section ?? "") \($0.snippet)"
+            }
+            lines.append("corrected to \(concepts.correction ?? "nothing")")
+            answers.append(Answer(
+                query: "concepts " + query, lines: lines, scores: concepts.hits.map(\.score)))
+            let references = try await index.referenceSearch(query)
+            answers.append(Answer(
+                query: "references " + query,
+                lines: references.map {
+                    "\($0.path) \($0.field) \($0.citedBy ?? "") \($0.citedVia ?? "") \($0.snippet)"
+                },
+                scores: []))
+        }
+        return answers
+    }
+
+    /// The triggers in the file, by name.
+    static func triggers(in file: URL) throws -> [String] {
+        let database = try SQLiteDatabase(path: file.path(percentEncoded: false))
+        let statement = try database.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+        var names: [String] = []
+        while try statement.step() { names.append(statement.string(0)) }
+        withExtendedLifetime(database) {}
+        return names
+    }
+
+    /// FTS5's own check that the index and its rows agree; throws if not.
+    static func checkIntegrity(of file: URL) throws {
+        let database = try SQLiteDatabase(path: file.path(percentEncoded: false))
+        try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('integrity-check')")
+    }
+
+    @Test("a rewrite over a populated index, then rows changed through the triggers, answers as before")
+    func populatedRewrite() async throws {
+        let scratch = Scratch()
+        defer { scratch.delete() }
+        let clone = try Self.hazardClone()
+        defer { clone.delete() }
+
+        // Another build's rows, rewritten in full over the old ones.
+        let populated = SearchIndex(path: scratch.file("populated.sqlite3"))
+        try await Self.sync(populated, Library(cloneRoot: clone.root), builder: "one")
+        try Self.edit(clone)
+        let rewrite = try await Self.sync(populated, Library(cloneRoot: clone.root), builder: "two")
+        #expect(rewrite.rebuiltFromScratch)
+        let triggers = try Self.triggers(in: scratch.file("populated.sqlite3"))
+        #expect(triggers == ["doc_ad", "doc_ai", "doc_au"], "the rewrite made the triggers again")
+
+        // Then a row updated, one deleted and one inserted, through them.
+        try clone.write(FixtureClone.owf, try clone.read(FixtureClone.owf)
+            + "\nInverting it is as hard as noisy linear algebra. zzqx\n")
+        try clone.remove(FixtureClone.lwe)
+        try clone.write("content/Primitives/garbled-circuits.md", FixtureClone.page(
+            type: "primitive", title: "Garbled circuits", aliases: ["GC"],
+            body: "# Garbled circuits\n\nA garbled function, built from a [[PRF]].\n"))
+        let library = Library(cloneRoot: clone.root)
+        let changes = try await Self.sync(populated, library, builder: "two")
+        #expect(changes == SyncReport(
+            inserted: 1, updated: 1, deleted: 1, unchanged: library.pages.count - 2))
+
+        // A fresh file, and the rewrite as it was: every row an insert
+        // through `doc_ai`, into an index with no rows.
+        let fresh = SearchIndex(path: scratch.file("fresh.sqlite3"))
+        let built = try await Self.sync(fresh, library, builder: "two")
+        #expect(built.rebuiltFromScratch)
+        let oldWay = SearchIndex(path: scratch.file("triggers.sqlite3"))
+        try await oldWay.sync(pages: [], backlinks: [:], fingerprints: .empty, builder: "two")
+        let inserted = try await Self.sync(oldWay, library, builder: "two")
+        #expect(inserted == SyncReport(inserted: library.pages.count))
+
+        let expected = try await Self.answers(oldWay)
+        #expect(expected.contains { $0.query.hasPrefix("search") && !$0.lines.isEmpty })
+        for (name, index) in [("populated", populated), ("fresh", fresh)] {
+            let actual = try await Self.answers(index)
+            #expect(actual == expected,
+                    "\(name): \(Self.firstDifference(actual, expected, path: \.query))")
+        }
+        for name in ["populated", "fresh", "triggers"] {
+            let file = scratch.file("\(name).sqlite3")
+            let rows = try Self.rows(of: file)
+            #expect(rows == Self.legacyRows(library), "\(name)")
+            try Self.checkIntegrity(of: file)
+        }
+    }
+
+    @Test("on the real wiki: the rewrite through 'rebuild' answers as the triggers did")
+    func corpusRebuild() async throws {
+        guard let library = Self.corpus, let contentRoot = CorpusTests.contentRoot else { return }
+        let scratch = Scratch()
+        defer { scratch.delete() }
+        let clock = ContinuousClock()
+
+        // The rewrite as it was: every row an insert through `doc_ai`, into
+        // an index with no rows.
+        let oldWay = SearchIndex(path: scratch.file("triggers.sqlite3"))
+        try await oldWay.sync(pages: [], backlinks: [:], fingerprints: .empty, builder: "S2")
+        var start = clock.now
+        let inserted = try await Self.sync(oldWay, library, builder: "S2")
+        let oldWayTime = start.duration(to: clock.now)
+        #expect(inserted == SyncReport(inserted: library.pages.count))
+
+        let fresh = SearchIndex(path: scratch.file("fresh.sqlite3"))
+        start = clock.now
+        let built = try await Self.sync(fresh, library, builder: "S2")
+        let freshTime = start.duration(to: clock.now)
+        #expect(built.rebuiltFromScratch)
+
+        // Over an older wiki's rows: a hundred pages fewer, and one that has
+        // since gone, whose words must leave the index with it.
+        let populated = SearchIndex(path: scratch.file("populated.sqlite3"))
+        let gone = WikiPage(path: "Glossary/gone.md", text: FixtureClone.page(
+            type: "glossary", title: "Gone",
+            body: "A pseudorandom function from lattices and learning with errors.\n"))
+        try await populated.sync(
+            pages: Array(library.pages.dropFirst(100)) + [gone], backlinks: library.backlinks,
+            fingerprints: library.fingerprints, builder: "older")
+        start = clock.now
+        let rewrite = try await Self.sync(populated, library, builder: "S2")
+        let rewriteTime = start.duration(to: clock.now)
+        #expect(rewrite.rebuiltFromScratch)
+
+        let indexes = [("fresh", fresh), ("populated", populated)]
+        let expected = try await Self.answers(oldWay)
+        for (name, index) in indexes {
+            let actual = try await Self.answers(index)
+            #expect(actual == expected,
+                    "\(name): \(Self.firstDifference(actual, expected, path: \.query))")
+        }
+        let expectedRows = Self.legacyRows(library)
+        for name in ["triggers", "fresh", "populated"] {
+            let file = scratch.file("\(name).sqlite3")
+            let rows = try Self.rows(of: file)
+            let sameRows = rows == expectedRows
+            #expect(sameRows, "\(name): \(Self.firstDifference(rows, expectedRows, path: \.path))")
+            try Self.checkIntegrity(of: file)
+        }
+
+        // Then one concept page changed, through `doc_au`, on each.
+        let page = try #require(library.pages.first { $0.kind == .primitive })
+        let text = try String(contentsOf: contentRoot.appending(path: page.path), encoding: .utf8)
+        let edited = library.replacing(page, with: text + "\nzzqx, a word no page has.\n")
+        for (_, index) in [("triggers", oldWay)] + indexes {
+            let report = try await Self.sync(index, edited, builder: "S2")
+            #expect(report == SyncReport(updated: 1, unchanged: library.pages.count - 1))
+        }
+        let expectedAfter = try await Self.answers(oldWay)
+        #expect(expectedAfter.contains { $0.query == "search zzqx" && $0.lines.count == 1 })
+        for (name, index) in indexes {
+            let actual = try await Self.answers(index)
+            #expect(actual == expectedAfter, """
+                \(name), after an update: \
+                \(Self.firstDifference(actual, expectedAfter, path: \.query))
+                """)
+        }
+
+        print("""
+            Search sync, the full rewrite through 'rebuild' (S2), on \(library.pages.count) pages, \
+            each with the rankers and rows:
+              every row through the triggers \(Self.milliseconds(oldWayTime)); \
+            a fresh file \(Self.milliseconds(freshTime)); \
+            over an older index \(Self.milliseconds(rewriteTime))
             """)
     }
 }

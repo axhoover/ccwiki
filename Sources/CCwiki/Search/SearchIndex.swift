@@ -137,6 +137,20 @@ actor SearchIndex {
           prefix = '2 3'
         );
 
+        \(insertDeleteTriggers)
+        CREATE TRIGGER IF NOT EXISTS doc_au AFTER UPDATE ON doc BEGIN
+          INSERT INTO doc_fts(doc_fts, rowid, title, aliases, headings, body)
+            VALUES ('delete', old.id, old.title, old.aliases, old.headings, old.body);
+          INSERT INTO doc_fts(rowid, title, aliases, headings, body)
+            VALUES (new.id, new.title, new.aliases, new.headings, new.body);
+        END;
+        """
+
+    /// The triggers that keep `doc_fts` in step with an insert into `doc` and
+    /// a delete from it. `writeAll` drops them while it writes every row,
+    /// builds the full-text index once from the rows, and makes them again
+    /// from this same text.
+    private static let insertDeleteTriggers = """
         CREATE TRIGGER IF NOT EXISTS doc_ai AFTER INSERT ON doc BEGIN
           INSERT INTO doc_fts(rowid, title, aliases, headings, body)
             VALUES (new.id, new.title, new.aliases, new.headings, new.body);
@@ -144,12 +158,6 @@ actor SearchIndex {
         CREATE TRIGGER IF NOT EXISTS doc_ad AFTER DELETE ON doc BEGIN
           INSERT INTO doc_fts(doc_fts, rowid, title, aliases, headings, body)
             VALUES ('delete', old.id, old.title, old.aliases, old.headings, old.body);
-        END;
-        CREATE TRIGGER IF NOT EXISTS doc_au AFTER UPDATE ON doc BEGIN
-          INSERT INTO doc_fts(doc_fts, rowid, title, aliases, headings, body)
-            VALUES ('delete', old.id, old.title, old.aliases, old.headings, old.body);
-          INSERT INTO doc_fts(rowid, title, aliases, headings, body)
-            VALUES (new.id, new.title, new.aliases, new.headings, new.body);
         END;
         """
 
@@ -291,16 +299,27 @@ actor SearchIndex {
 
     /// Every row deleted and written again, then the index optimized and
     /// the log folded into the file. Each page's outline goes to `outlines`.
+    ///
+    /// The full-text index is built once from the new rows, by FTS5's
+    /// `'rebuild'`, rather than kept in step row by row: through the
+    /// triggers every old row was tokenized out of the index and every new
+    /// one into it, which over a populated index (the launch after an app
+    /// update) cost about four times as much. The triggers are dropped and
+    /// made again in the same transaction, so a failure leaves them as it
+    /// leaves the rows.
     private func writeAll(
         _ pages: [WikiPage], digests: [String: String], builder: String?,
         outlines: inout [String: ConceptRanker.Outline], in database: SQLiteDatabase
     ) throws -> SyncReport {
         try database.transaction {
+            try database.execute("DROP TRIGGER IF EXISTS doc_ai; DROP TRIGGER IF EXISTS doc_ad;")
             try database.execute("DELETE FROM doc")
             let insert = try database.prepare(Self.insertRow)
             for page in pages {
                 outlines[page.path] = try Self.write(page, digest: digests[page.path], with: insert)
             }
+            try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('rebuild')")
+            try database.execute(Self.insertDeleteTriggers)
             try Self.stamp(builder, in: database)
         }
         try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('optimize')")
