@@ -69,7 +69,8 @@ struct DerivationEquivalenceTests {
         let starts = Self.startSets(corpus)
         let mismatches = await withTaskGroup(of: [String].self, returning: [String].self) { group in
             for (name, engine) in derivation.namedEngines {
-                group.addTask {
+                // Below the other tests' priority, as `hornPrefilter`'s are.
+                group.addTask(priority: .low) {
                     var found: [String] = []
                     for start in starts {
                         // Both settings from one run, as Derivation.init
@@ -223,6 +224,20 @@ struct DerivationEquivalenceTests {
         let unfiltered: Duration
     }
 
+    /// One target's implied-by, timed with and without the prefilter.
+    private static func backward(_ derivation: Derivation, _ target: String,
+                                 _ options: Derivation.Options) -> Backward {
+        let clock = ContinuousClock()
+        let started = clock.now
+        let filtered = derivation.implying(target, options: options)
+        let between = clock.now
+        let unfiltered = derivation.implying(target, options: options, prefilter: false)
+        let ended = clock.now
+        return Backward(
+            differs: filtered == unfiltered ? nil : "\(target), \(options.settingName)",
+            filtered: started.duration(to: between), unfiltered: between.duration(to: ended))
+    }
+
     @Test("the Horn prefilter changes no implied-by list, completion, chain or circumvention",
           .enabled(if: DerivationEquivalenceTests.corpus() != nil, DerivationCorpusTests.state.skipComment))
     func hornPrefilter() async throws {
@@ -236,7 +251,8 @@ struct DerivationEquivalenceTests {
         // reaches too. Every engine, every object, both settings.
         let escapes = await withTaskGroup(of: [String].self, returning: [String].self) { group in
             for (name, engine) in derivation.namedEngines {
-                group.addTask {
+                // Below the other tests' priority, as the implied-by jobs are.
+                group.addTask(priority: .low) {
                     var found: [String] = []
                     for id in ids {
                         for options in [Derivation.Options.standard, .all] {
@@ -261,24 +277,27 @@ struct DerivationEquivalenceTests {
         // Implied-by for every target in both settings: the pair closures the
         // prefilter skips are all run here, once.
         let targets = ids.filter { derivation.nodeType($0) != Derivation.excludedType }
+        // A few at a time, below the other tests' priority: all of them
+        // (468 on the wiki) queued at once held every cooperative thread for
+        // about a minute of debug CPU, and a test racing a deadline behind
+        // them lost.
+        let jobs: [(target: String, options: Derivation.Options)] = targets.flatMap { target in
+            [Derivation.Options.standard, .all].map { (target: target, options: $0) }
+        }
+        let width = max(1, ProcessInfo.processInfo.activeProcessorCount - 1)
         let backward = await withTaskGroup(of: Backward.self, returning: [Backward].self) { group in
-            for target in targets {
-                for options in [Derivation.Options.standard, .all] {
-                    group.addTask {
-                        let clock = ContinuousClock()
-                        let started = clock.now
-                        let filtered = derivation.implying(target, options: options)
-                        let between = clock.now
-                        let unfiltered = derivation.implying(target, options: options, prefilter: false)
-                        let ended = clock.now
-                        return Backward(
-                            differs: filtered == unfiltered ? nil : "\(target), \(options.settingName)",
-                            filtered: started.duration(to: between), unfiltered: between.duration(to: ended))
-                    }
-                }
+            var pending = jobs.makeIterator()
+            for _ in 0..<width {
+                guard let job = pending.next() else { break }
+                group.addTask(priority: .low) { Self.backward(derivation, job.target, job.options) }
             }
             var all: [Backward] = []
-            for await one in group { all.append(one) }
+            while let one = await group.next() {
+                all.append(one)
+                if let job = pending.next() {
+                    group.addTask(priority: .low) { Self.backward(derivation, job.target, job.options) }
+                }
+            }
             return all
         }
         let differing = backward.compactMap(\.differs)
