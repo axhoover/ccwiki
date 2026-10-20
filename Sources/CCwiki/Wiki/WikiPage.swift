@@ -230,10 +230,8 @@ struct WikiPage: Identifiable, Sendable {
 
         var lineStart = body.startIndex
         while lineStart < body.endIndex {
-            let lineEnd = body[lineStart...].firstIndex(where: \.isMarkdownLineEnding) ?? body.endIndex
-            defer {
-                lineStart = lineEnd < body.endIndex ? body.index(after: lineEnd) : body.endIndex
-            }
+            let (lineEnd, next) = MarkdownLineEnd.next(in: body, from: lineStart)
+            defer { lineStart = next }
 
             guard let (level, raw) = Self.atxHeading(body[lineStart..<lineEnd]) else { continue }
             // A `#` inside a fenced block is a comment, not a heading.

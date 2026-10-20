@@ -35,7 +35,7 @@ struct ReferenceRankerTests {
     static func ranker() -> ReferenceRanker {
         ReferenceRanker(
             pages: [ggm, reg, dot, prf],
-            backlinks: [ggm.path: [WikiIndex.Backlink(sourcePath: prf.path, context: "See GGM86.")]])
+            backlinks: [ggm.path: [WikiIndex.Backlink(sourcePath: prf.path, line: "See [[GGM86]].")]])
     }
 
     static func keys(_ ranked: [ReferenceRanker.Ranked]) -> [String] { ranked.map(\.entry.key) }
@@ -149,8 +149,8 @@ struct ReferenceRankerTests {
             path: "Primitives/commitment-scheme.md",
             text: "---\ntitle: Commitment scheme\n---\n\nSee [[com-to-ot-kil88]].\n")
         let ranker = ReferenceRanker(pages: [kil, edge, com], backlinks: [
-            kil.path: [WikiIndex.Backlink(sourcePath: edge.path, context: "")],
-            edge.path: [WikiIndex.Backlink(sourcePath: com.path, context: "")],
+            kil.path: [WikiIndex.Backlink(sourcePath: edge.path, line: "From [[Kil88]].")],
+            edge.path: [WikiIndex.Backlink(sourcePath: com.path, line: "See [[com-to-ot-kil88]].")],
         ])
         #expect(ranker.entries.first?.citers.map(\.title) == ["COM ⇒ OT", "Commitment scheme"])
 
