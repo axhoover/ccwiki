@@ -1,14 +1,15 @@
-// Verbatim copy of Sources/CCwiki/Wiki/{Wikilink,WikiPage,WikiIndex}.swift
-// and Sources/CCwiki/Reader/RenderRequest.swift at 21df5d7 for equivalence
-// tests. Do not edit; delete in the next batch.
+// Verbatim copy of Sources/CCwiki/Wiki/{Wikilink,WikiPage,WikiIndex,
+// PreviewExcerpt,LinkPreview}.swift and Sources/CCwiki/Reader/RenderRequest.swift
+// at 21df5d7 for equivalence tests. Do not edit; delete in the next batch.
 //
 // The parts the load path's efficiency work (plans/efficiency.md, track L)
 // replaces, as they were, for `LoadEquivalenceCorpusTests` to hold the new
 // code equal to. Inside `Legacy`, `CodeMask` and `WikilinkParser` name the
 // copies below, so the copied code calls the old code it called. What it
 // calls of the app is either unchanged by track L or, as with
-// `MarkdownLinkParser.links(in:)`, a wrapper the track keeps. Where a
-// method had to become a static function, the comment above it says what
+// `MarkdownLinkParser.links(in:)`, a wrapper the track keeps. Where a copy
+// had to change to stand here (a method made a static function, a private
+// one made internal, a name qualified), the comment above it says what
 // changed; nothing else did.
 
 import Foundation
@@ -285,5 +286,107 @@ extension Legacy {
             (raw: $0.destination, link: $0.wikilink)
         }
         return keyed
+    }
+}
+
+// MARK: - Sources/CCwiki/Wiki/PreviewExcerpt.swift: scope(of:anchor:) and its helpers
+
+extension Legacy {
+
+    typealias Scope = PreviewExcerpt.Scope
+
+    private struct HeadingLine {
+        let index: Int
+        let level: Int
+        let raw: String
+        let id: String
+    }
+
+    /// The body after the first ATX H1, or the whole body without one. With
+    /// an anchor, the section whose heading id matches, up to the next heading
+    /// of the same or a higher level; nil when no heading has that id.
+    ///
+    /// Ids come from the same deduplicating `GithubSlugger` as
+    /// `WikiPage.headings()`, over the same headings, so the first heading
+    /// with an id wins, as a Quartz anchor lands on the first.
+    static func scope(of body: String, anchor: String?) -> Scope? {
+        let text = withoutComments(body)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let headings = headingLines(in: text, lines: lines)
+        let firstH1 = headings.first { $0.level == 1 }
+
+        guard let anchor, !anchor.isEmpty else {
+            let start = firstH1.map { $0.index + 1 } ?? 0
+            return Scope(heading: nil, isWholePage: true, lines: Array(lines[start...]))
+        }
+        guard let target = headings.first(where: { $0.id == anchor }) else { return nil }
+        let next = headings.first(where: { $0.index > target.index && $0.level <= target.level })
+        let end = next?.index ?? lines.count
+        return Scope(
+            heading: target.raw,
+            isWholePage: target.index == firstH1?.index,
+            lines: Array(lines[(target.index + 1)..<end]))
+    }
+
+    /// Every ATX heading outside fenced code and comments, with its id, in
+    /// the order `WikiPage.headings()` assigns them.
+    private static func headingLines(in text: String, lines: [Substring]) -> [HeadingLine] {
+        let inert = CodeMask.inertRanges(in: text)
+        var slugger = GithubSlugger()
+        var result: [HeadingLine] = []
+        for (index, line) in lines.enumerated() {
+            guard let (level, raw) = WikiPage.atxHeading(line) else { continue }
+            guard !inert.contains(where: { $0.contains(line.startIndex) }) else { continue }
+            let plain = WikiPage.Heading.plainText(raw)
+            guard !plain.isEmpty else { continue }
+            result.append(HeadingLine(index: index, level: level, raw: raw, id: slugger.slug(plain)))
+        }
+        return result
+    }
+
+    /// `%%…%%` deleted, as Quartz deletes it before it parses anything, and
+    /// CRLF line ends made LF. A comment can span blank lines, so it has to
+    /// go before the body is split into blocks.
+    private static func withoutComments(_ text: String) -> String {
+        var result = text.replacingOccurrences(of: "\r\n", with: "\n")
+        guard result.contains("%%") else { return result }
+        result = result.replacingOccurrences(
+            of: #"%%[\s\S]*?%%"#, with: "", options: .regularExpression)
+        return result
+    }
+}
+
+// MARK: - Sources/CCwiki/Wiki/LinkPreview.swift: a card's label and excerpt
+
+extension Legacy {
+
+    /// `LinkPreview.spokenLabel`, no longer private; `labelLimit` is
+    /// `LinkPreview`'s.
+    ///
+    /// The card read aloud, in the order it is laid out: each part a
+    /// sentence, the meta parts a list. The note comes straight after the
+    /// title it qualifies.
+    static func spokenLabel(
+        kind: String, title: String, meta: [String], note: String?, excerpt: String?
+    ) -> String {
+        var sentences: [String] = [kind, PreviewExcerpt.plainText(title)]
+        if let note { sentences.append(note) }
+        sentences.append(meta.map(PreviewExcerpt.plainText).joined(separator: ", "))
+        if let excerpt { sentences.append(PreviewExcerpt.plainText(excerpt)) }
+        let text = sentences
+            .filter { !$0.isEmpty }
+            .map { sentence in
+                guard let last = sentence.last, !".!?…".contains(last) else { return sentence }
+                return sentence + "."
+            }
+            .joined(separator: " ")
+        return PreviewExcerpt.capped(text, at: LinkPreview.labelLimit)
+    }
+
+    /// `LinkPreviews.excerpt`, no longer private.
+    static func excerpt(_ paragraph: String?) -> String? {
+        guard let paragraph else { return nil }
+        let inline = PreviewExcerpt.inlineWithoutLinks(paragraph)
+        return inline.isEmpty ? nil : PreviewExcerpt.truncated(inline)
     }
 }

@@ -360,4 +360,130 @@ struct LoadEquivalenceCorpusTests {
             "the second time \(LoadTimings.format(second.duration))",
         ])
     }
+
+    // MARK: L5. Preview cards stop at the first H1
+
+    /// Bodies whose first H1 is not simply their first line: empty H1s
+    /// before a real one, H1s inside fences (closed by a longer run, by a
+    /// marker with trailing spaces, or never), an H2 first, a `%%` the
+    /// comment deletion leaves unpaired, a CR LF page and a lone CR.
+    static let scopeFixtures = [
+        "#\n# \n#   #\n# Real\n\nText.\n\n## Abstract\n\nThe abstract.\n",
+        "```\n# In a fence\n```\n# Out\n\nProse.\n",
+        "~~~~\n# In\n~~~\n# Still in\n~~~~~\n# Out\n\nProse.\n",
+        "    # Indented four\n# H\n\nProse.\n",
+        "   ```\n# Fenced by an indented fence\n```\n# After\n\nProse.\n",
+        "```js\n# x\n``` \n# y\n\nProse.\n",
+        "```\n# x\n```  trailing\n# y\n```\n# z\n\nProse.\n",
+        "```\n# Unterminated\n",
+        "`# code`\n# A\n\nProse.\n",
+        "## Two\n# One\n\nProse.\n",
+        "# [[]]\n# $x$ and [[page|Real]]\n\nProse.\n",
+        "%% unpaired\n# A\n\nProse.\n",
+        "%%a%% # not\n# A\n%% open\n\nProse.\n",
+        "# A\r\n\r\nText.\r\n\r\n## Abstract\r\n\r\nThe abstract.\r\n",
+        "line\r# A\r\n# B\n\nProse.\n",
+        "No heading at all.\n\nMore.\n",
+        "",
+    ]
+
+    static func sameScope(_ a: PreviewExcerpt.Scope?, _ b: PreviewExcerpt.Scope?) -> Bool {
+        a?.heading == b?.heading && a?.isWholePage == b?.isWholePage && a?.lines == b?.lines
+    }
+
+    /// The whole page, the empty anchor, `abstract`, an anchor nothing has,
+    /// and every heading's id.
+    static func anchors(_ page: WikiPage) -> [String?] {
+        let fixed: [String?] = [nil, "", "abstract", "nowhere"]
+        return fixed + page.headings().map { Optional($0.id) }
+    }
+
+    /// A page card's excerpt as `LinkPreviews` made it before: the first
+    /// paragraph of a reference's abstract when it has one, else of the
+    /// page, through the old scope.
+    static func legacyExcerpt(_ page: WikiPage) -> String? {
+        let paragraph: String?
+        if page.kind == .reference, let abstract = Legacy.scope(of: page.body, anchor: "abstract") {
+            paragraph = PreviewExcerpt.firstParagraph(inLines: abstract.lines)
+        } else {
+            paragraph = Legacy.scope(of: page.body, anchor: nil)
+                .flatMap { PreviewExcerpt.firstParagraph(inLines: $0.lines) }
+        }
+        return Legacy.excerpt(paragraph)
+    }
+
+    @Test("a card's scope stops at the first H1 it found before, and a section's is as it was")
+    func scopesOnFixtures() {
+        for body in Self.scopeFixtures {
+            #expect(CodeMask.inertRanges(in: body) == Legacy.CodeMask.inertRanges(in: body),
+                    "CodeMask of \(body.debugDescription)")
+            for anchor in Self.anchors(WikiPage(path: "Primitives/a.md", text: body)) {
+                #expect(Self.sameScope(PreviewExcerpt.scope(of: body, anchor: anchor),
+                                       Legacy.scope(of: body, anchor: anchor)),
+                        "\(body.debugDescription) at \(anchor ?? "nil")")
+            }
+        }
+        let paragraphs = Self.scopeFixtures.prefix(3).map { PreviewExcerpt.firstParagraph(in: $0, anchor: nil) }
+        #expect(paragraphs == ["Text.", "Prose.", "Prose."])
+        #expect(PreviewExcerpt.firstParagraph(in: "## Two\n# One\n\nProse.\n", anchor: nil) == "Prose.")
+        #expect(PreviewExcerpt.firstParagraphInline(in: "# A\n\nSee [[b|B]].\n", anchor: nil) == "See B.")
+    }
+
+    @Test("on the corpus, every scope a card or a section reads is the one it read before")
+    func scopesOnCorpus() {
+        guard let corpus = Self.corpus else { return }
+        let pages = corpus.pages
+        let old = Self.timed { pages.map { Legacy.scope(of: $0.body, anchor: nil) } }
+        let new = Self.timed { pages.map { PreviewExcerpt.scope(of: $0.body, anchor: nil) } }
+        var differing = pages.indices.filter { !Self.sameScope(old.value[$0], new.value[$0]) }
+            .map { pages[$0].path }
+
+        var anchored = 0
+        for page in pages {
+            for anchor in ["", "abstract"] + page.headings().map(\.id) {
+                anchored += 1
+                if !Self.sameScope(PreviewExcerpt.scope(of: page.body, anchor: anchor),
+                                   Legacy.scope(of: page.body, anchor: anchor)) {
+                    differing.append("\(page.path)#\(anchor)")
+                }
+            }
+        }
+        #expect(differing.isEmpty, "scopes differ: \(differing)")
+        Self.report("L5 scope stops at the first H1", [
+            "every whole-page scope " + Self.change(old.duration, new.duration),
+            "\(anchored) anchored scopes compared",
+        ])
+    }
+
+    @Test("on the corpus, every page's card has the excerpt and the label it had")
+    func cardsOnCorpus() {
+        guard let corpus = Self.corpus else { return }
+        let built = Self.timed {
+            LinkPreviews(index: corpus.index, manifest: corpus.manifest, labels: corpus.labels)
+        }
+        let old = Self.timed { corpus.pages.map(Self.legacyExcerpt) }
+        var cards: [LinkPreview] = []
+        var differing: [String] = []
+        for (page, excerpt) in zip(corpus.pages, old.value) {
+            guard let card = built.value.preview(path: page.path, anchor: nil) else {
+                differing.append(page.path + " (no card)")
+                continue
+            }
+            if card.excerpt != excerpt { differing.append(page.path) }
+            cards.append(card)
+        }
+        #expect(differing.isEmpty, "excerpts differ: \(differing)")
+        #expect(cards.count > 250 && cards.contains(where: { $0.excerpt != nil }))
+
+        let labels = Self.timed { cards.map(\.label) }
+        let oldLabels = cards.map {
+            Legacy.spokenLabel(kind: $0.kind, title: $0.title, meta: $0.meta, note: $0.note, excerpt: $0.excerpt)
+        }
+        #expect(labels.value == oldLabels)
+        Self.report("L5 cards", [
+            "LinkPreviews(index:manifest:labels:) \(LoadTimings.format(built.duration))",
+            "the old excerpts alone \(LoadTimings.format(old.duration))",
+            "every label, read afterwards \(LoadTimings.format(labels.duration))",
+        ])
+    }
 }

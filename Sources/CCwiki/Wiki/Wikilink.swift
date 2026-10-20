@@ -97,17 +97,36 @@ enum CodeMask {
 
     static func inertRanges(in text: String) -> [Range<String.Index>] {
         var ranges = commentRanges(in: text)
-
-        var inFence = false
-        var fenceMarker: Character = "`"
-        var fenceLength = 0
+        var fences = Fences()
 
         var lineStart = text.startIndex
         while lineStart < text.endIndex {
             let (lineEnd, next) = MarkdownLineEnd.next(in: text, from: lineStart)
-            let line = text[lineStart..<lineEnd]
             defer { lineStart = next }
 
+            if fences.isCode(text[lineStart..<lineEnd]) {
+                ranges.append(lineStart..<lineEnd)
+            } else {
+                ranges.append(contentsOf: inlineInertRanges(in: text, line: lineStart..<lineEnd))
+            }
+        }
+        return ranges
+    }
+
+    /// Which lines of a text are fenced code, read in order: the rule
+    /// `inertRanges` masks fences by, in one place, so that a scan which
+    /// stops early (`PreviewExcerpt.scope`) reads fences exactly as it does.
+    struct Fences {
+        private var inFence = false
+        private var fenceMarker: Character = "`"
+        private var fenceLength = 0
+
+        init() {}
+
+        /// Whether `line`, the text's next line, is code: a fence's opening or
+        /// closing line, or a line inside one. An unterminated fence swallows
+        /// the rest of the file, which is what a markdown parser does too.
+        mutating func isCode(_ line: Substring) -> Bool {
             let trimmed = line.drop { $0 == " " }
             if let marker = trimmed.first, marker == "`" || marker == "~" {
                 let run = trimmed.prefix { $0 == marker }.count
@@ -116,28 +135,17 @@ enum CodeMask {
                         inFence = true
                         fenceMarker = marker
                         fenceLength = run
-                        ranges.append(lineStart..<lineEnd)
-                        continue
+                        return true
                     }
                     if marker == fenceMarker, run >= fenceLength,
                        trimmed.dropFirst(run).allSatisfy({ $0 == " " }) {
                         inFence = false
-                        ranges.append(lineStart..<lineEnd)
-                        continue
+                        return true
                     }
                 }
             }
-
-            if inFence {
-                ranges.append(lineStart..<lineEnd)
-            } else {
-                ranges.append(contentsOf: inlineInertRanges(in: text, line: lineStart..<lineEnd))
-            }
+            return inFence
         }
-
-        // An unterminated fence swallows the rest of the file, which is what a
-        // markdown parser does too.
-        return ranges
     }
 
     /// Every `%% … %%` in the text, across lines. Done on the whole text
