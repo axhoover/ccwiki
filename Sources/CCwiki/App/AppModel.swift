@@ -1099,8 +1099,9 @@ final class AppModel {
     @ObservationIgnored private var loadTask: Task<LibraryUpdate?, Never>?
 
     /// Read the clone and bring everything built from it up to date: the
-    /// parsed wiki, the dates, the search index, then the page on screen
-    /// (plans/reader-comforts.md §3.2).
+    /// parsed wiki and the dates, then the page on screen while the search
+    /// index is written (plans/reader-comforts.md §3.2). Returns once the
+    /// index is written.
     ///
     /// Serialized: a load waits for the one before it, so ⌘R during the
     /// launch load cannot finish first and be overwritten by the older one.
@@ -1174,19 +1175,22 @@ final class AppModel {
         }
 
         // The search index is written while git is asked whether the commit
-        // moved meanwhile; the page on screen waits for both.
+        // moved meanwhile. The page on screen renders once git has answered,
+        // with everything the load knows settled, but not after the index:
+        // nothing a render reads is in it. Until plans/efficiency.md's U1 it
+        // waited for both (reader-comforts §3.2).
         async let searched = syncSearchIndex(with: update.library)
         let revisionAfter = await LibraryRefresh.currentRevision(
             store: paths.wikiStore, git: git, clone: cloneRoot)
         loadedRevision = revisionBefore == revisionAfter ? revisionAfter : nil
 
+        sessionsDidLoad(update)
         _ = await searched
+        searchDidSync()
 
         if LibraryRefresh.runsJobHousekeeping(reason) {
             await refreshJobHousekeeping()
         }
-
-        libraryDidLoad(update)
         return update
     }
 
@@ -1245,19 +1249,24 @@ final class AppModel {
         await refreshOrphanedWorktrees()
     }
 
-    /// What a load means for the readers: each window's session decides
-    /// what to render again (`ReaderSession.libraryDidLoad`), and the quick
-    /// switcher's list follows the new wiki.
-    ///
-    /// The open queries of ⌘S, ⇧⌘R and ⇧⌘F run again too: one typed during
-    /// the launch load was answered by an index with nothing in it yet, and
-    /// one answered before a pull lists the pages as they were.
-    private func libraryDidLoad(_ update: LibraryUpdate) {
+    /// What a load means for the readers, as soon as the library and its
+    /// revision are in place: each window's session decides what to render
+    /// again (`ReaderSession.libraryDidLoad`), and the quick switcher's list
+    /// follows the new wiki. ⇧⌘F's open query runs again too: it reads the
+    /// pages `apply` just replaced, not the search index.
+    private func sessionsDidLoad(_ update: LibraryUpdate) {
         for session in sessions.values { session.libraryDidLoad(update) }
         refreshQuickSwitcher()
+        scheduleGrep()
+    }
+
+    /// The search index now holds the load: the open queries of ⌘S and ⇧⌘R
+    /// run again. One typed during the launch load was answered by an index
+    /// with nothing in it yet, and one answered before a pull lists the
+    /// pages as they were.
+    private func searchDidSync() {
         scheduleSearch()
         scheduleReferenceSearch()
-        scheduleGrep()
     }
 
     var gitService: GitService? {
