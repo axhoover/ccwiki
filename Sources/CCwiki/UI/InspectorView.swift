@@ -107,6 +107,7 @@ struct InspectorView: View {
         _ group: WikiIndex.BacklinkGroup, rows: [WikiIndex.Backlink]
     ) -> some View {
         let isOpen = openBacklinkGroups.contains(group)
+        let state: String = isOpen ? "expanded" : "collapsed"
         return Section {
             if isOpen {
                 ForEach(rows) { link in
@@ -143,7 +144,7 @@ struct InspectorView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(group.title), \(rows.count)")
-            .accessibilityValue(isOpen ? "expanded" : "collapsed")
+            .accessibilityValue(state)
             .accessibilityAddTraits(.isHeader)
         }
     }
@@ -288,6 +289,9 @@ private struct BacklinkRow: View, Equatable {
     @ViewBuilder
     private var mentions: some View {
         let count = link.mentions.count
+        let state: String = listsMentions ? "expanded" : "collapsed"
+        let tooltip: String = listsMentions
+            ? "Hide the lines that mention this page" : "Show each line that mentions this page"
         Button {
             listsMentions.toggle()
         } label: {
@@ -302,10 +306,9 @@ private struct BacklinkRow: View, Equatable {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .help(listsMentions ? "Hide the lines that mention this page"
-                            : "Show each line that mentions this page")
+        .help(tooltip)
         .accessibilityLabel("\(count) mentions")
-        .accessibilityValue(listsMentions ? "expanded" : "collapsed")
+        .accessibilityValue(state)
 
         if listsMentions {
             ForEach(link.mentions.indices, id: \.self) { ordinal in
