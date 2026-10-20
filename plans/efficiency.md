@@ -1947,8 +1947,15 @@ which loads a real `AppModel` over the fixture clone.
   alone, and a section follows its page. A heading with math shows its
   source, as the outline does: 14 of the 1,772 headings below a page's
   title. No title or heading holds a §, so "Page § Heading" is never
-  ambiguous. `ReaderContextTarget.saveSectionItem(isSaved:)` builds the
-  page menu's item and is tested without a menu, as the section links are.
+  ambiguous. `ReaderContextTarget.saveSectionItem(outline:isSaved:)` builds
+  the page menu's item and is tested without a menu, as the section links
+  are.
+- **The page's title has no Save Section,** because Save Page covers it.
+  The title is the page's first heading when it is at level 1
+  (`ReaderContextTarget.isPageTitle(_:in:)`), as on every page of the
+  wiki. A right-click in a lead paragraph falls under it, on 562 pages. A
+  later level-1 heading is a section like any other: 63 pages have 110,
+  such as LWE's Attacks, so the rule is not "below level 1".
 - **Not built:** the shots. They need a `save:` step in
   `ScreenshotRunner`, which removes in its teardown only an entry it
   added, so CCwiki Dev's own list is left as it was.

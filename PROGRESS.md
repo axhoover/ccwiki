@@ -61,9 +61,11 @@ integrator's one commit after the merges.
   that title.
 - **Save Section.** An entry keeps the section's heading in an optional
   `sectionTitle`, so a list saved before reads unchanged.
-  `ReaderContextTarget.saveSectionItem(isSaved:)` builds the page menu's
-  item, and the outline's menu reads the saved state from the model, so a
-  save from anywhere retitles it Remove Section from Saved.
+  `ReaderContextTarget.saveSectionItem(outline:isSaved:)` builds the page
+  menu's item, and the outline's menu reads the saved state from the
+  model, so a save from anywhere retitles it Remove Section from Saved.
+  The page's title, its first heading at level 1, has none: Save Page
+  covers it.
 
 **Review.** F's review found six problems, fixed in four commits:
 - a row with several mentions had lost its first line, on 428 of 2,474

@@ -282,10 +282,18 @@ struct ReaderContextMenuTests {
 
     // MARK: Save Section (plans/efficiency.md §3.3)
 
+    /// The page's headings, as its outline has them: its title, a section,
+    /// and a later section at the title's level.
+    private static let outline = [
+        WikiPage.Heading(level: 1, text: "Pseudorandom function", id: "pseudorandom-function"),
+        WikiPage.Heading(level: 2, text: "Syntax", id: "syntax"),
+        WikiPage.Heading(level: 1, text: "Attacks", id: "attacks"),
+    ]
+
     @Test("under a heading, Save Section saves the right-click's section, and reads Remove Section from Saved once it is saved")
     func saveSection() {
         var asked: [String] = []
-        let item = Self.target(heading: Self.section).saveSectionItem { path, heading in
+        let item = Self.target(heading: Self.section).saveSectionItem(outline: Self.outline) { path, heading in
             asked.append("\(path)#\(heading.id)")
             return false
         }
@@ -293,20 +301,38 @@ struct ReaderContextMenuTests {
             title: "Save Section", path: Self.pagePath, section: Self.section))
         #expect(asked == ["\(Self.pagePath)#syntax"], "the section is the right-click's, on its page")
 
-        let saved = Self.target(heading: Self.section).saveSectionItem { _, _ in true }
+        let saved = Self.target(heading: Self.section).saveSectionItem(outline: Self.outline) { _, _ in true }
         #expect(saved?.title == "Remove Section from Saved")
         #expect(ReaderContextTarget.saveSectionTitle(isSaved: false) == "Save Section")
         #expect(ReaderContextTarget.saveSectionTitle(isSaved: true) == "Remove Section from Saved")
     }
 
-    @Test("outside a section, or on a page the wiki does not have, there is no Save Section")
+    @Test("outside a section, under the page's title, or on a page the wiki does not have, there is no Save Section")
     func noSaveSection() {
         let unsaved: (String, CorrectionTarget.Section) -> Bool? = { _, _ in false }
         let notAPage: (String, CorrectionTarget.Section) -> Bool? = { _, _ in nil }
-        #expect(Self.target(heading: nil).saveSectionItem(isSaved: unsaved) == nil)
-        #expect(ReaderContextTarget().saveSectionItem(isSaved: unsaved) == nil)
-        #expect(ReaderContextTarget(tex: "\\secpar").saveSectionItem(isSaved: unsaved) == nil)
-        #expect(Self.target(heading: Self.section).saveSectionItem(isSaved: notAPage) == nil)
+        let title = CorrectionTarget.Section(
+            id: "pseudorandom-function", title: "Pseudorandom function", level: 1)
+        #expect(Self.target(heading: nil).saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil)
+        #expect(ReaderContextTarget().saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil)
+        #expect(ReaderContextTarget(tex: "\\secpar").saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil)
+        #expect(Self.target(heading: Self.section).saveSectionItem(outline: Self.outline, isSaved: notAPage) == nil)
+        #expect(
+            Self.target(heading: title).saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil,
+            "Save Page keeps the title's place")
+    }
+
+    @Test("a level-1 heading below the page's title is a section like any other")
+    func saveSectionAtTitleLevel() {
+        let attacks = CorrectionTarget.Section(id: "attacks", title: "Attacks", level: 1)
+        let item = Self.target(heading: attacks).saveSectionItem(outline: Self.outline) { _, _ in false }
+        #expect(item?.title == "Save Section")
+        #expect(ReaderContextTarget.isPageTitle("pseudorandom-function", in: Self.outline))
+        #expect(!ReaderContextTarget.isPageTitle("attacks", in: Self.outline))
+        #expect(
+            !ReaderContextTarget.isPageTitle("syntax", in: Array(Self.outline.dropFirst())),
+            "a page that starts below level 1 has no title heading")
+        #expect(!ReaderContextTarget.isPageTitle("pseudorandom-function", in: []))
     }
 
     @Test("the bridge message carries the selection after the link")

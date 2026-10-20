@@ -56,7 +56,9 @@ struct InspectorView: View {
                 let active = session.webController.activeHeadingID
                 List {
                     ForEach(headings) { heading in
-                        OutlineRow(path: path, heading: heading, isActive: heading.id == active)
+                        OutlineRow(
+                            path: path, heading: heading, isActive: heading.id == active,
+                            isPageTitle: ReaderContextTarget.isPageTitle(heading.id, in: headings))
                             .equatable()
                             // A list trait: inside the EquatableView it never
                             // reaches the row.
@@ -175,12 +177,13 @@ struct InspectorView: View {
 /// One heading of the outline. A click scrolls the page to it; its menu
 /// opens its section in a new tab or window, copies a link to it, a
 /// wikilink and a CCwiki link, and saves it, as the page's own menu does
-/// (plans/efficiency.md §3.2, §3.3).
+/// (plans/efficiency.md §3.2, §3.3). The page's title has no Save Section:
+/// Save Page keeps the same place.
 ///
-/// A view of its own, compared by its page, its heading and whether it is
-/// the one being read, so its menu's links, which parse and resolve a
-/// wikilink, are worked out when the row changes rather than on every
-/// scroll that moves the highlight (SWIFTUI-RULES §6.3). Whether the
+/// A view of its own, compared by its page, its heading, and whether it is
+/// the title and the one being read, so its menu's links, which parse and
+/// resolve a wikilink, are worked out when the row changes rather than on
+/// every scroll that moves the highlight (SWIFTUI-RULES §6.3). Whether the
 /// section is saved is not compared: the menu reads it from the model,
 /// which tells the row itself when the saved pages change.
 private struct OutlineRow: View, Equatable {
@@ -191,9 +194,13 @@ private struct OutlineRow: View, Equatable {
     let path: String?
     let heading: WikiPage.Heading
     let isActive: Bool
+    /// Whether the heading is the page's title
+    /// (`ReaderContextTarget.isPageTitle`).
+    let isPageTitle: Bool
 
     nonisolated static func == (lhs: OutlineRow, rhs: OutlineRow) -> Bool {
         lhs.path == rhs.path && lhs.heading == rhs.heading && lhs.isActive == rhs.isActive
+            && lhs.isPageTitle == rhs.isPageTitle
     }
 
     var body: some View {
@@ -228,7 +235,7 @@ private struct OutlineRow: View, Equatable {
                     Button(item.title) { model.copyToPasteboard(item.text) }
                 }
             }
-            if let isSaved = session.isSectionSaved(path: path, id: heading.id) {
+            if !isPageTitle, let isSaved = session.isSectionSaved(path: path, id: heading.id) {
                 Button(ReaderContextTarget.saveSectionTitle(isSaved: isSaved)) {
                     session.toggleSavedSection(path: path, id: heading.id, text: heading.text)
                 }

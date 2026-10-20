@@ -661,8 +661,8 @@ final class ReaderWebView: WKWebView {
             sectionItems = target.sectionItems(links: links)
         }
         var saveItem: ReaderContextTarget.SaveSectionItem?
-        if let target, let isSaved = controller?.isSectionSaved {
-            saveItem = target.saveSectionItem(isSaved: isSaved)
+        if let target, let controller, let isSaved = controller.isSectionSaved {
+            saveItem = target.saveSectionItem(outline: controller.outline, isSaved: isSaved)
         }
         let hasSectionGroup = !sectionItems.isEmpty || saveItem != nil
         if hasSectionGroup {
@@ -954,17 +954,29 @@ struct ReaderContextTarget: Equatable, Sendable {
 
     /// Save Section, after the section group's links (plans/efficiency.md
     /// §3.3), for the section the right-click fell under, titled as
-    /// `isSaved` says it is from the page's path and the heading. Nothing
-    /// outside a section, or where `isSaved` answers nil: a page the wiki
+    /// `isSaved` says it is from the page's path and the heading. `outline`
+    /// is the page's headings, in order. Nothing outside a section, under
+    /// the page's title, or where `isSaved` answers nil: a page the wiki
     /// does not have.
     func saveSectionItem(
+        outline: [WikiPage.Heading],
         isSaved: (String, CorrectionTarget.Section) -> Bool?
     ) -> SaveSectionItem? {
         guard let selection, let heading = selection.heading,
+              !Self.isPageTitle(heading.id, in: outline),
               let saved = isSaved(selection.path, heading)
         else { return nil }
         return SaveSectionItem(
             title: Self.saveSectionTitle(isSaved: saved), path: selection.path, section: heading)
+    }
+
+    /// Whether heading `id` is the page's title: the first of `outline`, the
+    /// page's headings in order, when it is at level 1. Save Section leaves
+    /// it out, since Save Page keeps the same place. A later level-1 heading
+    /// is a section like any other.
+    static func isPageTitle(_ id: String, in outline: [WikiPage.Heading]) -> Bool {
+        guard let first = outline.first else { return false }
+        return first.level == 1 && first.id == id
     }
 
     /// Save Section's title in the page's menu and the outline's: Remove
