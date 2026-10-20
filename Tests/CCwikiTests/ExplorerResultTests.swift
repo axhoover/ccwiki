@@ -324,7 +324,7 @@ struct ExplorerResultTests {
         let derivation = try ExplorerFixture.derivation(objects: objects, reductions: reductions,
                                                         barriers: [hmo])
         // R12 never composes it with OWF ⇒ PRG.
-        #expect(derivation.derivedBarriers.isEmpty)
+        #expect(derivation.allDerivedBarriers().isEmpty)
 
         let result = Self.compute(ExplorerQuery(from: ["owf"], to: "ke"), over: derivation)
         let barriers = try #require(result.sections.first { $0.id == "barriers" })

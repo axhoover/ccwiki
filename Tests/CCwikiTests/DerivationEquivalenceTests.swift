@@ -158,6 +158,42 @@ struct DerivationEquivalenceTests {
             + "for each citation, \(LoadTimings.format(current)) parsing it once (min of 3)")
     }
 
+    // MARK: X3: the inspector's rows build no proof
+
+    @Test("each inspector link counts its proof as the explorer counts the same proof",
+          .enabled(if: DerivationEquivalenceTests.corpus() != nil, DerivationCorpusTests.state.skipComment))
+    func linksCarryTheirProofs() throws {
+        let corpus = try #require(Self.corpus())
+        let derivation = corpus.derivation
+        let writer = ExplorerWriter(derivation: derivation, labels: .empty)
+        var checked = 0
+        var unstatedRows = 0
+        var wrong: [String] = []
+        for id in derivation.manifest.objectsByID.keys.sorted(by: Derivation.precedes) {
+            var rows: [(source: String, target: String, link: Derivation.Link)] = []
+            for link in derivation.derivedImplications(of: id) {
+                rows.append((source: id, target: link.objectID, link: link))
+            }
+            for link in derivation.derivedSources(of: id) {
+                rows.append((source: link.objectID, target: id, link: link))
+            }
+            for row in rows {
+                // What PageDerivations.row built for every row before X3.
+                let proof = derivation.closure(from: [row.source], options: .standard).proof(of: row.target)
+                let unstated = proof.map { writer.unstatedSteps($0) } ?? 0
+                if row.link.unstatedSteps != unstated || row.link.relationCount != proof?.relationIDs.count {
+                    wrong.append("\(row.source) ⇒ \(row.target)")
+                }
+                checked += 1
+                if unstated > 0 { unstatedRows += 1 }
+            }
+        }
+        #expect(checked > 0)
+        #expect(wrong.isEmpty, "\(wrong.count) links differ: \(wrong.prefix(10))")
+        print("derivation links, \(corpus.modeName): \(checked) inspector rows carry their proof's "
+            + "counts (\(unstatedRows) with unstated steps), \(wrong.count) differ")
+    }
+
     private struct QuoteCase: Decodable {
         let name: String
         let page: String

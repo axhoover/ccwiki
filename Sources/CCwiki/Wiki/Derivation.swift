@@ -19,8 +19,8 @@ import Foundation
 ///
 /// Pure and `Sendable`, with no UI and no I/O, like `PageRelations`. It is
 /// built once per manifest load, off the main actor, and precomputes every
-/// single-object closure in both model settings, the derived barriers and the
-/// inspector's lookups, so a view only ever does dictionary reads.
+/// single-object closure in both model settings and the inspector's lookups,
+/// so a view only ever does dictionary reads.
 struct Derivation: Sendable {
 
     // MARK: Policy (derivations.md §2)
@@ -368,6 +368,11 @@ struct Derivation: Sendable {
         /// The derived end's.
         let fact: Fact
         let relationCount: Int
+        /// The steps of its proof that state no composable class, for "Class
+        /// unstated: N steps do not state theirs" (`ExplorerWriter.unstatedSteps`).
+        /// Counted from the proof the table builds anyway, so the inspector
+        /// builds none.
+        let unstatedSteps: Int
         var id: String { objectID }
     }
 
@@ -418,10 +423,8 @@ struct Derivation: Sendable {
 
     private let singleClosures: [Options: [String: Closure]]
     private let participantSets: [Options: Set<String>]
-    /// R12, all of them: every single-object derived barrier, with its
-    /// circumventions and redundancy worked out for its pair.
-    private(set) var derivedBarriers: [DerivedBarrier] = []
-    private var linkTables: [Options: LinkTable] = [:]
+    /// The inspector's lookups, in the default models it always shows.
+    private var linkTable = LinkTable()
 
     /// The curation's citations whose quote is no longer on its page in this
     /// clone (relations-followups.md §2.5). The bundled curation stays as
@@ -529,8 +532,7 @@ struct Derivation: Sendable {
         self.participantSets = participants
 
         // Everything stored is set; what follows reads `self`.
-        derivedBarriers = allDerivedBarriers()
-        linkTables = [.standard: makeLinkTable(.standard), .all: makeLinkTable(.all)]
+        linkTable = makeLinkTable()
     }
 
     // MARK: - Queries
@@ -555,17 +557,18 @@ struct Derivation: Sendable {
         Self.modelOfNode(id, in: manifest) != nil
     }
 
-    /// What `id` alone derives at depth ≥ 2, sorted by (depth, id). A lookup.
-    /// Depth 1 is a recorded step, which the recorded groups already show.
-    func derivedImplications(of id: String, options: Options) -> [Link] {
-        linkTables[options]?.implications[id] ?? []
+    /// What `id` alone derives at depth ≥ 2 in the default models, sorted by
+    /// (depth, id). A lookup. Depth 1 is a recorded step, which the recorded
+    /// groups already show.
+    func derivedImplications(of id: String) -> [Link] {
+        linkTable.implications[id] ?? []
     }
 
-    /// What alone derives `id` at depth ≥ 2, sorted by (depth, id). A lookup.
-    /// Like R11's single sources, it never lists a complexity class, a model
-    /// node, a refuted object or a setting.
-    func derivedSources(of id: String, options: Options) -> [Link] {
-        linkTables[options]?.sources[id] ?? []
+    /// What alone derives `id` at depth ≥ 2 in the default models, sorted by
+    /// (depth, id). A lookup. Like R11's single sources, it never lists a
+    /// complexity class, a model node, a refuted object or a setting.
+    func derivedSources(of id: String) -> [Link] {
+        linkTable.sources[id] ?? []
     }
 
     // MARK: - Helpers
@@ -642,17 +645,26 @@ struct Derivation: Sendable {
             && curation.refuted[id] == nil && curation.settings[id] == nil
     }
 
-    private func makeLinkTable(_ options: Options) -> LinkTable {
+    /// The inspector's lookups, from the default models' single closures:
+    /// nothing reads the toggle's.
+    private func makeLinkTable() -> LinkTable {
         var table = LinkTable()
-        guard let closures = singleClosures[options] else { return table }
+        guard let closures = singleClosures[.standard] else { return table }
+        let free = ChainClass.free.rawValue
         for start in closures.keys.sorted(by: Self.precedes) {
             guard let closure = closures[start] else { continue }
             var links: [Link] = []
             let ids = Set(closure.facts.keys).union(closure.weakFacts.keys)
             for objectID in ids {
                 guard let fact = closure.fact(objectID), fact.depth >= 2 else { continue }
-                let count = closure.proof(of: objectID)?.relationIDs.count ?? 0
-                links.append(Link(objectID: objectID, fact: fact, relationCount: count))
+                let proof = closure.proof(of: objectID)
+                var unstated = 0
+                for row in proof?.rows ?? [] {
+                    guard let step = row.step else { continue }
+                    if !implies(step.reductionClass, free) { unstated += 1 }
+                }
+                links.append(Link(objectID: objectID, fact: fact,
+                                  relationCount: proof?.relationIDs.count ?? 0, unstatedSteps: unstated))
             }
             guard !links.isEmpty else { continue }
             links.sort(by: Self.linkPrecedes)
@@ -660,7 +672,8 @@ struct Derivation: Sendable {
             guard isSingleSource(start) else { continue }
             for link in links {
                 table.sources[link.objectID, default: []].append(
-                    Link(objectID: start, fact: link.fact, relationCount: link.relationCount))
+                    Link(objectID: start, fact: link.fact, relationCount: link.relationCount,
+                         unstatedSteps: link.unstatedSteps))
             }
         }
         table.sources = table.sources.mapValues { $0.sorted(by: Self.linkPrecedes) }

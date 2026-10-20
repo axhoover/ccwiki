@@ -86,7 +86,7 @@ struct DerivationCorpusTests {
             #expect(skipped == 0)
         }
         print("derivations corpus, \(corpus.modeName): \(checked) queries checked "
-            + "(\(fields) fields), \(skipped) skipped; \(corpus.derivation.derivedBarriers.count) "
+            + "(\(fields) fields), \(skipped) skipped; \(corpus.derivation.allDerivedBarriers().count) "
             + "derived barriers; \(corpus.derivation.steps.count) eligible steps")
     }
 
@@ -144,7 +144,7 @@ struct DerivationCorpusTests {
                             "\(id).\(key): golden \(theirs?.description ?? "absent"), got \(ours?.description ?? "absent")")
                 }
                 let expectedCount = mutation["derivedBarrierCount"]?.int
-                let count = derivation.derivedBarriers.count
+                let count = derivation.allDerivedBarriers().count
                 #expect(count == expectedCount, "\(id): derived barriers")
                 // The upstream fields' mutations name the entry they
                 // supersede; the others, none.
@@ -215,10 +215,11 @@ struct DerivationCorpusTests {
         let exclusions = GoldenJSON.object(excluded)
         #expect(exclusions == golden["excluded"])
 
-        let derivedCount = derivation.derivedBarriers.count
+        let derivedBarriers = derivation.allDerivedBarriers()
+        let derivedCount = derivedBarriers.count
         #expect(derivedCount == golden["derivedBarrierCount"]?.int)
         var pairs: Set<[String]> = []
-        for barrier in derivation.derivedBarriers {
+        for barrier in derivedBarriers {
             pairs.insert([barrier.hypothesis, barrier.conclusion])
         }
         #expect(pairs.count == golden["derivedBarrierPairs"]?.int)

@@ -358,7 +358,8 @@ extension Derivation {
     }
 
     /// Every single-object derived barrier, pair by pair, for counts and the
-    /// corpus invariants. Built once, at init.
+    /// corpus invariants. Worked out on each call: the app never asks, so a
+    /// load no longer builds it.
     func allDerivedBarriers() -> [DerivedBarrier] {
         var pairs: Set<[String]> = []
         for rule in barrierRules {

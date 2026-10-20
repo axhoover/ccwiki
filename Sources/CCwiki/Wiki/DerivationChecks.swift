@@ -101,7 +101,7 @@ extension Derivation {
 
         var derivedConflicts: [String] = []
         var recordedAgainstDerived: [String] = []
-        for derived in derivedBarriers {
+        for derived in allDerivedBarriers() {
             if let chain = chainExists(from: derived.hypotheses, to: derived.conclusion,
                                        against: derived.reductionClass.rawValue) {
                 derivedConflicts.append(
