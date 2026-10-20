@@ -386,7 +386,16 @@ output is unchanged byte for byte: in jsdom, with the real `ccwiki.js`
 before and after, all 883 files rendered twice in one web view, in path
 order, each page twice in a row, and path order then a shuffled order,
 gave 1,766 of 1,766 identical pages each time (16.6 MB), with the limit at
-1,000 and at 50.
+1,000 and at 50. The exceptions themselves were checked in node: 1,000
+random runs of 120 steps, drawing on formulas and tables that write,
+read and delete KaTeX's names (a `\gdef` inside a `\gdef`, numbered
+environments, `\nonumber`, `\tag`, an environment a macro names,
+`\color` and `\current@color` in the table) and now and then installing
+another table, each through the vendored KaTeX behind `ccwiki.js` before
+and after, gave the same HTML in all 111,524 calls. The memo's first
+version, without the rules for what a definition defines, for the names
+KaTeX deletes and for what sets `\@eqnsw`, differed in 8 of 400 runs of
+80 steps.
 
 **The limit, from the corpus.** A render of every page calls KaTeX 7,320
 times (6,605 in prose, 92 of them display math, and 715 in pseudocode),
@@ -431,9 +440,11 @@ Measured in V8 on the same machine (node 22, the test's DOM-free shell,
 | `learning-with-errors`, rendered again | 38.4 ms | 8.5 ms (−78%) |
 
 `RenderMemoTests` checks the rules on a KaTeX that numbers its answers,
-checks a `\gdef` and `\@eqnsw` against the vendored KaTeX, and on the
-corpus renders every page twice through the memo and compares each with
-the vendored KaTeX behind the patch as it was before the memo.
+checks a `\gdef`, a `\gdef` inside one, `\@eqnsw` set and cleared twice
+over, and tables naming `\color` and `\current@color` against the
+vendored KaTeX, and on the corpus renders every page twice through the
+memo and compares each with the vendored KaTeX behind the patch as it
+was before the memo.
 
 **The numbers in WebKit.** The page times each render, pseudocode and the
 passes after it included, and sends it as `ms` in its `rendered` message,
