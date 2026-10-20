@@ -264,9 +264,10 @@ struct AppModelObservationTests {
 
         #expect(phasesEntered == 8)
         #expect(linesAppended == clone.count + 3)
+        // A comment is one string literal: `Comment` is not a `String`, so
+        // two joined with `+` do not convert.
         #expect(phaseNotifications == phasesEntered,
-                "the phase's readers heard \(phaseNotifications) changes in "
-                    + "\(phasesEntered) phases and \(linesAppended) lines")
+                "the phase's readers heard \(phaseNotifications) changes in \(phasesEntered) phases and \(linesAppended) lines")
     }
 
     @Test("a page's subject alone is the one its relations find")
