@@ -31,7 +31,7 @@ struct RootView: View {
         }
         .toolbar { toolbar }
         .navigationTitle("CCwiki")
-        .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
         .sheet(isPresented: $session.quickSwitcherPresented) {
             QuickSwitcherView()
         }
@@ -204,12 +204,6 @@ struct RootView: View {
         .allowsHitTesting(false)
     }
 
-    /// The oldest job that waits for review, which the status bar's count
-    /// opens Jobs on.
-    private var firstAwaitingReview: String? {
-        model.jobs.last { $0.state == .awaitingReview && !$0.isUntouchedEdit }?.id
-    }
-
     private func acceptDroppedPDF(_ providers: [NSItemProvider]) -> Bool {
         guard model.ingestSheetTarget == nil, let provider = providers.first else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -230,136 +224,6 @@ struct RootView: View {
             }
         }
         return true
-    }
-
-    // MARK: Status bar
-
-    /// The quiet strip macOS apps keep at the bottom: what just happened, and
-    /// anything that needs attention but must not interrupt reading.
-    private var statusBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: Theme.small) {
-                switch model.syncState {
-                case .running(let message):
-                    ProgressView().controlSize(.small)
-                    Text(message)
-                        .font(Theme.Fonts.meta)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                case .failed(let message):
-                    Image(systemName: model.syncState.isOffline
-                        ? "wifi.slash" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(model.syncState.isOffline
-                            ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.orange))
-                    Text(message)
-                        .font(Theme.Fonts.meta)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if !model.syncLog.isEmpty {
-                        Button("Details…") { session.syncLogPresented = true }
-                            .buttonStyle(.link)
-                            .font(Theme.Fonts.meta)
-                            .fixedSize()
-                    }
-                case .succeeded(let message):
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text(message)
-                        .font(Theme.Fonts.meta)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                case .idle:
-                    // The resting state says how current the wiki is, which
-                    // a reader can act on; the hash is in the tooltip.
-                    if let date = model.headDate {
-                        Image(systemName: "clock")
-                            .foregroundStyle(.tertiary)
-                        (Text("Wiki as of ") + Text(date, format: .relative(presentation: .named)))
-                            .font(Theme.Fonts.meta)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .help(model.headRevision.map { "Commit \($0.prefix(12))" } ?? "")
-                    } else if let revision = model.headRevision {
-                        Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                            .foregroundStyle(.tertiary)
-                        Text(revision.prefix(7))
-                            .font(Theme.Fonts.log)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                Spacer(minLength: Theme.small)
-
-                if let error = session.webController.lastRenderError {
-                    Label(error, systemImage: "exclamationmark.bubble")
-                        .font(Theme.Fonts.meta)
-                        .foregroundStyle(.orange)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                if let progress = model.updateInstallProgress {
-                    HStack(spacing: Theme.tight) {
-                        ProgressView().controlSize(.small).scaleEffect(0.6)
-                        Text(progress)
-                            .font(Theme.Fonts.meta)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                if model.activeJobCount > 0 {
-                    Button {
-                        openWindow(id: CCwikiApp.jobsWindowID)
-                    } label: {
-                        HStack(spacing: Theme.tight) {
-                            ProgressView().controlSize(.small).scaleEffect(0.6)
-                            Text("\(model.activeJobCount) job\(model.activeJobCount == 1 ? "" : "s")")
-                                .font(Theme.Fonts.meta)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show the jobs window (⇧⌘J)")
-                }
-                // The same in every window, like the job count (corrections
-                // §6.6, §17): work that waits for a person.
-                if model.jobCenter.reviewCount > 0 {
-                    Button {
-                        model.requestJobsWindow(selecting: firstAwaitingReview)
-                    } label: {
-                        Text("\(model.jobCenter.reviewCount) awaiting review")
-                            .font(Theme.Fonts.meta)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Review the changes in the jobs window")
-                }
-                if !model.warnings.isEmpty {
-                    // Warnings are unique (`AppModel.warn`), so the text is a
-                    // stable identity — and a row, once read, can be put away.
-                    Menu {
-                        ForEach(model.warnings, id: \.self) { warning in
-                            Button(warning) { model.dismissWarning(warning) }
-                        }
-                        Divider()
-                        Button("Dismiss All") { model.dismissAllWarnings() }
-                    } label: {
-                        Label("\(model.warnings.count)", systemImage: "exclamationmark.triangle")
-                            .font(Theme.Fonts.meta)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .foregroundStyle(.orange)
-                    .help("Choose a warning to dismiss it")
-                }
-            }
-            .padding(.horizontal, Theme.medium)
-            .padding(.vertical, 5)
-            .frame(height: 26)
-            .background(.bar)
-        }
     }
 }
 

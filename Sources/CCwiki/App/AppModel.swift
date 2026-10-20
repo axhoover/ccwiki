@@ -417,7 +417,17 @@ final class AppModel {
         }
     }
 
+    /// Where the sync is. It changes only when the sync moves to its next
+    /// phase (`enterSyncPhase`), a few times per sync, so the toolbar, the
+    /// menus and every window's empty state that read it are not redrawn
+    /// for each line git prints.
     private(set) var syncState: SyncState = .idle
+    /// The line git, or the download, printed last in the phase that is
+    /// running: one per progress update, 412 or more for a clone. Only the
+    /// status bar's `SyncProgressText` and the sync log's heading read it,
+    /// so a line redraws one `Text` per window (plans/efficiency.md, U4).
+    /// Nil until the phase prints a line.
+    private(set) var syncProgress: String?
     private(set) var syncLog: [String] = []
     private var syncTask: Task<Void, Never>?
 
@@ -1300,15 +1310,15 @@ final class AppModel {
         // which is all the reader needs. A clone with no git to update it is
         // the one dead end, and it says so.
         if git == nil, store == .git {
-            syncState = .failed("This wiki copy is a git clone, and git is no longer available "
-                + "to update it. Reset Clone in Settings > Storage downloads a snapshot instead.")
+            enterSyncPhase(.failed("This wiki copy is a git clone, and git is no longer available "
+                + "to update it. Reset Clone in Settings > Storage downloads a snapshot instead."))
             return
         }
 
         syncLog = []
-        syncState = .running(
+        enterSyncPhase(.running(
             store == .none ? (git != nil ? "Cloning the wiki…" : "Downloading the wiki…")
-                : (git != nil ? "Fetching…" : "Checking for a newer snapshot…"))
+                : (git != nil ? "Fetching…" : "Checking for a newer snapshot…")))
 
         syncTask = Task { [weak self] in
             guard let self else { return }
@@ -1332,14 +1342,14 @@ final class AppModel {
                 // to, in case this is the first launch after a manual pull.
                 if reloads { await loadLibrary(reason: .offline, after: outcome) }
                 await refreshPushCapability()
-                syncState = .failed(outcome.summary)
+                enterSyncPhase(.failed(outcome.summary))
             case .failed(let message):
-                syncState = .failed(message)
+                enterSyncPhase(.failed(message))
                 warn(message)
             default:
                 var update: LibraryUpdate?
                 if reloads {
-                    syncState = .running("Indexing…")
+                    enterSyncPhase(.running("Indexing…"))
                     update = await loadLibrary(
                         reason: Self.loadReason(after: outcome, afterReset: afterReset),
                         after: outcome)
@@ -1351,7 +1361,7 @@ final class AppModel {
                 let summary = await LibraryRefresh.summary(
                     after: outcome, changes: update?.changes,
                     store: paths.wikiStore, git: git, clone: paths.clone)
-                syncState = .succeeded(summary)
+                enterSyncPhase(.succeeded(summary))
                 warnings.removeAll { $0.contains("Fast-forward failed") }
                 scheduleStatusReset()
             }
@@ -1377,7 +1387,7 @@ final class AppModel {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(8))
             guard let self, case .succeeded = self.syncState else { return }
-            self.syncState = .idle
+            self.enterSyncPhase(.idle)
         }
     }
 
@@ -1397,7 +1407,20 @@ final class AppModel {
         sync(afterReset: true)
     }
 
-    private func appendSyncLine(_ line: ProcessLine) {
+    /// The sync moves to its next phase, and the line under it starts over:
+    /// what git printed in one phase is no status for the next. Every change
+    /// of `syncState` comes through here. Internal so the observation tests
+    /// can drive a sync without git.
+    func enterSyncPhase(_ state: SyncState) {
+        syncState = state
+        if syncProgress != nil { syncProgress = nil }
+    }
+
+    /// A line from git or the download: into the log and, while a phase
+    /// runs, under it in the status bar (`syncProgress`), never into
+    /// `syncState`. Internal so the observation tests can drive a sync
+    /// without git.
+    func appendSyncLine(_ line: ProcessLine) {
         if line.isProgress, !syncLog.isEmpty, syncLog[syncLog.count - 1].hasSuffix("%") {
             syncLog[syncLog.count - 1] = line.text
         } else {
@@ -1405,7 +1428,7 @@ final class AppModel {
         }
         if syncLog.count > 400 { syncLog.removeFirst(200) }
         if case .running = syncState, !line.text.isEmpty {
-            syncState = .running(line.text)
+            syncProgress = line.text
         }
     }
 

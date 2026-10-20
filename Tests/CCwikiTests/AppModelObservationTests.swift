@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import CCwiki
 
@@ -99,12 +100,13 @@ struct AppModelObservationTests {
     func canExploreAsTheQuestionDid() throws {
         let manifest = try ExplorerFixture.manifest()
         let derivation = try ExplorerFixture.derivation()
-        let checked = Self.expectCanExploreAsTheQuestionDid(manifest: manifest, derivation: derivation)
+        let checked = Self.expectCanExploreAsTheQuestionDid(
+            manifest: manifest, derivation: derivation)
         #expect(checked.offered > 0 && checked.withheld > 0, "\(checked)")
 
         // A class is never derived, an unknown id is no question, and with
         // nothing derivable there is no question at all.
-        let explore = { (from: [String], to: String?, derivation: Derivation) in
+        func explore(_ from: [String], _ to: String?, _ derivation: Derivation) -> Bool {
             AppModel.canExplore(from: from, to: to, manifest: manifest, derivation: derivation)
         }
         #expect(explore(["owf"], "pke", derivation))
@@ -187,6 +189,160 @@ struct AppModelObservationTests {
         }
     }
 
+    // MARK: A sync's lines (U4)
+
+    @Test("a sync's lines reach the line under the status, never its phase")
+    func syncLinesLeaveThePhaseAlone() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.delete() }
+        let model = fixture.model
+        let readPhase = { _ = model.syncState }
+        let readLine = { _ = model.syncProgress }
+        var phasesEntered = 0
+        var linesAppended = 0
+        var phaseNotifications = 0
+
+        /// A change of phase reaches the phase's readers, and clears the line.
+        func enter(_ state: AppModel.SyncState) {
+            let hadLine = model.syncProgress != nil
+            let seen = Self.notifications(readPhase, readLine) { model.enterSyncPhase(state) }
+            phasesEntered += 1
+            if seen.first { phaseNotifications += 1 }
+            #expect(seen.first, "\(state)")
+            #expect(seen.second == hadLine, "\(state)")
+            #expect(model.syncState == state)
+            #expect(model.syncProgress == nil)
+        }
+
+        /// A line reaches the line's readers alone, and only while a phase
+        /// runs.
+        func append(_ lines: [ProcessLine]) {
+            for processLine in lines {
+                let state = model.syncState
+                let before = model.syncProgress
+                let shows = state.isRunning && !processLine.text.isEmpty
+                let expected: String? = shows ? processLine.text : before
+                let seen = Self.notifications(readPhase, readLine) {
+                    model.appendSyncLine(processLine)
+                }
+                linesAppended += 1
+                if seen.first { phaseNotifications += 1 }
+                #expect(!seen.first, "\(processLine.text)")
+                #expect(seen.second == shows, "\(processLine.text)")
+                #expect(model.syncState == state)
+                #expect(model.syncProgress == expected)
+            }
+        }
+
+        enter(.running("Cloning the wiki…"))
+        let cloning = SyncLogView.subtitle(
+            for: model.syncState, progress: model.syncProgress, hasLog: false)
+        #expect(cloning == "Running: Cloning the wiki…")
+        let clone = Self.cloneLines()
+        append(clone)
+        let last = try #require(clone.last(where: { !$0.text.isEmpty }))
+        let cloned = SyncLogView.subtitle(
+            for: model.syncState, progress: model.syncProgress, hasLog: true)
+        #expect(cloned == "Running: \(last.text)")
+
+        enter(.running("Indexing…"))
+        let indexing = SyncLogView.subtitle(
+            for: model.syncState, progress: model.syncProgress, hasLog: true)
+        #expect(indexing == "Running: Indexing…")
+        // A line can land after its own phase is over: it shows until the
+        // next phase, as it did when it replaced the phase's text.
+        append([Self.line("Resolving deltas: 100% (2/2), done.")])
+        enter(.succeeded("Wiki updated: 4 pages changed."))
+        append([Self.line("a line from a sync that is over")])
+        enter(.idle)
+
+        enter(.running("Fetching…"))
+        append([Self.line("remote: Counting objects:  50% (1/2)", progress: true)])
+        enter(.failed("The fetch failed (exit 128)."))
+        enter(.running("Fetching…"))
+        enter(.failed("Offline — reading from the last pull."))
+
+        #expect(phasesEntered == 8)
+        #expect(linesAppended == clone.count + 3)
+        #expect(phaseNotifications == phasesEntered,
+                "the phase's readers heard \(phaseNotifications) changes in "
+                    + "\(phasesEntered) phases and \(linesAppended) lines")
+    }
+
+    @Test("a page's subject alone is the one its relations find")
+    func subjectAloneIsTheRelations() throws {
+        Self.expectSubjects(in: try ExplorerFixture.manifest())
+    }
+
+    @Test("a page's subject alone is the one its relations find, on the real wiki")
+    func subjectAloneIsTheRelationsOnTheCorpus() {
+        guard let cloneRoot = RelationsTests.cloneRoot else { return }
+        Self.expectSubjects(in: RelationsManifest.load(cloneRoot: cloneRoot))
+    }
+
+    /// `PageRelations.subject(path:manifest:)` against the relations' own,
+    /// for every page the manifest names and two it does not.
+    private static func expectSubjects(in manifest: RelationsManifest) {
+        let paths = Set(manifest.objectsByID.values.map(\.path))
+            .union(manifest.reductions.map(\.path))
+            .union(manifest.barriers.map(\.path))
+            .union(["References/nobody.md", "index.md"])
+        #expect(paths.count > 3)
+        for path in paths.sorted() {
+            let alone = PageRelations.subject(path: path, manifest: manifest)
+            let found = PageRelations(path: path, manifest: manifest).subject
+            #expect(alone == found, "\(path)")
+        }
+    }
+
+    /// What a clone prints, in kind if not in number: a first line, three
+    /// runs of progress updates ending in a percentage, a blank line, and a
+    /// last line.
+    private static func cloneLines() -> [ProcessLine] {
+        var lines = [line("Cloning into 'repo'...")]
+        for percent in 1...100 {
+            lines.append(line("remote: Counting objects: \(percent)% (\(percent)/100)",
+                              progress: percent < 100))
+        }
+        for percent in 1...100 {
+            lines.append(line("Receiving objects: \(percent)% (\(percent * 41)/4100)",
+                              progress: percent < 100))
+        }
+        lines.append(line(""))
+        for percent in 1...100 {
+            lines.append(line("Resolving deltas: \(percent)% (\(percent * 2)/200)",
+                              progress: percent < 100))
+        }
+        lines.append(line("Updating files: 100% (880/880), done."))
+        return lines
+    }
+
+    private static func line(_ text: String, progress: Bool = false) -> ProcessLine {
+        ProcessLine(stream: .stderr, text: text, isProgress: progress)
+    }
+
+    /// Whether a view that ran `first`, and one that ran `second`, would be
+    /// told of what `change` does. `withObservationTracking` calls `onChange`
+    /// as the change is made, so both are known when `change` returns.
+    private static func notifications(
+        _ first: () -> Void, _ second: () -> Void, when change: () -> Void
+    ) -> (first: Bool, second: Bool) {
+        let firstFlag = ChangeFlag()
+        let secondFlag = ChangeFlag()
+        withObservationTracking {
+            first()
+        } onChange: {
+            firstFlag.raise()
+        }
+        withObservationTracking {
+            second()
+        } onChange: {
+            secondFlag.raise()
+        }
+        change()
+        return (firstFlag.isRaised, secondFlag.isRaised)
+    }
+
     // MARK: Helpers
 
     private static let owf = FixtureClone.relative(FixtureClone.owf)
@@ -226,6 +382,25 @@ struct AppModelObservationTests {
             CCwikiSettings.recentPages = recent
             CCwikiSettings.lastPage = last
         }
+    }
+}
+
+/// Raised from `withObservationTracking`'s `onChange`, which is `@Sendable`.
+/// `@unchecked Sendable` with a lock, as `ProgressLog` is.
+private final class ChangeFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var raised = false
+
+    func raise() {
+        lock.lock()
+        defer { lock.unlock() }
+        raised = true
+    }
+
+    var isRaised: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return raised
     }
 }
 
