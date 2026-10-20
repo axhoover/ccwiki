@@ -6,7 +6,8 @@ import Testing
 /// The renderer's two memos (plans/render-pipeline.md, "The KaTeX memo" and
 /// "The review"): `ccwiki.js` renders each formula once while the macro
 /// table stands, the least recently used going first after 1,000, and
-/// `reviewEntries` renders a block's HTML only when an entry shows it.
+/// `reviewEntries` renders a block's HTML only when an entry shows it,
+/// unless a formula could change KaTeX's table.
 /// Neither may change a byte. The corpus suites render every formula of the
 /// wiki through the first twice and compare each page with the same page
 /// rendered by KaTeX itself, in a second context, through the patch as it
@@ -359,6 +360,77 @@ struct RenderMemoTests {
         // The old block renders after the new text is parsed.
         #expect(html("removed").contains("Nothing resolves to “x y”"))
         #expect(html("added").contains("Nothing resolves to “x%20y”"))
+    }
+
+    /// `old` with its last line changed.
+    private static func lastLineChanged(_ old: String) -> [String: Any] {
+        let last = old.split(separator: "\n", omittingEmptySubsequences: false).count - 1
+        return modified(old, old + " changed", [([last, last + 1], [last, last + 1])])
+    }
+
+    /// Reviews in which a formula changes KaTeX's table for the formulas
+    /// after it, each a table and the files reviewed with it in turn: the
+    /// gaps and the order a lazy review would render in both show.
+    private static func tableChanges() -> [(table: String, files: [[String: Any]])] {
+        let calA = #"{ "\\calA": "\\mathcal{A}" }"#
+        return [
+            // A `\gdef` in a gap, and a block shown that reads it.
+            (calA, [modified("$\\gdef\\foo{A}$ defines.\n\nB.\n\nC.\n\nD.\n\nUses $\\foo$ here.",
+                             "$\\gdef\\foo{A}$ defines.\n\nB.\n\nC.\n\nD.\n\nUses $\\foo$ there.",
+                             [([8, 9], [8, 9])])]),
+            // Only the new text defines, in a block shown before an old one
+            // that reads it.
+            (calA, [modified("X.\n\nB.\n\nC.\n\nD.\n\nUses $\\baz$.",
+                             "$\\gdef\\baz{N}$ X.\n\nB.\n\nC.\n\nD.\n\nUses $\\baz$, changed.",
+                             [([0, 1], [0, 1]), ([8, 9], [8, 9])])]),
+            // An align in a gap sets `\@eqnsw`, which a block shown reads.
+            (calA, [lastLineChanged("$$\n\\begin{align}a\\end{align}\n$$\n\nB.\n\nC.\n\nD.\n\nRead $\\@eqnsw$ here.")]),
+            // One file's `\nonumber` in a gap, and the next file's `\@eqnsw`.
+            (calA, [lastLineChanged("$$\nx\\nonumber\n$$\n\nB.\n\nC.\n\nD.\n\nE."),
+                    lastLineChanged("Read $\\@eqnsw$.\n\nB.")]),
+            // A macro one file defines defines another where the next uses
+            // it, in a gap.
+            (calA, [lastLineChanged("$\\gdef\\qux{\\gdef\\quux{Q}}$\n\nB."),
+                    lastLineChanged("$\\quux$ one.\n\nB.\n\nC.\n\nD.\n\n$\\qux$ two.\n\nE.\n\nF.\n\nG.\n\n"
+                                    + "$\\quux$ three.")]),
+            // KaTeX deletes `\color` after the first formula it renders.
+            (#"{ "\\color": "\\textcolor" }"#,
+             [lastLineChanged("$\\color{red}{x}y$\n\nB.\n\nC.\n\nD.\n\n$\\color{red}{x}y$ end.")]),
+            // A macro of the table defines another.
+            (#"{ "\\mk": "\\gdef\\made{M}" }"#,
+             [lastLineChanged("$\\mk$ makes.\n\nB.\n\nC.\n\nD.\n\nUses $\\made$ here.")]),
+        ]
+    }
+
+    @Test("a review in which a formula could change KaTeX's table renders every block, in the order it did")
+    func reviewTableChanges() throws {
+        for (table, files) in Self.tableChanges() {
+            let before = try Self.reviewer(Self.legacyMarkdown, table: table)
+            let after = try Self.reviewer(Self.currentMarkdown, table: table)
+            for file in files {
+                let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
+                    + MarkdownScript.literal(file) + "))"
+                let old = file["old"] as? String ?? ""
+                #expect(try after.text(call) == before.text(call), "\(old)")
+                #expect(try after.count("blockRenders") == before.count("blockRenders"), "every block of \(old)")
+            }
+        }
+    }
+
+    @Test("a review renders only the blocks it shows while no formula can change KaTeX's table")
+    func reviewRendersShownBlocks() throws {
+        let table = #"{ "\\calA": "\\mathcal{A}" }"#
+        let before = try Self.reviewer(Self.legacyMarkdown, table: table)
+        let after = try Self.reviewer(Self.currentMarkdown, table: table)
+        // A formula that reads what another left changes nothing itself.
+        let file = Self.lastLineChanged("$\\calA$ one.\n\nRead $\\@eqnsw$.\n\nC.\n\nD.\n\nE.")
+        let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
+            + MarkdownScript.literal(file) + "))"
+        #expect(try after.text(call) == before.text(call))
+        // Every block of both texts, five each, against the context and
+        // the block removed and added: the three before them are a gap.
+        #expect(try before.count("blockRenders") == 10)
+        #expect(try after.count("blockRenders") == 3)
     }
 
     /// What the review is sent for an edit to `page`: its middle non-blank

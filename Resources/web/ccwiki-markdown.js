@@ -887,6 +887,10 @@
     };
     md.renderer.rules.table_close = function () { return "</table></div>\n"; };
 
+    // The table KaTeX reads, and writes, for this instance's formulas: the
+    // review renders every block when a formula could change it.
+    md.katexMacros = katexOptions.macros;
+
     return md;
   }
 
@@ -946,6 +950,13 @@
   var WHITESPACE_ONLY = "Whitespace only";
   var SHOWN_AS_SOURCE = "Shown as source";
 
+  /** What, in a formula, can change KaTeX's macro table for every formula
+   *  after it: a global definition (`\gdef`, `\xdef`, `\global`), and what
+   *  sets KaTeX's own `\@eqnsw`: `\nonumber`, `\notag` and a numbered
+   *  environment, any `\begin` since a macro can spell its name (ccwiki.js,
+   *  "KaTeX memo"). */
+  var CHANGES_KATEX_TABLE = /\\(?:gdef|xdef|global|begin|nonumber|notag)(?![A-Za-z@])/;
+
   /** The top-level blocks of `source`: their lines, `[start, end)` and
    *  0-based, their source text, and their HTML, rendered from the tokens
    *  of one parse, so a footnote or a reference definition elsewhere in the
@@ -982,6 +993,8 @@
       start: map[0],
       end: map[1],
       text: lines.slice(map[0], map[1]).join("\n"),
+      // Whether rendering it could change what a later formula renders.
+      changesKatexTable: tokens.some(formulaChangesKatexTable),
       get html() {
         if (html !== null) return html;
         // The other text may have been parsed since this one. `link_open`
@@ -1012,6 +1025,30 @@
     } finally {
       md.normalizeLink = normalizeLink;
     }
+  }
+
+  /** Whether `token`, or one inside it, is a formula that can change
+   *  KaTeX's table. */
+  function formulaChangesKatexTable(token) {
+    if (token.type === "math_inline" || token.type === "math_block") {
+      return CHANGES_KATEX_TABLE.test(token.content);
+    }
+    return !!token.children && token.children.some(formulaChangesKatexTable);
+  }
+
+  /** Whether rendering `blocks` could change KaTeX's table, which every
+   *  later formula reads: a formula among them could, or any formula could
+   *  through `md`'s table. That is a macro whose body could, or one a
+   *  formula defined (KaTeX keeps it as tokens, not text), or a name KaTeX
+   *  changes: it deletes `\color` and `\current@color` after every
+   *  formula, and every name of its own has an `@`. */
+  function mayChangeKatexTable(md, blocks) {
+    var macros = md.katexMacros || {};
+    return Object.keys(macros).some(function (name) {
+      var body = macros[name];
+      return name === "\\color" || name.indexOf("@") >= 0 || typeof body !== "string" ||
+        CHANGES_KATEX_TABLE.test(body);
+    }) || blocks.some(function (block) { return block.changesKatexTable; });
   }
 
   /** `blocks`, in order, with a block for each run of non-blank lines in
@@ -1093,6 +1130,12 @@
     var status = file.status || "modified";
     var oldBlocks = status === "added" ? [] : topLevelBlocks(md, file.old || "", { links: file.links || {} });
     var newBlocks = status === "deleted" ? [] : topLevelBlocks(md, file.new || "", { links: file.links || {} });
+    // A formula that changes KaTeX's table changes what every later one
+    // renders. Then every block renders now, the old text's first, as each
+    // did when its text was parsed: parsing never calls KaTeX.
+    if (mayChangeKatexTable(md, oldBlocks.concat(newBlocks))) {
+      oldBlocks.concat(newBlocks).forEach(function (block) { return block.html; });
+    }
     var bodyLine = file.bodyLine || {};
     var entries = [];
 

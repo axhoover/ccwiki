@@ -604,21 +604,42 @@ an entry reads it, and kept (`renderedWhenRead`, a getter): a `gap` shows
 no HTML, so the blocks it stands for never render, and most blocks of a
 changed file are in one. The review renders when it opens and at every
 save while it is open. A one-line edit to each page of the wiki renders
-3,512 blocks instead of 12,748 (about 1.4 s → 0.7 s for all of them in
-V8); an edit to its first and last lines 5,240 instead of 12,814; a page
-added or deleted renders every block, as before.
+3,512 blocks instead of 12,748 (about 1.5 s → 0.9 s for all of them in
+V8, with the check for KaTeX's table below); an edit to its first and
+last lines 5,240 instead of 12,814; a page added or deleted renders
+every block, as before.
 
-That puts every render after both parses, and one thing a render reads
-can change in between: `link_open` finds a Markdown link's destination,
-which Swift keyed it by, from its href, in what `normalizeLink` last saw
-for that href (markdown-it keeps only the href; `create` in
-`ccwiki-markdown.js`), and `[a](<x y>)` and `[a](x%20y)` make one href.
-So `parseWithDestinations`
-records the destinations each text's parse asks `normalizeLink` about,
-and a block's first read asks again for its text's before it renders: the
-table is what it was when that text was parsed, as when every block
-rendered as its text was parsed. Without that, a review of such an edit
-called the removed link's missing target by the added one's spelling.
+That puts every render after both parses, in the order the entries
+come, not each text's, and without the blocks in gaps. Two things a
+render reads can change between renders. One is a Markdown link's
+destination: `link_open` finds the one Swift keyed it by from its href,
+in what `normalizeLink` last saw for that href (markdown-it keeps only
+the href; `create` in `ccwiki-markdown.js`), and `[a](<x y>)` and
+`[a](x%20y)` make one href. So `parseWithDestinations` records the
+destinations each text's parse asks `normalizeLink` about, and a block's
+first read asks again for its text's before it renders: what it last saw
+is what it saw when that text was parsed, as when every block rendered
+as its text was parsed. Without that, a review of such an edit called
+the removed link's missing target by the added one's spelling.
+
+The other is KaTeX's macro table, which a formula can change for every
+formula after it ("The KaTeX memo"): a `\gdef` in a gap defined nothing
+for the block shown below it, and an old block shown after a new one
+read what the new text defined. So when a block's formula could change
+the table (`\gdef`, `\xdef`, `\global`, `\nonumber`, `\notag`, or any
+`\begin`, as the memo has them), or any formula could through the table
+(a macro whose body could, one a formula defined, which KaTeX keeps as
+tokens, or a name KaTeX changes: `\color`, or one with an `@`),
+`reviewEntries` reads every block of both texts once both are parsed,
+the old text's first, which is the order they rendered in when each
+rendered as its text was parsed: parsing never calls KaTeX. That holds
+across files and reviews too: a file whose blocks render when shown
+leaves nothing in the table that a later formula reads. A formula that
+only reads what another left (`$\@eqnsw$`) does not count: while no
+formula writes, the table holds still. No wiki page has such a formula;
+only an edit that breaks a page's `$$`, so that pseudocode's `\begin`
+lands in a formula, renders every block (6 pages of the every-7th-line
+edit below).
 
 The entries are byte for byte the same: in node, with the vendored KaTeX
 and the wiki's macros, 7,064 reviews of every page (a middle line edited,
@@ -628,9 +649,16 @@ every 7th line, the page added and deleted) and 15 hazards the wiki lacks
 fences, `%%` comments, repeated headings, a footnote, a reference
 definition, math, pseudocode, a table, a callout) gave the same JSON
 before and after, 41 MB of it; without the second ask, 3 of the hazards
-did not. `RenderMemoTests` compares the two on the hazards on every run,
-and on four of those edits to every page on a corpus run, against a copy
-of the file as it was (`Tests/CCwikiTests/Fixtures/legacy`).
+did not. 300 runs of random reviews (565 reviews, 1,096 files, one to
+three a review) whose formulas write, read and delete KaTeX's names,
+some in gaps and some across files, gave the same JSON in bare contexts
+and the same review in jsdom through the shell; the first version, which
+rendered lazily whatever the formulas, differed within the first runs.
+`RenderMemoTests` compares the two on the hazards, on seven reviews in
+which a formula changes the table, and on one in which a formula only
+reads it, which must still render only the blocks it shows, on every
+run; and on four of those edits to every page on a corpus run, against a
+copy of the file as it was (`Tests/CCwikiTests/Fixtures/legacy`).
 
 ## 4. Serving content: a custom scheme, not `file://`
 
