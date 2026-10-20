@@ -12,7 +12,7 @@
   code. Commit messages are for the code.
 -->
 
-## 0.3.0 — unreleased
+## 0.1.4 — 2026-10-20
 
 **Correct a page from the reader.** Three ways, from the Wiki menu, the
 toolbar's pencil button, or a right-click on the page or a passage selected
@@ -105,58 +105,6 @@ PRP-to-PRF conversions need a superpolynomial domain. Kilian's OT-to-MPC
 step gives static malicious MPC with abort. The direction of ISIS/SIS
 whose parameters the wiki does not state is held back.
 
-**Fixes.**
-
-- A page saved with Windows line endings rendered blank and was missing from
-  search and backlinks.
-- On a page with a notice, such as a broken link with maintenance notices on,
-  pseudocode lost the wiki's macros, and so did Copy LaTeX (no macros) and
-  link previews.
-- A link to an asset can no longer open a file outside the wiki's content.
-- Back and Forward between two places on one page now move, and Open Link in
-  the right-click menu opens web and mail links.
-- Heading anchors match the site for superscripts, fractions, emphasis and
-  math in headings. `[[index]]` links to the front page, a YAML list written
-  flush left under its key is read, and an alias ending in `.md` links as
-  the site links it.
-- ⌘S, ⇧⌘R and ⇧⌘F show results for a query typed while the wiki was
-  loading, and Return opens a result for the text you typed rather than the
-  text before it. Opening an ⇧⌘F hit finds a capitalised term in its own
-  case.
-- Cancelling a paper ingestion while it was checking brought it back.
-- Tools you install while CCwiki is open are found when you come back to it.
-  A copy left open checks for updates every day, not only at launch, and
-  Settings no longer says "Up to date" after a relaunch when an update was
-  found.
-- In the Relations Explorer, a step whose requirement another recorded
-  reduction meets is no longer refused, relation names in plain text keep
-  `\gets`, `\pmod` and the like, and Copy Statement on a derived row says
-  what it assumes.
-- Pages read more as they do on the site. An aliased wikilink in a table no
-  longer splits its row, and one in rows that only look like a table is no
-  longer broken. Quotes curl, `--` and `---` become dashes and `->` an
-  arrow, as the site types them, in link text too. `%% comments %%` are
-  hidden. A callout written over several lines is recognised, and its title
-  reads as the site's. `[[page#Heading]]` shows the heading, and
-  `IND$-CPA` no longer shows its backslash. Games in pseudocode are grouped
-  as the site groups them, and a `../` link opens its page.
-- Folder pages list their pages in the site's order.
-- The line under a reduction's or barrier's title no longer shows a YAML
-  comment, or drops part of a value written over several lines or as a
-  list with its `]` on a line of its own.
-- Paper ingestion no longer says "Not signed in" because of another GitHub
-  host's expired token or a GitHub outage: offline, Settings and the
-  ingest sheet say so. A gh signed in only to another host no longer counts
-  as signed in to github.com. A gh that has moved no longer breaks the push
-  at the end of a job, and a credential helper you set in CCwiki's copy of
-  the wiki is kept.
-- ⇧⌘N works when the Jobs window is in front. An ingestion asked for there
-  with no reader open no longer takes the next PDF you open from the
-  Finder. The Sync Log no longer says no sync has run over the sync that
-  just ran.
-
-## 0.2.0 — unreleased
-
 **Ask whether one thing implies another.** Wiki → Relations Explorer (⇧⌘E)
 takes one or more assumptions, which together form a conjunction, and an
 optional target. It answers with a proof: a tree of the wiki's own
@@ -208,6 +156,56 @@ Settings → About shows where the copy you're running lives.
 **For people who build CCwiki from source:** a build from source is now
 CCwiki Dev, with its own settings, wiki copy and search index. It runs
 beside the released app without touching it, and never updates itself.
+
+**Fixes.**
+
+- A page saved with Windows line endings rendered blank and was missing from
+  search and backlinks.
+- On a page with a notice, such as a broken link with maintenance notices on,
+  pseudocode lost the wiki's macros, and so did Copy LaTeX (no macros) and
+  link previews.
+- A link to an asset can no longer open a file outside the wiki's content.
+- Back and Forward between two places on one page now move, and Open Link in
+  the right-click menu opens web and mail links.
+- Heading anchors match the site for superscripts, fractions, emphasis and
+  math in headings. `[[index]]` links to the front page, a YAML list written
+  flush left under its key is read, and an alias ending in `.md` links as
+  the site links it.
+- ⌘S, ⇧⌘R and ⇧⌘F show results for a query typed while the wiki was
+  loading, and Return opens a result for the text you typed rather than the
+  text before it. Opening an ⇧⌘F hit finds a capitalised term in its own
+  case.
+- Cancelling a paper ingestion while it was checking brought it back.
+- Tools you install while CCwiki is open are found when you come back to it.
+  A copy left open checks for updates every day, not only at launch, and
+  Settings no longer says "Up to date" after a relaunch when an update was
+  found.
+- In the Relations Explorer, a step whose requirement another recorded
+  reduction meets is no longer refused, relation names in plain text keep
+  `\gets`, `\pmod` and the like, and Copy Statement on a derived row says
+  what it assumes.
+- Pages read more as they do on the site. An aliased wikilink in a table no
+  longer splits its row, and one in rows that only look like a table is no
+  longer broken. Quotes curl, `--` and `---` become dashes and `->` an
+  arrow, as the site types them, in link text too. `%% comments %%` are
+  hidden. A callout written over several lines is recognised, and its title
+  reads as the site's. `[[page#Heading]]` shows the heading, and
+  `IND$-CPA` no longer shows its backslash. Games in pseudocode are grouped
+  as the site groups them, and a `../` link opens its page.
+- Folder pages list their pages in the site's order.
+- The line under a reduction's or barrier's title no longer shows a YAML
+  comment, or drops part of a value written over several lines or as a
+  list with its `]` on a line of its own.
+- Paper ingestion no longer says "Not signed in" because of another GitHub
+  host's expired token or a GitHub outage: offline, Settings and the
+  ingest sheet say so. A gh signed in only to another host no longer counts
+  as signed in to github.com. A gh that has moved no longer breaks the push
+  at the end of a job, and a credential helper you set in CCwiki's copy of
+  the wiki is kept.
+- ⇧⌘N works when the Jobs window is in front. An ingestion asked for there
+  with no reader open no longer takes the next PDF you open from the
+  Finder. The Sync Log no longer says no sync has run over the sync that
+  just ran.
 
 ## 0.1.3 — 2026-10-10
 

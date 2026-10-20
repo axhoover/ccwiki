@@ -5,6 +5,27 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-20 — 0.1.4: the tag found no notes
+
+`v0.1.4` was tagged on `910b422`, main's head after #14, and `release.yml`
+failed at `make release-notes`: CHANGELOG.md had everything since 0.1.3
+queued under `0.2.0 — unreleased` and `0.3.0 — unreleased` and no
+`## 0.1.4` section, so `make package` refused it, as designed (see the
+2026-09-27 entry). The release ships both plans under the one number the
+maintainer chose.
+
+The two unreleased sections are now one, `## 0.1.4 — 2026-10-20`: the
+0.3.0 features, then the 0.2.0 features, then the 0.3.0 Fixes list, with
+no line of prose changed. `make release-notes VERSION=0.1.4` cuts the whole
+section into `dist/RELEASE_NOTES.md`, and the changelog test still finds
+the file newest first.
+
+Still by hand, after the PR merges: move the tag to the merge commit and
+push it, which runs `release.yml` again. Re-running the failed run cannot
+work, since it checks out `910b422`, which has no 0.1.4 section.
+
+    git fetch origin && git tag -f v0.1.4 origin/main && git push -f origin v0.1.4
+
 ## 2026-10-20 — Three reading features
 
 The efficiency plan's second PR, on `claude/reading-features`, from
