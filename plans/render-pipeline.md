@@ -55,7 +55,8 @@ silently rendering garbage.
 
 pseudocode.js resolves its math backend from the global `katex` symbol and calls
 `renderToString` with **no options**, so macros arrive by monkey-patching —
-exactly as the site's own plugin does. Load order is therefore mandatory:
+exactly as the site's own plugin does. The patch is also where formulas are
+remembered (§3, "The KaTeX memo"). Load order is therefore mandatory:
 `katex.min.js` → `pseudocode.js` → markdown-it and its plugins →
 `github-slugger.umd.js` → `ccwiki-markdown.js` → `ccwiki.js`.
 
@@ -322,6 +323,100 @@ pseudocode.ts:69), in `--text-secondary` for contrast. Each `.ps-line` is
 `display: flow-root`, so a comment too long to share its statement's row
 drops to a row of its own under that statement instead of hanging beside the
 next one, which is what the site does.
+
+### The KaTeX memo
+
+KaTeX is most of a render's time (62% of the corpus's, 74% of the slowest
+20 pages'), and most of it is spent again on formulas it has rendered
+before: a page's repeats, Back and Forward, the editor's preview 300 ms
+after each pause in typing, a re-render after a pull or a preference
+change, a review's refresh. So the patched `katex.renderToString` in
+`ccwiki.js`, which every formula goes through (the page's, a card's and
+pseudocode's), keeps what it rendered in a `Map`, one per web view:
+
+- **The key** is every option of the call, defaults merged, but `macros`,
+  each as its name, its type and its value, then the formula. The table
+  is not in the key: the memo is emptied whenever `ensureMarkdown`
+  installs another one, and only the current table's calls are kept.
+- **What is never kept**: a call with another table; a formula that is not
+  a string; an option that is an object or a function (`strict` and
+  `trust` can be functions), which could answer otherwise under the same
+  name; a formula with an `@` (below); a call that throws.
+- **What empties it** (the `\gdef` rule): a formula holding `\gdef`,
+  `\xdef` or `\global` (as a control word: `\gdefault` is not one), or any
+  call in KaTeX's `globalGroup`. Those are the only ways a formula writes
+  the shared table: `\def`, `\edef`, `\let` and `\newcommand` are local to
+  their formula, and KaTeX undoes them when it ends, error or not
+  (`Parser.parse` ends every group in a `finally`). The call itself is not
+  kept, and the memo is emptied before it runs, so nothing rendered with
+  the old table survives it. KaTeX 0.16.47 also keeps two names of its own
+  in the table between formulas: `\@eqnsw`, which a numbered environment
+  (`align`, `gather`, `equation`) and `\nonumber` set globally, and
+  `\df@tag`, which `\tag` sets and every formula deletes as it starts.
+  KaTeX sets `\@eqnsw` before it reads it, so only a formula that names it
+  sees what another left, and every name KaTeX keeps has an `@`: a formula
+  with an `@` is never kept.
+- **Off**, for as long as a table stands, when any macro body holds a
+  global definition or an `@`: every formula using that macro could
+  change the table, or read what another formula left.
+- **Size**: 1,000 formulas, the least recently used going first: a hit
+  moves its entry to the end of the map, and a miss at the limit deletes
+  the first.
+
+None of the 126 macros and none of the wiki's 7,320 formulas has a global
+definition or an `@` (wiki at ab81f02). With every exception in place the
+output is unchanged byte for byte: in jsdom, with the real `ccwiki.js`
+before and after, all 883 files rendered twice in one web view, in path
+order, each page twice in a row, and path order then a shuffled order,
+gave 1,766 of 1,766 identical pages each time (16.6 MB), with the limit at
+1,000 and at 50.
+
+**The limit, from the corpus.** A render of every page calls KaTeX 7,320
+times (6,605 in prose, 92 of them display math, and 715 in pseudocode),
+on 3,299 distinct formulas and options, 4.39 M characters of HTML. The
+most on one page is 166 (`Assumptions/learning-with-errors.md`). The share
+of calls the memo answers, for each limit, simulated on that call
+sequence and checked against the real memo (`RenderMemoTests` prints all
+but the Back columns on every corpus run); "back k" is a page rendered
+again after k others, as Back does:
+
+| Limit | First pass | Second pass | Each page twice | Back 10 | Back 50 | Back 100 | Most kept |
+|---|---|---|---|---|---|---|---|
+| 500 | 46.5% | 46.9% | 100% | 100% | 78.6% | 53.7% | 0.8 M |
+| **1,000** | 50.5% | 51.7% | 100% | 100% | 100% | 82.1% | 1.6 M |
+| 2,000 | 53.5% | 57.3% | 100% | 100% | 100% | 100% | 3.1 M |
+| 3,300 | 54.9% | 100% | 100% | 100% | 100% | 100% | 4.9 M |
+| 1,000, first in first out | 48.5% | 49.2% | 99.9% | 99.0% | 95.8% | 77.2% | 1.6 M |
+
+The passes are in path order, which keeps a folder's pages together; in
+three shuffled orders 1,000 kept 100% of Back 100 too. "Most kept" is
+characters of HTML and keys at the most the memo held.
+
+1,000 holds any page, and the last hundred or so read, at about 1.6 M
+characters a web view (one per reader tab, editor preview and review). The
+app never renders the whole wiki in one web view, so the second pass,
+which only 3,300 or more covers, is no reason to keep three times as
+much. A hit rate is not time saved: the hits are mostly the short
+formulas every page repeats, so at 1,000 a second pass answers half the
+calls and saves none of the time (below), while a page rendered again
+saves most of it. Least recently used and not first in, first out,
+because first in, first out drops the formulas a page just used from
+among the oldest, and so misses on the page rendered again.
+
+Measured in V8 on the same machine (node 22, the test's DOM-free shell,
+`CCwiki.render` and the page's pseudocode, best of 5), before and after:
+
+| Case | Before | After |
+|---|---|---|
+| Every page, first render | 856 ms | 811 ms (−5%) |
+| Each page rendered again right after itself | 842 ms | 339 ms (−60%) |
+| The whole wiki a second time, in order | 732 ms | 732 ms |
+| `learning-with-errors`, rendered again | 38.4 ms | 8.5 ms (−78%) |
+
+`RenderMemoTests` checks the rules on a KaTeX that numbers its answers,
+checks a `\gdef` and `\@eqnsw` against the vendored KaTeX, and on the
+corpus renders every page twice through the memo and compares each with
+the vendored KaTeX behind the patch as it was before the memo.
 
 ### Copying LaTeX
 

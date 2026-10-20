@@ -57,16 +57,93 @@
 
   /** pseudocode.js resolves its math backend from the global `katex` symbol
    *  and calls `renderToString` with no options, so macros have to arrive by
-   *  patching — which is exactly what quartz/plugins/.../pseudocode.ts does. */
+   *  patching — which is exactly what quartz/plugins/.../pseudocode.ts does.
+   *  Every formula goes through the patch, the page's, a card's and
+   *  pseudocode's alike, so the memo below lives in it. */
   function installKatexMacros() {
     if (global.katex.__cityDeskPatched) return;
     var original = global.katex.renderToString.bind(global.katex);
     global.katex.renderToString = function (expr, options) {
       // Read at call time, not captured: the table can change between renders.
-      return original(expr, Object.assign(
-        { macros: currentMacros || {}, throwOnError: false, strict: "ignore" }, options || {}));
+      var merged = Object.assign(
+        { macros: currentMacros || {}, throwOnError: false, strict: "ignore" }, options || {});
+      if (writesMacros(expr, merged)) {
+        // What the memo holds was rendered with the table as it was.
+        katexMemo.clear();
+        return original(expr, merged);
+      }
+      var key = katexMemoKey(expr, merged);
+      if (key === null) return original(expr, merged);
+      var html = katexMemo.get(key);
+      if (html !== undefined) {
+        // The map's last entry is the one used last.
+        katexMemo.delete(key);
+        katexMemo.set(key, html);
+        return html;
+      }
+      html = original(expr, merged);
+      if (katexMemo.size >= KATEX_MEMO_LIMIT) katexMemo.delete(katexMemo.keys().next().value);
+      katexMemo.set(key, html);
+      return html;
     };
     global.katex.__cityDeskPatched = true;
+  }
+
+  // ========================================================== KaTeX memo ==
+  // A formula's HTML depends on its source, its options and the macro
+  // table. KaTeX keeps nothing else between calls, and a formula that
+  // changes the table, or reads what another left in it, never reaches the
+  // memo. So each formula renders once while the table stands, and a
+  // page's repeats, Back and Forward, the editor's preview as it is typed
+  // in, a review's refresh and the cards read it back
+  // (plans/render-pipeline.md, "The KaTeX memo").
+
+  /** How many formulas are kept, the least recently used going first: any
+   *  one page (the most on one is 166) and the last hundred or so read, in
+   *  about 1.6 M characters. render-pipeline.md has the hit rates. */
+  var KATEX_MEMO_LIMIT = 1000;
+  var katexMemo = new Map();
+  /** Off while a macro of the table could change what a formula reads. */
+  var katexMemoOn = true;
+  /** What writes KaTeX's shared macro table from inside a formula: `\gdef`,
+   *  `\xdef`, and `\global` before a `\def`, `\edef`, `\let` or
+   *  `\futurelet`. `\def` and `\newcommand` are local to their formula. */
+  var GLOBAL_DEFINITION = /\\(?:gdef|xdef|global)(?![A-Za-z@])/;
+
+  /** Whether a call can change the table every later formula reads: a
+   *  global definition, or in KaTeX's global group any definition. KaTeX
+   *  takes a `String` object too, which `test` reads as its text. */
+  function writesMacros(expr, options) {
+    return !!options.globalGroup || GLOBAL_DEFINITION.test(expr);
+  }
+
+  /** Whether a formula naming the macro whose body this is could read or
+   *  change what another formula left in the table. */
+  function sharesMacroState(body) {
+    return GLOBAL_DEFINITION.test(body) || body.indexOf("@") >= 0;
+  }
+
+  /** The memo's key for a call, or null for a call that must reach KaTeX:
+   *  while the memo is off, for a formula that is not a string, for
+   *  another table than the current one, and for an option that is an
+   *  object or a function (`strict`, `trust`), which can answer otherwise
+   *  under the same name. */
+  function katexMemoKey(expr, options) {
+    if (!katexMemoOn || typeof expr !== "string" || options.macros !== currentMacros) return null;
+    // KaTeX's own `\@eqnsw` stays in the table from one formula to the
+    // next (a numbered environment or `\nonumber` sets it), and a formula
+    // that names it reads what an earlier one left. KaTeX's own names all
+    // have an `@`; no formula or macro in the wiki has one.
+    if (expr.indexOf("@") >= 0) return null;
+    var parts = [];
+    for (var name in options) {
+      if (name === "macros") continue;
+      var value = options[name];
+      if (typeof value === "function" || (typeof value === "object" && value !== null)) return null;
+      parts.push(name, typeof value, String(value));
+    }
+    // JSON never holds a raw U+0000, so the options end at the first one.
+    return JSON.stringify(parts) + "\u0000" + expr;
   }
 
   function renderPseudocode(root) {
@@ -344,6 +421,12 @@
     if (md && key === currentMacrosKey) return md;
     currentMacros = macros;
     currentMacrosKey = key;
+    // Formulas rendered with another table are of no use, and none is kept
+    // while a macro could reach what one formula leaves for the next.
+    katexMemo.clear();
+    katexMemoOn = !Object.keys(macros).some(function (name) {
+      return sharesMacroState(String(macros[name]));
+    });
     installKatexMacros();
     md = markdownLibrary.create(macros);
     previewMarkdown = markdownLibrary.createPreview(macros);
