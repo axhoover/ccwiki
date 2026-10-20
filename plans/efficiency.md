@@ -37,8 +37,9 @@ D6 (§4.2).
   character. `backlinkMap()` makes 3.67 M of those calls per load, plus
   0.38 M direct calls in its backward walk. No other change on that path
   does even 1% of that volume. This is an inference. Phase 0 settles it in
-  one CI run, by timing today's backlinks against a test-only copy of the
-  `46685be` code in the same process (§1.3).
+  one CI run: a test-only copy of the `46685be` backlinks path, with each
+  of the four changes behind its own switch, is timed with none, each alone
+  and all four on, in the same process (§1.3).
 - **The larger finding is that the load throws away much of its work.** It
   builds contexts for 2,492 backlinks when at most 44 are ever shown. It
   parses each page's links three times instead of once. It resolves 3,447
@@ -174,18 +175,24 @@ suspect.
 **How M0 settles it, in one run.** D1's numbers and `main`'s come from
 different CI runs on different runners, and phases whose code did not
 change moved by 18–41% between them. So M0 does not compare across runs.
-It carries a test-only copy of the `46685be` backlinks path and times it
-beside today's, in the same process, minimum of 5 each (§2.3 item 3):
-- `backlinkMap()` as today, and the same loop over the copy's parsers and
-  `context`, which find line ends with `firstIndex(of: "\n")` and
-  `== "\n"`;
-- each of the four changes on its own, over the inputs `backlinkMap` gives
-  it.
+It carries a test-only copy of the whole backlinks path as `46685be` wrote
+it: the link parsers, `outgoingLinks`, `context`, `resolve` with the anchor
+slugging it calls, and `backlinkMap`'s loop. Each of the four changes above
+is in the copy too, as `21df5d7` wrote it, behind its own switch (§2.3
+item 3). One process times the copy six ways, interleaved run by run,
+minimum of 5 each, beside today's `backlinkMap()`:
+- no switch on, which is `46685be`'s path;
+- each switch alone, which is that change's cost on its own;
+- all four on, which is `21df5d7`'s path.
 
-The corpus has no `\r` (0 of 877 bodies), so the two maps must be equal,
-and M0 asserts it. If the line-end rows do not account for most of the
-difference, the other rows and the sub-phase lines say where the rest is,
-and the integrator corrects this section before anything claims a cause.
+The corpus has no `\r` (0 of 877 bodies) and no relative or `index` link,
+the only links whose page the old `resolve` would change. So all six maps
+must be equal, and M0 asserts it. It also asserts that with all four on,
+the copy parses, resolves and builds exactly what the app does, so the copy
+is the code being timed. §1.3 is right if the two line-end switches carry
+most of the difference between no switch and all four. If the slugger or
+the segment split carries much of it, the integrator corrects this section
+before anything claims a cause.
 
 **The A/B line.** M0 also times four ways of finding a line end over all
 bodies (§2.3 item 4). That line decides L1's form, not the cause.
@@ -245,14 +252,16 @@ attributable.
   activation, and the suite has never constructed one. So U's and W's checks
   are pure seams, test-local probes and the maintainer's `make shots`
   (§2.8, §2.9).
-- **The ports live outside the repo:**
+- **The ports and references the measurements used:**
   - Python ports of CodeMask, WikilinkParser, LinkScanner, QuartzSlug,
     `resolve`, `backlinkMap`, PreviewExcerpt, ConceptRanker,
-    ReferenceRanker and FuzzyMatcher;
-  - `scripts/derivations_reference.py` for the engine;
-  - SQLite 3.45 for FTS5;
+    ReferenceRanker and FuzzyMatcher, outside the repo;
+  - for the engine, `scripts/derivations_reference.py` (in the repo), run
+    from scripts outside the repo, and an instrumented copy of it for the
+    step-visit counts and X4's and X5's measurements;
+  - SQLite 3.45 for FTS5, outside the repo;
   - the vendored JavaScript in node 22 and jsdom, including the KaTeX call
-    sequence J1's cap was chosen from.
+    sequence J1's cap was chosen from, outside the repo.
 
   M0 moves the decisive measurements into the corpus suite, so nothing
   depends on these ports.
@@ -274,7 +283,10 @@ attributable.
      change, however L3 and F1 reshape the module's. Each copy starts:
      "Verbatim copy of <file> at 21df5d7 for equivalence tests. Do not
      edit; delete in the next batch." (M0's copy names `46685be` and the
-     backlinks timing instead.)
+     backlinks timing instead. It is also the one copy with switches: it
+     holds each of `21df5d7`'s four changes to the path as `21df5d7` wrote
+     it, behind a switch, and its functions are instance methods so that
+     each can read its switch. Its header says so.)
    - **Private helpers come along.** `@testable import` does not reach
      `private`, and the functions being replaced call private helpers:
      `CodeMask.commentRanges` and `inlineInertRanges`, `WikiIndex.context`,
@@ -323,8 +335,9 @@ attributable.
    - `CodeMask.inertRanges(in:)`, `WikilinkParser.links(in:)`,
      `MarkdownLinkParser.links(in:)`, `WikiIndex.outgoingLinks(in:)`,
      `resolve(_:from:)`, `WikiIndex.plainText(_:)`, `backlinkMap()`,
-     `Backlink.sourcePath` and `.context`, `WikiPage.headings()`, and the
-     `Wikilink` and `MarkdownLink` types as they are;
+     `Backlink.sourcePath` and `.context`, `WikiPage.headings()`,
+     `WikiIndex.pages` and `.assets`, and the `Wikilink`, `MarkdownLink`
+     and `WikiIndex.Target` types as they are;
    - `PreviewExcerpt.scope(of:anchor:)`,
      `LinkPreviews(index:manifest:labels:)`;
    - `Derivation(manifest:)`, `missingQuotes(pageText:)`,
@@ -398,40 +411,68 @@ fails. It also says "measured alone" when `CCWIKI_TIMINGS_ALONE` is set, and
 keeps the existing "beside the other suites" otherwise. So the copy inside
 `make test-corpus` is attributable too, not only the standalone step.
 
-**3. Backlinks, today against `46685be`, in one run.**
+**3. Backlinks, `46685be` against `21df5d7`, in one run.**
 - **The copy.** `Legacy/LegacyBacklinks46685be.swift` holds, inside
-  `extension Legacy { enum D1 { … } }`:
-  - `Wikilink.swift` at `46685be`, all of it but the `Wikilink` and
-    `MarkdownLink` structs, which stay the module's. That is
-    `WikilinkParser`, `CodeMask`, `MarkdownLinkParser` and the private
-    `LinkScanner`, plus its private `UInt8` extension, which stays at file
-    scope since an extension cannot nest. Inside `D1` their calls to each
-    other reach the copies, so all three CodeMask passes per page scan for
-    `"\n"`.
-  - `WikiIndex.outgoingLinks(in:)` and the private `context(of:in:)` at
-    `46685be`, which calls the module's `WikiIndex.plainText(_:)`;
-  - `GithubSlugger.slug` and its private `survives` at `46685be`;
-  - `backlinkMap`'s loop over those, calling today's `index.resolve`. Its
-    tables are private, so `resolve` cannot be copied. The loop builds
-    `Legacy.Backlink`, so it still compiles after L3 and F1 change the
-    module's `Backlink`.
-- **The lines**, each the minimum of 5 on the loaded library:
-  - `backlinkMap()` today, and `Legacy.D1.backlinkMap(index)`. It asserts
-    that for every target today's list, mapped to
-    `Legacy.Backlink(sourcePath:context:)`, equals the copy's, in order;
-  - CodeMask: `CodeMask.inertRanges` against `Legacy.D1.CodeMask`, three
-    times per page, as `backlinkMap` calls it;
-  - `context`'s forward scan and backward walk, each timed old and new on
-    its own, over every backlink's link. The test holds its own four-way
-    `context` for this, since today's is private;
-  - `GithubSlugger.slug` against `Legacy.D1.GithubSlugger.slug`, on each
-    anchored link's anchor three times, about the 1,770 calls `resolve`
-    makes;
-  - the segment split, alone, over every link that reaches it (3,435
-    splits).
-- **Reading it.** The first line gives today's cost and `46685be`'s, and
-  the others split the difference among the four changes. §1.3 is right if
-  the CodeMask and `context` rows hold most of it.
+  `extension Legacy`, a `struct D1` made by `D1(index:changes:)` from the
+  loaded index and a set of switches. `D1.Changes` is an `OptionSet` with
+  one switch for each change in §1.3: CodeMask's line ends, `context`'s line
+  ends, the slugger, and `resolve`'s segment split. The copied functions
+  are methods of `D1`, so each reads its switch, and their calls to each
+  other reach the copies. The copy holds, as `46685be` wrote them:
+  - `Wikilink.swift`'s `WikilinkParser`, `CodeMask`, `MarkdownLinkParser`
+    and the private `LinkScanner`, plus its private `UInt8` extension,
+    which stays at file scope since an extension cannot nest. The
+    `Wikilink` and `MarkdownLink` structs stay the module's. All three
+    CodeMask passes per page take the CodeMask switch.
+  - `WikiIndex`'s `backlinkMap`, `outgoingLinks(in:)`, `resolve(_:from:)`
+    and the private `context(of:in:)`, which calls the module's
+    `WikiIndex.plainText(_:)`.
+  - `resolve`'s tables. `slugToPath`, `aliasOwners` and `basenameIndex` are
+    private to `WikiIndex`, so `init` builds them again as `assemble` does,
+    from the files `overlaying` lists (`index.pages`' keys and
+    `index.assets`' values), outside the timed code. They are the index
+    phase's work, so they are built as `21df5d7` builds them, which differs
+    from `46685be` only for an alias that ends in `.md`. The first
+    assertion below catches any table that comes out different.
+  - `QuartzSlug.splitAnchor` and `transformInternalLink`, with the private
+    `addRelativeToStart`. These are the functions on `resolve`'s path that
+    reach the slugger, so they must reach the copy's. The rest of
+    `QuartzSlug` did not change, and the copy calls it as it is.
+  - `GithubSlugger.slug` and its private `survives`.
+
+  Behind each switch is that change as `21df5d7` wrote it. That includes
+  a file-private copy of `isMarkdownLineEnding`, under another name since a
+  same-named `Character` property would be ambiguous beside the module's,
+  so the line keeps its meaning whatever L1 does to the module's. The loop
+  builds `Legacy.Backlink`, so it still compiles after L3 and F1 change
+  the module's `Backlink`.
+- **The lines.** Seven, each the minimum of 5 on the loaded library,
+  interleaved run by run so that whatever slows the runner slows them
+  alike:
+  - the copy with no switch on: `46685be`'s path;
+  - the copy with each switch alone, each printed with its difference from
+    the first line;
+  - the copy with all four on: `21df5d7`'s path;
+  - `backlinkMap()` as built.
+- **Assertions.**
+  - With all four on, the copy's `outgoingLinks` and `resolve` equal the
+    app's for every link on every page. Its map equals `backlinkMap()`'s,
+    each list mapped to `Legacy.Backlink(sourcePath:context:)`, in order.
+    So the copy is the code being timed.
+  - It counts the bodies that hold `\r` and the links whose page the
+    copy's `46685be` `resolve` changes, and prints both. When both are 0,
+    as on the corpus, all six maps must be equal. Otherwise the report says
+    "not compared".
+- **Reading it.** The first copy line is `46685be`'s cost and the all-four
+  line is `21df5d7`'s, in one process. Each switch's difference is that
+  change's cost on its own. The four need not add up to the whole exactly,
+  since each line is its own minimum on a noisy runner. §1.3 is right if
+  the CodeMask and `context` switches carry most of the difference between
+  the first line and the all-four line. If the slugger or the segment
+  split carries much of it, §1.3 is wrong, and the integrator corrects it
+  (§2.10 item 1). At M0 the as-built line matches the all-four line within
+  noise. As the tracks land only the as-built line moves, since the copies
+  stay as they are.
 
 **4. Sub-phase lines.** Each is the minimum of 5 runs, on the library
 already loaded:
@@ -531,7 +572,8 @@ macOS minute counts ten times against the account's Actions quota:
 The copy that runs inside `make test-corpus`, on every push, keeps its
 assertions, and its numbers carry the "beside the other suites" label. The
 step reuses `make check`'s debug build and adds about 2–3 minutes where it
-runs.
+runs. A push to a branch without a pull request skips it, which is why the
+integrator opens the efficiency PR with M0 (§2.10 item 1).
 
 **What each line should do after the tracks.** The "before" figures are
 CI's numbers on `main`, or M0's first run for lines that are new. The
@@ -540,7 +582,7 @@ actually prints.
 
 | Report line | Before | After, expected | Moved by |
 |---|---|---|---|
-| backlinks, today and `46685be` in one run | new | the copy well below today, the difference mostly in the CodeMask and `context` rows, if §1.3 is right | (M0 only) |
+| backlinks: the `46685be` copy, each switch alone, all four, as built (same run) | new | `46685be` well below all four; most of the difference in the CodeMask and `context` switches, if §1.3 is right | the copies: nothing; as built: L1–L4 |
 | line ends A/B | new | (a) well above (d) | (M0 only; decides L1's form) |
 | `backlinks` | 1,605 ms | below D1's 680 ms: what remains is one parse per page and 972 resolves | L1–L4 |
 | `previews` | 1,051 ms | about half: plainText 2,752 → 1,317, CodeMask passes 887 → 430 | L1, L5 |
@@ -551,9 +593,10 @@ actually prints.
 | search sync, no-op (min of 5) | 1,125 ms (one run) | ≲ 0.35 s (estimate) | L1, S3, S4 |
 | `answer` / `implying` lines | new | closure counts fall 30× or more on no-path answers and implied-by | X4, X5 |
 | ⌘O, one keystroke | new | unchanged: FuzzyMatcher is deferred (§4.2) | — |
-| JSC first render of the corpus | new | about −4% | J1 |
+| JSC first render of the corpus | new | about −11 to −14%: one context renders the whole corpus, so formulas repeated across pages hit (a page alone in a fresh web view gains only 4–5%) | J1 |
 | JSC, each page again right after itself | new | about −55% | J1 |
-| JSC, the corpus a second time in path order | new | little change: J1's cap is below the corpus's 3,299 formulas on purpose | J1 |
+| JSC, LWE again right after itself | new | about −75% (20.9 → 4.9 ms in V8) | J1 |
+| JSC, the corpus a second time in path order | new | little change (about −10% in V8): J1's cap is below the corpus's 3,299 formulas on purpose | J1 |
 | JSC review entries | new | about −40% | J2 |
 
 ### 2.4 Track L: the load path, links, backlinks and previews
@@ -1057,7 +1100,7 @@ and JSC timing.*
     function; when the merged macros are not `currentMacros`; or when the
     expression matches `/\\(?:gdef|xdef|global)(?![A-Za-z@])/`, which also
     clears the map. A call that throws caches nothing.
-  - **Size:** first in, first out, capped at **2,000** entries (below).
+  - **Size:** first in, first out, capped at **2,500** entries (below).
   - **Macro table changes:** `ensureMarkdown` clears the map when it
     rebuilds, and turns caching off if any macro body holds a global
     definition.
@@ -1066,36 +1109,49 @@ and JSC timing.*
 - **The cap, from measured hit rates.** On the corpus's real call sequence
   (7,320 calls, 3,299 distinct keys, 4.39 M characters of HTML), node 22:
 
-  | Second render | Cap 1,000 | Cap 2,000 | Cap 3,300 |
-  |---|---|---|---|
-  | Each page again right after itself (A A B B …) | 99.9% hits | 100% | 100% |
-  | 100 primitive and assumption pages, then Back through all of them (50 seeded sessions) | 91.5% | 100% | 100% |
-  | The corpus a second time in path order (A … Z A … Z) | 49.2% | 54.7% | 100% |
-  | Most HTML held per web view | 1.48 M characters | 2.88 M | 4.39 M |
+  | Second render | Cap 1,000 | Cap 2,000 | Cap 2,500 | Cap 3,300 |
+  |---|---|---|---|---|
+  | Each page again right after itself (A A B B …) | 99.9% hits | 100% | 100% | 100% |
+  | 100 visits drawn at random from the 87 primitive and assumption pages (about 59 distinct), then Back (50 seeded sessions) | 91.5% | 100% | 100% | 100% |
+  | The 100 pages with the most formulas (2,234 distinct), most first, then Back | 67.0% | 92.8% | 100% | 100% |
+  | The corpus a second time in path order (A … Z A … Z) | 49.2% | 54.7% | 54.9% | 100% |
+  | Most HTML held per web view | 1.48 M characters | 2.88 M | 3.51 M | 4.39 M |
 
-  Any one page fits any cap: LWE, the largest, has 166 keys. The cap is
-  2,000, the smallest measured that holds a whole Back history
-  (`NavigationHistory.capacity` is 100) of math-heavy pages. Every
+  The third row is a worst case for a Back history: the 100 pages with the
+  most distinct formulas each, which are 36 reductions, 33 primitives, 17
+  assumptions and 14 other pages. Visited in path order, fewest first, or
+  in 50 seeded shuffles, it gives 65–67%, 91–92%, 100% and 100%. At a cap
+  of 2,500 it holds at most 3.16 M characters.
+
+  Any one page fits any cap: LWE, the largest, has 166 keys. Every
   re-render the app makes is of a page that web view rendered recently:
   Back and Forward, the editor's preview of the page being edited, the
-  current page after a pull or a preference change, a review refresh. A
-  second pass over the whole corpus in one web view thrashes any FIFO
-  smaller than its 3,299 formulas. No reader does that, so the cap is not
-  sized for it, and M0's path-order line is expected to move little.
-- **Effect.** In V8 (markdown-it, KaTeX and pseudocode; no DOM; min of 5),
-  the second render of the corpus:
+  current page after a pull or a preference change, a review refresh. So
+  the cap is sized to hold a whole Back history
+  (`NavigationHistory.capacity` is 100). 2,000 holds every formula of the
+  87 primitive and assumption pages (1,599), but only 92.8% of the
+  worst-case history. **The cap is 2,500**: it holds that history's 2,234
+  formulas with about 10% to spare as the wiki grows, at a cost of at most
+  0.6 M characters more than 2,000 (3.51 M against 2.88 M). A second pass
+  over the whole corpus in one web view thrashes any FIFO smaller than its
+  3,299 formulas. No reader does that, so the cap is not sized for it, and
+  M0's path-order line is expected to move little.
+- **Effect.** In V8 (markdown-it, KaTeX and pseudocode; no DOM; min of 5,
+  all caps in one run), the second render of the corpus:
 
-  | Order | No memo | Cap 1,000 | Cap 2,000 | Cap 3,300 |
-  |---|---|---|---|---|
-  | Each page again right after itself | 436 ms | 196 ms | 194 ms | 192 ms |
-  | The corpus a second time in path order | 453 ms | 471 ms | 440 ms | 188 ms |
+  | Order | No memo | Cap 1,000 | Cap 2,000 | Cap 2,500 | Cap 3,300 |
+  |---|---|---|---|---|---|
+  | Each page again right after itself | 444 ms | 199 ms | 207 ms | 192 ms | 194 ms |
+  | The corpus a second time in path order | 476 ms | 470 ms | 472 ms | 427 ms | 195 ms |
 
-  A re-render of LWE goes from 20.9 to 4.9 ms. A first render gains 4–5%,
-  from repeats within the page. A first pass over the corpus in one web
-  view gains 11–14%. Re-renders happen on Back and Forward, at every 300 ms
+  The capped columns of the first row differ only by noise. A re-render of
+  LWE goes from 20.9 to 4.9 ms. A first render gains 4–5%, from repeats
+  within the page. A first pass over the corpus in one web view gains
+  11–14%: 54% of its calls repeat a formula already rendered, on that page
+  or an earlier one. Re-renders happen on Back and Forward, at every 300 ms
   pause in the editor preview, after a pull or a preference change, and
-  when the review refreshes. Memory is at most about 2.9 M characters of
-  HTML per web view, reached only after 2,000 distinct formulas in that
+  when the review refreshes. Memory is at most about 3.5 M characters of
+  HTML per web view, reached only after 2,500 distinct formulas in that
   view. This is JavaScript, so the Swift build does not change it.
 - **Why it is exact.** In jsdom running the real `ccwiki.js`, 1,766 of 1,766
   renders were byte-identical with and without the memo: the corpus twice in
@@ -1373,21 +1429,31 @@ then edit some of the first's files (`WikiIndex`, `InspectorView`,
 tracks never conflict on the shared docs. Each track hands the integrator
 its commits and what it expects CI to print.
 
-1. **M0 lands first.** The integrator pushes it, and its CI run is the
-   baseline in §5. If its backlinks lines contradict §1.3, the integrator
-   corrects §1.3 before any track claims a cause.
+1. **M0 lands first.** The integrator pushes it and opens the efficiency
+   PR as a draft at the same time. The standalone timing step is gated off
+   ordinary pushes to a branch, so only a `pull_request` run (or a manual
+   `workflow_dispatch` run) has it. With the PR open, every later push to
+   `claude/efficiency` also runs the `pull_request` workflow, and §5 is
+   filled from that run's "measured alone" report, never from the "beside
+   the other suites" copy, whose phases move by up to 41% (§1.1). M0's run
+   is the baseline in §5. If its backlinks lines contradict §1.3, the
+   integrator corrects §1.3 before any track claims a cause.
 2. **Then L, S, X, J, U and W, in any order.** Each branches from M0's
    commit. Within a track, the items land in the order of §2.2, each as its
    own commit. Builders do not push. The integrator merges one track at a
    time and pushes after each, one CI run per track, so §5's columns
    attribute each change to a track; the sub-phase lines already isolate
-   the items within it. L first is preferable, since it carries the
-   regression.
+   the items within it. It waits for each run to finish before the next
+   push: ci.yml's `concurrency` cancels a run in progress on the same ref,
+   so a push made too soon loses the previous track's numbers. L first is
+   preferable, since it carries the regression.
 3. **Interfaces between tracks are fixed by this plan:**
    - L keeps `Backlink.sourcePath` (S reads it), `Backlink.context` (M0 and
      U5 read it), `headings()`'s signature (S calls it), and `Wikilink`,
-     `MarkdownLink`, `WikiIndex.plainText(_:)` and `resolve(_:from:)` as
-     they are (M0's `46685be` copy builds on them);
+     `MarkdownLink`, `WikiIndex.Target`, `WikiIndex.pages` and `.assets`,
+     `WikiIndex.plainText(_:)`, `outgoingLinks(in:)` and `resolve(_:from:)`
+     as they are. M0's `46685be` copy builds on all but the last two, and
+     checks itself against those two;
    - X keeps `answer` and `implying`, which M0 calls, and every existing
      `closure(from:options:)` call compiles through the defaulted `visits`;
    - J keeps `CCwiki.render`'s payload and `reviewEntries`' signature, which
@@ -1400,8 +1466,9 @@ its commits and what it expects CI to print.
      (§3). It starts from `claude/efficiency`'s head, since F1 builds on L1
      and L3, and merges after it.
 
-   The integrator opens both as drafts. The maintainer merges them; no
-   agent does.
+   The integrator opens both as drafts: the efficiency PR when it pushes
+   M0 (item 1), and the reading-features PR when it pushes the first of F
+   and G. The maintainer merges them; no agent does.
 
 ---
 
@@ -1560,9 +1627,10 @@ click:
 - A pure `SavedPages` value with `{path, anchor?, title, savedAt}` and
   these operations: add, remove, move, contains, and
   `reconciled(with: WikiIndex)`.
-- It persists as JSON in UserDefaults, as `Settings.recentPages` does
-  (`App/Settings.swift:22, 80-83`). CCwiki Dev's separate bundle id keeps
-  its list apart.
+- It persists as JSON in UserDefaults, as `CCwikiSettings.explorerRecents`
+  does (`App/ExplorerSettings.swift:30-39`), through a new accessor in
+  `App/Settings.swift`. CCwiki Dev's separate bundle id keeps its list
+  apart.
 
 **Tests.**
 - `SavedPagesTests`: add, remove, reorder, and a persistence round trip.
@@ -1592,8 +1660,9 @@ click:
 ### 4.1 Risks
 
 1. **§1.3's cause is an inference until M0 runs.** M0 settles it in one
-   run, against a copy of the `46685be` code. If the line-end rows do not
-   carry the difference, the other rows point elsewhere. L2–L4 still remove
+   run, with a copy of the `46685be` path whose four changes are each
+   behind a switch. If the line-end switches do not carry the difference,
+   the slugger and segment switches say where it is. L2–L4 still remove
    real work, but this document is corrected before it names a cause.
 2. **Legacy copies only prove what the corpus and fixtures exercise.**
    Fixtures cover what the corpus lacks: CR, CR LF, combining marks, fences,
@@ -1621,7 +1690,7 @@ click:
    pull requests, `main` and manual runs. The new corpus equivalence tests
    add about 1–2 minutes to `make test-corpus` on every push. All are
    debug.
-9. **Memory.** J1 holds at most 2,000 entries, about 2.9 M characters of
+9. **Memory.** J1 holds at most 2,500 entries, about 3.5 M characters of
    HTML, per web view. L6 holds at most a few hundred cards per load. L3 and
    F1 slices share the bodies' storage.
 10. **Debug versus release.** CI measures debug. The constant-factor items
@@ -1677,30 +1746,35 @@ click:
 
 ## 5. Results, filled in from CI
 
-The integrator fills this in, one column per push (§2.10).
+The integrator fills this in, one column per push, from the
+`pull_request` run's "measured alone" report (§2.10 item 1).
 
 | Report line | `main` (21df5d7) | M0 baseline | After L | After S | After X | After J | After U and W |
 |---|---|---|---|---|---|---|---|
 | wiki commit / Swift version | `ab81f02` (inferred) / — | | | | | | |
+| counts: pages / links / distinct resolve keys / backlinks / targets / max per target / headings, non-reference pages (vs §1.2) | from the ports: 877 / 3,447 / 972 / 2,492 / 821 / 44 / not counted | | | | | | |
 | backlinks | 1,605 ms | | | | | | |
-| backlinks, today / `46685be` copy (same run) | — | | | | | | |
-| … CodeMask ×3, `context` forward, backward, slug, split (Δ each) | — | | | | | | |
+| backlinks: `46685be` copy / all four switches / as built (same run) | — | | | | | | |
+| … each switch alone, Δ from the `46685be` copy: CodeMask line ends / `context` line ends / slugger / segment split | — | | | | | | |
 | line ends A/B (a)/(b)/(c)/(d) | — | | | | | | |
 | `CodeMask.inertRanges`, all bodies | — | | | | | | |
 | `outgoingLinks`, all bodies | — | | | | | | |
 | `resolve`, every link | — | | | | | | |
 | context `plainText`, every backlink | — | | | | | | |
 | previews | 1,051 ms | | | | | | |
+| `PreviewExcerpt.scope`, all bodies / `LinkPreviews(...)` | — | | | | | | |
 | derivation | 640 ms | | | | | | |
 | `Derivation(manifest:)` / `missingQuotes` | — | | | | | | |
 | `answer` / `implying` lines | — | | | | | | |
 | full build total | 3,553 ms | | | | | | |
 | update after one-page edit | 4,059 ms | | | | | | |
 | `ConceptRanker(pages:)` / `ReferenceRanker` | — | | | | | | |
+| `headings()`, non-reference pages / `indexableBody`, all bodies | — | | | | | | |
 | search sync, full (min of 3) / no-op (min of 5) | 2,984 / 1,125 ms (one run each) | | | | | | |
 | ⌘O, slowest keystroke / empty-query sort | — | | | | | | |
 | JSC first render | — | | | | | | |
 | JSC, each page again right after itself | — | | | | | | |
+| JSC, LWE again right after itself | — | | | | | | |
 | JSC, the corpus a second time in path order | — | | | | | | |
 | JSC review entries | — | | | | | | |
 | W2 probe: equal assignment notifies? | — | | | | | | |
