@@ -1920,8 +1920,10 @@ tests are `ReaderContextMenuTests` and `SectionLinkCorpusTests`.
 **As built** (track G: `9b73789` to `de0340c`, then five commits for six
 of a review's nine findings; two more were this section's text and
 design-system.md's, and the ninth is the shots. Save Section is one
-commit at integration). The model, its JSON and the sidebar section are
-as specified. The tests are `SavedPagesTests`, and `SavedPagesModelTests`,
+commit at integration, and the integrated branch's review gave it two
+more: none under the page's title, and a section looked up on its page
+after a pull). The model, its JSON and the sidebar section are as
+specified. The tests are `SavedPagesTests`, and `SavedPagesModelTests`,
 which loads a real `AppModel` over the fixture clone.
 - **Reconciliation also takes the one page with exactly the title.** A
   slug keeps its case, so no link with the old title finds a file renamed
