@@ -277,3 +277,26 @@ struct SavedPagesTests {
                 "the first is kept, where it was")
     }
 }
+
+/// Saved pages in the app model: what it reads from the user defaults when
+/// it is made, and what it writes back. Each test puts back the defaults it
+/// changes.
+@MainActor
+struct SavedPagesModelTests {
+
+    @Test("the Saved section is open or closed as it was left, at the next launch")
+    func sectionStaysAsLeft() throws {
+        let stored = CCwikiSettings.showsSavedPages
+        defer { CCwikiSettings.showsSavedPages = stored }
+        CCwikiSettings.showsSavedPages = true
+        let fixture = try ModelFixture()
+        defer { fixture.delete() }
+        #expect(fixture.model.showsSavedPages)
+
+        fixture.model.showsSavedPages = false
+        #expect(!CCwikiSettings.showsSavedPages)
+        let next = try ModelFixture()
+        defer { next.delete() }
+        #expect(!next.model.showsSavedPages, "a new launch finds it as it was left")
+    }
+}

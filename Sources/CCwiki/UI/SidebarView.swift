@@ -10,10 +10,9 @@ struct SidebarView: View {
     /// The selection and the open folders are this window's; the tree and
     /// its counts are every window's.
     @Environment(ReaderSession.self) private var session
-    /// Whether this window's Saved section is open.
-    @State private var showsSaved = true
 
     var body: some View {
+        @Bindable var model = model
         @Bindable var session = session
 
         ScrollViewReader { proxy in
@@ -21,11 +20,11 @@ struct SidebarView: View {
                 if model.index != nil {
                     // The pages the reader saved, in the order they gave
                     // them, the same in every window (plans/efficiency.md
-                    // §3.3). Hidden when there are none. Out of the tree's
-                    // selection: their ids are not paths, and the rows are
-                    // selection-disabled.
+                    // §3.3), and open or closed in all of them. Hidden when
+                    // there are none. Out of the tree's selection: their ids
+                    // are not paths, and the rows are selection-disabled.
                     if !model.savedPages.isEmpty {
-                        Section("Saved", isExpanded: $showsSaved) {
+                        Section("Saved", isExpanded: $model.showsSavedPages) {
                             let saved = model.savedPages.entries
                             ForEach(saved) { entry in
                                 SavedRow(

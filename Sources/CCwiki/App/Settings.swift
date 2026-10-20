@@ -21,6 +21,7 @@ struct CCwikiSettings: Sendable {
     private static let lastPageKey = "ccwiki.lastPage"
     private static let recentPagesKey = "ccwiki.recentPages"
     private static let savedPagesKey = "ccwiki.savedPages"
+    private static let showsSavedPagesKey = "ccwiki.showsSavedPages"
     private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
     private static let highestSeenVersionKey = "ccwiki.highestSeenVersion"
     private static let showsInspectorKey = "ccwiki.showsInspector"
@@ -95,6 +96,15 @@ struct CCwikiSettings: Sendable {
             guard let data = newValue.json else { return }
             UserDefaults.standard.set(data, forKey: savedPagesKey)
         }
+    }
+
+    /// Whether the sidebar's Saved section is open. Open by default.
+    static var showsSavedPages: Bool {
+        get {
+            UserDefaults.standard.object(forKey: showsSavedPagesKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: showsSavedPagesKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: showsSavedPagesKey) }
     }
 
     /// The "N links on this page have no target" banner. A signal for

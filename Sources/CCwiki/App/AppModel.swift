@@ -162,6 +162,14 @@ final class AppModel {
         }
     }
 
+    /// Whether the sidebar's Saved section is open. The model's, as the list
+    /// is, and kept between launches, as the inspector's derived sections
+    /// are: closed in one window, it is closed in every window and tab, new
+    /// or restored.
+    var showsSavedPages: Bool = CCwikiSettings.showsSavedPages {
+        didSet { CCwikiSettings.showsSavedPages = showsSavedPages }
+    }
+
     // MARK: Navigation
 
     // Where a reader is, and how it got there, is its window's: see
