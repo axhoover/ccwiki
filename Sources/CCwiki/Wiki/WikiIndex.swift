@@ -333,6 +333,45 @@ struct WikiIndex: Sendable {
             .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
+    // MARK: Section links
+
+    /// A wikilink to section `id` of the page at `path`, whose heading reads
+    /// `text`, that resolves back to that section (plans/efficiency.md §3.2).
+    ///
+    /// It names the page by its stem when `[[stem]]` resolves to the page,
+    /// as it does unless another page or an alias has the same name, and
+    /// otherwise by its path without `.md`. It names the section by `text`
+    /// when that reads back as `id`: the text has none of `[ ] | # ^ \` or a
+    /// line break, and its slug is `id`. Otherwise by `id`, the only way to
+    /// a repeated heading's `-1`. Each form is read back through
+    /// `WikilinkParser` and `resolve` before it is returned; nil when none
+    /// reads back.
+    func wikilink(toSection id: String, text: String, onPage path: String) -> String? {
+        let withoutExtension = path.hasSuffix(".md") ? String(path.dropLast(3)) : path
+        let names = [WikiPage.stem(of: path), withoutExtension]
+        let sections = Self.namesSection(text, id: id) ? [text, id] : [id]
+        for name in names {
+            for section in sections {
+                let link = "[[\(name)#\(section)]]"
+                let parsed = WikilinkParser.links(in: link)
+                if parsed.count == 1, parsed[0].range == link.startIndex..<link.endIndex,
+                   resolve(parsed[0], from: path) == .page(path: path, anchor: id) {
+                    return link
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Whether a heading's text can name its section in a wikilink: nothing
+    /// in it ends the link or its anchor, or makes it a block reference, and
+    /// its slug is the section's id.
+    static func namesSection(_ text: String, id: String) -> Bool {
+        !text.isEmpty
+            && !text.contains(where: { "[]|#^\\".contains($0) || $0.isNewline })
+            && GithubSlugger.slug(text) == id
+    }
+
     // MARK: Backlinks
 
     /// path → every page that links to it, with the lines that mention it.

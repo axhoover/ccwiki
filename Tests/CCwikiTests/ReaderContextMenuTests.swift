@@ -230,6 +230,56 @@ struct ReaderContextMenuTests {
             available: false, selection: Self.selection(text: "a passage")).isEmpty)
     }
 
+    // MARK: Sections (plans/efficiency.md §3.2)
+
+    private static let section = CorrectionTarget.Section(id: "syntax", title: "Syntax", level: 2)
+    private static let sectionLinks = ReaderContextTarget.SectionLinks(
+        site: "https://cryptology.city/Primitives/pseudorandom-function#syntax",
+        wikilink: "[[pseudorandom-function#Syntax]]",
+        app: "ccwiki-dev://wiki/page/Primitives%2Fpseudorandom-function.md#syntax")
+
+    private static func target(heading: CorrectionTarget.Section?) -> ReaderContextTarget {
+        ReaderContextTarget(selection: ReaderSelection(
+            renderedLines: 4..<6, text: nil, heading: heading, path: pagePath, revision: "ab81f02"))
+    }
+
+    @Test("under a heading, the section group offers the site link, the wikilink and the CCwiki link, in that order")
+    func sectionGroup() {
+        var asked: [String] = []
+        let items = Self.target(heading: Self.section).sectionItems { path, heading in
+            asked.append("\(path)#\(heading.id)")
+            return Self.sectionLinks
+        }
+        #expect(items.map(\.title) == [
+            "Copy Link to Section",
+            "Copy Wikilink to Section",
+            "Copy CCwiki Link to Section",
+        ])
+        #expect(items.map(\.text) == [
+            "https://cryptology.city/Primitives/pseudorandom-function#syntax",
+            "[[pseudorandom-function#Syntax]]",
+            "ccwiki-dev://wiki/page/Primitives%2Fpseudorandom-function.md#syntax",
+        ])
+        #expect(items.allSatisfy { !$0.isAlternate })
+        #expect(asked == ["\(Self.pagePath)#syntax"], "the section is the right-click's, on its page")
+    }
+
+    @Test("outside a section, or for a section the page cannot name, there is no section group")
+    func noSectionGroup() {
+        #expect(Self.target(heading: nil).sectionItems { _, _ in Self.sectionLinks }.isEmpty)
+        #expect(ReaderContextTarget().sectionItems { _, _ in Self.sectionLinks }.isEmpty)
+        #expect(ReaderContextTarget(tex: "\\secpar").sectionItems { _, _ in Self.sectionLinks }.isEmpty)
+        #expect(Self.target(heading: Self.section).sectionItems { _, _ in nil }.isEmpty)
+    }
+
+    @Test("a section no wikilink reaches offers the other two")
+    func sectionWithoutWikilink() {
+        let links = ReaderContextTarget.SectionLinks(
+            site: Self.sectionLinks.site, wikilink: nil, app: Self.sectionLinks.app)
+        let items = Self.target(heading: Self.section).sectionItems { _, _ in links }
+        #expect(items.map(\.title) == ["Copy Link to Section", "Copy CCwiki Link to Section"])
+    }
+
     @Test("the bridge message carries the selection after the link")
     func readsSelection() {
         let message: [String: Any] = [

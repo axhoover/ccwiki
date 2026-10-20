@@ -190,6 +190,11 @@ final class ReaderSession: Identifiable {
         webController.onCorrect = { [weak self] route, selection in
             self?.beginCorrection(route, selection: selection)
         }
+        // The context menu's section group (plans/efficiency.md §3.2): the
+        // section a right-click fell under, named as the outline names it.
+        webController.sectionLinks = { [weak self] path, section in
+            self?.sectionLinks(path: path, id: section.id, text: section.title)
+        }
     }
 
     // MARK: Starting
@@ -747,6 +752,17 @@ final class ReaderSession: Identifiable {
         case .document, .empty:
             return nil
         }
+    }
+
+    /// Section `id` of the page at `path`, whose heading reads `text`, as a
+    /// link to the site, a wikilink and a CCwiki link: for the section group
+    /// of the page's context menu and of the outline's (plans/efficiency.md
+    /// §3.2). Nil for a path that is not a page of the wiki.
+    func sectionLinks(
+        path: String, id: String, text: String
+    ) -> ReaderContextTarget.SectionLinks? {
+        guard let index = model.index, let page = index.pages[path] else { return nil }
+        return ReaderContextTarget.SectionLinks(page: page, id: id, text: text, index: index)
     }
 
     /// What the window is showing, as a title: for printing, and anything

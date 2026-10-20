@@ -52,38 +52,20 @@ struct InspectorView: View {
                 emptyPane("No Headings", systemImage: "list.bullet.indent",
                           detail: "This page has no section headings.")
             } else {
+                let path = session.location.path
+                let active = session.webController.activeHeadingID
                 List {
                     ForEach(headings) { heading in
-                        Button {
-                            session.webController.scrollTo(anchor: heading.id)
-                        } label: {
-                            Text(heading.text)
-                                .font(headingFont(heading.level))
-                                .foregroundStyle(
-                                    heading.id == session.webController.activeHeadingID
-                                        ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                // Indent by level so the shape of the document
-                                // is legible at a glance.
-                                .padding(.leading, CGFloat(max(0, heading.level - 1)) * Theme.medium)
-                        }
-                        .buttonStyle(.plain)
-                        .listRowSeparator(.hidden)
+                        OutlineRow(path: path, heading: heading, isActive: heading.id == active)
+                            .equatable()
+                            // A list trait: inside the EquatableView it never
+                            // reaches the row.
+                            .listRowSeparator(.hidden)
                     }
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
             }
-        }
-    }
-
-    private func headingFont(_ level: Int) -> Font {
-        switch level {
-        case 1: Theme.Fonts.row.weight(.semibold)
-        case 2: Theme.Fonts.row
-        default: Theme.Fonts.rowSubtitle
         }
     }
 
@@ -183,6 +165,70 @@ struct InspectorView: View {
         }
         .padding(Theme.large)
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// One heading of the outline. A click scrolls the page to it; its menu
+/// opens its section in a new tab or window, and copies a link to it, a
+/// wikilink and a CCwiki link, as the page's own menu does
+/// (plans/efficiency.md §3.2).
+///
+/// A view of its own, compared by its page, its heading and whether it is
+/// the one being read, so its menu's links, which parse and resolve a
+/// wikilink, are worked out when the row changes rather than on every
+/// scroll that moves the highlight (SWIFTUI-RULES §6.3).
+private struct OutlineRow: View, Equatable {
+    @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
+    /// The page the outline is of; nil on the app's own pages, whose
+    /// sections have no links.
+    let path: String?
+    let heading: WikiPage.Heading
+    let isActive: Bool
+
+    nonisolated static func == (lhs: OutlineRow, rhs: OutlineRow) -> Bool {
+        lhs.path == rhs.path && lhs.heading == rhs.heading && lhs.isActive == rhs.isActive
+    }
+
+    var body: some View {
+        Button {
+            session.webController.scrollTo(anchor: heading.id)
+        } label: {
+            Text(heading.text)
+                .font(Self.headingFont(heading.level))
+                .foregroundStyle(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // Indent by level so the shape of the document
+                // is legible at a glance.
+                .padding(.leading, CGFloat(max(0, heading.level - 1)) * Theme.medium)
+        }
+        .buttonStyle(.plain)
+        .contextMenu { menu }
+    }
+
+    /// New Tab and New Window open at the section, as a link to it would;
+    /// then its links (plans/efficiency.md §3.2).
+    @ViewBuilder
+    private var menu: some View {
+        if let path {
+            OpenElsewhereItems { session.open(.page(path: path, anchor: heading.id), $0) }
+            if let links = session.sectionLinks(path: path, id: heading.id, text: heading.text) {
+                Divider()
+                ForEach(links.copyItems, id: \.title) { item in
+                    Button(item.title) { model.copyToPasteboard(item.text) }
+                }
+            }
+        }
+    }
+
+    private static func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: Theme.Fonts.row.weight(.semibold)
+        case 2: Theme.Fonts.row
+        default: Theme.Fonts.rowSubtitle
+        }
     }
 }
 
