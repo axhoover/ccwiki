@@ -205,7 +205,8 @@ struct JobDetailView: View {
                 .font(Theme.Fonts.documentTitle)
             Spacer(minLength: Theme.small)
             if let startedAt = job.startedAt {
-                ElapsedTime(startedAt: startedAt, finishedAt: job.finishedAt)
+                ElapsedTime(
+                    startedAt: startedAt, finishedAt: job.finishedAt, ticks: job.state.isActive)
             }
             if let cost = job.outcome?.costUSD {
                 Text(cost, format: .currency(code: "USD"))
@@ -504,21 +505,27 @@ struct JobDetailView: View {
 
 // MARK: - Elapsed time
 
-/// How long the job has run: ticking each second until it finishes, so the
-/// time moves during a long silent tool call, then fixed. A view of its
-/// own, so a tick redraws these digits and nothing else (SWIFTUI-RULES
-/// §1.3, §1.4).
+/// How long the job has run: ticking each second while a process runs for
+/// it, so the time moves during a long silent tool call. Fixed otherwise,
+/// as it was: up to the finish, or, for a job waiting in review, up to
+/// when it was drawn, so a review left open for days does not redraw once
+/// a second. A view of its own, so a tick redraws these digits and nothing
+/// else (SWIFTUI-RULES §1.3, §1.4).
 private struct ElapsedTime: View {
     let startedAt: Date
     let finishedAt: Date?
+    /// A process runs for the job: an agent, or the publish.
+    let ticks: Bool
 
     var body: some View {
         if let finishedAt {
             label(at: finishedAt)
-        } else {
+        } else if ticks {
             TimelineView(.periodic(from: startedAt, by: 1)) { context in
                 label(at: context.date)
             }
+        } else {
+            label(at: .now)
         }
     }
 
