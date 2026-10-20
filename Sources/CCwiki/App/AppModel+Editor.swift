@@ -97,21 +97,18 @@ extension AppModel {
     /// so the relation-meta line appears; no hover cards, which are noise
     /// while editing; and the broken-link count, which is not.
     func previewRequest(path: String, text: String, in job: Job?) -> RenderRequest {
+        previewRequest(path: path, text: text, overlay: previewOverlay(for: job, reusing: nil))
+    }
+
+    /// The same, against an overlay `previewOverlay(for:reusing:)` gave:
+    /// what an editor renders after each pause in typing, with the overlay
+    /// it keeps. Nil before the library has loaded.
+    func previewRequest(path: String, text: String, overlay: PreviewOverlay?) -> RenderRequest {
         let page = WikiPage(path: ReviewPayload.contentPath(path) ?? path, text: text)
         var request: RenderRequest
-        if let index {
-            let added = job?.review.map(ReviewPayload.addedPages(in:)) ?? []
-            var renderer = PageRenderer(index: index.overlaying(added), hiddenPaths: unlistedPaths)
-            renderer.relations = relations
-            renderer.relationLabels = relationLabels
-            renderer.buildsPreviews = false
-            let rendered = renderer.request(for: page)
-            request = RenderRequest(
-                path: rendered.path, title: rendered.title, markdown: rendered.markdown,
-                html: nil,
-                links: ReviewPayload.markingNew(
-                    rendered.links, newPages: ReviewPayload.newPagePaths(added, in: index)),
-                anchor: nil, notices: rendered.notices)
+        if let overlay {
+            request = overlay.request(
+                for: page, hiddenPaths: unlistedPaths, relations: relations, labels: relationLabels)
         } else {
             // No library yet: the text, unresolved, rather than nothing.
             request = RenderRequest(
@@ -120,6 +117,16 @@ extension AppModel {
         }
         request.macros = macros.macros
         return request
+    }
+
+    /// The overlay the preview of `job`'s files resolves against: `cached`
+    /// while the library and the pages the job's review adds are the ones
+    /// it was built from, a new one otherwise. Nil before the library has
+    /// loaded.
+    func previewOverlay(for job: Job?, reusing cached: PreviewOverlay?) -> PreviewOverlay? {
+        guard let index else { return nil }
+        return PreviewOverlay.reusing(
+            cached, index: index, generation: libraryGeneration, review: job?.review)
     }
 
     /// `CCwiki.renderReview`'s payload for the job's snapshot (§6.3); nil
@@ -144,5 +151,71 @@ extension AppModel {
                     index: overlay, newPages: newPages)
             },
             macros: macros.macros)
+    }
+}
+
+/// The reader's index overlaid with the pages a job's review adds, and
+/// which of those the reader does not have yet: what the editor's preview
+/// resolves links against (§6.3, §7.4).
+///
+/// Built whole from the library and the review, never patched
+/// (SWIFTUI-RULES §3.2). An editor keeps the last one while both are the
+/// ones it was built from, so a pause in typing neither assembles the
+/// index again (about 900 files) nor parses the added pages again. The
+/// library is known by its generation, which `AppModel` bumps with every
+/// index it puts up. The review is known by the files it adds or renames,
+/// the only ones the overlay reads: each save takes the review again, with
+/// a new tree and the edited page's new text, and that alone changes
+/// nothing here.
+struct PreviewOverlay: Sendable {
+    let generation: Int
+    /// The review's added and renamed files, as they were.
+    let addedFiles: [ChangedFile]
+    /// The reader's index with the added pages in it.
+    let index: WikiIndex
+    /// The added pages the reader does not have: a link to one is `new`.
+    let newPages: Set<String>
+
+    init(index: WikiIndex, generation: Int, review: ReviewSnapshot?) {
+        let added = review.map(ReviewPayload.addedPages(in:)) ?? []
+        self.generation = generation
+        self.addedFiles = Self.files(addedBy: review)
+        self.index = index.overlaying(added)
+        self.newPages = ReviewPayload.newPagePaths(added, in: index)
+    }
+
+    /// `cached` when it was built from this generation and the same added
+    /// and renamed files; otherwise a new overlay of `index`.
+    static func reusing(
+        _ cached: PreviewOverlay?, index: WikiIndex, generation: Int, review: ReviewSnapshot?
+    ) -> PreviewOverlay {
+        if let cached, cached.generation == generation,
+           cached.addedFiles == files(addedBy: review) {
+            return cached
+        }
+        return PreviewOverlay(index: index, generation: generation, review: review)
+    }
+
+    /// The files `ReviewPayload.addedPages(in:)` reads, whole: two reviews
+    /// with the same ones add the same pages.
+    private static func files(addedBy review: ReviewSnapshot?) -> [ChangedFile] {
+        review?.files.filter { $0.status == .added || $0.status == .renamed } ?? []
+    }
+
+    /// `page` rendered against the overlay, links to the added pages
+    /// marked new, without hover cards.
+    func request(
+        for page: WikiPage, hiddenPaths: Set<String>, relations: RelationsManifest,
+        labels: RelationLabels
+    ) -> RenderRequest {
+        var renderer = PageRenderer(index: index, hiddenPaths: hiddenPaths)
+        renderer.relations = relations
+        renderer.relationLabels = labels
+        renderer.buildsPreviews = false
+        let rendered = renderer.request(for: page)
+        return RenderRequest(
+            path: rendered.path, title: rendered.title, markdown: rendered.markdown,
+            html: nil, links: ReviewPayload.markingNew(rendered.links, newPages: newPages),
+            anchor: nil, notices: rendered.notices)
     }
 }
