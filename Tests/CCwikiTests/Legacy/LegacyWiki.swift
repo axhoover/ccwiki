@@ -1,5 +1,6 @@
 // Verbatim copy of Sources/CCwiki/Wiki/{Wikilink,WikiPage,WikiIndex}.swift
-// at 21df5d7 for equivalence tests. Do not edit; delete in the next batch.
+// and Sources/CCwiki/Reader/RenderRequest.swift at 21df5d7 for equivalence
+// tests. Do not edit; delete in the next batch.
 //
 // The parts the load path's efficiency work (plans/efficiency.md, track L)
 // replaces, as they were, for `LoadEquivalenceCorpusTests` to hold the new
@@ -264,5 +265,25 @@ extension Legacy {
         }
         let end = body[link.range.upperBound...].firstIndex(where: \.isMarkdownLineEnding) ?? body.endIndex
         return WikiIndex.plainText(String(body[start..<end]))
+    }
+}
+
+// MARK: - Sources/CCwiki/Reader/RenderRequest.swift: the request's link list
+
+extension Legacy {
+
+    /// The links `PageRenderer.request(for:)` collected from `markdown`, its
+    /// body with the relation-meta line spliced in, as a function: these
+    /// lines are the request's, with `return keyed` added.
+    static func keyedLinks(in markdown: String) -> [(raw: String, link: Wikilink)] {
+        // A wikilink is keyed by its raw `[[…]]` text, a markdown link by its
+        // destination: the strings `ccwiki.js` looks each one up by.
+        var keyed: [(raw: String, link: Wikilink)] = WikilinkParser.links(in: markdown).map {
+            (raw: String(markdown[$0.range]), link: $0)
+        }
+        keyed += MarkdownLinkParser.links(in: markdown).map {
+            (raw: $0.destination, link: $0.wikilink)
+        }
+        return keyed
     }
 }

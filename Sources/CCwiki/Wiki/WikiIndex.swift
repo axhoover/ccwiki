@@ -286,8 +286,8 @@ struct WikiIndex: Sendable {
     /// they stand for. The wiki writes the second kind wherever a link's text
     /// holds math, so a page reached only that way is still linked to.
     static func outgoingLinks(in body: String) -> [Wikilink] {
-        let markdownLinks = MarkdownLinkParser.links(in: body).map(\.wikilink)
-        return (WikilinkParser.links(in: body) + markdownLinks)
+        let links = LinkParse.links(in: body)
+        return (links.wikilinks + links.markdownLinks.map(\.wikilink))
             .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 

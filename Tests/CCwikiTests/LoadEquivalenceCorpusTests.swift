@@ -20,6 +20,16 @@ struct LoadEquivalenceCorpusTests {
         let index: WikiIndex
         /// Every page, by path.
         let pages: [WikiPage]
+        let manifest: RelationsManifest
+        let labels: RelationLabels
+
+        /// What a render of `page` reads: its body, with the relation-meta
+        /// line spliced under the H1 of a reduction or a barrier.
+        func markdown(of page: WikiPage) -> String {
+            guard let line = RelationMeta.line(for: page.frontmatter, manifest: manifest, labels: labels)
+            else { return page.body }
+            return RelationMeta.insertUnderH1(line, into: page.body)
+        }
     }
 
     /// The clone `CCWIKI_WIKI` names, read once for every test here; nil
@@ -27,11 +37,15 @@ struct LoadEquivalenceCorpusTests {
     static let corpus: Corpus? = {
         guard let path = ProcessInfo.processInfo.environment["CCWIKI_WIKI"], !path.isEmpty
         else { return nil }
-        let content = URL(fileURLWithPath: path).appending(path: "content")
+        let root = URL(fileURLWithPath: path)
+        let content = root.appending(path: "content")
         guard FileManager.default.fileExists(atPath: content.path(percentEncoded: false))
         else { return nil }
         let index = WikiIndex.build(contentRoot: content)
-        return Corpus(index: index, pages: index.pages.values.sorted { $0.path < $1.path })
+        let manifest = RelationsManifest.load(cloneRoot: root)
+        return Corpus(
+            index: index, pages: index.pages.values.sorted { $0.path < $1.path },
+            manifest: manifest, labels: RelationLabels(manifest: manifest, index: index))
     }()
 
     #if DEBUG
@@ -100,6 +114,15 @@ struct LoadEquivalenceCorpusTests {
         "\n",
         "\r",
     ]
+
+    /// Both kinds of link, and the places neither is: code, a fence, a
+    /// comment, math, an embed, an image, a link inside a link's text.
+    static let linkFixtures = [
+        "See [[a]], [[b|B]], [$k$-Lin](bilinear-map-assumptions#k-linear) and [IR89](<IR89 - Limits>).",
+        "`[[code]]` [x](`y`)\n```\n[[fenced]] [x](y)\n```\n%%[[comment]] [c](d)%%\n![[embed.png]] ![i](i.png)",
+        "[outer [[inner]]](x), [a [b](c)](d), [[x#anchor]], [[#same]] and [t](u \"title\")",
+        "$[[math]]$ and $[m](n)$\n$$\n[m](n)\n$$\n[after](after-page) and [[after]]",
+    ] + lineEndFixtures
 
     // MARK: L1. Line ends on bytes
 
@@ -183,5 +206,64 @@ struct LoadEquivalenceCorpusTests {
             == ["- Uses [[b]] and [[b|B again]].", "- Uses [[b]] and [[b|B again]]."])
         #expect(links.map(\.context) == ["Uses b and B again.", "Uses b and B again."])
         #expect(Self.pairs(index.backlinkMap()) == Self.pairs(Legacy.backlinkMap(of: index)))
+    }
+
+    // MARK: L2. Each page's links parsed once
+
+    /// A render's link list as two comparable lists: the keys, and the links.
+    static func split(_ keyed: [(raw: String, link: Wikilink)]) -> (raws: [String], links: [Wikilink]) {
+        (keyed.map { $0.raw }, keyed.map { $0.link })
+    }
+
+    @Test("one parse finds the links both parsers found, for a page and for a render")
+    func linksOnFixtures() {
+        for text in Self.linkFixtures {
+            #expect(WikiIndex.outgoingLinks(in: text) == Legacy.outgoingLinks(in: text),
+                    "outgoing links of \(text.debugDescription)")
+            let new = Self.split(PageRenderer.keyedLinks(in: text))
+            let old = Self.split(Legacy.keyedLinks(in: text))
+            #expect(new.raws == old.raws && new.links == old.links,
+                    "the render's links in \(text.debugDescription)")
+        }
+    }
+
+    @Test("on the corpus, every body's links, every relation line's, and every render's are what they were")
+    func linksOnCorpus() {
+        guard let corpus = Self.corpus else { return }
+        let pages = corpus.pages
+        let bodies = pages.map(\.body)
+
+        let oldLinks = Self.timed { bodies.map(Legacy.outgoingLinks(in:)) }
+        let newLinks = Self.timed { bodies.map(WikiIndex.outgoingLinks(in:)) }
+        let bodiesDiffering = Self.differing(pages, oldLinks.value, newLinks.value)
+        #expect(bodiesDiffering.isEmpty, "outgoing links differ on \(bodiesDiffering)")
+        let count = newLinks.value.reduce(0) { $0 + $1.count }
+        #expect(count > 3000, "only \(count) links")
+
+        var relationLines = 0
+        var linesDiffering: [String] = []
+        for page in pages {
+            guard let line = RelationMeta.line(
+                for: page.frontmatter, manifest: corpus.manifest, labels: corpus.labels)
+            else { continue }
+            relationLines += 1
+            if WikiIndex.outgoingLinks(in: line) != Legacy.outgoingLinks(in: line) {
+                linesDiffering.append(page.path)
+            }
+        }
+        #expect(relationLines > 250, "only \(relationLines) relation-meta lines")
+        #expect(linesDiffering.isEmpty, "a relation line's links differ on \(linesDiffering)")
+
+        let markdowns = pages.map(corpus.markdown(of:))
+        let oldKeyed = Self.timed { markdowns.map(Legacy.keyedLinks(in:)).map(Self.split) }
+        let newKeyed = Self.timed { markdowns.map(PageRenderer.keyedLinks(in:)).map(Self.split) }
+        let raws = Self.differing(pages, oldKeyed.value.map { $0.raws }, newKeyed.value.map { $0.raws })
+        let keyed = Self.differing(pages, oldKeyed.value.map { $0.links }, newKeyed.value.map { $0.links })
+        #expect(raws.isEmpty && keyed.isEmpty, "a render's links differ on \(raws + keyed)")
+
+        Self.report("L2 links parsed once", [
+            "outgoingLinks(in:) over every body " + Self.change(oldLinks.duration, newLinks.duration),
+            "a render's link list for every page " + Self.change(oldKeyed.duration, newKeyed.duration),
+        ])
     }
 }
