@@ -168,6 +168,24 @@ struct BacklinkMentionTests {
         #expect(unknown.keys.sorted { $0.title < $1.title } == [.mentionedIn], "a page it cannot find is prose")
     }
 
+    @Test("the prose starts open, and on a page no prose mentions, the first group there does")
+    func groupsOpenByDefault() {
+        /// The groups that start open on a page with backlinks in `present`,
+        /// in the tab's order.
+        func opened(_ present: Set<WikiIndex.BacklinkGroup>) -> [WikiIndex.BacklinkGroup] {
+            WikiIndex.BacklinkGroup.allCases.filter {
+                present.contains($0) && $0.opensByDefault(among: present)
+            }
+        }
+        #expect(opened([.mentionedIn, .reductionsAndBarriers, .references]) == [.mentionedIn])
+        #expect(opened([.mentionedIn, .references]) == [.mentionedIn])
+        #expect(opened([.mentionedIn]) == [.mentionedIn])
+        #expect(opened([.reductionsAndBarriers, .references]) == [.reductionsAndBarriers],
+                "a page only reductions, barriers and references link to opens on the first")
+        #expect(opened([.reductionsAndBarriers]) == [.reductionsAndBarriers])
+        #expect(opened([.references]) == [.references])
+    }
+
     // MARK: The corpus
 
     struct Corpus: Sendable {

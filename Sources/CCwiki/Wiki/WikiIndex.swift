@@ -490,6 +490,17 @@ struct WikiIndex: Sendable {
             }
         }
 
+        /// Whether the group starts open on a page whose backlinks fall in
+        /// `present`. The prose that mentions the page does. On a page no
+        /// prose mentions, the first group there does, so the tab never
+        /// opens on closed headers alone, as it would on 181 of the
+        /// corpus's 818 targets.
+        func opensByDefault(among present: Set<BacklinkGroup>) -> Bool {
+            if self == .mentionedIn { return true }
+            return !present.contains(.mentionedIn)
+                && Self.allCases.first(where: { present.contains($0) }) == self
+        }
+
         /// `backlinks` by group, each in the order it came in. `kind` is the
         /// kind of the page at a path; a page it does not know is prose.
         static func grouping(

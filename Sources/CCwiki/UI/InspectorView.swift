@@ -71,12 +71,6 @@ struct InspectorView: View {
 
     // MARK: Backlinks
 
-    /// The backlink groups this window has open: the prose that mentions
-    /// the page, until the reader closes it. Reductions and barriers, which
-    /// the Relations tab lists, and references wait for a click. Kept from
-    /// page to page, as an Xcode inspector's sections are.
-    @State private var openBacklinkGroups: Set<WikiIndex.BacklinkGroup> = [.mentionedIn]
-
     private var backlinks: some View {
         Group {
             let links = session.currentBacklinks
@@ -87,10 +81,11 @@ struct InspectorView: View {
                 let groups = WikiIndex.BacklinkGroup.grouping(links) {
                     model.index?.pages[$0]?.kind
                 }
+                let present = Set(groups.keys)
                 List {
                     ForEach(WikiIndex.BacklinkGroup.allCases, id: \.self) { group in
                         if let rows = groups[group] {
-                            backlinkSection(group, rows: rows)
+                            backlinkSection(group, rows: rows, among: present)
                         }
                     }
                 }
@@ -103,10 +98,17 @@ struct InspectorView: View {
     /// One group, under a header that opens and closes it: a button with a
     /// turning chevron and the group's count, as the Relations tab's derived
     /// sections have, with no `withAnimation` (SWIFTUI-RULES §1.2).
+    ///
+    /// The prose that mentions the page starts open. Reductions and
+    /// barriers, which an object's Relations tab lists, and references wait
+    /// for a click, except that on a page no prose mentions the first of
+    /// them opens. What the reader opens and closes, the window's session
+    /// keeps.
     private func backlinkSection(
-        _ group: WikiIndex.BacklinkGroup, rows: [WikiIndex.Backlink]
+        _ group: WikiIndex.BacklinkGroup, rows: [WikiIndex.Backlink],
+        among present: Set<WikiIndex.BacklinkGroup>
     ) -> some View {
-        let isOpen = openBacklinkGroups.contains(group)
+        let isOpen = session.isBacklinkGroupOpen(group, among: present)
         let state: String = isOpen ? "expanded" : "collapsed"
         return Section {
             if isOpen {
@@ -120,11 +122,7 @@ struct InspectorView: View {
             }
         } header: {
             Button {
-                if isOpen {
-                    openBacklinkGroups.remove(group)
-                } else {
-                    openBacklinkGroups.insert(group)
-                }
+                session.toggleBacklinkGroup(group, among: present)
             } label: {
                 HStack(spacing: Theme.tight) {
                     Image(systemName: "chevron.right")

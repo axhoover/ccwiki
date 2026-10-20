@@ -77,6 +77,28 @@ final class ReaderSession: Identifiable {
         showInspector = true
     }
 
+    /// The Backlinks tab's groups the reader has opened or closed in this
+    /// window. Kept here, not in the inspector's views, so they last from
+    /// page to page, as an Xcode inspector's sections do, and while the
+    /// inspector is hidden. A group the reader has not touched opens as
+    /// `WikiIndex.BacklinkGroup.opensByDefault(among:)` says.
+    private(set) var backlinkGroupChoices: [WikiIndex.BacklinkGroup: Bool] = [:]
+
+    /// Whether a group of the Backlinks tab is open on a page whose
+    /// backlinks fall in `present`.
+    func isBacklinkGroupOpen(
+        _ group: WikiIndex.BacklinkGroup, among present: Set<WikiIndex.BacklinkGroup>
+    ) -> Bool {
+        backlinkGroupChoices[group] ?? group.opensByDefault(among: present)
+    }
+
+    /// Closes an open group of the Backlinks tab, or opens a closed one.
+    func toggleBacklinkGroup(
+        _ group: WikiIndex.BacklinkGroup, among present: Set<WikiIndex.BacklinkGroup>
+    ) {
+        backlinkGroupChoices[group] = !isBacklinkGroupOpen(group, among: present)
+    }
+
     // MARK: Sheets
 
     /// The sheets this window shows. Their queries are the model's, so each
