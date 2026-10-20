@@ -207,7 +207,9 @@ enum GitHubAuth {
     @TaskLocal static var cache: Cache = Cache()
 
     /// How long to wait on each of gh's answers before treating it as none.
-    static let deadline: Duration = .seconds(15)
+    /// Task-local, as `cache` is: a test whose gh answers at once scopes a
+    /// long one, so the deadline times gh and not how busy the test run is.
+    @TaskLocal static var deadline: Duration = .seconds(15)
 
     /// The cached answer, or `signedIn`'s, which caches only a definite one.
     /// Nil, and not cached, when gh could not be asked (no gh, no network,
