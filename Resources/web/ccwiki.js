@@ -114,6 +114,11 @@
    *  `\xdef`, and `\global` before a `\def`, `\edef`, `\let` or
    *  `\futurelet`. `\def` and `\newcommand` are local to their formula. */
   var GLOBAL_DEFINITION = /\\(?:gdef|xdef|global)(?![A-Za-z@])/;
+  /** What sets KaTeX's own `\@eqnsw`, which a formula naming it reads: a
+   *  numbered environment (`align`, `alignat`, `gather`, `equation`) at
+   *  each row, `\nonumber` and `\notag`. Any `\begin`, since a macro can
+   *  spell an environment's name. */
+  var SETS_EQUATION_SWITCH = /\\(?:begin|nonumber|notag)(?![A-Za-z@])/;
 
   /** Whether a call can change the table every later formula reads: a
    *  global definition, or in KaTeX's global group any definition. KaTeX
@@ -125,7 +130,7 @@
   /** Whether a formula naming the macro whose body this is could read or
    *  change what another formula left in the table. */
   function sharesMacroState(body) {
-    return GLOBAL_DEFINITION.test(body) || body.indexOf("@") >= 0;
+    return GLOBAL_DEFINITION.test(body) || SETS_EQUATION_SWITCH.test(body) || body.indexOf("@") >= 0;
   }
 
   /** The memo's key for a call, or null for a call that must reach KaTeX:
@@ -136,10 +141,11 @@
   function katexMemoKey(expr, options) {
     if (!katexMemoOn || typeof expr !== "string" || options.macros !== currentMacros) return null;
     // KaTeX's own `\@eqnsw` stays in the table from one formula to the
-    // next (a numbered environment or `\nonumber` sets it), and a formula
-    // that names it reads what an earlier one left. KaTeX's own names all
-    // have an `@`; no formula or macro in the wiki has one.
-    if (expr.indexOf("@") >= 0) return null;
+    // next, and a formula that names it reads what the last one to set it
+    // left. So neither kind is kept, and every one that sets it renders,
+    // as without the memo. KaTeX's own names all have an `@`; no formula
+    // or macro in the wiki has one, or a `\begin`.
+    if (expr.indexOf("@") >= 0 || SETS_EQUATION_SWITCH.test(expr)) return null;
     var parts = [];
     for (var name in options) {
       if (name === "macros") continue;

@@ -341,7 +341,8 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
 - **What is never kept**: a call with another table; a formula that is not
   a string; an option that is an object or a function (`strict` and
   `trust` can be functions), which could answer otherwise under the same
-  name; a formula with an `@` (below); a call that throws.
+  name; a formula with an `@`, or naming `\begin`, `\nonumber` or
+  `\notag` ("KaTeX's own names", below); a call that throws.
 - **What empties it, and turns it off** (the `\gdef` rule): a formula
   holding `\gdef`, `\xdef` or `\global` (as a control word: `\gdefault` is
   not one), or any call in KaTeX's `globalGroup`. Those are the only ways
@@ -353,27 +354,34 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
   until `ensureMarkdown` installs another table: what the formula defined
   stays in the table, and can define more when a later formula uses it,
   which that formula's text does not show (`$\gdef\foo{\gdef\bar{1}}$`,
-  then `$\foo$`, changes what `$\bar$` renders). KaTeX 0.16.47 also keeps
-  two names of its own in the table between formulas: `\@eqnsw`, which a
-  numbered environment (`align`, `gather`, `equation`) and `\nonumber` set
-  globally, and `\df@tag`, which `\tag` sets and every formula deletes as
-  it starts. KaTeX sets `\@eqnsw` before it reads it, so only a formula
-  that names it sees what another left, and every name KaTeX keeps has an
-  `@`: a formula with an `@` is never kept.
+  then `$\foo$`, changes what `$\bar$` renders).
+- **KaTeX's own names.** KaTeX 0.16.47 also keeps two names of its own in
+  the table between formulas: `\@eqnsw`, which a numbered environment
+  (`align`, `alignat`, `gather`, `equation`) sets at each row and
+  `\nonumber` and `\notag` set globally, and `\df@tag`, which `\tag` sets
+  and every formula deletes as it starts. KaTeX sets `\@eqnsw` before it
+  reads it, so only a formula that names it sees what another left, and
+  every name KaTeX keeps has an `@`: a formula with an `@` is never kept.
+  Nor is a formula that could set `\@eqnsw`, so each one renders, as it
+  would without the memo: a remembered `align` would not set it again,
+  and a formula naming it would then read what a `\nonumber` before the
+  `align` left. Those are the formulas naming `\nonumber`, `\notag` or
+  `\begin`, any `\begin`, since a macro can spell an environment's name.
 - **Off**, for as long as a table stands, when any macro body holds a
-  global definition or an `@`: every formula using that macro could
-  change the table, or read what another formula left. Off too when a
-  macro's name is `\color` or has an `@`: after every formula KaTeX
-  deletes `\color` and `\current@color` from the table, which `\color`
-  and `\right` read, so a table naming either changes at the first
-  formula, and every name of KaTeX's own has an `@`. And from a global
-  definition on, as above.
+  global definition, an `@`, `\begin`, `\nonumber` or `\notag`: every
+  formula using that macro could change the table, or read what another
+  formula left. Off too when a macro's name is `\color` or has an `@`:
+  after every formula KaTeX deletes `\color` and `\current@color` from
+  the table, which `\color` and `\right` read, so a table naming either
+  changes at the first formula, and every name of KaTeX's own has an
+  `@`. And from a global definition on, as above.
 - **Size**: 1,000 formulas, the least recently used going first: a hit
   moves its entry to the end of the map, and a miss at the limit deletes
   the first.
 
 None of the 126 macros and none of the wiki's 7,320 formulas has a global
-definition or an `@` (wiki at ab81f02). With every exception in place the
+definition, an `@`, a `\begin`, a `\nonumber` or a `\notag`, and no macro
+is named `\color` (wiki at ab81f02). With every exception in place the
 output is unchanged byte for byte: in jsdom, with the real `ccwiki.js`
 before and after, all 883 files rendered twice in one web view, in path
 order, each page twice in a row, and path order then a shuffled order,

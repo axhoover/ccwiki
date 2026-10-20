@@ -64,6 +64,11 @@ struct RenderMemoTests {
             (MarkdownScript.literal("x"), "{ macros: {} }"),
             (MarkdownScript.literal(#"\@eqnsw"#), "undefined"),
             (MarkdownScript.literal(#"\text{a@b}"#), "undefined"),
+            // What sets KaTeX's `\@eqnsw`, which a formula naming it reads.
+            (MarkdownScript.literal(#"\begin{align}a&=b\end{align}"#), "{ displayMode: true }"),
+            (MarkdownScript.literal(#"\begin{pmatrix}a\end{pmatrix}"#), "undefined"),
+            (MarkdownScript.literal(#"x\nonumber"#), "undefined"),
+            (MarkdownScript.literal(#"x\notag"#), "undefined"),
             (#"new String("x")"#, "undefined"),
         ]
         for call in calls {
@@ -138,6 +143,7 @@ struct RenderMemoTests {
     func tableThatSharesState() throws {
         let tables: [[String: String]] = [
             [#"\g"#: #"\gdef\h{1}"#], [#"\g"#: #"\@eqnsw"#],
+            [#"\g"#: #"x\nonumber"#], [#"\g"#: #"\begin{align}a\end{align}"#],
             // KaTeX deletes these two from the table after every formula.
             [#"\color"#: #"\textcolor"#], [#"\current@color"#: "blue"],
         ]
@@ -179,11 +185,16 @@ struct RenderMemoTests {
         let unseen = try sameAsKatex(
             [#"\bar"#, #"\gdef\foo{\gdef\bar{1}}"#, #"\bar"#, #"\foo"#, #"\bar"#], table: table)
         #expect(unseen[2] != unseen[4], #"\bar, after \foo defined it"#)
+        // An align sets `\@eqnsw` and `\nonumber` clears it, the second
+        // time as the first.
+        let align = #"\begin{align}a&=b\\c&=d\end{align}"#
         let switched = try sameAsKatex(
-            [#"\@eqnsw"#, #"\begin{align}a&=b\\c&=d\end{align}"#, #"\@eqnsw"#, #"x\nonumber"#, #"\@eqnsw"#],
+            [#"\@eqnsw"#, align, #"\@eqnsw"#, #"x\nonumber"#, #"\@eqnsw"#,
+             align, #"\@eqnsw"#, #"x\nonumber"#, #"\@eqnsw"#],
             table: table)
-        #expect(switched[0] != switched[2], #"\@eqnsw, after an align"#)
-        #expect(switched[2] != switched[4], #"\@eqnsw, after \nonumber"#)
+        for read in stride(from: 2, through: 8, by: 2) {
+            #expect(switched[read] != switched[read - 2], "\\@eqnsw, formula \(read)")
+        }
         // KaTeX deletes `\color` and `\current@color` from the table after
         // every formula, so a table naming either changes at the first.
         let colored = try sameAsKatex(
@@ -599,7 +610,8 @@ struct RenderMemoTests {
         function memoKey(expr, options) {
           var merged = Object.assign({ macros: TABLE, throwOnError: false, strict: "ignore" }, options || {});
           if (typeof expr !== "string" || merged.macros !== TABLE || merged.globalGroup ||
-              /\\(?:gdef|xdef|global)(?![A-Za-z@])/.test(expr) || expr.indexOf("@") >= 0) return null;
+              /\\(?:gdef|xdef|global|begin|nonumber|notag)(?![A-Za-z@])/.test(expr) ||
+              expr.indexOf("@") >= 0) return null;
           var parts = [];
           for (var name in merged) {
             if (name === "macros") continue;
