@@ -418,6 +418,14 @@ checks a `\gdef` and `\@eqnsw` against the vendored KaTeX, and on the
 corpus renders every page twice through the memo and compares each with
 the vendored KaTeX behind the patch as it was before the memo.
 
+**The numbers in WebKit.** The page times each render, pseudocode and the
+passes after it included, and sends it as `ms` in its `rendered` message,
+with the page's path. `WebController` logs both at debug level under
+category `render` (a review as "a review"), so
+`log stream --level debug --predicate 'subsystem BEGINSWITH "com.axhoover.ccwiki" AND category == "render"'`
+gives the app's own before and after for a change to the renderer, which
+the V8 numbers above only stand in for.
+
 ### Copying LaTeX
 
 The page shows glyphs: copied as they stand, `\frac{1}{2}` reads "21",

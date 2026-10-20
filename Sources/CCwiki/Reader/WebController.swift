@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import OSLog
 import SwiftUI
 import WebKit
 
@@ -78,6 +79,13 @@ final class WebController: NSObject {
     /// One for every reader: each store brings a network process of its own
     /// (plans/reader-comforts.md §1.9).
     @MainActor static let sharedDataStore: WKWebsiteDataStore = .nonPersistent()
+
+    /// Category `render`: how long each render took in the page, as the
+    /// page measures it, so WebKit's own numbers can be read before and
+    /// after a change to the renderer (plans/render-pipeline.md, "The KaTeX
+    /// memo"). `debug`, so it is kept only while someone streams it.
+    private static let renderLog = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.axhoover.ccwiki", category: "render")
 
     /// `webRoot` is the pipeline to serve, staged once per launch
     /// (`AppPaths.stagedWebRoot()`); `pageZoom` the text size to start at.
@@ -294,6 +302,11 @@ final class WebController: NSObject {
             }
             if let errors = message["pseudocodeErrors"] as? Int, errors > 0 {
                 lastRenderError = "\(errors) pseudocode block(s) failed to render."
+            }
+            if let milliseconds = message["ms"] as? Int {
+                // A page sends its path; a review none.
+                let shown = message["path"] as? String ?? "a review"
+                Self.renderLog.debug("\(shown, privacy: .public) rendered in \(milliseconds) ms")
             }
 
         case "scrolled":

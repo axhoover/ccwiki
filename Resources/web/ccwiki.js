@@ -519,6 +519,9 @@
     post({
       type: "rendered",
       ok: true,
+      // The page this is about, for the render log: another render may
+      // have been asked for since.
+      path: payload.path,
       toc: toc,
       pseudocodeBlocks: pseudo.count,
       pseudocodeErrors: pseudo.errors,
