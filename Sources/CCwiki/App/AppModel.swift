@@ -150,6 +150,18 @@ final class AppModel {
         didSet { CCwikiSettings.derivedSectionsExpanded = derivedSectionsExpanded.sorted() }
     }
 
+    // MARK: Saved pages
+
+    /// The pages saved with Save Page (⌘D), in the reader's order
+    /// (plans/efficiency.md §3.3). The model's, so every window's sidebar
+    /// shows the same list. Persisted, and reconciled with each load.
+    private(set) var savedPages: SavedPages = CCwikiSettings.savedPages {
+        didSet {
+            guard savedPages != oldValue else { return }
+            CCwikiSettings.savedPages = savedPages
+        }
+    }
+
     // MARK: Navigation
 
     // Where a reader is, and how it got there, is its window's: see
@@ -1220,6 +1232,12 @@ final class AppModel {
         libraryGeneration += 1
         unlistedPaths = library.manifest.unlistedPaths
         rebuildBrowseState()
+        // A saved page whose file went is looked up in the new wiki, in the
+        // same step, so no sidebar shows it against the new index first.
+        // Assigned only when it changes: a load that moved no saved page
+        // redraws no sidebar for it.
+        let saved = savedPages.reconciled(with: library.index)
+        if saved != savedPages { savedPages = saved }
         macros = MacroTable.load(cloneRoot: paths.clone)
         refreshMacrosWarning()
 
@@ -1602,6 +1620,32 @@ final class AppModel {
         } else {
             derivedSectionsExpanded.insert(role.rawValue)
         }
+    }
+
+    // MARK: Saved pages
+
+    /// Whether the page at `path` is saved, as a page rather than a section.
+    func isSaved(_ path: String) -> Bool {
+        savedPages.contains(path: path)
+    }
+
+    /// Wiki ▸ Save Page, or Remove from Saved when the page is saved. The
+    /// page, never the section being read.
+    func toggleSaved(_ page: WikiPage) {
+        if savedPages.contains(path: page.path) {
+            savedPages.remove(path: page.path)
+        } else {
+            savedPages.add(path: page.path, title: page.title)
+        }
+    }
+
+    func removeSaved(_ entry: SavedPages.Entry) {
+        savedPages.remove(path: entry.path, anchor: entry.anchor)
+    }
+
+    /// A drag in the sidebar's Saved section.
+    func moveSaved(fromOffsets source: IndexSet, toOffset destination: Int) {
+        savedPages.move(fromOffsets: source, toOffset: destination)
     }
 
     // MARK: Relations explorer
