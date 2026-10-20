@@ -1061,10 +1061,13 @@ struct DerivationTests {
         var compared = 0
         for (name, engine) in derivation.namedEngines {
             for start in starts {
+                let both = engine.closures(from: start)
                 for options in [Derivation.Options.standard, .all] {
                     let legacy = engine.closure(from: start, options: options, loop: .legacy)
                     let current = engine.closure(from: start, options: options)
                     #expect(current.decidesLike(legacy), "\(name) \(start.sorted()) \(options.settingName)")
+                    let shared = options.includesIdealisedModels ? both.all : both.standard
+                    #expect(shared.decidesLike(legacy), "\(name) \(start.sorted()), one run for both settings")
                     compared += 1
                     // The Horn prefilter's premise: plain Horn closure
                     // reaches everything a closure derives.

@@ -494,14 +494,17 @@ struct Derivation: Sendable {
         let relaxed = Engine(objects: objects, steps: compiled + compiledQuarantined, order: order,
                              allowsAssuming: true, appliesRules: false)
 
-        var singles: [Options: [String: Closure]] = [:]
+        // Both settings of each object's closure come from one run.
+        var standardSingles: [String: Closure] = [:]
+        var allSingles: [String: Closure] = [:]
+        for id in objects.ids {
+            let both = main.closures(from: [id])
+            standardSingles[id] = both.standard
+            allSingles[id] = both.all
+        }
+        let singles: [Options: [String: Closure]] = [.standard: standardSingles, .all: allSingles]
         var participants: [Options: Set<String>] = [:]
         for options in [Options.standard, Options.all] {
-            var byObject: [String: Closure] = [:]
-            for id in objects.ids {
-                byObject[id] = main.closure(from: [id], options: options)
-            }
-            singles[options] = byObject
             var endpoints: Set<String> = []
             for step in options.includesIdealisedModels ? table.steps : table.defaultSteps {
                 endpoints.formUnion(step.hypotheses)
@@ -932,15 +935,22 @@ extension Derivation {
         /// What phases 1 and 2 walk, and what phase 3 walks.
         private let defaultSet: StepSet
         private let fullSet: StepSet
+        /// The steps only phase 3 runs (in `steps`, not in `defaultSteps`):
+        /// the first hypothesis of each, and whether one has none. Phase 3
+        /// adds a fact only through one of them (`runIdealisedPhase`).
+        private let idealisedFirstHypotheses: [Int]
+        private let hasUnconditionalIdealisedStep: Bool
 
         /// Which loop a closure runs. Only the equivalence tests ask for
         /// anything but `.current`.
         enum Loop: Sendable {
             /// The loop as of 21df5d7: every step at every layer, with R13's
-            /// flags looked up on each visit. Kept so DerivationEquivalenceTests
-            /// can hold `.current` to it on the real manifest; delete it with
-            /// the Legacy files.
+            /// flags looked up on each visit, and all three phases. Kept so
+            /// DerivationEquivalenceTests can hold `.current` to it on the
+            /// real manifest; delete it with the Legacy files.
             case legacy
+            /// Semi-naive layers, R13's flags worked out once, and only the
+            /// phases that can add a fact.
             case current
         }
 
@@ -1008,6 +1018,17 @@ extension Derivation {
                                       establishing: establishing)
             self.fullSet = StepSet(steps, objectCount: count, appliesRules: appliesRules,
                                    establishing: establishing)
+            var firsts: [Int] = []
+            var unconditional = false
+            for compiled in steps where !(compiled.step.isDefault && !compiled.step.isStub) {
+                if let first = compiled.hypotheses.first {
+                    firsts.append(first)
+                } else {
+                    unconditional = true
+                }
+            }
+            self.idealisedFirstHypotheses = firsts
+            self.hasUnconditionalIdealisedStep = unconditional
         }
 
         /// Whether plain Horn closure reaches `target` from `start`: the
@@ -1052,18 +1073,8 @@ extension Derivation {
         }
 
         func closure(from start: Set<String>, options: Options, loop: Loop = .current) -> Closure {
-            var state = State(count: objects.ids.count)
-            // Every start is a given fact. A model node given as a start (R4)
-            // is not itself model-scoped: the steps leaving it are the
-            // idealised ones, and what they conclude is.
-            var outside: [String: Fact] = [:]
-            for id in start {
-                if let index = objects.index[id] {
-                    state.add(Fact.given(id), at: index)
-                } else {
-                    outside[id] = Fact.given(id)
-                }
-            }
+            let seed = seeded(start)
+            var state = seed.state
             switch loop {
             case .legacy:
                 legacyRun(&state, defaultSteps, phase: 1)
@@ -1074,24 +1085,81 @@ extension Derivation {
                     legacyRun(&state, steps, phase: 3)
                 }
             case .current:
-                run(&state, defaultSet, phase: 1)
-                if allowsAssuming {
-                    run(&state, defaultSet, phase: 2)
-                }
+                runDefaultPhases(&state)
                 if options.includesIdealisedModels {
-                    run(&state, fullSet, phase: 3)
+                    runIdealisedPhase(&state)
                 }
             }
+            return result(of: state, start: start, outside: seed.outside, options: options)
+        }
 
+        /// Both settings of one closure from a single run. Phases 1 and 2 are
+        /// the same in each, so the toggle's closure is the standard one's
+        /// state carried on through phase 3.
+        func closures(from start: Set<String>) -> (standard: Closure, all: Closure) {
+            let seed = seeded(start)
+            var state = seed.state
+            runDefaultPhases(&state)
+            let standard = result(of: state, start: start, outside: seed.outside, options: .standard)
+            runIdealisedPhase(&state)
+            return (standard, result(of: state, start: start, outside: seed.outside, options: .all))
+        }
+
+        /// Every start as a given fact. A model node given as a start (R4) is
+        /// not itself model-scoped: the steps leaving it are the idealised
+        /// ones, and what they conclude is. A start the table does not know
+        /// is kept outside the state, which no step reads.
+        private func seeded(_ start: Set<String>) -> (state: State, outside: [String: Fact]) {
+            var state = State(count: objects.ids.count)
+            var outside: [String: Fact] = [:]
+            for id in start {
+                if let index = objects.index[id] {
+                    state.add(Fact.given(id), at: index)
+                } else {
+                    outside[id] = Fact.given(id)
+                }
+            }
+            return (state, outside)
+        }
+
+        private func result(of state: State, start: Set<String>, outside: [String: Fact],
+                            options: Options) -> Closure {
             var facts = outside
             var weakFacts: [String: Fact] = [:]
-            for (index, id) in objects.ids.enumerated() {
-                if let fact = state.facts[index] { facts[id] = fact }
-                if let fact = state.weak[index] { weakFacts[id] = fact }
+            // Every object with a fact is in `reached`; the rest go unread.
+            for indexes in state.reached {
+                for index in indexes {
+                    if let fact = state.facts[index] { facts[objects.ids[index]] = fact }
+                    if let fact = state.weak[index] { weakFacts[objects.ids[index]] = fact }
+                }
             }
             let refused = state.blocked.values.sorted { Derivation.stepPrecedes($0.step, $1.step) }
             return Closure(start: start, options: options, facts: facts, weakFacts: weakFacts,
                            established: state.established, refused: refused)
+        }
+
+        /// Phases 1 and 2 (R4, R13). Phase 2 differs from phase 1 only where
+        /// a check waits for it, on a precondition of a given, so after a
+        /// phase 1 in which none waited it would add nothing, and it runs only
+        /// after one did.
+        private func runDefaultPhases(_ state: inout State) {
+            let waited = run(&state, defaultSet, phase: 1)
+            if allowsAssuming && waited {
+                run(&state, defaultSet, phase: 2)
+            }
+        }
+
+        /// Phase 3, the toggle's (R4). Its default steps find nothing phases
+        /// 1 and 2 left, so it adds a fact only through a step it alone runs,
+        /// and such a step can start only once its first hypothesis is known,
+        /// in full or weakened. Until then the phase is skipped.
+        private func runIdealisedPhase(_ state: inout State) {
+            let canStart = hasUnconditionalIdealisedStep || idealisedFirstHypotheses.contains {
+                state.depths[$0] >= 0 || state.weakDepths[$0] >= 0
+            }
+            if canStart {
+                run(&state, fullSet, phase: 3)
+            }
         }
 
         private struct State {
@@ -1104,6 +1172,10 @@ extension Derivation {
             var deepest = 0
             /// The first refusal of each step.
             var blocked: [StepKey: RefusedStep] = [:]
+            /// By depth: the objects that gained a fact of that depth, in
+            /// full, weakened, or as a `metBy` producer's conclusion. A layer
+            /// visits the steps reading those one depth below it.
+            var reached: [[Int]] = []
 
             init(count: Int) {
                 facts = Array(repeating: nil, count: count)
@@ -1116,12 +1188,19 @@ extension Derivation {
                 facts[index] = fact
                 depths[index] = fact.depth
                 deepest = max(deepest, fact.depth)
+                markReached(index, at: fact.depth)
             }
 
             mutating func addWeak(_ fact: Fact, at index: Int) {
                 weak[index] = fact
                 weakDepths[index] = fact.depth
                 deepest = max(deepest, fact.depth)
+                markReached(index, at: fact.depth)
+            }
+
+            mutating func markReached(_ index: Int, at depth: Int) {
+                while reached.count <= depth { reached.append([]) }
+                reached[depth].append(index)
             }
 
             mutating func addEstablished(_ fact: Fact, by producer: StepKey) {
@@ -1153,14 +1232,37 @@ extension Derivation {
         /// `metBy` producer's own fact (R13): the producer fires into it at
         /// its first layer even when its conclusion is already known, and
         /// only a requirement reads it.
-        private func run(_ state: inout State, _ set: StepSet, phase: Int) {
+        ///
+        /// Semi-naive: layer k visits only the steps reading an object that
+        /// gained a fact of depth k − 1, in full, weakened or as a producer's
+        /// (`State.reached`, kept across phases), and at layer 1 those with no
+        /// hypothesis. Any other step sees at layer k what it saw at k − 1:
+        /// what it fired then is known now, and what it waited on, refused or
+        /// was not ready for is as it was, its refusal already recorded. So
+        /// the facts, the refusals and the layer count are the every-step
+        /// loop's. Returns whether a check waited for phase 2.
+        @discardableResult
+        private func run(_ state: inout State, _ set: StepSet, phase: Int) -> Bool {
+            var waited = false
+            var visitedAt = Array(repeating: 0, count: set.steps.count)
             var layer = 0
             while true {
                 layer += 1
+                var visits = layer == 1 ? set.unconditional : []
+                if layer - 1 < state.reached.count {
+                    for index in state.reached[layer - 1] {
+                        for position in set.consumers[index] where visitedAt[position] != layer {
+                            visitedAt[position] = layer
+                            visits.append(position)
+                        }
+                    }
+                }
+                visits.sort()
                 var candidates: [Int: Fact] = [:]
                 var weakCandidates: [Int: Fact] = [:]
                 var establishedCandidates: [StepKey: Fact] = [:]
-                for position in set.steps.indices {
+                var establishedObjects: [Int] = []
+                for position in visits {
                     let compiled = set.steps[position]
                     let makesWeak = set.makesWeak[position]
                     // Known already: only its own fact is left to find.
@@ -1211,7 +1313,7 @@ extension Derivation {
                     switch check(compiled, inputs, phase: phase, layer: layer,
                                  established: state.established) {
                     case .waits:
-                        break
+                        waited = true
                     case .refused(let refusal):
                         if !onlyEstablishes { state.block(compiled.step, refusal) }
                     case .fires(let assumes, let met):
@@ -1220,6 +1322,7 @@ extension Derivation {
                                              met: met)
                         if establishes {
                             establishedCandidates[compiled.step.key] = candidate
+                            establishedObjects.append(compiled.conclusion)
                         }
                         guard !onlyEstablishes else { break }
                         if makesWeak {
@@ -1234,9 +1337,13 @@ extension Derivation {
                 for (producer, fact) in establishedCandidates {
                     state.addEstablished(fact, by: producer)
                 }
+                // A requirement reads a producer's fact through its
+                // hypothesis, so the steps reading that object are the ones
+                // it can wake.
+                for index in establishedObjects { state.markReached(index, at: layer) }
                 if candidates.isEmpty && weakCandidates.isEmpty && establishedCandidates.isEmpty
                     && layer > state.deepest {
-                    return
+                    return waited
                 }
             }
         }

@@ -72,10 +72,14 @@ struct DerivationEquivalenceTests {
                 group.addTask {
                     var found: [String] = []
                     for start in starts {
+                        // Both settings from one run, as Derivation.init
+                        // builds the single-object closures.
+                        let both = engine.closures(from: start)
                         for options in [Derivation.Options.standard, .all] {
                             let legacy = engine.closure(from: start, options: options, loop: .legacy)
                             let current = engine.closure(from: start, options: options)
-                            if !current.decidesLike(legacy) {
+                            let shared = options.includesIdealisedModels ? both.all : both.standard
+                            if !current.decidesLike(legacy) || !shared.decidesLike(legacy) {
                                 found.append("\(name) \(start.sorted()) \(options.settingName)")
                             }
                         }
@@ -90,9 +94,18 @@ struct DerivationEquivalenceTests {
         let compared = starts.count * 2 * derivation.namedEngines.count
         #expect(mismatches.isEmpty, "\(mismatches.count) of \(compared) closures differ: \(mismatches.prefix(10))")
 
+        // The single-object closures the derivation keeps, read back.
+        let ids = derivation.mainEngine.objects.ids
+        for id in ids {
+            for options in [Derivation.Options.standard, .all] {
+                let legacy = derivation.mainEngine.closure(from: [id], options: options, loop: .legacy)
+                #expect(derivation.closure(from: [id], options: options).decidesLike(legacy),
+                        "the kept closure of \(id), \(options.settingName)")
+            }
+        }
+
         // What Derivation.init spends its closures on: every object, both
         // settings, on the main engine.
-        let ids = derivation.mainEngine.objects.ids
         func singles(_ loop: Derivation.Engine.Loop) -> Duration {
             Self.fastest {
                 for id in ids {
@@ -104,10 +117,17 @@ struct DerivationEquivalenceTests {
         }
         let legacy = singles(.legacy)
         let current = singles(.current)
+        let shared = Self.fastest {
+            for id in ids { _ = derivation.mainEngine.closures(from: [id]) }
+        }
+        let build = Self.fastest {
+            _ = Derivation(manifest: corpus.manifest, curation: corpus.curation)
+        }
         print("derivation loops, \(corpus.modeName): \(compared) closures on \(derivation.namedEngines.count) "
             + "engines compared, \(mismatches.count) differ; the \(ids.count * 2) single-object closures "
-            + "of a load take \(LoadTimings.format(legacy)) with the 21df5d7 loop and "
-            + "\(LoadTimings.format(current)) with the current one (min of 3)")
+            + "of a load take \(LoadTimings.format(legacy)) with the 21df5d7 loop, "
+            + "\(LoadTimings.format(current)) with the current one and \(LoadTimings.format(shared)) "
+            + "sharing a run between settings; Derivation.init \(LoadTimings.format(build)) (min of 3)")
     }
 
     // MARK: X2: each cited page parsed once
@@ -326,6 +346,8 @@ struct DerivationEquivalenceTests {
             + "\(noPath) no-path completions, \(chains) chains and \(circumventions) circumventions "
             + "compared")
     }
+
+    // MARK: X2: the shared quote cases
 
     private struct QuoteCase: Decodable {
         let name: String
