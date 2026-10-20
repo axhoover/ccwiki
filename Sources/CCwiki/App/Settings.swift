@@ -20,6 +20,8 @@ struct CCwikiSettings: Sendable {
     private static let showsLinkPreviewsKey = "ccwiki.showsLinkPreviews"
     private static let lastPageKey = "ccwiki.lastPage"
     private static let recentPagesKey = "ccwiki.recentPages"
+    private static let savedPagesKey = "ccwiki.savedPages"
+    private static let showsSavedPagesKey = "ccwiki.showsSavedPages"
     private static let lastSeenVersionKey = "ccwiki.lastSeenVersion"
     private static let highestSeenVersionKey = "ccwiki.highestSeenVersion"
     private static let showsInspectorKey = "ccwiki.showsInspector"
@@ -81,6 +83,28 @@ struct CCwikiSettings: Sendable {
     static var recentPages: [String] {
         get { UserDefaults.standard.stringArray(forKey: recentPagesKey) ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: recentPagesKey) }
+    }
+
+    /// The pages saved with Save Page, in the reader's order, as JSON
+    /// (plans/efficiency.md §3.3). What cannot be read of it is left out.
+    static var savedPages: SavedPages {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: savedPagesKey) else { return SavedPages() }
+            return SavedPages(json: data)
+        }
+        set {
+            guard let data = newValue.json else { return }
+            UserDefaults.standard.set(data, forKey: savedPagesKey)
+        }
+    }
+
+    /// Whether the sidebar's Saved section is open. Open by default.
+    static var showsSavedPages: Bool {
+        get {
+            UserDefaults.standard.object(forKey: showsSavedPagesKey) == nil
+                ? true : UserDefaults.standard.bool(forKey: showsSavedPagesKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: showsSavedPagesKey) }
     }
 
     /// The "N links on this page have no target" banner. A signal for
