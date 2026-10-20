@@ -70,7 +70,7 @@ struct ConceptRanker: Sendable {
 
     /// One page, with its names pre-folded so a keystroke costs comparisons
     /// and nothing else.
-    struct Entry: Sendable {
+    struct Entry: Equatable, Sendable {
         let path: String
         let slug: String
         let title: String
@@ -79,7 +79,7 @@ struct ConceptRanker: Sendable {
         let names: [Name]
         let headings: [Heading]
 
-        struct Heading: Sendable {
+        struct Heading: Equatable, Sendable {
             let name: Name
             /// The anchor Quartz gives it, for opening the page at it.
             let id: String
@@ -99,7 +99,7 @@ struct ConceptRanker: Sendable {
     }
 
     /// A name as typed and as folded.
-    struct Name: Sendable {
+    struct Name: Equatable, Sendable {
         let text: String
         let exact: String
         let folded: String
@@ -143,10 +143,21 @@ struct ConceptRanker: Sendable {
     /// reduction. Its words still count as text, through BM25.
     static let structuralHeadingPages = 3
 
+    /// A page's headings as the ranker reads them, in order: each one's text
+    /// and the anchor it opens at. `WikiPage.headings()` without the levels.
+    typealias Outline = [(text: String, id: String)]
+
     init(pages: [WikiPage]) {
+        self.init(pages: pages, headings: [:])
+    }
+
+    /// `headings` holds the outlines already known, by path, so that no page
+    /// is parsed twice: the search index passes those of the rows it has just
+    /// written. A page it lacks is parsed here.
+    init(pages: [WikiPage], headings known: [String: Outline]) {
         let pages = pages.filter { $0.kind != .reference }
         let headings = pages.map { page in
-            page.headings().map {
+            (known[page.path] ?? Self.outline(page.headings())).map {
                 Entry.Heading(name: Name(RelationText.plain($0.text)), id: $0.id)
             }
         }
@@ -171,6 +182,11 @@ struct ConceptRanker: Sendable {
     }
 
     static let empty = ConceptRanker(pages: [])
+
+    /// `headings` as the ranker reads them.
+    static func outline(_ headings: [WikiPage.Heading]) -> Outline {
+        headings.map { (text: $0.text, id: $0.id) }
+    }
 
     /// The maintainer's order of sections. References never reach this.
     static func priority(_ kind: PageKind) -> Int {

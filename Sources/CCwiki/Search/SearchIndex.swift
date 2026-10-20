@@ -80,10 +80,11 @@ actor SearchIndex {
     private(set) var indexedCount = 0
     /// ⌘S's ordering rules, over the pages of the last rebuild. Held here
     /// rather than on the main actor because it is read on every keystroke,
-    /// next to the query it combines with.
-    private var ranker = ConceptRanker.empty
+    /// next to the query it combines with. Readable so the tests can hold
+    /// both rankers against ones built from the pages.
+    private(set) var ranker = ConceptRanker.empty
     /// ⇧⌘R's, over the references.
-    private var referenceRanker = ReferenceRanker.empty
+    private(set) var referenceRanker = ReferenceRanker.empty
 
     init(path: URL) {
         self.path = path
@@ -199,8 +200,10 @@ actor SearchIndex {
     /// cite each reference.
     func rebuild(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]] = [:]) throws {
         let pages = Self.sortedByPath(pages)
-        rank(pages, backlinks: backlinks)
-        _ = try writeAll(pages, digests: [:], builder: nil, in: try openOrReset())
+        var outlines: [String: ConceptRanker.Outline] = [:]
+        defer { rank(pages, outlines: outlines, backlinks: backlinks) }
+        let database = try openOrReset()
+        _ = try writeAll(pages, digests: [:], builder: nil, outlines: &outlines, in: database)
     }
 
     /// Bring the index in line with a library load: what `AppModel` calls
@@ -227,22 +230,34 @@ actor SearchIndex {
         let clock = ContinuousClock()
         let start = clock.now
         let pages = Self.sortedByPath(pages)
-        rank(pages, backlinks: backlinks)
 
-        var database = try openOrReset()
+        // Each page's outline as this sync comes to know it: parsed for a row
+        // it writes. The rankers are built from it when the writing ends,
+        // however it ends, and parse only the pages it lacks, so no page is
+        // parsed twice (`rank`).
+        var outlines: [String: ConceptRanker.Outline] = [:]
         let report: SyncReport
         do {
-            let stamped = try Self.builder(in: database)
-            if stamped != builder || LibraryChanges.areIgnored {
-                report = try writeAll(pages, digests: fingerprints.pages, builder: builder, in: database)
-            } else {
-                report = try writeChanges(
-                    pages, digests: fingerprints.pages, builder: builder, in: database)
+            defer { rank(pages, outlines: outlines, backlinks: backlinks) }
+            var database = try openOrReset()
+            do {
+                let stamped = try Self.builder(in: database)
+                if stamped != builder || LibraryChanges.areIgnored {
+                    report = try writeAll(
+                        pages, digests: fingerprints.pages, builder: builder,
+                        outlines: &outlines, in: database)
+                } else {
+                    report = try writeChanges(
+                        pages, digests: fingerprints.pages, builder: builder,
+                        outlines: &outlines, in: database)
+                }
+            } catch {
+                reset()
+                database = try open()
+                report = try writeAll(
+                    pages, digests: fingerprints.pages, builder: builder,
+                    outlines: &outlines, in: database)
             }
-        } catch {
-            reset()
-            database = try open()
-            report = try writeAll(pages, digests: fingerprints.pages, builder: builder, in: database)
         }
 
         let message = "Search index: \(report.summary) in \(start.duration(to: clock.now))"
@@ -251,9 +266,13 @@ actor SearchIndex {
     }
 
     /// The rankers, from pages sorted by path: their ties then fall the same
-    /// way whichever build made the rows.
-    private func rank(_ pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]]) {
-        ranker = ConceptRanker(pages: pages)
+    /// way whichever build made the rows. `outlines` holds the headings
+    /// already parsed for the rows, by path, which are not parsed again.
+    private func rank(
+        _ pages: [WikiPage], outlines: [String: ConceptRanker.Outline],
+        backlinks: [String: [WikiIndex.Backlink]]
+    ) {
+        ranker = ConceptRanker(pages: pages, headings: outlines)
         referenceRanker = ReferenceRanker(pages: pages, backlinks: backlinks)
     }
 
@@ -271,16 +290,16 @@ actor SearchIndex {
     }
 
     /// Every row deleted and written again, then the index optimized and
-    /// the log folded into the file.
+    /// the log folded into the file. Each page's outline goes to `outlines`.
     private func writeAll(
         _ pages: [WikiPage], digests: [String: String], builder: String?,
-        in database: SQLiteDatabase
+        outlines: inout [String: ConceptRanker.Outline], in database: SQLiteDatabase
     ) throws -> SyncReport {
         try database.transaction {
             try database.execute("DELETE FROM doc")
             let insert = try database.prepare(Self.insertRow)
             for page in pages {
-                try Self.write(page, digest: digests[page.path], with: insert)
+                outlines[page.path] = try Self.write(page, digest: digests[page.path], with: insert)
             }
             try Self.stamp(builder, in: database)
         }
@@ -292,10 +311,11 @@ actor SearchIndex {
 
     /// Only the rows whose file changed, came or went. FTS5's automerge keeps
     /// the index in shape after a few writes; a pull that touched many pages
-    /// is optimized as a rebuild is.
+    /// is optimized as a rebuild is. The outline of each page written goes
+    /// to `outlines`.
     private func writeChanges(
         _ pages: [WikiPage], digests: [String: String], builder: String,
-        in database: SQLiteDatabase
+        outlines: inout [String: ConceptRanker.Outline], in database: SQLiteDatabase
     ) throws -> SyncReport {
         var stored = try Self.storedHashes(in: database)
         var report = SyncReport()
@@ -331,11 +351,11 @@ actor SearchIndex {
             // The `doc_au` trigger keeps the full-text index in step.
             let update = try database.prepare(Self.updateRow)
             for page in updates {
-                try Self.write(page, digest: digests[page.path], with: update)
+                outlines[page.path] = try Self.write(page, digest: digests[page.path], with: update)
             }
             let insert = try database.prepare(Self.insertRow)
             for page in inserts {
-                try Self.write(page, digest: digests[page.path], with: insert)
+                outlines[page.path] = try Self.write(page, digest: digests[page.path], with: insert)
             }
             try Self.stamp(builder, in: database)
         }
@@ -362,9 +382,12 @@ actor SearchIndex {
         """
 
     /// Binds `page`'s row to `statement`, one of the two above, and runs it.
+    /// Returns the page's outline, parsed for the row, which the concept
+    /// ranker then reads rather than parse the page a second time.
     private static func write(
         _ page: WikiPage, digest: String?, with statement: SQLiteDatabase.Statement
-    ) throws {
+    ) throws -> ConceptRanker.Outline {
+        let headings = page.headings()
         statement.reset()
         statement.bind(1, page.path)
         statement.bind(2, page.slug)
@@ -376,10 +399,11 @@ actor SearchIndex {
         statement.bind(5, page.kind == .reference
             ? "\(page.title) \(page.displayTitle)" : page.title)
         statement.bind(6, page.aliases.joined(separator: "\n"))
-        statement.bind(7, page.headings().map(\.text).joined(separator: "\n"))
+        statement.bind(7, headings.map(\.text).joined(separator: "\n"))
         statement.bind(8, indexableBody(page.body))
         statement.bind(9, digest ?? "")
         _ = try statement.step()
+        return ConceptRanker.outline(headings)
     }
 
     /// Each row's path and the fingerprint it was built from.
