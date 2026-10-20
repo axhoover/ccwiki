@@ -132,6 +132,36 @@ struct SourceLineMapTests {
         }
     }
 
+    // MARK: From the body alone (plans/efficiency.md §3.1)
+
+    @Test("a map made from the body alone is the file's, past the frontmatter")
+    func bodyAlone() {
+        let byFile = SourceLineMap(fileText: Self.reduction, renderedMarkdown: Self.spliced)
+        let body = WikiPage(path: "Reductions/r.md", text: Self.reduction).body
+        let byBody = SourceLineMap(body: body, renderedMarkdown: Self.spliced)
+        #expect(byBody.bodyOffset == 0)
+        #expect(byBody.inserted == byFile.inserted)
+        for line in SourceLineMap.lines(of: Substring(body)).indices {
+            #expect(byBody.renderedLine(forBodyLine: line)
+                == byFile.renderedLine(forFileLine: byFile.bodyOffset + line + 1), "body line \(line)")
+        }
+    }
+
+    @Test("a body line lands on itself, or past the splice; a negative one nowhere")
+    func renderedBodyLine() throws {
+        let body = WikiPage(path: "Reductions/r.md", text: Self.reduction).body
+        let map = SourceLineMap(body: body, renderedMarkdown: Self.spliced)
+        let bodyLines = SourceLineMap.lines(of: Substring(body))
+        let rendered = SourceLineMap.lines(of: Substring(Self.spliced))
+        for (line, text) in bodyLines.enumerated() where !text.isEmpty {
+            let landing = try #require(map.renderedLine(forBodyLine: line))
+            #expect(rendered[landing] == text, "body line \(line)")
+        }
+        let plain = SourceLineMap(body: Self.body, renderedMarkdown: Self.body)
+        #expect(plain.renderedLine(forBodyLine: 3) == 3)
+        #expect(plain.renderedLine(forBodyLine: -1) == nil)
+    }
+
     @Test("an empty or negative range maps nowhere")
     func emptyRange() {
         let map = SourceLineMap(fileText: Self.reduction, renderedMarkdown: Self.spliced)

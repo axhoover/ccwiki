@@ -16,16 +16,18 @@ import SwiftUI
 struct OpenInReaderAction: Sendable {
     /// What a session holds until its view hands it the real one: nothing
     /// opens.
-    static let none = OpenInReaderAction { _, _, _ in }
+    static let none = OpenInReaderAction { _, _, _, _ in }
 
     /// Opens the location as the disposition says; the strings are found on
-    /// the page once it renders.
-    let handler: @MainActor @Sendable (AppModel.Location, LinkDisposition, [String]?) -> Void
+    /// the page once it renders, and the line of its body, a backlink's
+    /// mention, is revealed.
+    let handler: @MainActor @Sendable (AppModel.Location, LinkDisposition, [String]?, Int?) -> Void
 
     @MainActor func callAsFunction(
-        _ location: AppModel.Location, _ disposition: LinkDisposition, find: [String]? = nil
+        _ location: AppModel.Location, _ disposition: LinkDisposition, find: [String]? = nil,
+        revealing line: Int? = nil
     ) {
-        handler(location, disposition, find)
+        handler(location, disposition, find, line)
     }
 }
 

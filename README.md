@@ -164,6 +164,7 @@ a job that could not push.
 | ⌥⌘I | Toggle inspector |
 | ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
 | ⌘P | Print, or Save as PDF from the print panel |
+| ⌘D | Save the page to the sidebar's Saved, or remove it |
 | ⌥⌘P | Show the paper behind a reference |
 | ⌘+ / ⌘− / ⌘0 | Text bigger / smaller / actual size; in a paper window, zoom in / out / to fit |
 | ⇧⌘H | Go home |

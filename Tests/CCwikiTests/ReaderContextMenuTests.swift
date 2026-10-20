@@ -230,6 +230,111 @@ struct ReaderContextMenuTests {
             available: false, selection: Self.selection(text: "a passage")).isEmpty)
     }
 
+    // MARK: Sections (plans/efficiency.md §3.2)
+
+    private static let section = CorrectionTarget.Section(id: "syntax", title: "Syntax", level: 2)
+    private static let sectionLinks = ReaderContextTarget.SectionLinks(
+        site: "https://cryptology.city/Primitives/pseudorandom-function#syntax",
+        wikilink: "[[pseudorandom-function#Syntax]]",
+        app: "ccwiki-dev://wiki/page/Primitives%2Fpseudorandom-function.md#syntax")
+
+    private static func target(heading: CorrectionTarget.Section?) -> ReaderContextTarget {
+        ReaderContextTarget(selection: ReaderSelection(
+            renderedLines: 4..<6, text: nil, heading: heading, path: pagePath, revision: "ab81f02"))
+    }
+
+    @Test("under a heading, the section group offers the site link, the wikilink and the CCwiki link, in that order")
+    func sectionGroup() {
+        var asked: [String] = []
+        let items = Self.target(heading: Self.section).sectionItems { path, heading in
+            asked.append("\(path)#\(heading.id)")
+            return Self.sectionLinks
+        }
+        #expect(items.map(\.title) == [
+            "Copy Link to Section",
+            "Copy Wikilink to Section",
+            "Copy CCwiki Link to Section",
+        ])
+        #expect(items.map(\.text) == [
+            "https://cryptology.city/Primitives/pseudorandom-function#syntax",
+            "[[pseudorandom-function#Syntax]]",
+            "ccwiki-dev://wiki/page/Primitives%2Fpseudorandom-function.md#syntax",
+        ])
+        #expect(items.allSatisfy { !$0.isAlternate })
+        #expect(asked == ["\(Self.pagePath)#syntax"], "the section is the right-click's, on its page")
+    }
+
+    @Test("outside a section, or for a section the page cannot name, there is no section group")
+    func noSectionGroup() {
+        #expect(Self.target(heading: nil).sectionItems { _, _ in Self.sectionLinks }.isEmpty)
+        #expect(ReaderContextTarget().sectionItems { _, _ in Self.sectionLinks }.isEmpty)
+        #expect(ReaderContextTarget(tex: "\\secpar").sectionItems { _, _ in Self.sectionLinks }.isEmpty)
+        #expect(Self.target(heading: Self.section).sectionItems { _, _ in nil }.isEmpty)
+    }
+
+    @Test("a section no wikilink reaches offers the other two")
+    func sectionWithoutWikilink() {
+        let links = ReaderContextTarget.SectionLinks(
+            site: Self.sectionLinks.site, wikilink: nil, app: Self.sectionLinks.app)
+        let items = Self.target(heading: Self.section).sectionItems { _, _ in links }
+        #expect(items.map(\.title) == ["Copy Link to Section", "Copy CCwiki Link to Section"])
+    }
+
+    // MARK: Save Section (plans/efficiency.md §3.3)
+
+    /// The page's headings, as its outline has them: its title, a section,
+    /// and a later section at the title's level.
+    private static let outline = [
+        WikiPage.Heading(level: 1, text: "Pseudorandom function", id: "pseudorandom-function"),
+        WikiPage.Heading(level: 2, text: "Syntax", id: "syntax"),
+        WikiPage.Heading(level: 1, text: "Attacks", id: "attacks"),
+    ]
+
+    @Test("under a heading, Save Section saves the right-click's section, and reads Remove Section from Saved once it is saved")
+    func saveSection() {
+        var asked: [String] = []
+        let item = Self.target(heading: Self.section).saveSectionItem(outline: Self.outline) { path, heading in
+            asked.append("\(path)#\(heading.id)")
+            return false
+        }
+        #expect(item == ReaderContextTarget.SaveSectionItem(
+            title: "Save Section", path: Self.pagePath, section: Self.section))
+        #expect(asked == ["\(Self.pagePath)#syntax"], "the section is the right-click's, on its page")
+
+        let saved = Self.target(heading: Self.section).saveSectionItem(outline: Self.outline) { _, _ in true }
+        #expect(saved?.title == "Remove Section from Saved")
+        #expect(ReaderContextTarget.saveSectionTitle(isSaved: false) == "Save Section")
+        #expect(ReaderContextTarget.saveSectionTitle(isSaved: true) == "Remove Section from Saved")
+    }
+
+    @Test("outside a section, under the page's title, or on a page the wiki does not have, there is no Save Section")
+    func noSaveSection() {
+        let unsaved: (String, CorrectionTarget.Section) -> Bool? = { _, _ in false }
+        let notAPage: (String, CorrectionTarget.Section) -> Bool? = { _, _ in nil }
+        let title = CorrectionTarget.Section(
+            id: "pseudorandom-function", title: "Pseudorandom function", level: 1)
+        #expect(Self.target(heading: nil).saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil)
+        #expect(ReaderContextTarget().saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil)
+        #expect(ReaderContextTarget(tex: "\\secpar").saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil)
+        #expect(Self.target(heading: Self.section).saveSectionItem(outline: Self.outline, isSaved: notAPage) == nil)
+        #expect(
+            Self.target(heading: title).saveSectionItem(outline: Self.outline, isSaved: unsaved) == nil,
+            "Save Page keeps the title's place")
+    }
+
+    @Test("a level-1 heading below the page's title is a section like any other")
+    func saveSectionAtTitleLevel() {
+        let attacks = CorrectionTarget.Section(id: "attacks", title: "Attacks", level: 1)
+        let item = Self.target(heading: attacks).saveSectionItem(outline: Self.outline) { _, _ in false }
+        #expect(item?.title == "Save Section")
+        #expect(ReaderContextTarget.isPageTitle("pseudorandom-function", in: Self.outline))
+        #expect(!ReaderContextTarget.isPageTitle("attacks", in: Self.outline))
+        #expect(
+            !ReaderContextTarget.isPageTitle("syntax", in: Array(Self.outline.dropFirst())),
+            "a page that starts below level 1 has no title heading")
+        #expect(!ReaderContextTarget.isPageTitle("pseudorandom-function", in: []))
+    }
+
     @Test("the bridge message carries the selection after the link")
     func readsSelection() {
         let message: [String: Any] = [

@@ -29,6 +29,7 @@ right shows what links back.
 | ⌘[ and ⌘] | Back and forward. |
 | ⇧⌘H | The wiki's front page. |
 | ⌥⌘I | Show or hide the inspector. |
+| ⌘D | Save the page you are reading to the sidebar's Saved list. Press it again to remove it. |
 | ⌥⌘P | On a reference, the paper behind it, in a window of its own. |
 | ⌥⌘E | Edit the page you are reading, at the passage selected. |
 | ⌘+ and ⌘− | Larger or smaller text. ⌘0 goes back to the usual size. |
@@ -42,7 +43,8 @@ it, and the barriers known between them.
 Select text with formulas and press ⌘C to copy them as LaTeX, or right-click a
 formula for Copy LaTeX. Hover an algorithm to copy its LaTeX source, as on the
 website. Right-click anywhere on a page to open it on cryptology.city or copy a
-link to it.
+link to it. Under a heading, or on a heading in the outline, you can also copy
+a link to that section or save the section.
 
 ⌘-click a link to open it in a new tab, or ⌥⌘-click for a new window. To
 open a linked page on cryptology.city, right-click the link and choose Open

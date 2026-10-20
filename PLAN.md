@@ -178,12 +178,16 @@ redesign, not a refactor.
   an updater that swaps in one step and deletes the old bundle, and a launch
   check that finds other copies. §1 lists the commands that tell which copy
   ran; §4 what is still unproven without a Mac.
-- [plans/efficiency.md](plans/efficiency.md) — **in progress on
-  `claude/efficiency`**: where a load, a sync, a derivation and a render
-  spend their time on the 877-page wiki, measured first (Phase 0) and then
-  cut in six file-disjoint tracks, each held equal to the code it replaces;
-  then three reading features on `claude/reading-features`. §5 holds CI's
-  timings before and after.
+- [plans/efficiency.md](plans/efficiency.md) — **built on
+  `claude/efficiency`, and its reading features on
+  `claude/reading-features`**: where a load, a sync, a derivation and a
+  render spend their time on the 877-page wiki, measured first (Phase 0)
+  and then cut in six file-disjoint tracks, each held equal to the code it
+  replaces; §5 holds CI's timings before and after. Then three reading
+  features (§3): backlinks grouped by kind that open the linking page at
+  the line that mentions this one, links to a section (the site, a
+  wikilink, a `ccwiki://` link), and saved pages and sections in the
+  sidebar (⌘D). Each track and feature ends with an "As built" note.
 - [PROGRESS.md](PROGRESS.md) — running log, newest first.
 - [PROBLEMS.md](PROBLEMS.md) — things that bit us.
 - [SWIFTUI-RULES.md](SWIFTUI-RULES.md) — hard-won SwiftUI rules; the code here

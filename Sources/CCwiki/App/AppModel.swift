@@ -150,6 +150,26 @@ final class AppModel {
         didSet { CCwikiSettings.derivedSectionsExpanded = derivedSectionsExpanded.sorted() }
     }
 
+    // MARK: Saved pages
+
+    /// The pages saved with Save Page (⌘D), in the reader's order
+    /// (plans/efficiency.md §3.3). The model's, so every window's sidebar
+    /// shows the same list. Persisted, and reconciled with each load.
+    private(set) var savedPages: SavedPages = CCwikiSettings.savedPages {
+        didSet {
+            guard savedPages != oldValue else { return }
+            CCwikiSettings.savedPages = savedPages
+        }
+    }
+
+    /// Whether the sidebar's Saved section is open. The model's, as the list
+    /// is, and kept between launches, as the inspector's derived sections
+    /// are: closed in one window, it is closed in every window and tab, new
+    /// or restored.
+    var showsSavedPages: Bool = CCwikiSettings.showsSavedPages {
+        didSet { CCwikiSettings.showsSavedPages = showsSavedPages }
+    }
+
     // MARK: Navigation
 
     // Where a reader is, and how it got there, is its window's: see
@@ -1220,6 +1240,13 @@ final class AppModel {
         libraryGeneration += 1
         unlistedPaths = library.manifest.unlistedPaths
         rebuildBrowseState()
+        // A saved page whose file went is looked up in the new wiki, in the
+        // same step, so no sidebar shows it against the new index first.
+        // Assigned only when it changes: an equal assignment still tells
+        // every reader on Swift 6.1 (W2's probe, plans/efficiency.md §5),
+        // and a load that moved no saved page should redraw no sidebar.
+        let saved = savedPages.reconciled(with: library.index)
+        if saved != savedPages { savedPages = saved }
         macros = MacroTable.load(cloneRoot: paths.clone)
         refreshMacrosWarning()
 
@@ -1602,6 +1629,42 @@ final class AppModel {
         } else {
             derivedSectionsExpanded.insert(role.rawValue)
         }
+    }
+
+    // MARK: Saved pages
+
+    /// Whether the page at `path` is saved: the page itself, or with
+    /// `anchor`, that section of it.
+    func isSaved(_ path: String, anchor: String? = nil) -> Bool {
+        savedPages.contains(path: path, anchor: anchor)
+    }
+
+    /// Wiki ▸ Save Page, or Remove from Saved when the page is saved; with
+    /// `anchor`, Save Section or Remove Section from Saved for that section,
+    /// whose heading reads `sectionTitle`. The entry keeps the page's title
+    /// either way, since reconciliation looks it up.
+    func toggleSaved(_ page: WikiPage, anchor: String? = nil, sectionTitle: String? = nil) {
+        if savedPages.contains(path: page.path, anchor: anchor) {
+            savedPages.remove(path: page.path, anchor: anchor)
+        } else {
+            savedPages.add(
+                path: page.path, anchor: anchor, sectionTitle: sectionTitle, title: page.title)
+        }
+    }
+
+    func removeSaved(_ entry: SavedPages.Entry) {
+        savedPages.remove(path: entry.path, anchor: entry.anchor)
+    }
+
+    /// A drag in the sidebar's Saved section.
+    func moveSaved(fromOffsets source: IndexSet, toOffset destination: Int) {
+        savedPages.move(fromOffsets: source, toOffset: destination)
+    }
+
+    /// Move Up and Move Down on a saved row: a drag's form in the row's menu
+    /// and for VoiceOver.
+    func moveSaved(_ entry: SavedPages.Entry, by step: Int) {
+        savedPages.move(entry.id, by: step)
     }
 
     // MARK: Relations explorer

@@ -333,23 +333,78 @@ struct WikiIndex: Sendable {
             .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
+    // MARK: Section links
+
+    /// A wikilink to section `id` of the page at `path`, whose heading reads
+    /// `text`, that resolves back to that section (plans/efficiency.md §3.2).
+    ///
+    /// It names the page by its stem when `[[stem]]` resolves to the page,
+    /// as it does unless another page or an alias has the same name, and
+    /// otherwise by its path without `.md`. It names the section by `text`
+    /// when that reads back as `id`: the text has none of `[ ] | # ^ \` or a
+    /// line break, and its slug is `id`. Otherwise by `id`, the only way to
+    /// a repeated heading's `-1`. Each form is read back through
+    /// `WikilinkParser` and `resolve` before it is returned; nil when none
+    /// reads back.
+    func wikilink(toSection id: String, text: String, onPage path: String) -> String? {
+        let withoutExtension = path.hasSuffix(".md") ? String(path.dropLast(3)) : path
+        let names = [WikiPage.stem(of: path), withoutExtension]
+        let sections = Self.namesSection(text, id: id) ? [text, id] : [id]
+        for name in names {
+            for section in sections {
+                let link = "[[\(name)#\(section)]]"
+                let parsed = WikilinkParser.links(in: link)
+                if parsed.count == 1, parsed[0].range == link.startIndex..<link.endIndex,
+                   resolve(parsed[0], from: path) == .page(path: path, anchor: id) {
+                    return link
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Whether a heading's text can name its section in a wikilink: nothing
+    /// in it ends the link or its anchor, or makes it a block reference, and
+    /// its slug is the section's id.
+    static func namesSection(_ text: String, id: String) -> Bool {
+        !text.isEmpty
+            && !text.contains(where: { "[]|#^\\".contains($0) || $0.isNewline })
+            && GithubSlugger.slug(text) == id
+    }
+
     // MARK: Backlinks
 
-    /// path → the paths of every page that links to it. Built once per index
-    /// because it needs a full sweep; the corpus is 293 pages and 673 links, so
-    /// this takes a few milliseconds.
+    /// path → every page that links to it, with the lines that mention it.
+    /// Built once per index because it needs a full sweep; the corpus is 293
+    /// pages and 673 links, so this takes a few milliseconds.
     func backlinkMap() -> [String: [Backlink]] {
         var result: [String: [Backlink]] = [:]
         var resolutions = LinkResolutions(self)
         for page in pages.values.sorted(by: { $0.path < $1.path }) {
-            var seen: Set<String> = []
+            // The pages this one links to, in the order it first does, each
+            // with the lines that mention it.
+            var found: [(target: String, mentions: [Substring])] = []
+            var slots: [String: Int] = [:]
             for link in Self.outgoingLinks(in: page.body) {
                 guard case .page(let targetPath, _) = resolutions.target(of: link, from: page.path),
-                      targetPath != page.path,
-                      seen.insert(targetPath).inserted
+                      targetPath != page.path
                 else { continue }
-                result[targetPath, default: []].append(
-                    Backlink(sourcePath: page.path, line: Self.line(of: link, in: page.body)))
+                let start = MarkdownLineEnd.start(in: page.body, before: link.range.lowerBound)
+                if let slot = slots[targetPath] {
+                    // The links come in source order, so a line already
+                    // counted is the last one.
+                    guard found[slot].mentions.last?.startIndex != start else { continue }
+                    found[slot].mentions.append(Self.line(from: start, around: link, in: page.body))
+                } else {
+                    slots[targetPath] = found.count
+                    found.append((
+                        target: targetPath,
+                        mentions: [Self.line(from: start, around: link, in: page.body)]))
+                }
+            }
+            for entry in found {
+                result[entry.target, default: []].append(
+                    Backlink(sourcePath: page.path, mentions: entry.mentions))
             }
         }
         return result
@@ -357,9 +412,24 @@ struct WikiIndex: Sendable {
 
     struct Backlink: Identifiable, Hashable, Sendable {
         let sourcePath: String
-        /// The line the link appeared on, as markdown: a slice of the linking
-        /// page's body, so a load copies nothing and reduces nothing for it.
-        let line: Substring
+        /// Every line of the linking page that holds a link to the target, as
+        /// markdown, in source order: a line with two such links is one
+        /// mention. Slices of the linking page's body, so a load copies
+        /// nothing and reduces nothing for them (plans/efficiency.md §3.1).
+        let mentions: [Substring]
+
+        init(sourcePath: String, mentions: [Substring]) {
+            self.sourcePath = sourcePath
+            self.mentions = mentions
+        }
+
+        /// One mention, as L3's backlink held it.
+        init(sourcePath: String, line: Substring) {
+            self.init(sourcePath: sourcePath, mentions: [line])
+        }
+
+        /// The first mention: the line the pane shows for the page.
+        var line: Substring { mentions.first ?? "" }
 
         /// The line the link appeared on, reduced to plain text, so the pane
         /// can show *why* the page links here rather than just that it does.
@@ -373,11 +443,77 @@ struct WikiIndex: Sendable {
         /// `backlinkMap` keeps one backlink per linking page for each target,
         /// so the linking page tells a target's backlinks apart.
         var id: String { sourcePath }
+
+        /// The 0-based line of the linking page's body that mention `ordinal`
+        /// starts on, as markdown-it counts lines: `\n`, `\r\n` or a lone `\r`
+        /// ends one. Counted from the top of the body when a mention is
+        /// clicked, never at load (plans/efficiency.md §3.1). Nil for a
+        /// mention there is not.
+        func bodyLine(ofMention ordinal: Int) -> Int? {
+            guard mentions.indices.contains(ordinal) else { return nil }
+            let mention = mentions[ordinal]
+            let body = mention.base
+            var line = 0
+            var lineEnd = MarkdownLineEnd.next(in: body, from: body.startIndex)
+            while lineEnd.end < mention.startIndex {
+                line += 1
+                lineEnd = MarkdownLineEnd.next(in: body, from: lineEnd.next)
+            }
+            return line
+        }
     }
 
-    /// The line a link appeared on.
-    private static func line(of link: Wikilink, in body: String) -> Substring {
-        let start = MarkdownLineEnd.start(in: body, before: link.range.lowerBound)
+    /// The groups the Backlinks tab shows a page's backlinks in, by the kind
+    /// of the linking page (plans/efficiency.md §3.1). The prose comes first.
+    /// Most of the rows on a primitive or an assumption are reductions and
+    /// barriers, which the Relations tab lists already, so they come after it,
+    /// and the citations last.
+    enum BacklinkGroup: CaseIterable, Hashable, Sendable {
+        case mentionedIn
+        case reductionsAndBarriers
+        case references
+
+        init(kind: PageKind) {
+            switch kind {
+            case .reduction, .barrier: self = .reductionsAndBarriers
+            case .reference: self = .references
+            case .primitive, .assumption, .complexityClass, .glossary, .folklore, .note:
+                self = .mentionedIn
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .mentionedIn: "Mentioned in"
+            case .reductionsAndBarriers: "Reductions and Barriers"
+            case .references: "References"
+            }
+        }
+
+        /// Whether the group starts open on a page whose backlinks fall in
+        /// `present`. The prose that mentions the page does. On a page no
+        /// prose mentions, the first group there does, so the tab never
+        /// opens on closed headers alone, as it would on 181 of the
+        /// corpus's 818 targets.
+        func opensByDefault(among present: Set<BacklinkGroup>) -> Bool {
+            if self == .mentionedIn { return true }
+            return !present.contains(.mentionedIn)
+                && Self.allCases.first(where: { present.contains($0) }) == self
+        }
+
+        /// `backlinks` by group, each in the order it came in. `kind` is the
+        /// kind of the page at a path; a page it does not know is prose.
+        static func grouping(
+            _ backlinks: [Backlink], kind: (String) -> PageKind?
+        ) -> [BacklinkGroup: [Backlink]] {
+            Dictionary(grouping: backlinks) { BacklinkGroup(kind: kind($0.sourcePath) ?? .note) }
+        }
+    }
+
+    /// The line a link appeared on, from `start`, where that line starts.
+    private static func line(
+        from start: String.Index, around link: Wikilink, in body: String
+    ) -> Substring {
         let end = MarkdownLineEnd.next(in: body, from: link.range.upperBound).end
         return body[start..<end]
     }

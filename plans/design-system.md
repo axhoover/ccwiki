@@ -60,7 +60,10 @@ navigation for free.
   root pages, pages sorted by *title* rather than filename. A status dot per
   page; a page count per folder. Opening a page from anywhere expands its folder
   and scrolls the row into view, so the sidebar never silently disagrees with
-  the reader. **References are not in the tree** — see §3a.
+  the reader. **References are not in the tree** — see §3a. A **Saved**
+  section above it lists the pages and sections saved with ⌘D and Save
+  Section, a section as its page's title over "§ Heading"
+  ([efficiency.md](efficiency.md) §3.3).
 - **Reader**: a document-info strip (folder · status · last change, plus the
   reference byline) and then the page. The strip deliberately does **not**
   repeat the title — the window title bar already carries it, and printing it
@@ -72,8 +75,13 @@ navigation for free.
   switched by a segmented control. None earns a permanent column. Backlinks show
   the *line* that mentions the page, reduced to prose — a backlinks pane that
   shows `[[markup]]` is unreadable, and the point of the pane is why another
-  page links here. Relations show the typed hypergraph from `relations.json`;
-  see [relations.md](relations.md) §9 and §3b below.
+  page links here. They group by the linking page's kind, Mentioned in
+  first, under headers that open and close with a count each; a page that
+  mentions this one on several lines lists every line, and a click lands
+  on the line ([efficiency.md](efficiency.md) §3.1). Relations show the
+  typed hypergraph from `relations.json`; see [relations.md](relations.md)
+  §9 and §3b below. An outline heading's menu opens its section elsewhere,
+  copies a link to it and saves it (efficiency.md §3.2, §3.3).
 
   The switch is **text-only**. Two segments fitted comfortably with icons and
   titles; three do not, and a truncated word is worse than a missing glyph when
@@ -98,8 +106,9 @@ do in Finder and Safari.
   its page's display title, which is what its tab and the Window menu show.
 - **What every window shares:** the wiki, the tree and its counts, Hide
   stubs, the search index, jobs, sync state, warnings, settings, text size,
-  recent pages, and the palettes' queries, so ⌘S in any tab reopens on the
-  last search.
+  recent pages, the saved pages and whether the sidebar's Saved section is
+  open, and the palettes' queries, so ⌘S in any tab reopens on the last
+  search.
 - **A new window starts as the last one was left.** Its inspector and open
   folders are those of the window changed most recently, and it opens Home.
   Only the first window of a launch, or the first after every reader window
@@ -134,6 +143,7 @@ discoverable rather than folklore.
 | ⌥⌘I | Toggle inspector |
 | ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | Outline / Backlinks / Relations |
 | ⌘P | Print, or Save as PDF from the print panel |
+| ⌘D | Save Page, or Remove from Saved; Wiki ▸ Saved Pages lists them |
 | ⌥⌘P | Show Paper, on a reference page |
 | ⌥⌘E | Edit Page: the page being read, in an editor window, at the passage selected |
 | ⌘↩ | Review Changes, in an editor window: save, and review the job in Jobs |
@@ -144,8 +154,8 @@ discoverable rather than folklore.
 
 **Clicks say where a page opens**, as in Safari
 ([reader-comforts.md](reader-comforts.md) §1.4). One table serves a link in
-the page and every row that is a button (Cited by, the Reductions and
-References rows, Backlinks, Relations, palette rows), though a row, which
+the page and every row that is a button (Saved, Cited by, the Reductions
+and References rows, Backlinks, Relations, palette rows), though a row, which
 SwiftUI draws, answers only the primary button:
 
 | | |

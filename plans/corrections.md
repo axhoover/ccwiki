@@ -212,6 +212,8 @@ struct SourceLineMap: Sendable, Equatable {
     let inserted: Range<Int>
 
     init(fileText: String, renderedMarkdown: String)
+    /// The body alone, as WikiPage.body holds it: bodyOffset is 0 (efficiency.md §3.1).
+    init(body: String, renderedMarkdown: String)
 
     enum Location: Sendable, Equatable {
         case body(LineRange)          // 1-based, in the file
@@ -222,8 +224,16 @@ struct SourceLineMap: Sendable, Equatable {
     /// A 1-based file line → the rendered line, for the preview to follow the cursor.
     /// nil inside the frontmatter.
     func renderedLine(forFileLine line: Int) -> Int?
+    /// A 0-based body line → the rendered line: renderedLine(forFileLine: line + bodyOffset + 1).
+    func renderedLine(forBodyLine line: Int) -> Int?
 }
 ```
+
+The body form is how a backlink lands on the line that mentions its page
+([efficiency.md](efficiency.md) §3.1): a mention is a line of the linking
+page's body, and `WikiPage` keeps no frontmatter. It is the same alignment,
+and `BacklinkMentionTests` checks on every line of every corpus page that it
+maps as the file form does past the frontmatter.
 
 `bodyOffset` counts the newlines before `Frontmatter.parse(fileText).bodyStart`.
 `inserted` comes from aligning the body's lines with the rendered lines: the

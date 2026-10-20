@@ -40,6 +40,17 @@ final class WebController: NSObject {
     /// A correction chosen from the context menu, with what was selected at
     /// the right-click: a passage, the block under the pointer, or nothing.
     var onCorrect: ((CorrectionRoute, ReaderSelection?) -> Void)?
+    /// The links to a section of a page, for the page context menu's section
+    /// group (plans/efficiency.md §3.2): given the page's path and the
+    /// heading the right-click fell under. `nil`, or no links, leaves the
+    /// group out.
+    var sectionLinks: ((String, CorrectionTarget.Section) -> ReaderContextTarget.SectionLinks?)?
+    /// Whether that section is saved, for the group's Save Section
+    /// (plans/efficiency.md §3.3). `nil`, or a nil answer for a section that
+    /// cannot be saved, leaves the item out.
+    var isSectionSaved: ((String, CorrectionTarget.Section) -> Bool?)?
+    /// Save Section chosen, or Remove Section from Saved.
+    var onToggleSavedSection: ((String, CorrectionTarget.Section) -> Void)?
     /// What the page reported under the last right-click, for the menu.
     @ObservationIgnored fileprivate var contextTarget: ReaderContextTarget?
 
@@ -73,6 +84,9 @@ final class WebController: NSObject {
     @ObservationIgnored private var loadedPath: String?
     /// Searched for once the next render reports back.
     @ObservationIgnored private var pendingFind: [String]?
+    /// Revealed once the render of this page reports back: a 0-based
+    /// rendered line. Only the page asked for last keeps one.
+    @ObservationIgnored private var pendingReveal: (path: String, line: Int)?
 
     /// An offline reader has nothing worth persisting, and a non-persistent
     /// store means nothing about the wiki lands in a WebKit cache directory.
@@ -125,22 +139,35 @@ final class WebController: NSObject {
     // MARK: Rendering
 
     /// Render, then find `needle` on the result: how a search result lands
-    /// on its match instead of the top of the page. If the page is already
-    /// showing, only the find runs.
-    func render(_ request: RenderRequest, thenFind needle: [String]?) {
-        guard let needle, !needle.isEmpty else {
+    /// on its match instead of the top of the page. Then reveal rendered
+    /// line `line`: the innermost block holding it is scrolled to the middle
+    /// and outlined for a moment, which is how a backlink lands on the line
+    /// that mentions the page (plans/efficiency.md §3.1). If the page is
+    /// already showing, only the find and the reveal run.
+    func render(
+        _ request: RenderRequest, thenFind needle: [String]?, thenReveal line: Int? = nil
+    ) {
+        let needle = needle?.isEmpty == false ? needle : nil
+        guard needle != nil || line != nil else {
             render(request)
             return
         }
         if isReady, request.path == loadedPath, request.anchor == nil {
-            Task { _ = await findFirst(of: needle) }
+            // What this asks for replaces a reveal the page still waits on.
+            pendingReveal = nil
+            if let needle { Task { _ = await findFirst(of: needle) } }
+            if let line { revealSourceLines(line..<(line + 1), mark: true) }
             return
         }
         pendingFind = needle
+        pendingReveal = line.map { (path: request.path, line: $0) }
         render(request)
     }
 
     func render(_ request: RenderRequest) {
+        // A reveal waits for its own page. Once another is asked for, the
+        // reveal's page will not be the one on screen when it reports back.
+        if let reveal = pendingReveal, reveal.path != request.path { pendingReveal = nil }
         guard isReady else {
             pendingRequest = request
             return
@@ -299,6 +326,17 @@ final class WebController: NSObject {
             if let needle = pendingFind {
                 pendingFind = nil
                 Task { _ = await findFirst(of: needle) }
+            }
+            if let reveal = pendingReveal {
+                // Only its own page's render ends the wait: an earlier
+                // page's, still on its way, leaves it waiting. A failed
+                // render sends no path, and ends it with nothing to reveal.
+                if message["path"] as? String == reveal.path {
+                    pendingReveal = nil
+                    revealSourceLines(reveal.line..<(reveal.line + 1), mark: true)
+                } else if message["ok"] as? Bool == false {
+                    pendingReveal = nil
+                }
             }
             if let errors = message["pseudocodeErrors"] as? Int, errors > 0 {
                 lastRenderError = "\(errors) pseudocode block(s) failed to render."
@@ -614,12 +652,35 @@ final class ReaderWebView: WKWebView {
             })
             menu.addItem(ClosureMenuItem("Copy Link to Page") { Self.copy(url.absoluteString) })
         }
+        // The section the click fell under, as a link to it on the site, a
+        // wikilink and a link that opens CCwiki there (plans/efficiency.md
+        // §3.2), then Save Section (§3.3). It joins the page's group, and
+        // without one starts its own.
+        var sectionItems: [ReaderContextTarget.CopyItem] = []
+        if let target, let links = controller?.sectionLinks {
+            sectionItems = target.sectionItems(links: links)
+        }
+        var saveItem: ReaderContextTarget.SaveSectionItem?
+        if let target, let controller, let isSaved = controller.isSectionSaved {
+            saveItem = target.saveSectionItem(outline: controller.outline, isSaved: isSaved)
+        }
+        let hasSectionGroup = !sectionItems.isEmpty || saveItem != nil
+        if hasSectionGroup {
+            if siteURL == nil { menu.addItem(.separator()) }
+            for item in sectionItems { menu.addItem(Self.menuItem(for: item)) }
+            if let saveItem {
+                let onToggleSaved = controller?.onToggleSavedSection
+                menu.addItem(ClosureMenuItem(saveItem.title) {
+                    onToggleSaved?(saveItem.path, saveItem.section)
+                })
+            }
+        }
         // What this page's objects derive, in the Relations Explorer. Only on
         // a page with something to explore: an object, a reduction or a
         // barrier, never a complexity class. It joins the page's group, and
         // without one it starts its own, apart from WebKit's Copy and Look Up.
         if let query = controller?.exploreHere?() {
-            if siteURL == nil { menu.addItem(.separator()) }
+            if siteURL == nil, !hasSectionGroup { menu.addItem(.separator()) }
             let onExplore = controller?.onExplore
             menu.addItem(ClosureMenuItem("Explore From This Page…") { onExplore?(query) })
         }
@@ -694,6 +755,45 @@ struct ReaderContextTarget: Equatable, Sendable {
         let title: String
         let destination: CCwikiURL.Destination
         let disposition: LinkDisposition
+    }
+
+    /// One section of a wiki page, named three ways for the section group
+    /// of the page's menu and of the outline's (plans/efficiency.md §3.2).
+    struct SectionLinks: Equatable, Sendable {
+        /// On cryptology.city, with the section's id as the fragment.
+        let site: String?
+        /// `[[stem#Heading]]`, which resolves back to the section; nil when
+        /// no wikilink does.
+        let wikilink: String?
+        /// `ccwiki://…#id` in the scheme this build answers to, which opens
+        /// CCwiki at the section from Notes, Obsidian or a TeX comment.
+        let app: String
+
+        /// The items, in menu order.
+        var copyItems: [CopyItem] {
+            var items: [CopyItem] = []
+            if let site {
+                items.append(CopyItem(title: "Copy Link to Section", text: site, isAlternate: false))
+            }
+            if let wikilink {
+                items.append(CopyItem(
+                    title: "Copy Wikilink to Section", text: wikilink, isAlternate: false))
+            }
+            items.append(CopyItem(title: "Copy CCwiki Link to Section", text: app, isAlternate: false))
+            return items
+        }
+    }
+
+    /// Save Section, the section group's last item (plans/efficiency.md
+    /// §3.3): the section the right-click fell under, saved to the
+    /// sidebar's Saved, or taken out when it is there.
+    struct SaveSectionItem: Equatable, Sendable {
+        /// Save Section, or Remove Section from Saved.
+        let title: String
+        /// The page the right-click was on.
+        let path: String
+        /// The section it fell under.
+        let section: CorrectionTarget.Section
     }
 
     /// The formula's LaTeX as written on the page, without delimiters.
@@ -839,6 +939,53 @@ struct ReaderContextTarget: Equatable, Sendable {
         ]
     }
 
+    /// The section group, after Copy Link to Page (plans/efficiency.md
+    /// §3.2): the section the right-click fell under, as `links` names it
+    /// from the page's path and the heading. Nothing outside a section, or
+    /// for a section `links` cannot name.
+    func sectionItems(
+        links: (String, CorrectionTarget.Section) -> SectionLinks?
+    ) -> [CopyItem] {
+        guard let selection, let heading = selection.heading,
+              let found = links(selection.path, heading)
+        else { return [] }
+        return found.copyItems
+    }
+
+    /// Save Section, after the section group's links (plans/efficiency.md
+    /// §3.3), for the section the right-click fell under, titled as
+    /// `isSaved` says it is from the page's path and the heading. `outline`
+    /// is the page's headings, in order. Nothing outside a section, under
+    /// the page's title, or where `isSaved` answers nil: a page the wiki
+    /// does not have.
+    func saveSectionItem(
+        outline: [WikiPage.Heading],
+        isSaved: (String, CorrectionTarget.Section) -> Bool?
+    ) -> SaveSectionItem? {
+        guard let selection, let heading = selection.heading,
+              !Self.isPageTitle(heading.id, in: outline),
+              let saved = isSaved(selection.path, heading)
+        else { return nil }
+        return SaveSectionItem(
+            title: Self.saveSectionTitle(isSaved: saved), path: selection.path, section: heading)
+    }
+
+    /// Whether heading `id` is the page's title: the first of `outline`, the
+    /// page's headings in order, when it is at level 1. Save Section leaves
+    /// it out, since Save Page keeps the same place. A later level-1 heading
+    /// is a section like any other.
+    static func isPageTitle(_ id: String, in outline: [WikiPage.Heading]) -> Bool {
+        guard let first = outline.first else { return false }
+        return first.level == 1 && first.id == id
+    }
+
+    /// Save Section's title in the page's menu and the outline's: Remove
+    /// Section from Saved once it is saved, as Save Page becomes Remove from
+    /// Saved. "Section" says which, since the page's group sits just above.
+    static func saveSectionTitle(isSaved: Bool) -> String {
+        isSaved ? "Remove Section from Saved" : "Save Section"
+    }
+
     /// WebKit's own Open Link, which the link items follow, where Safari
     /// puts its own.
     static let openLinkIdentifier = "WKMenuItemIdentifierOpenLink"
@@ -848,6 +995,22 @@ struct ReaderContextTarget: Equatable, Sendable {
     /// the items then make a group of their own after the copy items.
     static func indexAfterOpenLink(in identifiers: [String?]) -> Int? {
         identifiers.firstIndex(of: openLinkIdentifier).map { $0 + 1 }
+    }
+}
+
+extension ReaderContextTarget.SectionLinks {
+    /// Section `id` of `page`, whose heading reads `text` as the outline
+    /// shows it. The CCwiki link is in `channel`'s scheme
+    /// (`CCwikiURL.external(page:anchor:channel:)`), so a link copied from
+    /// CCwiki Dev opens Dev.
+    init(
+        page: WikiPage, id: String, text: String, index: WikiIndex,
+        channel: BuildIdentity.Channel = BuildIdentity.current
+    ) {
+        self.init(
+            site: AppModel.siteURL(slug: page.slug, anchor: id)?.absoluteString,
+            wikilink: index.wikilink(toSection: id, text: text, onPage: page.path),
+            app: CCwikiURL.external(page: page.path, anchor: id, channel: channel))
     }
 }
 

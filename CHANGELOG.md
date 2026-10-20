@@ -50,6 +50,27 @@ keeps it in CCwiki's library, and opens it in a window of its own. Where
 there is nothing to download, such as a DOI alone, Choose PDF… takes a copy
 you already have.
 
+**Backlinks that take you to the line.** The Backlinks tab (⌥⌘2) groups the
+pages that link here: Mentioned in, then Reductions and Barriers, then
+References, each with its count, opened or closed with a click. A page that
+mentions this one on several lines says how many and lists every line.
+Click a line to open that page scrolled to it, outlined for a moment;
+⌘-click opens it in a new tab, which lands there too.
+
+**Links to a section.** Right-click under a heading, or a heading in the
+Outline, to copy a link to that section: on cryptology.city, as a
+`[[wikilink]]` for the wiki, or as a CCwiki link that opens CCwiki at the
+section from Notes or any other app. A heading in the Outline also opens
+its section in a new tab or window.
+
+**Saved pages.** Wiki → Save Page (⌘D) keeps the page you are reading in a
+Saved section at the top of the sidebar, the same in every window and
+kept between launches, and Wiki → Saved Pages lists them. Save Section,
+next to the section links, keeps a section. Drag a saved page to reorder
+the list, or use Move Up and Move Down in its right-click menu. If a sync
+renames a saved page, CCwiki finds it by its title. One that is gone stays
+in the list, dimmed, and a click searches the wiki for it.
+
 **Quicker syncs.** After a sync, the search index updates only the pages that
 changed, and an open tab renders again only if its page did. A sync that
 changes nothing reloads nothing.
