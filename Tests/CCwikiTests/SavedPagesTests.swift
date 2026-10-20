@@ -172,6 +172,50 @@ struct SavedPagesTests {
         #expect(reconciled.reconciled(with: after) == reconciled, "a second load changes nothing")
     }
 
+    @Test("a page renamed with no alias for its title is found as the one page with that title")
+    func reconcilesByExactTitle() throws {
+        let clone = try FixtureClone()
+        defer { clone.delete() }
+        let saved = try Self.savedFixturePages(WikiIndex.build(contentRoot: clone.content))
+
+        // OWF's file is renamed and keeps its title, with no alias for it, as
+        // the wiki renamed `Oblivious RAM.md` to `oblivious-ram.md`: no link
+        // with the title finds the new file.
+        try clone.remove(FixtureClone.owf)
+        try clone.write("content/" + Self.renamedOWF, FixtureClone.page(
+            type: "primitive", title: "One-way function", body: "# One-way function\n"))
+        let renamed = WikiIndex.build(contentRoot: clone.content)
+        #expect(!renamed.resolve(Self.link("One-way function"), from: Self.owf).isResolved)
+        #expect(Self.paths(saved.reconciled(with: renamed)) == [Self.prf, Self.renamedOWF, Self.lwe])
+
+        // Two pages with that title, and neither is taken for it.
+        try clone.write("content/Primitives/one-way-function-copy.md", FixtureClone.page(
+            type: "primitive", title: "One-way function", body: "# One-way function\n"))
+        let twice = WikiIndex.build(contentRoot: clone.content)
+        #expect(saved.reconciled(with: twice) == saved, "an entry no page alone answers to stays missing")
+    }
+
+    @Test("a title with a # in it never points an entry at a section of another page")
+    func reconcilesNoSection() throws {
+        let clone = try FixtureClone()
+        defer { clone.delete() }
+        let index = WikiIndex.build(contentRoot: clone.content)
+        let gone = "Primitives/gone.md"
+
+        // As a link, the text before the # is PRF's alias.
+        let title = "PRF#Syntax"
+        #expect(index.resolve(Self.link(title), from: gone) == .page(path: Self.prf, anchor: "syntax"))
+        let saved = SavedPages([.init(path: gone, anchor: nil, title: title, savedAt: Self.earlier)])
+        #expect(saved.reconciled(with: index) == saved)
+    }
+
+    /// `[[text]]`, as reconciliation asks the index.
+    private static func link(_ text: String) -> Wikilink {
+        Wikilink(
+            target: text, rawAnchor: nil, alias: nil, isEmbed: false,
+            range: text.startIndex..<text.startIndex)
+    }
+
     @Test("a page still at its path takes its new title, and is never looked up")
     func reconcilesRetitled() throws {
         let clone = try FixtureClone()

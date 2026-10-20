@@ -79,17 +79,19 @@ struct SavedPages: Equatable, Sendable {
 
     /// The list as a new wiki has it. A page still at its path keeps its
     /// place and takes its title as the wiki has it now. A page whose file
-    /// went is looked up by its title among the new index's aliases and file
-    /// names, as a wikilink with that text resolves it (`WikiIndex.resolve`).
-    /// Found, the entry points there. Not found, it stays as it was, and the
-    /// sidebar says it is no longer in the wiki. An entry that comes to name
-    /// a page already saved is that page twice, and the first is kept.
+    /// went is looked up by its title: among the new index's aliases and file
+    /// names, as a wikilink with that text resolves it (`WikiIndex.resolve`),
+    /// and then as the one page with exactly that title. Found, the entry
+    /// points there. Not found, it stays as it was, and the sidebar says it
+    /// is no longer in the wiki. An entry that comes to name a page already
+    /// saved is that page twice, and the first is kept.
     func reconciled(with index: WikiIndex) -> SavedPages {
         SavedPages(entries.map { entry in
             var entry = entry
             if let page = index.pages[entry.path] {
                 entry.title = page.title
-            } else if let page = Self.page(titled: entry.title, in: index, from: entry.path) {
+            } else if let page = Self.page(titled: entry.title, in: index, from: entry.path)
+                        ?? Self.onlyPage(titled: entry.title, in: index) {
                 entry.path = page.path
                 entry.title = page.title
             }
@@ -98,15 +100,25 @@ struct SavedPages: Equatable, Sendable {
     }
 
     /// The page a `[[title]]` written on the page at `sourcePath` would
-    /// open, if any.
+    /// open, if any. A whole page only: a `#` in a title splits it, and the
+    /// text before the `#` names some other page.
     private static func page(
         titled title: String, in index: WikiIndex, from sourcePath: String
     ) -> WikiPage? {
         let link = Wikilink(
             target: title, rawAnchor: nil, alias: nil, isEmbed: false,
             range: title.startIndex..<title.startIndex)
-        guard case .page(let path, _) = index.resolve(link, from: sourcePath) else { return nil }
+        guard case .page(let path, nil) = index.resolve(link, from: sourcePath) else { return nil }
         return index.pages[path]
+    }
+
+    /// The one page whose title is `title`, when exactly one has it: a file
+    /// renamed without its old name kept as an alias, as the wiki renamed
+    /// `Oblivious RAM.md` to `oblivious-ram.md`. A slug keeps its case, so
+    /// no link with the old title finds the new file.
+    private static func onlyPage(titled title: String, in index: WikiIndex) -> WikiPage? {
+        let titled = index.pages.values.filter { $0.title == title }
+        return titled.count == 1 ? titled[0] : nil
     }
 
     // MARK: JSON
