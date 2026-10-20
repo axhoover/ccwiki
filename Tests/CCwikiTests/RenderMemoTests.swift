@@ -445,6 +445,9 @@ struct RenderMemoTests {
             // A macro of the table defines another.
             (#"{ "\\mk": "\\gdef\\made{M}" }"#,
              [lastLineChanged("$\\mk$ makes.\n\nB.\n\nC.\n\nD.\n\nUses $\\made$ here.")]),
+            // A `\tag` in a gap leaves `\df@tag` in the table for what
+            // reads it after the review: the copy area, `expandMacros`.
+            (calA, [lastLineChanged("$$z \\tag{1}$$\n\nB.\n\nC.\n\nD.\n\nE.")]),
         ]
     }
 
@@ -460,6 +463,9 @@ struct RenderMemoTests {
                 #expect(try after.text(call) == before.text(call), "\(old)")
                 #expect(try after.count("blockRenders") == before.count("blockRenders"), "every block of \(old)")
             }
+            // What the reviews left in KaTeX's table, for what reads it next.
+            let names = "Object.keys(TABLE).sort().join()"
+            #expect(try after.text(names) == before.text(names), "the table after \(table)")
         }
     }
 
