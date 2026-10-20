@@ -121,17 +121,22 @@ extension Derivation {
     /// precondition have a class that implies* `reductionClass`? Returns that
     /// class, `unstated` when only an unstated chain meets a barrier on
     /// `free` reductions (an unstated step is still a proved implication), or
-    /// `nil`.
+    /// `nil`. A clean engine whose plain Horn closure misses the target is
+    /// not run (`Engine.mayReach`); `prefilter: false` runs each, for the
+    /// test that holds the two equal.
     func chainExists(from start: [String], to target: String,
-                     against reductionClass: String) -> ChainClass? {
+                     against reductionClass: String, prefilter: Bool = true) -> ChainClass? {
         let starts = Set(start)
         for (index, chain) in ChainClass.composable.enumerated()
         where implies(chain.rawValue, reductionClass) {
-            if cleanEngines[index].closure(from: starts, options: .standard).facts[target] != nil {
+            let engine = cleanEngines[index]
+            if prefilter, !engine.mayReach(target, from: starts, options: .standard) { continue }
+            if engine.closure(from: starts, options: .standard).facts[target] != nil {
                 return chain
             }
         }
         if reductionClass == ChainClass.free.rawValue,
+           !prefilter || cleanAnyEngine.mayReach(target, from: starts, options: .standard),
            cleanAnyEngine.closure(from: starts, options: .standard).facts[target] != nil {
             return .unstated
         }
@@ -347,13 +352,18 @@ extension Derivation {
 
     /// Is `target` derivable from `start` through reduction `relationID`:
     /// are its hypotheses in cl(start), and is `target` in cl(start ∪ {its
-    /// conclusion})?
-    func isDerivable(from start: [String], to target: String, through relationID: String) -> Bool {
+    /// conclusion})? The second closure is not run when its plain Horn
+    /// closure misses the target (`Engine.mayReach`); `prefilter: false`
+    /// runs it, for the test that holds the two equal.
+    func isDerivable(from start: [String], to target: String, through relationID: String,
+                     prefilter: Bool = true) -> Bool {
         guard let relation = manifest.reduction(relationID) else { return false }
         let starts = Set(start)
         let base = closure(from: starts, options: .standard)
         guard relation.hypotheses.allSatisfy({ base.facts[$0] != nil }) else { return false }
-        let extended = closure(from: starts.union([relation.conclusion]), options: .standard)
+        let union = starts.union([relation.conclusion])
+        if prefilter, !mainEngine.mayReach(target, from: union, options: .standard) { return false }
+        let extended = closure(from: union, options: .standard)
         return extended.facts[target] != nil
     }
 

@@ -194,6 +194,139 @@ struct DerivationEquivalenceTests {
             + "counts (\(unstatedRows) with unstated steps), \(wrong.count) differ")
     }
 
+    // MARK: X4: the plain Horn prefilter
+
+    /// One target's implied-by, with and without the prefilter.
+    private struct Backward: Sendable {
+        let differs: String?
+        let filtered: Duration
+        let unfiltered: Duration
+    }
+
+    @Test("the Horn prefilter changes no implied-by list, completion, chain or circumvention",
+          .enabled(if: DerivationEquivalenceTests.corpus() != nil, DerivationCorpusTests.state.skipComment))
+    func hornPrefilter() async throws {
+        let corpus = try #require(Self.corpus())
+        let derivation = corpus.derivation
+        let manifest = corpus.manifest
+        let ids = manifest.objectsByID.keys.sorted(by: Derivation.precedes)
+
+        // What it rests on: every object a closure derives, in full,
+        // weakened or as a `metBy` producer's fact, plain Horn closure
+        // reaches too. Every engine, every object, both settings.
+        let escapes = await withTaskGroup(of: [String].self, returning: [String].self) { group in
+            for (name, engine) in derivation.namedEngines {
+                group.addTask {
+                    var found: [String] = []
+                    for id in ids {
+                        for options in [Derivation.Options.standard, .all] {
+                            let closure = engine.closure(from: [id], options: options)
+                            let derived = Set(closure.facts.keys).union(closure.weakFacts.keys)
+                                .union(closure.established.values.map(\.objectID))
+                            for object in derived.sorted()
+                            where !engine.mayReach(object, from: [id], options: options) {
+                                found.append("\(name): \(id) ⇒ \(object), \(options.settingName)")
+                            }
+                        }
+                    }
+                    return found
+                }
+            }
+            var all: [String] = []
+            for await found in group { all += found }
+            return all
+        }
+        #expect(escapes.isEmpty, "closures past their Horn closure: \(escapes.prefix(10))")
+
+        // Implied-by for every target in both settings: the pair closures the
+        // prefilter skips are all run here, once.
+        let targets = ids.filter { derivation.nodeType($0) != Derivation.excludedType }
+        let backward = await withTaskGroup(of: Backward.self, returning: [Backward].self) { group in
+            for target in targets {
+                for options in [Derivation.Options.standard, .all] {
+                    group.addTask {
+                        let clock = ContinuousClock()
+                        let started = clock.now
+                        let filtered = derivation.implying(target, options: options)
+                        let between = clock.now
+                        let unfiltered = derivation.implying(target, options: options, prefilter: false)
+                        let ended = clock.now
+                        return Backward(
+                            differs: filtered == unfiltered ? nil : "\(target), \(options.settingName)",
+                            filtered: started.duration(to: between), unfiltered: between.duration(to: ended))
+                    }
+                }
+            }
+            var all: [Backward] = []
+            for await one in group { all.append(one) }
+            return all
+        }
+        let differing = backward.compactMap(\.differs)
+        #expect(backward.count == targets.count * 2)
+        #expect(differing.isEmpty, "implied-by differs for \(differing.prefix(10))")
+
+        // Completions for every no-path question the golden file asks.
+        var noPath = 0
+        for record in corpus.golden["queries"]?.array ?? [] {
+            let start = record["start"]?.strings ?? []
+            let target = record["target"]?.string ?? ""
+            guard (start + [target]).allSatisfy({ manifest.object($0) != nil }) else { continue }
+            let options = Derivation.Options(includesIdealisedModels: record["includeIdealised"]?.bool ?? false)
+            guard case .notDerived(let answer) = derivation.answer(from: Set(start), to: target, options: options)
+            else { continue }
+            noPath += 1
+            let closure = derivation.closure(from: Set(start), options: options)
+            let filtered = derivation.completions(start: answer.start, target: target, closure: closure,
+                                                  options: options)
+            let unfiltered = derivation.completions(start: answer.start, target: target, closure: closure,
+                                                    options: options, prefilter: false)
+            let id = record["id"]?.string ?? "?"
+            #expect(filtered.offered == unfiltered.offered, "\(id): completions")
+            #expect(filtered.count == unfiltered.count, "\(id): completion count")
+            #expect(filtered.restating == unfiltered.restating, "\(id): the question becomes")
+            #expect(answer.completions == unfiltered.offered, "\(id): the answer's completions")
+        }
+        #expect(noPath > 0)
+
+        // R8's chains, as the invariants and the answers ask them, and R12's
+        // circumventions.
+        var chains = 0
+        func compareChain(_ start: [String], _ target: String, _ reductionClass: String) {
+            let filtered = derivation.chainExists(from: start, to: target, against: reductionClass)
+            let unfiltered = derivation.chainExists(from: start, to: target, against: reductionClass,
+                                                    prefilter: false)
+            #expect(filtered == unfiltered, "\(start) ⇒ \(target) against \(reductionClass)")
+            chains += 1
+        }
+        for barrier in manifest.barriers {
+            for rule in Derivation.consequenceRules(of: barrier, in: manifest) {
+                compareChain(barrier.hypotheses, barrier.conclusion, rule.reductionClass)
+            }
+        }
+        let derivedBarriers = derivation.allDerivedBarriers()
+        var circumventions = 0
+        for derived in derivedBarriers {
+            compareChain(derived.hypotheses, derived.conclusion, derived.reductionClass.rawValue)
+            for relationID in derived.barrier.circumventedBy {
+                let filtered = derivation.isDerivable(from: derived.hypotheses, to: derived.conclusion,
+                                                      through: relationID)
+                let unfiltered = derivation.isDerivable(from: derived.hypotheses, to: derived.conclusion,
+                                                        through: relationID, prefilter: false)
+                #expect(filtered == unfiltered,
+                        "\(derived.hypotheses) ⇒ \(derived.conclusion) through \(relationID)")
+                circumventions += 1
+            }
+        }
+
+        let fast = backward.reduce(Duration.zero) { $0 + $1.filtered }
+        let slow = backward.reduce(Duration.zero) { $0 + $1.unfiltered }
+        print("derivation prefilter, \(corpus.modeName): implied-by for \(targets.count) targets in both "
+            + "settings takes \(LoadTimings.format(fast)) with the Horn prefilter and "
+            + "\(LoadTimings.format(slow)) without (summed over tasks), \(differing.count) differ; "
+            + "\(noPath) no-path completions, \(chains) chains and \(circumventions) circumventions "
+            + "compared")
+    }
+
     private struct QuoteCase: Decodable {
         let name: String
         let page: String

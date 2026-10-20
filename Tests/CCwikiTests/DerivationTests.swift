@@ -1066,6 +1066,14 @@ struct DerivationTests {
                     let current = engine.closure(from: start, options: options)
                     #expect(current.decidesLike(legacy), "\(name) \(start.sorted()) \(options.settingName)")
                     compared += 1
+                    // The Horn prefilter's premise: plain Horn closure
+                    // reaches everything a closure derives.
+                    let derived = Set(legacy.facts.keys).union(legacy.weakFacts.keys)
+                        .union(legacy.established.values.map(\.objectID))
+                    for object in derived.sorted() {
+                        #expect(engine.mayReach(object, from: start, options: options),
+                                "\(name) \(start.sorted()) ⇒ \(object) \(options.settingName)")
+                    }
                 }
             }
         }
@@ -1078,6 +1086,39 @@ struct DerivationTests {
         #expect(derivation.closure(from: ["s"], options: .standard).weakFacts["w"] != nil)
         #expect(derivation.closure(from: ["rom"], options: .all).refused.count == 1)
         #expect(derivation.closure(from: ["h"], options: .all).facts["k"] != nil)
+    }
+
+    @Test("the Horn prefilter changes no implied-by list, completion or chain on every rule's fixture")
+    func prefilterAgrees() throws {
+        let derivation = try Self.everyRule()
+        let ids = derivation.manifest.objectsByID.keys.sorted(by: Derivation.precedes)
+        var pairs = 0
+        for options in [Derivation.Options.standard, .all] {
+            for target in ids {
+                let backward = derivation.implying(target, options: options)
+                #expect(backward == derivation.implying(target, options: options, prefilter: false),
+                        "implied-by \(target) \(options.settingName)")
+                pairs += backward.pairCount
+                for start in ids where start != target {
+                    let closure = derivation.closure(from: [start], options: options)
+                    let filtered = derivation.completions(start: [start], target: target, closure: closure,
+                                                          options: options)
+                    let unfiltered = derivation.completions(start: [start], target: target, closure: closure,
+                                                            options: options, prefilter: false)
+                    #expect(filtered.offered == unfiltered.offered && filtered.count == unfiltered.count
+                        && filtered.restating == unfiltered.restating,
+                            "completions \(start) ⇒ \(target) \(options.settingName)")
+                    for chain in Derivation.ChainClass.composable {
+                        #expect(derivation.chainExists(from: [start], to: target, against: chain.rawValue)
+                            == derivation.chainExists(from: [start], to: target, against: chain.rawValue,
+                                                      prefilter: false),
+                                "chain \(start) ⇒ \(target) against \(chain.rawValue)")
+                    }
+                }
+            }
+        }
+        // The pair loop runs: z needs h and v, which no one object gives.
+        #expect(pairs > 0)
     }
 
     /// The rules' fixtures above in one manifest, so the loops meet them side

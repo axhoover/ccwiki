@@ -946,18 +946,40 @@ extension Derivation {
 
         /// One phase's steps, with what the loop asks of each worked out
         /// once, so a visit reads an array where it would build and hash a
-        /// `StepKey`.
+        /// `StepKey`, and with each object's consumers for the plain Horn
+        /// closure (`mayReach`).
         private struct StepSet: Sendable {
             let steps: [CompiledStep]
             /// R13: the step concludes only a weaker notion.
             let makesWeak: [Bool]
             /// R13: a `metBy` producer (`establishing`).
             let establishes: [Bool]
+            /// By object index: the positions of the steps with that object
+            /// among their hypotheses, ascending, each step once.
+            let consumers: [[Int]]
+            /// By position: how many distinct hypotheses the step has.
+            let hypothesisCounts: [Int]
+            /// The positions of the steps with no hypothesis. The decoder
+            /// drops such a reduction, but nothing here relies on it.
+            let unconditional: [Int]
 
-            init(_ steps: [CompiledStep], appliesRules: Bool, establishing: Set<StepKey>) {
+            init(_ steps: [CompiledStep], objectCount: Int, appliesRules: Bool,
+                 establishing: Set<StepKey>) {
                 self.steps = steps
                 self.makesWeak = steps.map { appliesRules && $0.step.weakening != nil }
                 self.establishes = steps.map { appliesRules && establishing.contains($0.step.key) }
+                var consumers = Array(repeating: [Int](), count: objectCount)
+                var hypothesisCounts: [Int] = []
+                var unconditional: [Int] = []
+                for (position, compiled) in steps.enumerated() {
+                    let hypotheses = Set(compiled.hypotheses)
+                    hypothesisCounts.append(hypotheses.count)
+                    if hypotheses.isEmpty { unconditional.append(position) }
+                    for index in hypotheses { consumers[index].append(position) }
+                }
+                self.consumers = consumers
+                self.hypothesisCounts = hypothesisCounts
+                self.unconditional = unconditional
             }
         }
 
@@ -981,8 +1003,52 @@ extension Derivation {
                 }
             }
             self.establishing = establishing
-            self.defaultSet = StepSet(defaultSteps, appliesRules: appliesRules, establishing: establishing)
-            self.fullSet = StepSet(steps, appliesRules: appliesRules, establishing: establishing)
+            let count = objects.ids.count
+            self.defaultSet = StepSet(defaultSteps, objectCount: count, appliesRules: appliesRules,
+                                      establishing: establishing)
+            self.fullSet = StepSet(steps, objectCount: count, appliesRules: appliesRules,
+                                   establishing: establishing)
+        }
+
+        /// Whether plain Horn closure reaches `target` from `start`: the
+        /// steps `options` lets a closure use, each firing once all its
+        /// hypotheses are reached, with no rule applied (Dowling–Gallier, a
+        /// counter per step). Every fact this engine derives, in full,
+        /// weakened or as a `metBy` producer's, comes from one of those steps
+        /// with every hypothesis derived, so a target this does not reach is
+        /// one no closure from `start` holds. `false` answers for a closure
+        /// without running it.
+        func mayReach(_ target: String, from start: Set<String>, options: Options) -> Bool {
+            if start.contains(target) { return true }
+            guard let goal = objects.index[target] else { return false }
+            let set = options.includesIdealisedModels ? fullSet : defaultSet
+            var reached = Array(repeating: false, count: objects.ids.count)
+            var queue: [Int] = []
+            for id in start {
+                guard let index = objects.index[id], !reached[index] else { continue }
+                reached[index] = true
+                queue.append(index)
+            }
+            for position in set.unconditional {
+                let conclusion = set.steps[position].conclusion
+                guard !reached[conclusion] else { continue }
+                if conclusion == goal { return true }
+                reached[conclusion] = true
+                queue.append(conclusion)
+            }
+            var remaining = set.hypothesisCounts
+            while let index = queue.popLast() {
+                for position in set.consumers[index] {
+                    remaining[position] -= 1
+                    guard remaining[position] == 0 else { continue }
+                    let conclusion = set.steps[position].conclusion
+                    guard !reached[conclusion] else { continue }
+                    if conclusion == goal { return true }
+                    reached[conclusion] = true
+                    queue.append(conclusion)
+                }
+            }
+            return false
         }
 
         func closure(from start: Set<String>, options: Options, loop: Loop = .current) -> Closure {
