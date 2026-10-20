@@ -95,47 +95,52 @@ struct FixesAuthTests {
         }
         let invalid = "echo '  - The token in keyring is invalid.' >&2; exit 1"
 
-        // Signed in to github.com; another host's trouble is not ours.
-        let signedIn = try gh("signed-in", status: "exit 0", probe: "exit 7")
-        await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
-            #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == true)
-            #expect(GitHubAuth.cachedAnswer == true)
-        }
+        // Each ask waits as long as it takes: gh answers at once, but in a
+        // test run every suite runs at once, and 15 seconds can pass before
+        // its answer is heard. The deadline is not what is tested here.
+        try await GitHubAuth.$deadline.withValue(.seconds(600)) {
+            // Signed in to github.com; another host's trouble is not ours.
+            let signedIn = try gh("signed-in", status: "exit 0", probe: "exit 7")
+            await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+                #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == true)
+                #expect(GitHubAuth.cachedAnswer == true)
+            }
 
-        try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
-            // A GitHub outage: not known, and asked again next time.
-            let outage = try gh(
-                "outage", status: invalid,
-                probe: "echo 'gh: Service Unavailable (HTTP 503)' >&2; exit 1")
-            #expect(await GitHubAuth.isAuthenticated(tools: outage) == nil)
-            #expect(GitHubAuth.cachedAnswer == nil)
-            #expect(await GitHubAuth.signedIn(tools: outage) == nil)
+            try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+                // A GitHub outage: not known, and asked again next time.
+                let outage = try gh(
+                    "outage", status: invalid,
+                    probe: "echo 'gh: Service Unavailable (HTTP 503)' >&2; exit 1")
+                #expect(await GitHubAuth.isAuthenticated(tools: outage) == nil)
+                #expect(GitHubAuth.cachedAnswer == nil)
+                #expect(await GitHubAuth.signedIn(tools: outage) == nil)
 
-            // Offline: the same.
-            let offline = try gh(
-                "offline", status: "echo 'error connecting to api.github.com' >&2; exit 1",
-                probe: "exit 7")
-            #expect(await GitHubAuth.isAuthenticated(tools: offline) == nil)
-            #expect(GitHubAuth.cachedAnswer == nil)
+                // Offline: the same.
+                let offline = try gh(
+                    "offline", status: "echo 'error connecting to api.github.com' >&2; exit 1",
+                    probe: "exit 7")
+                #expect(await GitHubAuth.isAuthenticated(tools: offline) == nil)
+                #expect(GitHubAuth.cachedAnswer == nil)
 
-            // A refused token is an answer, and is kept.
-            let refused = try gh(
-                "refused", status: invalid,
-                probe: "echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1")
-            #expect(await GitHubAuth.isAuthenticated(tools: refused) == false)
-            #expect(GitHubAuth.cachedAnswer == false)
-            #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == false, "from the cache")
-        }
+                // A refused token is an answer, and is kept.
+                let refused = try gh(
+                    "refused", status: invalid,
+                    probe: "echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1")
+                #expect(await GitHubAuth.isAuthenticated(tools: refused) == false)
+                #expect(GitHubAuth.cachedAnswer == false)
+                #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == false, "from the cache")
+            }
 
-        // Signed in only to an Enterprise host: github.com asked without a
-        // token is a 401, not an answer GitHub gives anyone.
-        try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
-            let elsewhere = try gh(
-                "elsewhere",
-                status: "echo 'You are not logged into any accounts on github.com' >&2; exit 1",
-                probe: "echo 'gh: Requires authentication (HTTP 401)' >&2; exit 1")
-            #expect(await GitHubAuth.isAuthenticated(tools: elsewhere) == false)
-            #expect(GitHubAuth.cachedAnswer == false)
+            // Signed in only to an Enterprise host: github.com asked without a
+            // token is a 401, not an answer GitHub gives anyone.
+            try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+                let elsewhere = try gh(
+                    "elsewhere",
+                    status: "echo 'You are not logged into any accounts on github.com' >&2; exit 1",
+                    probe: "echo 'gh: Requires authentication (HTTP 401)' >&2; exit 1")
+                #expect(await GitHubAuth.isAuthenticated(tools: elsewhere) == false)
+                #expect(GitHubAuth.cachedAnswer == false)
+            }
         }
     }
 
