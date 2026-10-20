@@ -1954,76 +1954,121 @@ click:
 
 ## 5. Results, filled in from CI
 
-The integrator fills this in, one column per push, from the
-`pull_request` run's "measured alone" report (§2.10 item 1). The rows
-follow M0's five reports in the order they print. In the `main` column,
-"—" means the line did not exist at `main`, and an empty cell that it did
-but this plan does not record its figure.
+From the `pull_request` runs' "measured alone" reports, a debug build on
+CI's `macos-15` runner, every figure the fastest of 5 unless the line says
+otherwise, all on the same live wiki (`7649bcf`, 2026-10-19, 885 pages)
+and Swift 6.1.2. The rows follow M0's five reports in the order they
+print.
 
-| Report line | `main` (21df5d7) | M0 baseline | After L | After S | After X | After J | After U and W |
-|---|---|---|---|---|---|---|---|
-| wiki commit / Swift version | `ab81f02` (inferred) / — | | | | | | |
-| full build, each phase the fastest of 5: `read` / `index` / `manifest` / `labels` / `grep` | 207 / 16 / 7.6 / 6.8 / 19 ms (the fastest run's phases) | | | | | | |
-| … `backlinks` | 1,605 ms | | | | | | |
-| … `derivation` | 640 ms | | | | | | |
-| … `previews` | 1,051 ms | | | | | | |
-| full build in memory: fastest / median | 3,553 ms / not recorded | | | | | | |
-| fingerprint scan alone | | | | | | | |
-| update after a one-page edit | 4,059 ms | | | | | | |
-| update after an alias change / a manifest change | | | | | | | |
-| search sync, one run each: in full / as a no-op / after one page changed | 2,984 / 1,125 / 1,291 ms | | | | | | |
-| counts: pages / scalars of body / bodies with `\r` (vs §1.2) | from the ports: 877 / 1,091,044 / 0 | | | | | | |
-| counts: links (wikilinks, markdown links) / distinct resolve keys / distinct targets | 3,447 (3,412, 35) / 972 / 831 | | | | | | |
-| counts: backlinks / pages linked to / most to one page / headings on non-reference pages | 2,492 / 821 / 44 / 1,882 on 447 pages | | | | | | |
-| line ends A/B, every body: (a) / (b) / (c) / (d) | — | | | | | | |
-| load path: `CodeMask.inertRanges`, every body | — | | | | | | |
-| … `outgoingLinks(in:)`, every body | — | | | | | | |
-| … `resolve`, every link | — | | | | | | |
-| … `plainText`, every backlink's line | — | | | | | | |
-| … `backlinkMap()` | — | | | | | | |
-| previews: `PreviewExcerpt.scope`, every body / `LinkPreviews` | — | | | | | | |
-| derivation: `Derivation(manifest:)` / `missingQuotes` | — | | | | | | |
-| explorer, standard / idealised: answer `owf` ⇒ `pke`, `pke` ⇒ `ot`, `ddh` ⇒ `io` | — | | | | | | |
-| explorer, standard / idealised: implying `pke`, `ot`, `mpc`, `nizk` | — | | | | | | |
-| search: `ConceptRanker` / `ReferenceRanker` | — | | | | | | |
-| search: `headings()`, non-reference pages / `indexableBody`, every body | — | | | | | | |
-| search: sync as a no-op (fastest of 5) / full sync into a fresh file (fastest of 3) | — | | | | | | |
-| ⌘O, one keystroke: opening with no query / "p" / "pr" / "prf" | — | | | | | | |
-| backlinks, one process: the `46685be` copy / all four switches / `backlinkMap()` as built | — | | | | | | |
-| … each switch alone, Δ from the `46685be` copy: CodeMask line ends / `context` line ends / slugger / segment split | — | | | | | | |
-| … the six maps the same, or why they were not compared | — | | | | | | |
-| JSC, each page twice in a row: first / again | — | | | | | | |
-| … LWE in that order: first / again | — | | | | | | |
-| JSC, the corpus twice in path order: first / again | — | | | | | | |
-| … LWE in that order: first / again | — | | | | | | |
-| JSC: pages rendered / with KaTeX's output / failed; the same the second time and in either order? | — | | | | | | |
-| JSC review, a one-line edit to every page: all pages / LWE | — | | | | | | |
-| … entries / with HTML / with KaTeX's output | — | | | | | | |
+**One column for the six tracks, not one per track.** §2.10 planned a push
+and a CI run per track. The tracks touch disjoint files, and each line
+below belongs to one track's code (§2.2 names it), so they were merged and
+pushed together, which saved five pairs of macOS runs at ten times the
+minute. Two runs of the merged tracks are given, so the noise between runs
+shows: the same code moved by up to a fifth between them. In the `main`
+column, "—" means the line did not exist at `main`, and the figures are
+D1's at `ab81f02`, which is why the counts differ.
+
+| Report line | `main` (21df5d7) | M0 baseline (969d41a) | Six tracks, run 1 (9922a9e) | Six tracks, run 2 (e17ca99) |
+|---|---|---|---|---|
+| wiki commit / Swift version | `ab81f02` (inferred) / — | `7649bcf` / 6.1.2 | `7649bcf` / 6.1.2 | `7649bcf` / 6.1.2 |
+| full build, each phase the fastest of 5: `read` / `index` / `manifest` / `labels` / `grep` | 207 / 16 / 7.6 / 6.8 / 19 ms (the fastest run's phases) | 243.5 / 22.2 / 10.6 / 7.4 / 23.1 ms | 249.5 / 17.0 / 7.7 / 7.1 / 20.4 ms | 235.4 / 17.9 / 8.0 / 7.7 / 21.3 ms |
+| … `backlinks` | 1,605 ms | 1,914.4 ms | **278.6 ms** | **252.5 ms** |
+| … `derivation` | 640 ms | 727.0 ms | **117.4 ms** | **114.4 ms** |
+| … `previews` | 1,051 ms | 2,517.7 ms | **664.1 ms** | **554.2 ms** |
+| full build in memory: fastest / median | 3,553 ms / not recorded | 5,627.6 / 5,985.4 ms | **1,413.7 / 1,568.2 ms** | **1,258.0 / 1,349.6 ms** |
+| fingerprint scan alone |  | 77.1 ms | 96.7 ms | 95.4 ms |
+| update after a one-page edit | 4,059 ms | 5,202.0 ms | **1,433.4 ms** | **1,248.1 ms** |
+| update after an alias change / a manifest change |  | 5,274.0 / 5,069.6 ms | 1,454.9 / 1,432.6 ms | 1,167.6 / 1,211.3 ms |
+| search sync, one run each: in full / as a no-op / after one page changed | 2,984 / 1,125 / 1,291 ms | 4,134.2 / 1,690.7 / 1,797.5 ms | 1,475.5 / **329.3** / 339.6 ms | 956.7 / **213.6** / 210.7 ms |
+| counts: pages / scalars of body / bodies with `\r` (vs §1.2) | from the ports: 877 / 1,091,044 / 0 | 885 / 1,097,933 / 0 | the same | the same |
+| counts: links (wikilinks, markdown links) / distinct resolve keys / distinct targets | 3,447 (3,412, 35) / 972 / 831 | 3,489 (3,450, 39) / 974 / 832 | the same | the same |
+| counts: backlinks / pages linked to / most to one page / headings on non-reference pages | 2,492 / 821 / 44 / 1,882 on 447 pages | 2,530 / 822 / 44 / 1,890 on 455 pages | the same | the same |
+| line ends A/B, every body (15,440 lines): (a) / (b) / (c) / (d) | — | 335.7 / 61.9 / 29.3 / 14.0 ms | 357.4 / 76.7 / 39.9 / 15.9 ms | 301.5 / 62.4 / 32.9 / 17.7 ms |
+| load path: `CodeMask.inertRanges`, every body | — | 376.6 ms | **78.4 ms** | **54.3 ms** |
+| … `outgoingLinks(in:)`, every body | — | 1,240.9 ms | **250.7 ms** | **184.9 ms** |
+| … `resolve`, every link | — | 91.7 ms | 109.8 ms | 102.0 ms |
+| … `plainText`, every backlink's line (914,081 scalars) | — | 114.5 ms | 285.1 ms | 210.0 ms |
+| … `backlinkMap()` | — | 1,629.9 ms | **345.6 ms** | **252.7 ms** |
+| previews: `PreviewExcerpt.scope`, every body / `LinkPreviews` | — | 1,603.2 / 2,115.2 ms | **223.6 / 702.6 ms** | **177.9 / 553.6 ms** |
+| derivation: `Derivation(manifest:)` / `missingQuotes` | — | 548.3 / 77.7 ms | **87.5 / 40.0 ms** | **64.5 / 38.8 ms** |
+| explorer, standard / idealised: answer `owf` ⇒ `pke`, `pke` ⇒ `ot`, `ddh` ⇒ `io` | — | 205.5 / 317.5, 245.9 / 386.9, 329.6 / 486.1 ms | **9.3 / 6.2, 5.9 / 7.0, 6.6 / 7.2 ms** | **6.2 / 6.3, 5.7 / 5.6, 6.7 / 7.1 ms** |
+| explorer, standard / idealised: implying `pke`, `ot`, `mpc`, `nizk` | — | 151.3 / 315.3, 776.9 / 1,650.0, 842.8 / 1,721.0, 1,293.5 / 2,427.0 ms | **13.4 / 20.9, 12.2 / 16.9, 19.9 / 31.0, 53.8 / 96.8 ms** | **12.3 / 18.9, 12.8 / 15.3, 21.5 / 29.1, 47.9 / 102.8 ms** |
+| search: `ConceptRanker` / `ReferenceRanker` | — | 1,399.5 / 218.1 ms | **279.1 / 87.6 ms** | **249.9 / 91.0 ms** |
+| search: `headings()`, non-reference pages / `indexableBody`, every body | — | 1,186.9 / 289.5 ms | **206.3** / 349.1 ms | **157.7** / 270.3 ms |
+| search: sync as a no-op (fastest of 5) / full sync into a fresh file (fastest of 3) | — | 1,708.2 / 5,527.4 ms | **198.1 / 1,117.3 ms** | **177.4 / 949.4 ms** |
+| ⌘O, one keystroke over 855 pages and 2,908 names: opening with no query / "p" / "pr" / "prf" | — | 17.5 / 24.9 / 21.5 / 22.4 ms | 10.8 / 15.6 / 14.8 / 12.8 ms | 13.2 / 16.5 / 15.7 / 13.4 ms |
+| backlinks, one process: the `46685be` copy / all four switches / `backlinkMap()` as built | — | 651.6 / 1,725.5 / 1,743.2 ms | 682.4 / 1,498.9 / **214.7 ms** | 775.6 / 1,833.9 / **252.5 ms** |
+| … each switch alone, Δ from the `46685be` copy: CodeMask line ends / `context` line ends / slugger / segment split | — | +946.6 / +114.6 / +38.1 / +54.1 ms | +715.8 / +123.4 / +20.3 / +22.1 ms | +955.8 / +167.4 / +116.3 / +46.7 ms |
+| … the six maps the same, or why they were not compared | — | the same: no `\r`, and no link resolves to another page at `46685be` | the same | the same |
+| JSC, each page twice in a row: first / again | — | 2,216.4 / 2,151.9 ms | 1,765.2 / **1,061.1 ms** | 1,976.8 / **1,154.1 ms** |
+| … LWE in that order: first / again | — | 50.2 / 45.7 ms | 41.7 / **16.7 ms** | 49.4 / **17.5 ms** |
+| JSC, the corpus twice in path order: first / again | — | 2,294.9 / 2,157.9 ms | 1,969.2 / 1,996.8 ms | 2,296.1 / 2,429.1 ms |
+| … LWE in that order: first / again | — | 48.1 / 44.8 ms | 42.1 / 40.3 ms | 44.3 / 76.3 ms |
+| JSC: pages rendered / with KaTeX's output / failed; the same the second time and in either order? | — | 885 / 474 / 0; yes | 885 / 474 / 0; yes | 885 / 474 / 0; yes |
+| JSC review, a one-line edit to every page: all pages / LWE | — | 4,726.5 / 106.1 ms | **3,020.0 / 32.1 ms** | **3,548.7 / 41.7 ms** |
+| … entries / with HTML / with KaTeX's output | — | 4,778 / 3,515 / 775 | the same | the same |
+
+**Reading it.**
+- **§1.3 is right.** In one process, CodeMask's line ends by key path cost
+  +946.6 ms of the +1,073.9 ms between the `46685be` copy and `21df5d7`'s;
+  the other three changes cost 38 to 115 ms each. The A/B line puts the
+  byte scan (d) at 14 to 18 ms against 300 to 360 ms for the key path, so
+  L1 keeps its form.
+- **A load** in memory went from 5.6 s to 1.3–1.4 s, and an update after a
+  one-page edit from 5.2 s to 1.2–1.4 s: backlinks −85%, previews −75%,
+  derivation −84%. Reading the files (about 240 ms) is now the largest
+  phase after previews.
+- **A sync** that changes nothing went from 1.7 s to about 0.2 s, and a
+  full one into a fresh file from 5.5 s to about 1 s.
+- **The explorer** answers in about 6 ms instead of 0.2–0.5 s, and its
+  slowest implied-by list here (`nizk`, idealised models on) takes 0.1 s
+  instead of 2.4 s.
+- **The renderer.** A page rendered again right after itself costs about
+  half (LWE: 46 → 17 ms). The second pass over the corpus in path order
+  does not gain, as J1 expected: its cap of 1,000 is below the corpus's
+  formulas on purpose. The review of a one-line edit to every page went
+  from 4.7 s to 3.0–3.5 s.
+- **Two lines moved the wrong way.** `plainText` over every backlink's
+  line rose from 114.5 to 210–285 ms, though neither `plainText` nor the
+  test's inputs changed. No load runs it any more (L3 works out a context
+  only when it is shown), and this plan does not explain the change.
+  `indexableBody` moved from 289.5 to 270–349 ms, within the noise between
+  the two runs.
+- **The test run.** The corpus step on the merged tracks first failed one
+  test, `isAuthenticatedCaches`: a fake `gh` that answers at once was not
+  heard within `GitHubAuth.deadline`'s 15 s, because the new equivalence
+  suites held every cooperative thread. The same test took 74 s at the
+  baseline and 155 s there; trivial tests took 62 and 75 s, and the git
+  publishing tests about 90 and 175 s. Two changes followed: the deadline
+  (and `Tripwire.deadline`) became task-locals that a test whose `gh`
+  answers at once scopes long, and the derivation sweeps run one task
+  fewer than the cores at a time (`fewAtATime`).
 
 **The tracks' own lines.** These come from `make test-corpus`, beside the
-other suites, and W2's from `make check`. Each times the old code and the
+other suites, and W2's from `make check`, in the run on `e17ca99`. Each times the old code and the
 new in one process, or only counts, so one CI run fills it. The expected
 values are the builders' ports and counts at `ab81f02`; CI's counts move
 with the live wiki.
 
 | Line, as printed | Item | Expected | CI |
 |---|---|---|---|
-| "L1 line ends on bytes": `CodeMask.inertRanges`, `headings()`, old → new | L1 | both faster; with M0's A/B line, it decides L1's form | |
-| "Backlinks (L1, L3, L4)": `backlinkMap()` old → new; every context read afterwards; the busiest page's | L1, L3, L4 | a large drop; the busiest page has 44 | |
-| "L2 links parsed once": `outgoingLinks(in:)` over every body, a render's link list for every page, old → new | L2 | new below old | |
-| "L4 resolutions per sweep": links, resolved | L4 | about 3,447 links, about 972 resolved | |
-| "L6 section cards once per load": anchors, worked out directly; the first time; the second time | L6 | about 2,742 anchors; the second time near 0 | |
-| "L5 scope stops at the first H1": every whole-page scope, old → new; anchored scopes compared | L5 | a large drop | |
-| "L5 cards": `LinkPreviews(index:manifest:labels:)`; the old excerpts alone; every label, read afterwards | L5 | | |
-| "Search sync, headings parsed once (S1)": `ConceptRanker` as before; `headings()` on every page; `ConceptRanker` from those outlines; full sync | S1 | a full sync makes 877 `headings()` calls instead of 1,324 | |
-| "Search sync, the full rewrite through 'rebuild' (S2)": every row through the triggers; a fresh file; over an older index | S2 | the fresh file well below the triggers (in C: 82–87 against 195–233 ms) | |
-| "Search sync, citing pages named once (S3)": `ReferenceRanker` as before; handed the concept ranker's names; naming each page once itself | S3 | 6,781 `Name` inits instead of 13,495 | |
-| "Search sync, the concept ranker from stored outlines (S4)": both rankers as a no-op built them before; a no-op after a relaunch (fastest of 3); after one page changed | S4 | a no-op parses no page (447 before) | |
-| "derivation loops": closures compared, differing; a load's single-object closures with the `21df5d7` loop / the current one / sharing a run; `Derivation.init` | X1, X5 | about 11,000 closures, 0 differ; the current loop far below the old (about 199× fewer visits), sharing below that | |
-| "derivation quotes": citations, pages, missing; a parse per citation / once per page | X2 | 117 citations on 50 pages, 0 missing; once per page about a third of the time | |
-| "derivation links": inspector rows, with unstated steps, differing | X3 | about 1,663 rows, about 800 with unstated steps, 0 differ | |
-| "derivation prefilter": implied-by for every target in both settings, with / without; differing; no-path completions, chains and circumventions compared | X4 | 234 targets, 0 differ; 46, 439 and 4 compared; with well below without | |
-| "The KaTeX memo on the real wiki": formulas a pass; before the memo; pass 1 and pass 2 rendered and remembered; remembered by limit | J1 | about 7,320 formulas; about 3,621 then 3,538 rendered (50.5% and 51.7% remembered); at 1,000, page again 100% and about 1.57 M characters | |
-| "The review's blocks rendered when shown": middle, ends, added and deleted, blocks and ms before and after | J2 | middle 12,748 → 3,512; ends 12,814 → 5,240; added and deleted the same | |
-| "Explore From Here on the corpus": offered, withheld | U3 | offered above 0 | |
-| "window observation" (`make check`): `@Observable` notifies, or does not, on an equal assignment | W2 | "notifies" on Swift 6.1, so W2 removes work; "does not notify" makes it insurance | |
+| "L1 line ends on bytes": `CodeMask.inertRanges`, `headings()`, old → new | L1 | both faster; with M0's A/B line, it decides L1's form || CodeMask 439.7 → 69.5 ms; `headings()` 954.4 → 341.3 ms |
+| "Backlinks (L1, L3, L4)": `backlinkMap()` old → new; every context read afterwards; the busiest page's | L1, L3, L4 | a large drop; the busiest page has 44 || 1,852.3 → 352.2 ms; every context afterwards 272.4 ms; the busiest page's 44 in 7.6 ms |
+| "L2 links parsed once": `outgoingLinks(in:)` over every body, a render's link list for every page, old → new | L2 | new below old || 778.7 → 235.9 ms; 839.4 → 381.3 ms |
+| "L4 resolutions per sweep": links, resolved | L4 | about 3,447 links, about 972 resolved || 3,489 links, 974 resolved |
+| "L6 section cards once per load": anchors, worked out directly; the first time; the second time | L6 | about 2,742 anchors; the second time near 0 || 2,750 anchors; 3,215.3 ms directly; 3,106.0 ms the first time; 3.9 ms the second |
+| "L5 scope stops at the first H1": every whole-page scope, old → new; anchored scopes compared | L5 | a large drop || 825.2 → 249.7 ms; 4,520 anchored scopes compared |
+| "L5 cards": `LinkPreviews(index:manifest:labels:)`; the old excerpts alone; every label, read afterwards | L5 | || 703.6 ms; 1,341.3 ms; 180.1 ms |
+| "Search sync, headings parsed once (S1)": `ConceptRanker` as before; `headings()` on every page; `ConceptRanker` from those outlines; full sync | S1 | a full sync makes 877 `headings()` calls instead of 1,324 || 332.5 ms; 323.4 ms; 126.9 ms; full sync 1,340.4 ms |
+| "Search sync, the full rewrite through 'rebuild' (S2)": every row through the triggers; a fresh file; over an older index | S2 | the fresh file well below the triggers (in C: 82–87 against 195–233 ms) || 1,670.3 ms; 1,632.8 ms; 1,480.0 ms: little gain here, where each run includes the rankers and the rows, beside the other suites |
+| "Search sync, citing pages named once (S3)": `ReferenceRanker` as before; handed the concept ranker's names; naming each page once itself | S3 | 6,781 `Name` inits instead of 13,495 || 1,960 citers from 378 pages: 328.8 ms; 112.4 ms; 135.0 ms |
+| "Search sync, the concept ranker from stored outlines (S4)": both rankers as a no-op built them before; a no-op after a relaunch (fastest of 3); after one page changed | S4 | a no-op parses no page (447 before) || 1,489.0 ms; 249.6 ms; 529.3 ms |
+| "derivation loops": closures compared, differing; a load's single-object closures with the `21df5d7` loop / the current one / sharing a run; `Derivation.init` | X1, X5 | about 11,000 closures, 0 differ; the current loop far below the old (about 199× fewer visits), sharing below that || 10,314 closures on 9 engines, 0 differ; 524 closures: 754.1 / 38.9 / 19.9 ms; `Derivation.init` 100.4 ms |
+| "derivation quotes": citations, pages, missing; a parse per citation / once per page | X2 | 117 citations on 50 pages, 0 missing; once per page about a third of the time || 117 citations on 50 pages, 0 missing; 112.7 / 54.1 ms |
+| "derivation links": inspector rows, with unstated steps, differing | X3 | about 1,663 rows, about 800 with unstated steps, 0 differ || 1,663 rows, 803 with unstated steps, 0 differ |
+| "derivation prefilter": implied-by for every target in both settings, with / without; differing; no-path completions, chains and circumventions compared | X4 | 234 targets, 0 differ; 46, 439 and 4 compared; with well below without || 234 targets, 0 differ; 20,190.5 ms with, 171,522.0 ms without (summed over tasks); 46, 439 and 4 compared |
+| "The KaTeX memo on the real wiki": formulas a pass; before the memo; pass 1 and pass 2 rendered and remembered; remembered by limit | J1 | about 7,320 formulas; about 3,621 then 3,538 rendered (50.5% and 51.7% remembered); at 1,000, page again 100% and about 1.57 M characters || 7,355 formulas; 3,744 ms before; 3,637 then 3,555 rendered (50.6% and 51.7%); at 1,000, page again 100% and 1.59 M characters |
+| "The review's blocks rendered when shown": middle, ends, added and deleted, blocks and ms before and after | J2 | middle 12,748 → 3,512; ends 12,814 → 5,240; added and deleted the same || 3,540 files, identical: middle 12,717 → 3,515 blocks (6,865 → 4,181 ms); ends 12,764 → 5,246 (6,953 → 4,015 ms); added and deleted 6,382, the same |
+| "Explore From Here on the corpus": offered, withheld | U3 | offered above 0 || 1,442 offered, 248 withheld |
+| "window observation" (`make check`): `@Observable` notifies, or does not, on an equal assignment | W2 | "notifies" on Swift 6.1, so W2 removes work; "does not notify" makes it insurance || "notifies": the save-state guard is removed work |

@@ -166,21 +166,63 @@ type style changed.
 
 **The merge.** `claude/efficiency` holds the plan, M0 and the six tracks,
 merged in that order, the tracks as L, S, X, J, U, W, each without a
-conflict. The tracks were never compiled together before: CI is the first
-compiler. The shared docs follow the code: search.md (schema version 4),
+conflict. The shared docs follow the code: search.md (schema version 4),
 architecture.md §3 and reader-comforts.md §4.1 (U1's load order),
-corrections.md §7.4 (`PreviewOverlay`), and CHANGELOG 0.3.0 for what a
-reader will notice.
+corrections.md §7.4 (`PreviewOverlay`), render-pipeline.md (the memo's
+rules, `\tag` included), and CHANGELOG 0.3.0 for what a reader will
+notice.
+
+**CI, first time together.** The app compiled; the tests did not, at one
+line (an `#expect` comment made of two literals joined with `+`, which
+`Comment` does not take). Then the corpus step failed one test,
+`isAuthenticatedCaches`: a fake `gh` that answers at once was not heard
+within `GitHubAuth.deadline`'s 15 s, because the new equivalence suites
+held every cooperative thread. That test took 74 s at the baseline and
+155 s there, and the git publishing tests went from about 90 to 175 s.
+The deadline became a task-local, and CI went green on `e17ca99`: 1,201
+tests, in both runs.
+
+**An integration review** of the merged tree read it five ways (Sources
+compiling together, Tests compiling and passing, the run on CI, what a
+reader sees, and whether the equivalence claims hold) and found 7
+findings; a skeptic for each confirmed 6. A fixer fixed all six, a
+review of the fixes found four more, and three of those were fixed in
+code:
+- the derivation sweeps queued every job at once and held every thread
+  (now `fewAtATime`, one task fewer than the cores, for all three sweeps);
+- `GitHubAuth.deadline` and `Tripwire.deadline` are task-locals that the
+  tests whose `gh` answers at once scope long, Approve's tests included;
+- the sidebar's Cited by rows had become selectable: `.selectionDisabled()`
+  inside an `.equatable()` row never reaches the list, so it sits outside;
+- a remembered formula did not delete `\df@tag` as KaTeX does, so after a
+  `\tag` the copy area's `JSON.stringify` could throw and a page failed
+  to render; a hit now deletes it, and a `\tag` formula is never kept;
+- the lazy review now renders every block when a formula names `\tag`;
+- two of the memo's corpus tests checked the wiki's content rather than
+  the code, and would have failed on an ordinary wiki edit.
+
+**Results** (efficiency.md §5, measured alone, debug build, the same
+wiki, before → the six tracks in two runs):
+- §1.3's cause is confirmed: CodeMask's line ends by key path cost
+  +946.6 ms of the +1,073.9 ms. L1 keeps the byte scan (14–18 ms against
+  300–360 ms for the key path).
+- A load in memory: 5,628 → 1,258–1,414 ms. Backlinks 1,914 → 253–279 ms,
+  previews 2,518 → 554–664 ms, derivation 727 → 114–117 ms. An update
+  after a one-page edit: 5,202 → 1,248–1,433 ms.
+- Search sync as a no-op: 1,708 → 177–198 ms; in full into a fresh file:
+  5,527 → 949–1,117 ms.
+- The explorer: answers 206–487 ms → about 6 ms; implied-by for `nizk`,
+  idealised models on, 2,427 → 97–103 ms.
+- A page rendered again right after itself: 2,152 → 1,061–1,154 ms for
+  the corpus (LWE 46 → 17 ms). The review of a one-line edit to every
+  page: 4,727 → 3,020–3,549 ms.
+- `plainText` over every backlink's line rose from 114.5 to 210–285 ms on
+  unchanged code; no load runs it any more, and it is not explained.
 
 **Left:**
 
-- CI's numbers in efficiency.md §5, from the pull request's "measured
-  alone" run, and §1.3's cause confirmed or corrected from M0's backlinks
-  lines. L1's form waits on M0's A/B line.
 - `make shots` on a Mac, for U and W.
-- Then the reading features F1–F3, on `claude/reading-features`.
-
-Timings: see plans/efficiency.md §5 (filled from CI)
+- The reading features F1–F3, on `claude/reading-features`.
 
 ## 2026-10-16 — Lease recovery from recorded attempts, after the maintainer's review
 

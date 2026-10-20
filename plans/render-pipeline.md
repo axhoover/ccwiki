@@ -341,8 +341,8 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
 - **What is never kept**: a call with another table; a formula that is not
   a string; an option that is an object or a function (`strict` and
   `trust` can be functions), which could answer otherwise under the same
-  name; a formula with an `@`, or naming `\begin`, `\nonumber` or
-  `\notag` ("KaTeX's own names", below); a call that throws.
+  name; a formula with an `@`, or naming `\begin`, `\nonumber`, `\notag`
+  or `\tag` ("KaTeX's own names", below); a call that throws.
 - **What empties it, and turns it off** (the `\gdef` rule): a formula
   holding `\gdef`, `\xdef` or `\global` (as a control word: `\gdefault` is
   not one), or any call in KaTeX's `globalGroup`. Those are the only ways
@@ -367,8 +367,14 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
   and a formula naming it would then read what a `\nonumber` before the
   `align` left. Those are the formulas naming `\nonumber`, `\notag` or
   `\begin`, any `\begin`, since a macro can spell an environment's name.
+  A formula naming `\tag` is never kept either: a remembered one would not
+  leave `\df@tag` in the table. And a hit deletes `\df@tag`, as KaTeX does
+  when a formula starts, so the table's other readers (the copy area,
+  `expandMacros`) see what they would without the memo. Before that, a
+  `\tag` followed by a remembered formula left a `\df@tag` the copy area's
+  `JSON.stringify` could not read, and the page failed to render.
 - **Off**, for as long as a table stands, when any macro body holds a
-  global definition, an `@`, `\begin`, `\nonumber` or `\notag`: every
+  global definition, an `@`, `\begin`, `\nonumber`, `\notag` or `\tag`: every
   formula using that macro could change the table, or read what another
   formula left. Off too when a macro's name is `\color` or has an `@`:
   after every formula KaTeX deletes `\color` and `\current@color` from
@@ -380,7 +386,7 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
   the first.
 
 None of the 126 macros and none of the wiki's 7,320 formulas has a global
-definition, an `@`, a `\begin`, a `\nonumber` or a `\notag`, and no macro
+definition, an `@`, a `\begin`, a `\nonumber`, a `\notag` or a `\tag`, and no macro
 is named `\color` (wiki at ab81f02). With every exception in place the
 output is unchanged byte for byte: in jsdom, with the real `ccwiki.js`
 before and after, all 883 files rendered twice in one web view, in path
@@ -638,8 +644,10 @@ The other is KaTeX's macro table, which a formula can change for every
 formula after it ("The KaTeX memo"): a `\gdef` in a gap defined nothing
 for the block shown below it, and an old block shown after a new one
 read what the new text defined. So when a block's formula could change
-the table (`\gdef`, `\xdef`, `\global`, `\nonumber`, `\notag`, or any
-`\begin`, as the memo has them), or any formula could through the table
+the table (`\gdef`, `\xdef`, `\global`, `\nonumber`, `\notag`, `\tag`,
+or any `\begin`, as the memo has them; a `\tag` leaves `\df@tag` in the
+table, for the copy area and `expandMacros`, until the next formula
+starts), or any formula could through the table
 (a macro whose body could, one a formula defined, which KaTeX keeps as
 tokens, or a name KaTeX changes: `\color`, or one with an `@`),
 `reviewEntries` reads every block of both texts once both are parsed,
