@@ -27,19 +27,36 @@ import Foundation
 enum CurationQuote {
 
     static func contains(_ quote: String, section: String?, in page: String) -> Bool {
-        let lines = Self.lines(page)
-        var body = lines[...]
-        if let section {
-            let wanted = nfc(Array(section.unicodeScalars))
-            let headings = Self.headings(lines)
-            guard let found = headings.firstIndex(where: { $0.text == wanted }) else { return false }
-            let heading = headings[found]
-            let end = headings[(found + 1)...].first { $0.level <= heading.level }?.line ?? lines.count
-            body = lines[(heading.line + 1)..<end]
+        Page(page).contains(quote, section: section)
+    }
+
+    /// A page split into its NFC lines, with its headings found: parsed
+    /// once, however many quotes are looked for in it. `missingQuotes`
+    /// builds one per cited page rather than parsing the page again for
+    /// each quote it holds.
+    struct Page {
+        private let lines: [[Unicode.Scalar]]
+        private let headings: [Heading]
+
+        init(_ text: String) {
+            let lines = CurationQuote.lines(text)
+            self.lines = lines
+            self.headings = CurationQuote.headings(lines)
         }
-        let needle = collapsed(joined(Self.lines(quote)))
-        guard !needle.isEmpty, needle != [" "] else { return false }
-        return occurs(needle, in: collapsed(joined(body)))
+
+        func contains(_ quote: String, section: String?) -> Bool {
+            var body = lines[...]
+            if let section {
+                let wanted = CurationQuote.nfc(Array(section.unicodeScalars))
+                guard let found = headings.firstIndex(where: { $0.text == wanted }) else { return false }
+                let heading = headings[found]
+                let end = headings[(found + 1)...].first { $0.level <= heading.level }?.line ?? lines.count
+                body = lines[(heading.line + 1)..<end]
+            }
+            let needle = CurationQuote.collapsed(CurationQuote.joined(CurationQuote.lines(quote)))
+            guard !needle.isEmpty, needle != [" "] else { return false }
+            return CurationQuote.occurs(needle, in: CurationQuote.collapsed(CurationQuote.joined(body)))
+        }
     }
 
     // MARK: Lines
@@ -120,7 +137,7 @@ enum CurationQuote {
 
     // MARK: Headings
 
-    private struct Heading {
+    fileprivate struct Heading {
         /// Index into the lines.
         let line: Int
         /// How many `#`s.
