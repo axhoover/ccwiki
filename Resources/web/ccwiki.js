@@ -80,6 +80,10 @@
       if (key === null) return original(expr, merged);
       var html = katexMemo.get(key);
       if (html !== undefined) {
+        // KaTeX deletes `\df@tag` from the table as every formula starts; one
+        // read back from the memo must too, or the one a `\tag` left stays for
+        // the table's other readers (`fillMacrosCopyArea`, `expandMacros`).
+        delete merged.macros["\\df@tag"];
         // The map's last entry is the one used last.
         katexMemo.delete(key);
         katexMemo.set(key, html);
@@ -117,8 +121,9 @@
   /** What sets KaTeX's own `\@eqnsw`, which a formula naming it reads: a
    *  numbered environment (`align`, `alignat`, `gather`, `equation`) at
    *  each row, `\nonumber` and `\notag`. Any `\begin`, since a macro can
-   *  spell an environment's name. */
-  var SETS_EQUATION_SWITCH = /\\(?:begin|nonumber|notag)(?![A-Za-z@])/;
+   *  spell an environment's name. And `\tag`, whose expansion `\gdef`s
+   *  `\df@tag` into the table. */
+  var SETS_EQUATION_SWITCH = /\\(?:begin|nonumber|notag|tag)(?![A-Za-z@])/;
 
   /** Whether a call can change the table every later formula reads: a
    *  global definition, or in KaTeX's global group any definition. KaTeX

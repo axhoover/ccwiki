@@ -70,6 +70,8 @@ struct RenderMemoTests {
             (MarkdownScript.literal(#"\begin{pmatrix}a\end{pmatrix}"#), "undefined"),
             (MarkdownScript.literal(#"x\nonumber"#), "undefined"),
             (MarkdownScript.literal(#"x\notag"#), "undefined"),
+            // What `\gdef`s KaTeX's own `\df@tag`, which the copy area reads.
+            (MarkdownScript.literal(#"x\tag{1}"#), "{ displayMode: true }"),
             (#"new String("x")"#, "undefined"),
         ]
         for call in calls {
@@ -204,6 +206,50 @@ struct RenderMemoTests {
         let delimited = try sameAsKatex(
             [#"\left( x \right)"#, #"\left( x \right)"#], table: #"{ "\\current@color": "blue" }"#)
         #expect(delimited[0] != delimited[1], #"\right, after a formula"#)
+    }
+
+    @Test("a formula the memo gives back deletes the `\\df@tag` a `\\tag` left, as KaTeX does")
+    func tagLeftForTheCopyArea() throws {
+        // The web view's scripts with the vendored KaTeX, the messages
+        // `ccwiki.js` posts, and Glossary/latex-macros's copy area, which
+        // reads the whole table.
+        let script = MarkdownScript(context: JSContext())
+        try script.evaluate(MarkdownScript.prelude, named: "prelude.js")
+        for name in Self.vendored + MarkdownScript.scripts {
+            try script.evaluate(try Self.source(name), named: name)
+        }
+        try script.evaluate(Self.shell, named: "shell.js")
+        try script.evaluate(#"""
+            var posted = [];
+            var webkit = { messageHandlers: { ccwiki: { postMessage: function (m) { posted.push(m); } } } };
+            var copyArea = stubElement();
+            stubPage.querySelector = function (selector) {
+              return selector === "#macros-copy-area" &&
+                stubPage.innerHTML.indexOf("macros-copy-area") >= 0 ? copyArea : null;
+            };
+            /** Each render's `ok`, or what it threw. A table of its own each
+             *  time, as each payload from Swift is. */
+            function show(markdown) {
+              posted = [];
+              try {
+                CCwiki.render({ path: "p", markdown: markdown, links: {}, macros: { "\\calA": "\\mathcal{A}" } });
+              } catch (e) {
+                return "threw " + e;
+              }
+              return JSON.stringify(posted.filter(function (m) { return m.type === "rendered"; })
+                .map(function (m) { return m.ok; }));
+            }
+            """#, named: "copy-area.js")
+        try script.evaluate(try Self.source("ccwiki.js"), named: "ccwiki.js")
+
+        // The macros page's formula comes back from the memo the second
+        // time, after a page whose last formula is tagged.
+        let macrosPage = #"<div id="macros-copy-area"></div>"# + "\n\nA formula $x$.\n"
+        let tagged = "# Tagged\n\n$$\nE = mc^2 \\tag{1}\n$$\n"
+        for (step, markdown) in [macrosPage, tagged, macrosPage].enumerated() {
+            #expect(try script.text("show(\(MarkdownScript.literal(markdown)))") == "[true]",
+                    "render \(step + 1)")
+        }
     }
 
     // MARK: - The corpus
@@ -682,7 +728,7 @@ struct RenderMemoTests {
         function memoKey(expr, options) {
           var merged = Object.assign({ macros: TABLE, throwOnError: false, strict: "ignore" }, options || {});
           if (typeof expr !== "string" || merged.macros !== TABLE || merged.globalGroup ||
-              /\\(?:gdef|xdef|global|begin|nonumber|notag)(?![A-Za-z@])/.test(expr) ||
+              /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/.test(expr) ||
               expr.indexOf("@") >= 0) return null;
           var parts = [];
           for (var name in merged) {
