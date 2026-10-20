@@ -150,8 +150,8 @@ struct ReaderWindowView: View {
     private static func openInReader(
         beside session: ReaderSession, model: AppModel, openWindow: OpenWindowAction
     ) -> OpenInReaderAction {
-        OpenInReaderAction { [weak session] location, disposition, find in
-            let window = ReaderWindow(opening: location, find: find)
+        OpenInReaderAction { [weak session] location, disposition, find, revealing in
+            let window = ReaderWindow(opening: location, find: find, revealing: revealing)
             guard let request = ReaderWindowRequest(
                 opening: window, as: disposition, beside: session?.hostWindowNumber)
             else { return }

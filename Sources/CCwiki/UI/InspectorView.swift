@@ -89,6 +89,12 @@ struct InspectorView: View {
 
     // MARK: Backlinks
 
+    /// The backlink groups this window has open: the prose that mentions
+    /// the page, until the reader closes it. Reductions and barriers, which
+    /// the Relations tab lists, and references wait for a click. Kept from
+    /// page to page, as an Xcode inspector's sections are.
+    @State private var openBacklinkGroups: Set<WikiIndex.BacklinkGroup> = [.mentionedIn]
+
     private var backlinks: some View {
         Group {
             let links = session.currentBacklinks
@@ -96,16 +102,67 @@ struct InspectorView: View {
                 emptyPane("No Backlinks", systemImage: "arrow.turn.up.left",
                           detail: "No other page links here yet.")
             } else {
+                let groups = WikiIndex.BacklinkGroup.grouping(links) {
+                    model.index?.pages[$0]?.kind
+                }
                 List {
-                    ForEach(links) { link in
-                        BacklinkRow(link: link)
-                            .equatable()
-                            .listRowSeparator(.hidden)
+                    ForEach(WikiIndex.BacklinkGroup.allCases, id: \.self) { group in
+                        if let rows = groups[group] {
+                            backlinkSection(group, rows: rows)
+                        }
                     }
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
             }
+        }
+    }
+
+    /// One group, under a header that opens and closes it: a button with a
+    /// turning chevron and the group's count, as the Relations tab's derived
+    /// sections have, with no `withAnimation` (SWIFTUI-RULES §1.2).
+    private func backlinkSection(
+        _ group: WikiIndex.BacklinkGroup, rows: [WikiIndex.Backlink]
+    ) -> some View {
+        let isOpen = openBacklinkGroups.contains(group)
+        return Section {
+            if isOpen {
+                ForEach(rows) { link in
+                    BacklinkRow(link: link)
+                        .equatable()
+                        // A list trait: inside the EquatableView it never
+                        // reaches the row.
+                        .listRowSeparator(.hidden)
+                }
+            }
+        } header: {
+            Button {
+                if isOpen {
+                    openBacklinkGroups.remove(group)
+                } else {
+                    openBacklinkGroups.insert(group)
+                }
+            } label: {
+                HStack(spacing: Theme.tight) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    Text(group.title)
+                        .font(Theme.Fonts.sectionHeader)
+                        .lineLimit(1)
+                    Spacer(minLength: Theme.small)
+                    Text("\(rows.count)")
+                        .font(Theme.Fonts.meta)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(group.title), \(rows.count)")
+            .accessibilityValue(isOpen ? "expanded" : "collapsed")
+            .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -129,52 +186,118 @@ struct InspectorView: View {
     }
 }
 
-/// One page that links to the page being read, and the line that mentions
+/// One page that links to the page being read, and the lines that mention
 /// it.
 ///
-/// A view of its own, compared by its backlink, so the line is reduced to
+/// One mention shows as the line itself. Several show as "N mentions", a
+/// disclosure that lists each line (plans/efficiency.md §3.1). The title
+/// opens the page at its first mention, and a listed line at that line:
+/// scrolled to the block holding it, and outlined for a moment.
+///
+/// A view of its own, compared by its backlink, so the lines are reduced to
 /// plain text (`Backlink.context`) when the backlink changes rather than on
 /// every redraw of the pane (SWIFTUI-RULES §6.3).
 private struct BacklinkRow: View, Equatable {
     @Environment(AppModel.self) private var model
     @Environment(ReaderSession.self) private var session
     let link: WikiIndex.Backlink
+    /// Whether a page that mentions this one on several lines lists them.
+    @State private var listsMentions = false
 
     nonisolated static func == (lhs: BacklinkRow, rhs: BacklinkRow) -> Bool {
         lhs.link == rhs.link
     }
 
     var body: some View {
-        // A button, so ⌘-click is a link's: a tab behind this one
-        // (reader-comforts §1.1).
-        let location = AppModel.Location.page(path: link.sourcePath, anchor: nil)
-        Button {
-            session.open(location, LinkDisposition.current)
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.title(forPath: link.sourcePath))
-                    .font(Theme.Fonts.row)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                // The line that mentions this page — *why* it links here,
-                // which is the useful half.
-                Text(link.context)
-                    .font(Theme.Fonts.rowSubtitle)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
+        VStack(alignment: .leading, spacing: 2) {
+            // A button, so ⌘-click is a link's: a tab behind this one
+            // (reader-comforts §1.1).
+            Button {
+                openMention(0, LinkDisposition.current)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.title(forPath: link.sourcePath))
+                        .font(Theme.Fonts.row)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // The line that mentions this page — *why* it links
+                    // here, which is the useful half.
+                    if link.mentions.count == 1 {
+                        mentionLine(link.context)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+            .contextMenu { menu(mention: 0) }
+
+            if link.mentions.count > 1 {
+                mentions
+            }
+        }
+    }
+
+    /// "N mentions", and each line under it while it is open.
+    @ViewBuilder
+    private var mentions: some View {
+        let count = link.mentions.count
+        Button {
+            listsMentions.toggle()
+        } label: {
+            HStack(spacing: Theme.tight) {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .rotationEffect(.degrees(listsMentions ? 90 : 0))
+                Text("\(count) mentions")
+                    .font(Theme.Fonts.meta)
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            OpenElsewhereItems { session.open(location, $0) }
-            if let page = model.index?.pages[link.sourcePath],
-               let url = AppModel.siteURL(slug: page.slug) {
-                Divider()
-                Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
-                Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
+        .help(listsMentions ? "Hide the lines that mention this page"
+                            : "Show each line that mentions this page")
+        .accessibilityLabel("\(count) mentions")
+        .accessibilityValue(listsMentions ? "expanded" : "collapsed")
+
+        if listsMentions {
+            ForEach(link.mentions.indices, id: \.self) { ordinal in
+                Button {
+                    openMention(ordinal, LinkDisposition.current)
+                } label: {
+                    mentionLine(WikiIndex.plainText(String(link.mentions[ordinal])))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, Theme.medium)
+                .contextMenu { menu(mention: ordinal) }
             }
         }
+    }
+
+    private func mentionLine(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.Fonts.rowSubtitle)
+            .foregroundStyle(.secondary)
+            .lineLimit(3)
+            .multilineTextAlignment(.leading)
+    }
+
+    /// New Tab and New Window land on the mention too.
+    @ViewBuilder
+    private func menu(mention ordinal: Int) -> some View {
+        OpenElsewhereItems { openMention(ordinal, $0) }
+        if let page = model.index?.pages[link.sourcePath],
+           let url = AppModel.siteURL(slug: page.slug) {
+            Divider()
+            Button("Open on cryptology.city") { NSWorkspace.shared.open(url) }
+            Button("Copy Link") { model.copyToPasteboard(url.absoluteString) }
+        }
+    }
+
+    private func openMention(_ ordinal: Int, _ disposition: LinkDisposition) {
+        session.openMention(ordinal, of: link.sourcePath, disposition)
     }
 }

@@ -73,6 +73,9 @@ final class WebController: NSObject {
     @ObservationIgnored private var loadedPath: String?
     /// Searched for once the next render reports back.
     @ObservationIgnored private var pendingFind: [String]?
+    /// Revealed once the next render reports back, if it is of this page: a
+    /// 0-based rendered line.
+    @ObservationIgnored private var pendingReveal: (path: String, line: Int)?
 
     /// An offline reader has nothing worth persisting, and a non-persistent
     /// store means nothing about the wiki lands in a WebKit cache directory.
@@ -125,18 +128,26 @@ final class WebController: NSObject {
     // MARK: Rendering
 
     /// Render, then find `needle` on the result: how a search result lands
-    /// on its match instead of the top of the page. If the page is already
-    /// showing, only the find runs.
-    func render(_ request: RenderRequest, thenFind needle: [String]?) {
-        guard let needle, !needle.isEmpty else {
+    /// on its match instead of the top of the page. Then reveal rendered
+    /// line `line`: the innermost block holding it is scrolled to the middle
+    /// and outlined for a moment, which is how a backlink lands on the line
+    /// that mentions the page (plans/efficiency.md §3.1). If the page is
+    /// already showing, only the find and the reveal run.
+    func render(
+        _ request: RenderRequest, thenFind needle: [String]?, thenReveal line: Int? = nil
+    ) {
+        let needle = needle?.isEmpty == false ? needle : nil
+        guard needle != nil || line != nil else {
             render(request)
             return
         }
         if isReady, request.path == loadedPath, request.anchor == nil {
-            Task { _ = await findFirst(of: needle) }
+            if let needle { Task { _ = await findFirst(of: needle) } }
+            if let line { revealSourceLines(line..<(line + 1), mark: true) }
             return
         }
         pendingFind = needle
+        pendingReveal = line.map { (path: request.path, line: $0) }
         render(request)
     }
 
@@ -299,6 +310,14 @@ final class WebController: NSObject {
             if let needle = pendingFind {
                 pendingFind = nil
                 Task { _ = await findFirst(of: needle) }
+            }
+            if let reveal = pendingReveal {
+                pendingReveal = nil
+                // Another page may have been asked for since; a failed
+                // render sends no path.
+                if message["path"] as? String == reveal.path {
+                    revealSourceLines(reveal.line..<(reveal.line + 1), mark: true)
+                }
             }
             if let errors = message["pseudocodeErrors"] as? Int, errors > 0 {
                 lastRenderError = "\(errors) pseudocode block(s) failed to render."

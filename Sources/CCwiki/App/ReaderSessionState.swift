@@ -58,6 +58,8 @@ struct SessionStartPlan: Equatable, Sendable {
     var opensOnLoad: Location?
     /// Found on the page `opensOnLoad` renders.
     var find: [String]?
+    /// The line of its body revealed on the page `opensOnLoad` renders.
+    var revealing: Int? = nil
     /// Nothing else to show: Home, once the wiki is loaded.
     var opensHomeOnLoad: Bool
 
@@ -95,6 +97,7 @@ struct SessionStartPlan: Equatable, Sendable {
         if restored == nil, let opening = window.opening {
             plan.opensOnLoad = opening
             plan.find = window.find
+            plan.revealing = window.revealing
             return plan
         }
         // A restored page, or the launch document, is something to read

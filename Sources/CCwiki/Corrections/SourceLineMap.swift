@@ -29,9 +29,26 @@ struct SourceLineMap: Sendable, Equatable {
     /// identical.
     init(fileText: String, renderedMarkdown: String) {
         let frontmatter = Frontmatter.parse(fileText)
-        let body = Self.lines(of: fileText[frontmatter.bodyStart...])
+        self.init(
+            bodyLines: Self.lines(of: fileText[frontmatter.bodyStart...]),
+            bodyOffset: Self.lines(of: fileText[..<frontmatter.bodyStart]).count - 1,
+            renderedMarkdown: renderedMarkdown)
+    }
+
+    /// The same alignment for a page's body alone, as `WikiPage.body` holds
+    /// it: nothing comes before it, so `bodyOffset` is 0. For a line found
+    /// in the body without the file, as a backlink's mention is
+    /// (plans/efficiency.md §3.1). `renderedMarkdown` is the request's: the
+    /// body, with the relation-meta line spliced in.
+    init(body: String, renderedMarkdown: String) {
+        self.init(
+            bodyLines: Self.lines(of: Substring(body)), bodyOffset: 0,
+            renderedMarkdown: renderedMarkdown)
+    }
+
+    private init(bodyLines body: [Substring], bodyOffset: Int, renderedMarkdown: String) {
         let rendered = Self.lines(of: Substring(renderedMarkdown))
-        bodyOffset = Self.lines(of: fileText[..<frontmatter.bodyStart]).count - 1
+        self.bodyOffset = bodyOffset
 
         let added = rendered.count - body.count
         guard added > 0 else {
@@ -79,6 +96,13 @@ struct SourceLineMap: Sendable, Equatable {
         guard line > bodyOffset else { return nil }
         let bodyLine = line - bodyOffset - 1
         return bodyLine < inserted.lowerBound || inserted.isEmpty ? bodyLine : bodyLine + inserted.count
+    }
+
+    /// A 0-based line of the body → the rendered line: the file line past
+    /// the frontmatter, for a backlink to land on the line that mentions
+    /// its page. Nil for a negative line.
+    func renderedLine(forBodyLine line: Int) -> Int? {
+        renderedLine(forFileLine: line + bodyOffset + 1)
     }
 
     /// A rendered line outside the splice → its 1-based file line.

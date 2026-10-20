@@ -95,6 +95,9 @@ final class ReaderSession: Identifiable {
     /// Set for the render a search hit, or a window opened on one, triggers,
     /// then cleared.
     @ObservationIgnored private var pendingFind: [String]?
+    /// The same for a backlink's mention: the 0-based line of the page's
+    /// body the render reveals.
+    @ObservationIgnored private var pendingReveal: Int?
     /// Set for the render that shows a restored page where it was being
     /// read, then cleared: the heading it scrolls to in place of the
     /// location's own anchor.
@@ -137,6 +140,8 @@ final class ReaderSession: Identifiable {
     @ObservationIgnored private var pendingLocation: Location?
     /// Found on `pendingLocation` when it opens: the window's `find`.
     @ObservationIgnored private var pendingLocationFind: [String]?
+    /// Revealed on `pendingLocation` when it opens: the window's `revealing`.
+    @ObservationIgnored private var pendingLocationReveal: Int?
     /// The heading a restored page was being read at, for its first render.
     @ObservationIgnored private var readingPosition: (location: Location, heading: String)?
 
@@ -207,6 +212,7 @@ final class ReaderSession: Identifiable {
         if pendingLocation == nil, let opening = plan.opensOnLoad {
             pendingLocation = opening
             pendingLocationFind = plan.find
+            pendingLocationReveal = plan.revealing
         }
         // Before the session waits, so the launch document is part of the
         // plan rather than something asked for since, and a pending
@@ -238,10 +244,13 @@ final class ReaderSession: Identifiable {
             pendingLocation = nil
             pendingFind = pendingLocationFind
             pendingLocationFind = nil
+            pendingReveal = pendingLocationReveal
+            pendingLocationReveal = nil
             open(pending)
             // Consumed by the render `open` did; if it did not render (a
-            // page the wiki no longer has), it must not linger.
+            // page the wiki no longer has), they must not linger.
             pendingFind = nil
+            pendingReveal = nil
         }
         if location == .empty {
             // What the plan asks for when it has nothing else
@@ -411,8 +420,10 @@ final class ReaderSession: Identifiable {
         guard isStarted, model.index != nil || newLocation.isDocument else {
             if !isShowing(newLocation) {
                 pendingLocation = newLocation
-                // A search hit that waits still lands on its match.
+                // A search hit that waits still lands on its match, and a
+                // mention on its line.
                 pendingLocationFind = pendingFind
+                pendingLocationReveal = pendingReveal
             }
             return
         }
@@ -423,6 +434,7 @@ final class ReaderSession: Identifiable {
         if awaitsLibrary, !isShowing(newLocation) {
             pendingLocation = nil
             pendingLocationFind = nil
+            pendingLocationReveal = nil
             openWhatWaited(superseded: true)
         }
         // A page the clone does not have is not somewhere the reader can be.
@@ -476,23 +488,45 @@ final class ReaderSession: Identifiable {
     /// cryptology.city, or in a new tab or window of its own, which the
     /// window's view opens (`openInReader`). `find` is found on the page once
     /// it renders, so a search hit lands on its match wherever it opens.
+    /// `line`, a 0-based line of the page's body, is revealed the same way,
+    /// so a backlink lands on its mention (plans/efficiency.md §3.1).
     ///
     /// What a SwiftUI row calls with `LinkDisposition.current`, and what a
     /// link in the page comes to through `navigate(to:disposition:)`.
-    func open(_ location: Location, _ disposition: LinkDisposition, find: [String]? = nil) {
+    func open(
+        _ location: Location, _ disposition: LinkDisposition, find: [String]? = nil,
+        revealing line: Int? = nil
+    ) {
         switch disposition {
         case .here:
             pendingFind = find
+            pendingReveal = line
             open(location)
             // Consumed by the render `open` did, or kept with a location
             // that waits for the wiki. If neither (a page the wiki lacks),
-            // it must not linger for the next render.
+            // they must not linger for the next render.
             pendingFind = nil
+            pendingReveal = nil
         case .onSite:
             if let url = siteURL(for: location) { NSWorkspace.shared.open(url) }
         case .newTab, .newWindow:
-            openInReader(location, disposition, find: find)
+            openInReader(location, disposition, find: find, revealing: line)
         }
+    }
+
+    /// Open a page that links to the page being read at a line that
+    /// mentions it, its backlink's `ordinal`th mention: scrolled to the
+    /// block holding the line and outlined for a moment, wherever
+    /// `disposition` opens it (plans/efficiency.md §3.1).
+    ///
+    /// The mention is looked up here, in the backlinks this window has now,
+    /// not taken from the row that was clicked: SwiftUI keeps a row whose
+    /// lines read the same across a load, and its lines would be slices of
+    /// a body the load replaced (SWIFTUI-RULES §3.5).
+    func openMention(_ ordinal: Int, of sourcePath: String, _ disposition: LinkDisposition) {
+        let backlink = currentBacklinks.first { $0.sourcePath == sourcePath }
+        open(.page(path: sourcePath, anchor: nil), disposition,
+             revealing: backlink?.bodyLine(ofMention: ordinal))
     }
 
     func openPage(_ path: String, anchor: String? = nil) {
@@ -621,11 +655,18 @@ final class ReaderSession: Identifiable {
         }
 
         var request: RenderRequest
+        var revealing: Int?
         switch location {
         case .page(let path, let anchor):
             guard let page = index.pages[path] else { return }
             request = renderer.request(
                 for: page, anchor: renderAnchor ?? anchor, notices: notices)
+            // A mention's line of the body, as the line the page draws it
+            // on: past the relation-meta line the request spliced in.
+            if let line = pendingReveal {
+                revealing = SourceLineMap(body: page.body, renderedMarkdown: request.markdown)
+                    .renderedLine(forBodyLine: line)
+            }
         case .folder(let slug):
             request = renderer.folderRequest(
                 slug: slug, hidingStubs: model.hidesStubs, notices: notices)
@@ -641,8 +682,9 @@ final class ReaderSession: Identifiable {
         // The commit this render shows. A correction is built at it, never
         // at whatever HEAD is by the time someone clicks (corrections §3.5).
         request.revision = model.headRevision
-        webController.render(request, thenFind: pendingFind)
+        webController.render(request, thenFind: pendingFind, thenReveal: revealing)
         pendingFind = nil
+        pendingReveal = nil
     }
 
     // MARK: The page on screen
