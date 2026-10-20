@@ -33,7 +33,7 @@ struct ReferenceRanker: Sendable {
 
     typealias Name = ConceptRanker.Name
 
-    struct Entry: Sendable {
+    struct Entry: Equatable, Sendable {
         let path: String
         /// The citation key, `GGM86`.
         let key: String
@@ -53,7 +53,7 @@ struct ReferenceRanker: Sendable {
         let citers: [Citer]
     }
 
-    struct Citer: Sendable {
+    struct Citer: Equatable, Sendable {
         let path: String
         let title: String
         let names: [Name]
@@ -80,13 +80,28 @@ struct ReferenceRanker: Sendable {
     /// linking to it. References never count as citers: a paper citing a
     /// paper says nothing about what the reader searched for.
     init(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]]) {
+        self.init(pages: pages, backlinks: backlinks, citerNames: [:])
+    }
+
+    /// `citerNames` holds pages already named, by path: the search index
+    /// passes `ConceptRanker.citerNames`, the names of every page that can
+    /// cite a paper. A page it lacks is named here. Either way each citing
+    /// page is named once, and each reduction's title made plain once,
+    /// however many papers they cite.
+    init(
+        pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]],
+        citerNames: [String: [Name]]
+    ) {
         let byPath = Dictionary(pages.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        var names = citerNames
+        var vias: [String: String] = [:]
         entries = pages.filter { $0.kind == .reference }.map { page in
             let authors = page.frontmatter.string("authors") ?? ""
             let venue = page.frontmatter.string("venue")
             let keys = [page.title] + page.aliases + [page.frontmatter.string("cryptobib_key")]
                 .compactMap { $0 }
-            let citers = Self.citers(of: page.path, byPath: byPath, backlinks: backlinks)
+            let citers = Self.citers(
+                of: page.path, byPath: byPath, backlinks: backlinks, names: &names, vias: &vias)
             let titleName = Name(page.displayTitle)
             let authorNames = Self.authorNames(authors)
             let authorWords = Set(authorNames.flatMap { Name($0).words })
@@ -111,16 +126,22 @@ struct ReferenceRanker: Sendable {
 
     /// The pages citing `path`: every non-reference page linking to it, and
     /// for each reduction or barrier among them, the concept pages linking
-    /// to that.
+    /// to that. `names` and `vias` keep, by path, each page's names and each
+    /// reduction's plain title once made, for the next paper.
     static func citers(
-        of path: String, byPath: [String: WikiPage], backlinks: [String: [WikiIndex.Backlink]]
+        of path: String, byPath: [String: WikiPage], backlinks: [String: [WikiIndex.Backlink]],
+        names: inout [String: [Name]], vias: inout [String: String]
     ) -> [Citer] {
         func isEdge(_ kind: PageKind) -> Bool { kind == .reduction || kind == .barrier }
         func citer(_ page: WikiPage, via: WikiPage?) -> Citer {
-            Citer(
-                path: page.path, title: page.title,
-                names: ([page.title] + page.aliases).map(Name.init),
-                via: via.map { RelationText.plain($0.title) })
+            let pageNames = Self.kept(page.path, in: &names) {
+                ([page.title] + page.aliases).map(Name.init)
+            }
+            var viaText: String?
+            if let via {
+                viaText = Self.kept(via.path, in: &vias) { RelationText.plain(via.title) }
+            }
+            return Citer(path: page.path, title: page.title, names: pageNames, via: viaText)
         }
 
         var result: [Citer] = []
@@ -140,6 +161,17 @@ struct ReferenceRanker: Sendable {
             }
         }
         return result
+    }
+
+    /// The value `values` holds for `key`, made by `make` and kept there the
+    /// first time.
+    private static func kept<Value>(
+        _ key: String, in values: inout [String: Value], _ make: () -> Value
+    ) -> Value {
+        if let value = values[key] { return value }
+        let value = make()
+        values[key] = value
+        return value
     }
 
     /// `Alice, Bob, and Carol` or `Alice and Bob`: one name per author.
