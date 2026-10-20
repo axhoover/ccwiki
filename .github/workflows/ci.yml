@@ -12,8 +12,9 @@
 #
 # Cost: this is a private repository, and a macOS runner minute counts ten
 # times against the account's free Actions quota. Every push gets the
-# compile-and-test half (~40 s); assembling and uploading the app is kept
-# for pull requests, main, and manual runs.
+# compile-and-test half (~40 s); assembling and uploading the app, and the
+# timings measured alone (2–3 minutes), are kept for pull requests, main,
+# and manual runs.
 name: CI
 
 on:
@@ -82,6 +83,25 @@ jobs:
 
       - name: Corpus and search relevance
         run: make test-corpus WIKI="$RUNNER_TEMP/wiki" 2>&1 | tee "$RUNNER_TEMP/corpus.log"; exit ${PIPESTATUS[0]}
+
+      # The load and render timings again, with no other suite beside them:
+      # the numbers plans/efficiency.md compares (§2.3). Inside
+      # `make test-corpus` every suite runs at once, and a phase whose code
+      # did not change moved by up to 41% between runs. Kept for pull
+      # requests, main and manual runs, as `make release` is: a macOS minute
+      # counts ten times against the quota. It runs after a failed step too,
+      # whose timings are still worth reading, but not in a cancelled run.
+      # Without a clone (the clone step failed, or never ran) it has nothing
+      # to time.
+      - name: Load and render timings, measured alone
+        if: ${{ !cancelled() && (github.event_name != 'push' || github.ref == 'refs/heads/main') }}
+        env:
+          CCWIKI_WIKI: ${{ runner.temp }}/wiki
+          CCWIKI_TIMINGS_ALONE: "1"
+        run: |
+          [ -d "$CCWIKI_WIKI/content" ] || exit 0
+          git -C "$CCWIKI_WIKI" log -1 --format='wiki %h %cs'
+          swift test --no-parallel --filter 'IncrementalCorpusTests|RenderCorpusTests'
 
       - name: Relevance report
         if: always()
