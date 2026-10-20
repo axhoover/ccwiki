@@ -342,23 +342,28 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
   a string; an option that is an object or a function (`strict` and
   `trust` can be functions), which could answer otherwise under the same
   name; a formula with an `@` (below); a call that throws.
-- **What empties it** (the `\gdef` rule): a formula holding `\gdef`,
-  `\xdef` or `\global` (as a control word: `\gdefault` is not one), or any
-  call in KaTeX's `globalGroup`. Those are the only ways a formula writes
-  the shared table: `\def`, `\edef`, `\let` and `\newcommand` are local to
-  their formula, and KaTeX undoes them when it ends, error or not
-  (`Parser.parse` ends every group in a `finally`). The call itself is not
-  kept, and the memo is emptied before it runs, so nothing rendered with
-  the old table survives it. KaTeX 0.16.47 also keeps two names of its own
-  in the table between formulas: `\@eqnsw`, which a numbered environment
-  (`align`, `gather`, `equation`) and `\nonumber` set globally, and
-  `\df@tag`, which `\tag` sets and every formula deletes as it starts.
-  KaTeX sets `\@eqnsw` before it reads it, so only a formula that names it
-  sees what another left, and every name KaTeX keeps has an `@`: a formula
-  with an `@` is never kept.
+- **What empties it, and turns it off** (the `\gdef` rule): a formula
+  holding `\gdef`, `\xdef` or `\global` (as a control word: `\gdefault` is
+  not one), or any call in KaTeX's `globalGroup`. Those are the only ways
+  a formula's own text writes the shared table: `\def`, `\edef`, `\let`
+  and `\newcommand` are local to their formula, and KaTeX undoes them when
+  it ends, error or not (`Parser.parse` ends every group in a `finally`).
+  The call itself is not kept, and the memo is emptied before it runs, so
+  nothing rendered with the old table survives it. Then nothing is kept
+  until `ensureMarkdown` installs another table: what the formula defined
+  stays in the table, and can define more when a later formula uses it,
+  which that formula's text does not show (`$\gdef\foo{\gdef\bar{1}}$`,
+  then `$\foo$`, changes what `$\bar$` renders). KaTeX 0.16.47 also keeps
+  two names of its own in the table between formulas: `\@eqnsw`, which a
+  numbered environment (`align`, `gather`, `equation`) and `\nonumber` set
+  globally, and `\df@tag`, which `\tag` sets and every formula deletes as
+  it starts. KaTeX sets `\@eqnsw` before it reads it, so only a formula
+  that names it sees what another left, and every name KaTeX keeps has an
+  `@`: a formula with an `@` is never kept.
 - **Off**, for as long as a table stands, when any macro body holds a
   global definition or an `@`: every formula using that macro could
-  change the table, or read what another formula left.
+  change the table, or read what another formula left. And from a global
+  definition on, as above.
 - **Size**: 1,000 formulas, the least recently used going first: a hit
   moves its entry to the end of the map, and a miss at the limit deletes
   the first.

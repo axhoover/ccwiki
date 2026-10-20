@@ -73,7 +73,10 @@ struct RenderMemoTests {
         }
     }
 
-    @Test("a global definition is never remembered, and empties the memo")
+    /// A render that installs a table other than `memoScript`'s.
+    private static let otherTable = #"CCwiki.render({ path: "a", markdown: "", links: {}, macros: {} });"#
+
+    @Test("a global definition is never remembered, empties the memo and turns it off until another table")
     func globalDefinitions() throws {
         for definition in [#"\gdef\z{1}"#, #"\xdef\z{1}"#, #"\global\let\z\relax"#, #"\global\def\z{1}"#] {
             let script = try memoScript()
@@ -81,17 +84,21 @@ struct RenderMemoTests {
             #expect(try script.tex(definition) == "2:" + definition)
             #expect(try script.tex(definition) == "3:" + definition)
             #expect(try script.tex("y") == "4:y", "rendered again after \(definition)")
-            #expect(try script.tex("y") == "4:y")
+            // What it defined can define more, which no formula shows.
+            #expect(try script.tex("y") == "5:y", "nothing kept after \(definition)")
+            try script.evaluate(Self.otherTable)
+            #expect(try script.tex("y") == "6:y")
+            #expect(try script.tex("y") == "6:y", "kept again with another table")
         }
         let script = try memoScript()
-        #expect(try script.tex("y") == "1:y")
-        // In KaTeX's global group every definition is global.
-        #expect(try script.tex(#"\def\z{1}"#, "{ globalGroup: true }") == #"2:\def\z{1}"#)
-        #expect(try script.tex("y") == "3:y")
         // A control word that only begins like one defines nothing.
-        #expect(try script.tex(#"\gdefault"#) == #"4:\gdefault"#)
-        #expect(try script.tex(#"\gdefault"#) == #"4:\gdefault"#)
-        #expect(try script.tex("y") == "3:y")
+        #expect(try script.tex(#"\gdefault"#) == #"1:\gdefault"#)
+        #expect(try script.tex(#"\gdefault"#) == #"1:\gdefault"#)
+        #expect(try script.tex("y") == "2:y")
+        // In KaTeX's global group every definition is global.
+        #expect(try script.tex(#"\def\z{1}"#, "{ globalGroup: true }") == #"3:\def\z{1}"#)
+        #expect(try script.tex("y") == "4:y")
+        #expect(try script.tex("y") == "5:y")
     }
 
     @Test("a call that throws leaves nothing behind")
@@ -133,7 +140,7 @@ struct RenderMemoTests {
             let script = try memoScript(table: MarkdownScript.literal([#"\g"#: body]))
             try script.evaluate(#"tex("x"); tex("x");"#)
             #expect(try script.count("katexCalls") == 2, "with \(body) in the table")
-            try script.evaluate(#"CCwiki.render({ path: "a", markdown: "", links: {}, macros: {} });"#)
+            try script.evaluate(Self.otherTable)
             try script.evaluate(#"tex("x"); tex("x");"#)
             #expect(try script.count("katexCalls") == 3, "on again with a table that cannot")
         }
@@ -141,25 +148,37 @@ struct RenderMemoTests {
 
     // MARK: - The memo against KaTeX itself
 
-    @Test("a \\gdef, and the \\@eqnsw KaTeX keeps between formulas, read as KaTeX reads them")
-    func sharedTable() throws {
-        let table = #"{ "\\calA": "\\mathcal{A}" }"#
+    /// `formulas` in display mode, in order, through the patch with its memo
+    /// and through the patch as it was before, each in a new context with
+    /// `table`: every answer must be KaTeX's. Returns the answers.
+    private func sameAsKatex(_ formulas: [String], table: String) throws -> [String] {
         let patched = try Self.renderer(table: table)
         let plain = try Self.unpatched(table: table)
-        let formulas = [
-            #"\foo"#, #"\gdef\foo{x}"#, #"\foo"#, #"\foo"#, #"\calA"#, #"\calA"#,
-            #"\@eqnsw"#, #"\begin{align}a&=b\\c&=d\end{align}"#, #"\@eqnsw"#, #"x\nonumber"#, #"\@eqnsw"#,
-        ]
         var answers: [String] = []
         for formula in formulas {
             let answer = try patched.tex(formula, "{ displayMode: true }")
             #expect(try answer == plain.tex(formula, "{ displayMode: true }"), "\(formula)")
             answers.append(answer)
         }
-        // Each is a case where what an earlier formula did shows.
-        #expect(answers[0] != answers[2], #"\foo, after \gdef\foo"#)
-        #expect(answers[6] != answers[8], #"\@eqnsw, after an align"#)
-        #expect(answers[8] != answers[10], #"\@eqnsw, after \nonumber"#)
+        return answers
+    }
+
+    @Test("what one formula leaves in KaTeX's table for the next reads as KaTeX reads it")
+    func sharedTable() throws {
+        let table = #"{ "\\calA": "\\mathcal{A}" }"#
+        // Each a case where what an earlier formula did shows.
+        let defined = try sameAsKatex(
+            [#"\foo"#, #"\gdef\foo{x}"#, #"\foo"#, #"\foo"#, #"\calA"#, #"\calA"#], table: table)
+        #expect(defined[0] != defined[2], #"\foo, after \gdef\foo"#)
+        // `\foo` defines `\bar`, which no formula's text shows.
+        let unseen = try sameAsKatex(
+            [#"\bar"#, #"\gdef\foo{\gdef\bar{1}}"#, #"\bar"#, #"\foo"#, #"\bar"#], table: table)
+        #expect(unseen[2] != unseen[4], #"\bar, after \foo defined it"#)
+        let switched = try sameAsKatex(
+            [#"\@eqnsw"#, #"\begin{align}a&=b\\c&=d\end{align}"#, #"\@eqnsw"#, #"x\nonumber"#, #"\@eqnsw"#],
+            table: table)
+        #expect(switched[0] != switched[2], #"\@eqnsw, after an align"#)
+        #expect(switched[2] != switched[4], #"\@eqnsw, after \nonumber"#)
     }
 
     // MARK: - The corpus

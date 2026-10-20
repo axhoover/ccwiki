@@ -68,8 +68,12 @@
       var merged = Object.assign(
         { macros: currentMacros || {}, throwOnError: false, strict: "ignore" }, options || {});
       if (writesMacros(expr, merged)) {
-        // What the memo holds was rendered with the table as it was.
+        // What the memo holds was rendered with the table as it was. And
+        // what this defines can define more when a later formula uses it,
+        // which no formula's text shows, so nothing is kept until
+        // `ensureMarkdown` installs another table.
         katexMemo.clear();
+        katexMemoOn = false;
         return original(expr, merged);
       }
       var key = katexMemoKey(expr, merged);
@@ -103,7 +107,8 @@
    *  about 1.6 M characters. render-pipeline.md has the hit rates. */
   var KATEX_MEMO_LIMIT = 1000;
   var katexMemo = new Map();
-  /** Off while a macro of the table could change what a formula reads. */
+  /** Off while a macro of the table could change what a formula reads, and
+   *  after a formula has defined one. */
   var katexMemoOn = true;
   /** What writes KaTeX's shared macro table from inside a formula: `\gdef`,
    *  `\xdef`, and `\global` before a `\def`, `\edef`, `\let` or
