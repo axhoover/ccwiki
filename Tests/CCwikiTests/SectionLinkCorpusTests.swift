@@ -81,7 +81,10 @@ struct SectionLinkCorpusTests {
         #expect(site.host == "cryptology.city")
         #expect(site.fragment == "σ-protocols")
         #expect(release.app.hasPrefix("ccwiki://wiki/page/Primitives%2Fprf.md#"))
-        #expect(release.app.unicodeScalars.allSatisfy(\.isASCII), "\(release.app)")
+        // Worked out first: #expect cannot take a key path handed to a
+        // rethrowing call such as allSatisfy.
+        let isASCII = release.app.unicodeScalars.allSatisfy(\.isASCII)
+        #expect(isASCII, "\(release.app)")
 
         let dev = try Self.links("σ-protocols", of: Self.prf, in: index, channel: .dev)
         #expect(dev.app == "ccwiki-dev" + String(release.app.dropFirst("ccwiki".count)))
