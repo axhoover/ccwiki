@@ -311,4 +311,53 @@ struct LoadEquivalenceCorpusTests {
         #expect(differing.isEmpty, "resolved differently in a sweep: \(differing)")
         print("L4 resolutions per sweep: \(links) links, \(resolutions.count) resolved")
     }
+
+    // MARK: L6. Section cards once per load
+
+    @Test("a section card asked for twice is the one worked out directly")
+    func sectionCardsOnFixtures() {
+        let page = WikiPage(path: "Primitives/a.md",
+                            text: "# A\n\nIntro.\n\n## Syntax\n\nThe syntax.\n\n## Syntax\n\nAgain.\n")
+        let previews = LinkPreviews(index: Self.index([page]), manifest: .empty, labels: .empty)
+        for anchor in ["syntax", "syntax-1", "a", "nowhere"] {
+            let expected = LinkPreviews.sectionCard(for: page, anchor: anchor, manifest: .empty)
+                ?? previews.preview(path: page.path, anchor: nil)
+            #expect(previews.preview(path: page.path, anchor: anchor) == expected, "#\(anchor)")
+            #expect(previews.preview(path: page.path, anchor: anchor) == expected, "#\(anchor), again")
+        }
+        #expect(previews.preview(path: page.path, anchor: "syntax-1")?.excerpt == "Again.")
+        #expect(previews.preview(path: "Primitives/none.md", anchor: "syntax") == nil)
+    }
+
+    @Test("on the corpus, every section card asked for twice is the one worked out directly")
+    func sectionCardsOnCorpus() {
+        guard let corpus = Self.corpus else { return }
+        let previews = LinkPreviews(index: corpus.index, manifest: corpus.manifest, labels: corpus.labels)
+        let pages = corpus.pages
+        let anchors = pages.map { $0.headings().map(\.id) }
+        func cards(_ card: (WikiPage, String) -> LinkPreview?) -> [[LinkPreview?]] {
+            pages.indices.map { i in anchors[i].map { card(pages[i], $0) } }
+        }
+
+        // What `preview` returned before: the section's card, else the page's.
+        let direct = Self.timed {
+            cards { page, anchor in
+                LinkPreviews.sectionCard(for: page, anchor: anchor, manifest: corpus.manifest)
+                    ?? previews.preview(path: page.path, anchor: nil)
+            }
+        }
+        let first = Self.timed { cards { previews.preview(path: $0.path, anchor: $1) } }
+        let second = Self.timed { cards { previews.preview(path: $0.path, anchor: $1) } }
+        let firstDiffering = Self.differing(pages, direct.value, first.value)
+        let secondDiffering = Self.differing(pages, direct.value, second.value)
+        #expect(firstDiffering.isEmpty && secondDiffering.isEmpty,
+                "section cards differ on \(firstDiffering + secondDiffering)")
+
+        let count = anchors.reduce(0) { $0 + $1.count }
+        Self.report("L6 section cards once per load", [
+            "\(count) anchors, worked out directly \(LoadTimings.format(direct.duration))",
+            "through preview(path:anchor:) the first time \(LoadTimings.format(first.duration))",
+            "the second time \(LoadTimings.format(second.duration))",
+        ])
+    }
 }

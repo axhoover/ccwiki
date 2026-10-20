@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The card shown when the pointer rests on a link to a wiki page.
 ///
@@ -79,8 +80,8 @@ struct LinkPreview: Hashable, Sendable {
 ///
 /// Built in `loadLibrary`'s detached task beside `RelationLabels`: one
 /// paragraph scan per page, a few tens of milliseconds for the corpus. A
-/// link to `page#anchor` gets a card for that section, worked out when the
-/// page holding the link is rendered; there are seldom more than ten.
+/// link to `page#anchor` gets a card for that section, worked out the first
+/// time a page holding the link is rendered; there are seldom more than ten.
 struct LinkPreviews: Sendable {
 
     static let empty = LinkPreviews(pages: [:], manifest: .empty, cards: [:])
@@ -89,6 +90,8 @@ struct LinkPreviews: Sendable {
     private let pages: [String: WikiPage]
     private let manifest: RelationsManifest
     private let cards: [String: LinkPreview]
+    /// The section cards worked out so far, from `pages` and `manifest`.
+    private let sections = SectionCards()
 
     private init(
         pages: [String: WikiPage], manifest: RelationsManifest, cards: [String: LinkPreview]
@@ -114,9 +117,11 @@ struct LinkPreviews: Sendable {
     /// heading on the page, else the page's. Nil for a page this library does
     /// not have.
     func preview(path: String, anchor: String?) -> LinkPreview? {
-        if let anchor, !anchor.isEmpty, let page = pages[path],
-           let section = Self.sectionCard(for: page, anchor: anchor, manifest: manifest) {
-            return section
+        if let anchor, !anchor.isEmpty, let page = pages[path] {
+            let section = sections.card(path: path, anchor: anchor) {
+                Self.sectionCard(for: page, anchor: anchor, manifest: manifest)
+            }
+            if let section { return section }
         }
         return cards[path]
     }
@@ -424,5 +429,35 @@ struct LinkPreviews: Sendable {
         ]
         if nonStrings.contains(text) || (text.hasPrefix("{") && text.hasSuffix("}")) { return "" }
         return text
+    }
+}
+
+/// The section cards one `LinkPreviews` has worked out, by page and anchor.
+/// Each card reads its page's headings, and a page renders again on every
+/// visit, so without this every render of a page with section links reads
+/// each target page again (plans/efficiency.md, L6).
+///
+/// A card is a function of the pages and the manifest the previews hold,
+/// which never change, so the box lives and dies with them and is never
+/// invalidated (SWIFTUI-RULES §3.2): a load builds new previews, with an
+/// empty box. A nil card is kept too, for an anchor that names no section
+/// or the page's own H1. A lock, since renders may come from any task.
+private final class SectionCards: Sendable {
+
+    private struct Key: Hashable, Sendable {
+        let path: String
+        let anchor: String
+    }
+
+    private let cards = OSAllocatedUnfairLock<[Key: LinkPreview?]>(initialState: [:])
+
+    /// The card for `anchor` on the page at `path`, from `make` the first
+    /// time it is asked for.
+    func card(path: String, anchor: String, _ make: () -> LinkPreview?) -> LinkPreview? {
+        let key = Key(path: path, anchor: anchor)
+        if let known = cards.withLock({ $0[key] }) { return known }
+        let card = make()
+        cards.withLock { $0[key] = .some(card) }
+        return card
     }
 }
