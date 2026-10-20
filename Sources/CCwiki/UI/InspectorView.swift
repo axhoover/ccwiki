@@ -91,6 +91,11 @@ struct InspectorView: View {
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
+                // The page's own rows, from the top. A row is known by its
+                // linking page, so without this a page that links here and
+                // to the last page read would bring its mentions listed as
+                // they were left there.
+                .id(session.location.path)
             }
         }
     }
