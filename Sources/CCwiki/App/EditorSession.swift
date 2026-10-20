@@ -171,10 +171,20 @@ final class EditorSession {
         if case .conflict = saveState {
             // Nothing is saved until the conflict is settled.
         } else {
-            saveState = hasUnsavedText ? .saving : .saved
+            updateSaveState()
             scheduleSave()
         }
         schedulePreview()
+    }
+
+    /// Saving while text is unsaved, saved otherwise; assigned only when
+    /// that changes. An assignment of an equal value can still notify the
+    /// readers, the editor's chrome and Jobs' Open Draft PR gate, and
+    /// typing would then redraw them on every key rather than twice per
+    /// burst.
+    private func updateSaveState() {
+        let next: SaveState = hasUnsavedText ? .saving : .saved
+        if saveState != next { saveState = next }
     }
 
     /// The cursor is on `line` (1-based): the preview follows it, at most
@@ -229,7 +239,7 @@ final class EditorSession {
         guard case .conflict(let disk, _) = saveState else { return }
         // The disk as it is now is what this write replaces.
         diskText = disk
-        saveState = hasUnsavedText ? .saving : .saved
+        updateSaveState()
         await saveNow()
     }
 
