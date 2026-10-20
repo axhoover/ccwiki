@@ -427,10 +427,12 @@
     currentMacros = macros;
     currentMacrosKey = key;
     // Formulas rendered with another table are of no use, and none is kept
-    // while a macro could reach what one formula leaves for the next.
+    // while a macro could reach what one formula leaves for the next, or
+    // is one KaTeX changes: it deletes `\color` and `\current@color` from
+    // the table after every formula, and every name of its own has an `@`.
     katexMemo.clear();
     katexMemoOn = !Object.keys(macros).some(function (name) {
-      return sharesMacroState(String(macros[name]));
+      return name === "\\color" || name.indexOf("@") >= 0 || sharesMacroState(String(macros[name]));
     });
     installKatexMacros();
     md = markdownLibrary.create(macros);

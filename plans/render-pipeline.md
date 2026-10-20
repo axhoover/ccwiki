@@ -362,7 +362,11 @@ pseudocode's), keeps what it rendered in a `Map`, one per web view:
   `@`: a formula with an `@` is never kept.
 - **Off**, for as long as a table stands, when any macro body holds a
   global definition or an `@`: every formula using that macro could
-  change the table, or read what another formula left. And from a global
+  change the table, or read what another formula left. Off too when a
+  macro's name is `\color` or has an `@`: after every formula KaTeX
+  deletes `\color` and `\current@color` from the table, which `\color`
+  and `\right` read, so a table naming either changes at the first
+  formula, and every name of KaTeX's own has an `@`. And from a global
   definition on, as above.
 - **Size**: 1,000 formulas, the least recently used going first: a hit
   moves its entry to the end of the map, and a miss at the limit deletes

@@ -134,12 +134,17 @@ struct RenderMemoTests {
         #expect(try script.tex(#"\calA"#) == #"2:\calA"#)
     }
 
-    @Test("nothing is remembered while a macro could reach what one formula leaves for the next")
+    @Test("nothing is remembered while a macro could reach what one formula leaves for the next, or KaTeX changes it")
     func tableThatSharesState() throws {
-        for body in [#"\gdef\h{1}"#, #"\@eqnsw"#] {
-            let script = try memoScript(table: MarkdownScript.literal([#"\g"#: body]))
+        let tables: [[String: String]] = [
+            [#"\g"#: #"\gdef\h{1}"#], [#"\g"#: #"\@eqnsw"#],
+            // KaTeX deletes these two from the table after every formula.
+            [#"\color"#: #"\textcolor"#], [#"\current@color"#: "blue"],
+        ]
+        for table in tables {
+            let script = try memoScript(table: MarkdownScript.literal(table))
             try script.evaluate(#"tex("x"); tex("x");"#)
-            #expect(try script.count("katexCalls") == 2, "with \(body) in the table")
+            #expect(try script.count("katexCalls") == 2, "with \(MarkdownScript.literal(table))")
             try script.evaluate(Self.otherTable)
             try script.evaluate(#"tex("x"); tex("x");"#)
             #expect(try script.count("katexCalls") == 3, "on again with a table that cannot")
@@ -179,6 +184,14 @@ struct RenderMemoTests {
             table: table)
         #expect(switched[0] != switched[2], #"\@eqnsw, after an align"#)
         #expect(switched[2] != switched[4], #"\@eqnsw, after \nonumber"#)
+        // KaTeX deletes `\color` and `\current@color` from the table after
+        // every formula, so a table naming either changes at the first.
+        let colored = try sameAsKatex(
+            [#"\color{red}{x}y"#, #"\color{red}{x}y"#], table: #"{ "\\color": "\\textcolor" }"#)
+        #expect(colored[0] != colored[1], #"\color, after a formula"#)
+        let delimited = try sameAsKatex(
+            [#"\left( x \right)"#, #"\left( x \right)"#], table: #"{ "\\current@color": "blue" }"#)
+        #expect(delimited[0] != delimited[1], #"\right, after a formula"#)
     }
 
     // MARK: - The corpus
