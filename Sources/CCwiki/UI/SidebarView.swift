@@ -10,6 +10,8 @@ struct SidebarView: View {
     /// The selection and the open folders are this window's; the tree and
     /// its counts are every window's.
     @Environment(ReaderSession.self) private var session
+    /// Whether this window's Saved section is open.
+    @State private var showsSaved = true
 
     var body: some View {
         @Bindable var session = session
@@ -17,6 +19,22 @@ struct SidebarView: View {
         ScrollViewReader { proxy in
             List(selection: $session.sidebarSelection) {
                 if model.index != nil {
+                    // The pages the reader saved, in the order they gave
+                    // them, the same in every window (plans/efficiency.md
+                    // §3.3). Hidden when there are none. Out of the tree's
+                    // selection: their ids are not paths, and the rows are
+                    // selection-disabled.
+                    if !model.savedPages.isEmpty {
+                        Section("Saved", isExpanded: $showsSaved) {
+                            ForEach(model.savedPages.entries) { entry in
+                                SavedRow(entry: entry, page: model.index?.pages[entry.path])
+                                    .selectionDisabled()
+                            }
+                            .onMove { model.moveSaved(fromOffsets: $0, toOffset: $1) }
+                        }
+                        .listSectionSeparator(.hidden)
+                    }
+
                     // Only when the tree has nothing to say about where you
                     // are — which is exactly when you are on a reference.
                     if !session.citingPages.isEmpty {
@@ -273,5 +291,92 @@ private struct CitingRow: View, Equatable {
         .contextMenu {
             OpenElsewhereItems { session.open(location, $0) }
         }
+    }
+}
+
+/// A saved page (plans/efficiency.md §3.3). A button, as a Cited by row is:
+/// out of the tree's selection, and ⌘-click is a link's. The sidebar applies
+/// `.selectionDisabled()`.
+///
+/// A page the wiki no longer has, and that reconciliation could not find by
+/// its title, stays where the reader put it, dimmed, and a click searches
+/// the wiki for its title.
+private struct SavedRow: View {
+    @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
+    let entry: SavedPages.Entry
+    /// Nil when the wiki no longer has the page.
+    let page: WikiPage?
+
+    var body: some View {
+        let location = AppModel.Location.page(path: entry.path, anchor: entry.anchor)
+        Button {
+            if page == nil {
+                searchForTitle()
+            } else {
+                session.open(location, LinkDisposition.current)
+            }
+        } label: {
+            // Dimmed by colour, never by weight, when the page is gone.
+            HStack(spacing: Theme.small) {
+                Image(systemName: page == nil ? "bookmark.slash" : "bookmark")
+                    .font(.caption)
+                    .foregroundStyle(page == nil
+                        ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(entry.title)
+                        .font(Theme.Fonts.row)
+                        .foregroundStyle(page == nil
+                            ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(Theme.Fonts.rowSubtitle)
+                            .foregroundStyle(page == nil
+                                ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .contextMenu {
+            if page == nil {
+                Button("Search the Wiki for “\(entry.title)”") { searchForTitle() }
+            } else {
+                OpenElsewhereItems { session.open(location, $0) }
+            }
+            Divider()
+            Button("Remove from Saved") { model.removeSaved(entry) }
+        }
+        // The context menu is invisible to VoiceOver; a named action is not.
+        .accessibilityAction(named: "Remove from Saved") { model.removeSaved(entry) }
+    }
+
+    /// The second line: the paper a reference's key stands for, as in the
+    /// tree, or why the row is dimmed.
+    private var subtitle: String? {
+        guard let page else { return "No longer in the wiki" }
+        return page.kind == .reference ? page.displayTitle : nil
+    }
+
+    private var tooltip: Text {
+        guard page != nil else {
+            return Text("No longer in the wiki. Click to search for “\(entry.title)”.")
+        }
+        return Text("Saved \(entry.savedAt, format: .dateTime.day().month().year())")
+    }
+
+    /// ⌘S, opened on the page's title.
+    private func searchForTitle() {
+        model.searchQuery = entry.title
+        session.searchPresented = true
     }
 }

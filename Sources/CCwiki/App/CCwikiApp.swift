@@ -396,6 +396,16 @@ struct CCwikiCommands: Commands {
 
             Divider()
 
+            // ⌘D, Safari's key for a bookmark. The page, not the section
+            // being read; the sidebar's Saved section lists it in every
+            // window (plans/efficiency.md §3.3).
+            Button(isCurrentPageSaved ? "Remove from Saved" : "Save Page") {
+                guard let model, let page = session?.currentPage else { return }
+                model.toggleSaved(page)
+            }
+            .keyboardShortcut("d", modifiers: .command)
+            .disabled(session?.currentPage == nil)
+
             Button("Open on cryptology.city") {
                 guard let url = session?.currentSiteURL else { return }
                 NSWorkspace.shared.open(url)
@@ -473,6 +483,13 @@ struct CCwikiCommands: Commands {
             Button("Open Draft PR") { openDraftPRAction?.perform() }
                 .disabled(openDraftPRAction?.isEnabled != true)
         }
+    }
+
+    /// Whether the key reader's page is saved, which turns Save Page into
+    /// Remove from Saved.
+    private var isCurrentPageSaved: Bool {
+        guard let model, let page = session?.currentPage else { return false }
+        return model.isSaved(page.path)
     }
 
     /// A correction of the key reader's page, which carries what is selected
