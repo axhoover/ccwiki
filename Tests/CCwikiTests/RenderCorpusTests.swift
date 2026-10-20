@@ -104,7 +104,11 @@ import Testing
     /// What the test calls, one page or file at a time: each payload is
     /// parsed in the call, as `WebController`'s script literal is. A review
     /// starts as `CCwiki.renderReview` does, by making its macro table the
-    /// current one, which installs `ccwiki.js`'s KaTeX patch.
+    /// current one, which installs `ccwiki.js`'s KaTeX patch, and builds its
+    /// markdown-it over that same parsed table, as `ensureMarkdown` does: so
+    /// KaTeX is handed the object `ccwiki.js` holds as current, not an equal
+    /// copy that a memo keyed on that object would pass over. The warm-up's
+    /// table and the measured one differ, so each call makes its own current.
     static let harness = #"""
         var pagePayloads = [];
         var warmUpPayloads = [];
@@ -123,8 +127,9 @@ import Testing
         function firstHTML(i) { return firstRenders[i]; }
         function addReview(file) { reviewFiles.push(file); }
         function useReviewMacros(macros) {
-          CCwiki.render({ path: "", markdown: "", links: {}, notices: [], macros: JSON.parse(macros) });
-          reviewMarkdown = CCwikiMarkdown.create(JSON.parse(macros));
+          var table = JSON.parse(macros);
+          CCwiki.render({ path: "", markdown: "", links: {}, notices: [], macros: table });
+          reviewMarkdown = CCwikiMarkdown.create(table);
         }
         function reviewAt(i) {
           reviewResults[i] = CCwikiMarkdown.reviewEntries(reviewMarkdown, JSON.parse(reviewFiles[i]));
