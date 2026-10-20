@@ -303,17 +303,25 @@ struct RenderMemoTests {
         let reached = try #require(report["reached"] as? [Int])
         let simulated = try #require(report["simulated"] as? Int)
         let lines = try #require(report["lines"] as? [String])
+        // Whether ccwiki.js kept nothing for a while, which the model leaves
+        // out: a macro that could share KaTeX's state, or a global
+        // definition. Then the hit rates are the wiki's, not the code's.
+        let memoOff = report["memoOff"] as? Bool ?? false
         #expect(formulas > 0)
         try #require(reached.count == 2)
         // The memo as the hit rates below model it: 1,000 formulas, the
         // least recently used going first.
-        #expect(reached.reduce(0, +) == simulated)
-        #expect(reached.allSatisfy { $0 < formulas }, "formulas the wiki repeats were remembered")
+        #expect(memoOff || reached.reduce(0, +) == simulated)
+        #expect(memoOff || reached.allSatisfy { $0 < formulas }, "formulas the wiki repeats were remembered")
 
         func remembered(_ rendered: Int) -> String {
             String(format: "%.1f%%", 100 * Double(formulas - rendered) / Double(formulas))
         }
-        let summary: [String] = [
+        let off: [String] = memoOff
+            ? ["the memo was off for some or all of this wiki (a macro that could share KaTeX's state, "
+               + "or a global definition), so the hit rates were not checked"]
+            : []
+        let summary: [String] = off + [
             "KaTeX through the patch before the memo: \(times[0]) ms",
             "pass 1: \(reached[0]) rendered, \(remembered(reached[0])) remembered, \(times[1]) ms",
             "pass 2: \(reached[1]) rendered, \(remembered(reached[1])) remembered, \(times[2]) ms",
@@ -526,6 +534,16 @@ struct RenderMemoTests {
         var renders: [String: (before: Int, after: Int)] = [:]
         var different: [String] = []
         var count = 0
+        // Whether a macro could change KaTeX's table, as `mayChangeKatexTable`
+        // asks: then every review renders every block. Read before the
+        // reviews, whose formulas can write into the table.
+        let tableShares = try after.evaluate(#"""
+            Object.keys(TABLE).some(function (n) {
+              var b = TABLE[n];
+              return n === "\\color" || n.indexOf("@") >= 0 || typeof b !== "string" ||
+                /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/.test(b);
+            });
+            """#)?.toBool() == true
         for page in corpus.pages {
             for (name, file) in Self.reviewFiles(page) {
                 let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
@@ -548,7 +566,7 @@ struct RenderMemoTests {
         }
         #expect(different.isEmpty, "reviewed otherwise:\n  \(different.prefix(20).joined(separator: "\n  "))")
         let middle = try #require(renders["middle"])
-        #expect(middle.after < middle.before, "the blocks in gaps are never rendered")
+        #expect(tableShares || middle.after < middle.before, "the blocks in gaps are never rendered")
         #expect(renders["added"].map { $0.after == $0.before } == true, "a new file shows every block")
 
         let lines = ["middle", "ends", "added", "deleted"].compactMap { name -> String? in
@@ -700,6 +718,13 @@ struct RenderMemoTests {
     /// Counts the calls that reach KaTeX, and records each formula's key,
     /// as `ccwiki.js` makes it, and its HTML's length, for `report`.
     private static let rendererSetup = #"""
+        /** The table as Swift sends it with every page: a new object each
+         *  time, never the one KaTeX writes into. Sent `TABLE` itself, the
+         *  next page's table held what a formula had left there (`\@eqnsw`,
+         *  a `\tag`'s `\df@tag`), so ccwiki.js took it for another table and
+         *  emptied the memo, and its `@` turned the memo off, as the app's
+         *  tables never do. */
+        var SENT = JSON.stringify(TABLE);
         var reached = 0;
         var vendoredKatex = katex.renderToString;
         katex.renderToString = function () {
@@ -724,15 +749,26 @@ struct RenderMemoTests {
         function page(markdown) {
           formulas = [];
           rendered.push(formulas);
-          CCwiki.render({ path: "page", markdown: markdown, links: {}, macros: TABLE });
+          CCwiki.render({ path: "page", markdown: markdown, links: {}, macros: JSON.parse(SENT) });
           var html = stubPage.innerHTML;
           return html + pseudocodeOf(html);
         }
+
+        /** ccwiki.js keeps nothing while a macro could share KaTeX's state
+         *  (`ensureMarkdown`), nor from a global definition on (`writesMacros`).
+         *  Neither is modelled below, so `report` says when either applies. */
+        var tableShares = Object.keys(TABLE).some(function (name) {
+          var body = String(TABLE[name]);
+          return name === "\\color" || name.indexOf("@") >= 0 || body.indexOf("@") >= 0 ||
+            /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/.test(body);
+        });
+        var wrote = false;
 
         /** The memo's key for a call, as ccwiki.js makes it; null for one it
          *  never keeps. */
         function memoKey(expr, options) {
           var merged = Object.assign({ macros: TABLE, throwOnError: false, strict: "ignore" }, options || {});
+          if (merged.globalGroup || /\\(?:gdef|xdef|global)(?![A-Za-z@])/.test(String(expr))) wrote = true;
           if (typeof expr !== "string" || merged.macros !== TABLE || merged.globalGroup ||
               /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/.test(expr) ||
               expr.indexOf("@") >= 0) return null;
@@ -800,7 +836,8 @@ struct RenderMemoTests {
             lines.push([limit === Infinity ? "none" : String(limit), share(a), share(b), share(again),
               (memo.most / 1e6).toFixed(2) + " M characters"].join("   "));
           });
-          return { formulas: formulaCount, reached: reachedByPass, simulated: simulated, lines: lines };
+          return { formulas: formulaCount, reached: reachedByPass, simulated: simulated, lines: lines,
+                   memoOff: tableShares || wrote };
         }
         """#
 
