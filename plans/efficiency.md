@@ -1768,6 +1768,10 @@ specified. The tests are `BacklinkMentionTests` and `SourceLineMapTests`.
 The corpus test compares against `Legacy.backlinkMap(of:)`, L's copy in
 `Legacy/LegacyWiki.swift`: the `Legacy.Backlinks.backlinkMap` named above
 was the plan's name for it, and no such type was built.
+- **How many mentions were hidden.** The "702 mentions (22%)" above counts
+  a page's extra links to the target, not its extra lines. By distinct
+  lines, the model built here, a port counting wikilinks at `ab81f02`
+  gives 505 hidden lines (LWE 5, PKE 2).
 - **The groups' open state is the window's.** `ReaderSession` keeps what
   the reader opened and closed (`isBacklinkGroupOpen(_:among:)`,
   `toggleBacklinkGroup(_:among:)`). Held in the inspector's view, it was

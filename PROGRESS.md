@@ -17,7 +17,7 @@ reader and for how much of them CI can check:
   Barriers, then References, each under a header with a count that opens
   and closes it. A row still shows the line that mentions the page. A page
   that mentions it on several lines adds "N mentions", which lists every
-  line; 702 mentions, 22%, were hidden before. A click on the title or a
+  line; about 505 such lines were hidden before. A click on the title or a
   line opens the linking page scrolled to that line's block, outlined for a
   moment. ⌘-click and Open in New Tab land there too.
 - **Section links (F2).** A right-click under a heading, or on an outline
