@@ -77,6 +77,10 @@ final class EditorSession {
     /// for the preview to follow the cursor (§7.4).
     @ObservationIgnored private var previewLineMap: SourceLineMap?
     @ObservationIgnored private var hasRenderedPreview = false
+    /// The index the preview resolves links against, kept while the library
+    /// and the job's review are the ones it was built from: rebuilt when
+    /// either changes, never patched (`PreviewOverlay`).
+    @ObservationIgnored private var previewOverlay: PreviewOverlay?
 
     static let saveDelay: Duration = .milliseconds(500)
     static let refreshDelay: Duration = .seconds(1)
@@ -440,7 +444,9 @@ final class EditorSession {
         previewTask?.cancel()
         previewTask = nil
         guard isLoaded, hasPreview else { return }
-        var request = model.previewRequest(path: target.path, text: text, in: job)
+        let overlay = model.previewOverlay(for: job, reusing: previewOverlay)
+        previewOverlay = overlay
+        var request = model.previewRequest(path: target.path, text: text, overlay: overlay)
         request.preservesScroll = hasRenderedPreview
         // `render` skips the path it already shows.
         preview.invalidate()

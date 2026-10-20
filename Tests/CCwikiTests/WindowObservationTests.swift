@@ -90,6 +90,112 @@ struct WindowObservationTests {
         print("window observation: @Observable \(behaviour) observers of an equal assignment "
             + "on this toolchain; the editor's save-state guard is \(guardIs)")
     }
+
+    // MARK: The editor preview's overlay
+
+    /// The preview as `AppModel.previewRequest(path:text:in:)` built it at
+    /// 21df5d7, on every pause in typing, with the model's state passed in:
+    /// what a kept overlay must render the same as.
+    private static func legacyRequest(
+        _ page: WikiPage, index: WikiIndex, review: ReviewSnapshot?
+    ) -> RenderRequest {
+        let added = review.map(ReviewPayload.addedPages(in:)) ?? []
+        var renderer = PageRenderer(index: index.overlaying(added), hiddenPaths: [])
+        renderer.relations = .empty
+        renderer.relationLabels = .empty
+        renderer.buildsPreviews = false
+        let rendered = renderer.request(for: page)
+        return RenderRequest(
+            path: rendered.path, title: rendered.title, markdown: rendered.markdown,
+            html: nil,
+            links: ReviewPayload.markingNew(
+                rendered.links, newPages: ReviewPayload.newPagePaths(added, in: index)),
+            anchor: nil, notices: rendered.notices)
+    }
+
+    /// Everything a preview request carries, as `==` can compare it:
+    /// `RenderRequest` is not `Equatable`, and its JSON has no fixed key
+    /// order.
+    private static func facts(_ request: RenderRequest) -> [String] {
+        let links = request.links.sorted { $0.key < $1.key }.map {
+            "link \($0.key) → \($0.value.href) \($0.value.kind) "
+                + "\($0.value.external) \($0.value.isImage)"
+        }
+        let notices = request.notices.map { "notice \($0.level): \($0.text)" }
+        return [request.path, request.title, request.markdown] + links + notices
+    }
+
+    private static func facts(_ overlay: PreviewOverlay, _ page: WikiPage) -> [String] {
+        facts(overlay.request(for: page, hiddenPaths: [], relations: .empty, labels: .empty))
+    }
+
+    /// PRF as the ingestion leaves it: citing the reference page the same
+    /// change adds.
+    private static func editedPRF() throws -> WikiPage {
+        let file = try #require(ReviewPayloadTests.ingestion().files.first)
+        let text = try #require(file.newText)
+        return WikiPage(path: "Primitives/pseudorandom-function.md", text: text)
+    }
+
+    @Test("the preview's overlay is kept while the library and the review are the same")
+    func overlayKept() throws {
+        let index = ReviewPayloadTests.readerIndex()
+        let review = ReviewPayloadTests.ingestion()
+        let kept = PreviewOverlay(index: index, generation: 1, review: review)
+        #expect(kept.index.pages.count == index.pages.count + 1)
+
+        // Handed another index under the same generation, it gives the kept
+        // overlay back, nothing assembled: the generation stands for the
+        // index, and AppModel bumps it with every library it puts up.
+        let other = WikiIndex.assemble(
+            contentRoot: URL(fileURLWithPath: "/nonexistent/content"), files: [], pages: [:])
+        let reused = PreviewOverlay.reusing(kept, index: other, generation: 1, review: review)
+        #expect(reused.index.pages.count == kept.index.pages.count)
+        #expect(reused.newPages == kept.newPages)
+
+        // A pause in typing renders through it what the old path rendered.
+        let page = try Self.editedPRF()
+        #expect(Self.facts(reused, page)
+            == Self.facts(Self.legacyRequest(page, index: index, review: review)))
+        let citation = reused.request(for: page, hiddenPaths: [], relations: .empty, labels: .empty)
+            .links[ReviewPayloadTests.ggmLink]
+        #expect(citation?.kind == "new")
+    }
+
+    @Test("a new review or a new library builds the preview's overlay again")
+    func overlayRebuilt() throws {
+        let index = ReviewPayloadTests.readerIndex()
+        let review = ReviewPayloadTests.ingestion()
+        let page = try Self.editedPRF()
+        let kept = PreviewOverlay(index: index, generation: 1, review: review)
+        let before = Self.facts(kept, page)
+
+        // The review taken again no longer adds the reference page: the
+        // citation has no target, as the old path says.
+        let edited = ReviewPayloadTests.snapshot(try #require(review.files.first))
+        let refreshed = PreviewOverlay.reusing(kept, index: index, generation: 1, review: edited)
+        #expect(refreshed.newPages.isEmpty)
+        #expect(Self.facts(refreshed, page) != before)
+        #expect(Self.facts(refreshed, page)
+            == Self.facts(Self.legacyRequest(page, index: index, review: edited)))
+
+        // A sync brought the page into the library: a page now, not new.
+        let synced = index.overlaying(ReviewPayload.addedPages(in: review))
+        let loaded = PreviewOverlay.reusing(kept, index: synced, generation: 2, review: review)
+        #expect(loaded.newPages.isEmpty)
+        #expect(Self.facts(loaded, page) != before)
+        #expect(Self.facts(loaded, page)
+            == Self.facts(Self.legacyRequest(page, index: synced, review: review)))
+        let citation = loaded.request(for: page, hiddenPaths: [], relations: .empty, labels: .empty)
+            .links[ReviewPayloadTests.ggmLink]
+        #expect(citation?.kind == "page")
+
+        // The job gone: the reader's index alone.
+        let alone = PreviewOverlay.reusing(kept, index: index, generation: 1, review: nil)
+        #expect(alone.index.pages.count == index.pages.count)
+        #expect(Self.facts(alone, page)
+            == Self.facts(Self.legacyRequest(page, index: index, review: nil)))
+    }
 }
 
 /// One property, of the editor's own type, to ask the toolchain with.
