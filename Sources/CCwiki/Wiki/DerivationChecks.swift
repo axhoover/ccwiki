@@ -230,24 +230,23 @@ extension Derivation {
     /// does not find, in the curation's order. `pageText` takes a
     /// content-relative path (`Citation.contentPath`), as
     /// `statementLint(pageText:)` does, so this type stays free of I/O; a
-    /// page it cannot read counts as missing. Each page is read once.
+    /// page it cannot read counts as missing. Each page is read and parsed
+    /// once, however many citations it carries.
     func missingQuotes(pageText: (String) -> String?) -> [MissingQuote] {
-        var texts: [String: String] = [:]
+        var pages: [String: CurationQuote.Page] = [:]
         var unreadable: Set<String> = []
         var missing: [MissingQuote] = []
         for entry in curation.entries {
             for citation in entry.cites {
                 let path = citation.contentPath
-                if texts[path] == nil, !unreadable.contains(path) {
+                if pages[path] == nil, !unreadable.contains(path) {
                     if let text = pageText(path) {
-                        texts[path] = text
+                        pages[path] = CurationQuote.Page(text)
                     } else {
                         unreadable.insert(path)
                     }
                 }
-                let found = texts[path].map {
-                    CurationQuote.contains(citation.quote, section: citation.section, in: $0)
-                } ?? false
+                let found = pages[path]?.contains(citation.quote, section: citation.section) ?? false
                 if !found {
                     missing.append(MissingQuote(entryID: entry.id, citation: citation))
                 }

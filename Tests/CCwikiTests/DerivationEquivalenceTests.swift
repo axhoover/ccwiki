@@ -109,6 +109,90 @@ struct DerivationEquivalenceTests {
             + "of a load take \(LoadTimings.format(legacy)) with the 21df5d7 loop and "
             + "\(LoadTimings.format(current)) with the current one (min of 3)")
     }
+
+    // MARK: X2: each cited page parsed once
+
+    @Test("missingQuotes, parsing each page once, misses what a parse per citation misses",
+          .enabled(if: DerivationEquivalenceTests.corpus() != nil, DerivationCorpusTests.state.skipComment))
+    func quotesParsedOnce() throws {
+        let corpus = try #require(Self.corpus())
+        let derivation = corpus.derivation
+        let content = corpus.cloneRoot.appending(path: "content")
+        var read: [String: String] = [:]
+        var cited = 0
+        for entry in derivation.curation.entries {
+            for citation in entry.cites {
+                cited += 1
+                let path = citation.contentPath
+                if read[path] == nil {
+                    read[path] = try? String(contentsOf: content.appending(path: path), encoding: .utf8)
+                }
+            }
+        }
+        let texts = read
+
+        // The shape of 21df5d7: the page parsed again for each citation.
+        func perCitation() -> [Derivation.MissingQuote] {
+            var missing: [Derivation.MissingQuote] = []
+            for entry in derivation.curation.entries {
+                for citation in entry.cites {
+                    let found = texts[citation.contentPath].map {
+                        CurationQuote.contains(citation.quote, section: citation.section, in: $0)
+                    } ?? false
+                    if !found {
+                        missing.append(Derivation.MissingQuote(entryID: entry.id, citation: citation))
+                    }
+                }
+            }
+            return missing
+        }
+        let legacyMissing = perCitation()
+        let missing = derivation.missingQuotes { texts[$0] }
+        #expect(missing == legacyMissing)
+        #expect(Set(missing.map(\.citation)) == Set(legacyMissing.map(\.citation)))
+
+        let legacy = Self.fastest { _ = perCitation() }
+        let current = Self.fastest { _ = derivation.missingQuotes { texts[$0] } }
+        print("derivation quotes, \(corpus.modeName): \(cited) citations on \(texts.count) pages, "
+            + "\(missing.count) missing either way; \(LoadTimings.format(legacy)) parsing the page "
+            + "for each citation, \(LoadTimings.format(current)) parsing it once (min of 3)")
+    }
+
+    private struct QuoteCase: Decodable {
+        let name: String
+        let page: String
+        let section: String?
+        let quote: String
+        let found: Bool
+    }
+
+    private struct QuoteCases: Decodable {
+        let cases: [QuoteCase]
+    }
+
+    /// The shared cases hold the hazards a corpus page may lack: CRLF, a
+    /// lone CR, combining marks after a line break, fences, frontmatter,
+    /// a heading twice.
+    @Test("one parsed page answers every shared case on it, in any order, as the rule says")
+    func quotePageReused() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appending(path: "Fixtures/quote-cases.json")
+        let cases = try JSONDecoder().decode(QuoteCases.self, from: Data(contentsOf: url)).cases
+        let byPage = Dictionary(grouping: cases, by: \.page)
+        for (text, onPage) in byPage {
+            let page = CurationQuote.Page(text)
+            for testCase in onPage + onPage.reversed() {
+                #expect(page.contains(testCase.quote, section: testCase.section) == testCase.found,
+                        "\(testCase.name)")
+            }
+            // Every other case's quote, against this page, as a fresh parse answers it.
+            for other in cases {
+                #expect(page.contains(other.quote, section: other.section)
+                    == CurationQuote.contains(other.quote, section: other.section, in: text),
+                        "\(other.name) on the page of \(onPage[0].name)")
+            }
+        }
+    }
 }
 
 // MARK: - Helpers
