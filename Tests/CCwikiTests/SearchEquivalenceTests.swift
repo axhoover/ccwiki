@@ -182,6 +182,23 @@ struct SearchEquivalenceTests {
         return rows.sorted { $0.path < $1.path }
     }
 
+    /// Every row's outline, by path: the column track S added.
+    static func outlines(of file: URL) throws -> [String: String] {
+        let database = try SQLiteDatabase(path: file.path(percentEncoded: false))
+        let statement = try database.prepare("SELECT path, outline FROM doc")
+        var outlines: [String: String] = [:]
+        while try statement.step() {
+            outlines[statement.string(0)] = statement.string(1)
+        }
+        withExtendedLifetime(database) {}
+        return outlines
+    }
+
+    /// An outline as arrays, which compare.
+    static func pairs(_ outline: ConceptRanker.Outline?) -> [[String]]? {
+        outline?.map { [$0.text, $0.id] }
+    }
+
     /// The rows the code before track S wrote for `library`. `rebuild`
     /// writes no fingerprints.
     static func legacyRows(_ library: Library, fingerprinted: Bool = true) -> [Row] {
@@ -205,7 +222,8 @@ struct SearchEquivalenceTests {
     }
 
     /// Asserts that `index`, synced with `library`, holds what the code
-    /// before track S built for it: both rankers and every row.
+    /// before track S built for it: both rankers and every row, and that
+    /// every row's outline reads back as its page's headings.
     static func expectLegacy(
         _ index: SearchIndex, file: URL, _ library: Library, fingerprinted: Bool = true,
         after step: String
@@ -214,6 +232,13 @@ struct SearchEquivalenceTests {
         let expectedRows = Self.legacyRows(library, fingerprinted: fingerprinted)
         let sameRows = rows == expectedRows
         #expect(sameRows, "\(step): rows, \(Self.firstDifference(rows, expectedRows, path: \.path))")
+
+        let stored = try Self.outlines(of: file)
+        let unread = library.pages.filter { page in
+            Self.pairs(SearchIndex.outline(decoding: stored[page.path] ?? ""))
+                != Self.pairs(ConceptRanker.outline(page.headings()))
+        }
+        #expect(unread.isEmpty, "\(step): outlines read back wrong, \(unread.prefix(3).map(\.path))")
 
         let ranker = await index.ranker
         let legacy = Legacy.Concepts(pages: library.pages)
@@ -593,6 +618,111 @@ struct SearchEquivalenceTests {
               ReferenceRanker as before \(Self.milliseconds(legacyTime)); \
             handed the concept ranker's names \(Self.milliseconds(handedTime)); \
             naming each page once itself \(Self.milliseconds(namedTime))
+            """)
+    }
+
+    // MARK: S4. The concept ranker from the outlines the rows keep
+
+    @Test("an outline survives every hazard as JSON, the line break of a character reference too")
+    func outlineRoundTrip() throws {
+        let clone = try Self.hazardClone()
+        defer { clone.delete() }
+        let pages = Library(cloneRoot: clone.root).pages
+        let texts = pages.flatMap { $0.headings().map(\.text) }
+        #expect(texts.contains { $0.contains("\n") }, "a heading holds a line break")
+        #expect(texts.contains { $0.contains("\"") && $0.contains("\\") && $0.contains("/") })
+        for page in pages {
+            let outline = ConceptRanker.outline(page.headings())
+            let read = SearchIndex.outline(decoding: SearchIndex.encoded(outline))
+            #expect(Self.pairs(read) == Self.pairs(outline), "\(page.path)")
+        }
+        #expect(SearchIndex.outline(decoding: "[]")?.isEmpty == true, "a page with no headings")
+    }
+
+    @Test("a kept row's outline is what the ranker reads, and one that cannot be read is parsed")
+    func storedOutlines() async throws {
+        let scratch = Scratch()
+        defer { scratch.delete() }
+        let clone = try Self.hazardClone()
+        defer { clone.delete() }
+        let library = Library(cloneRoot: clone.root)
+        let file = scratch.file("search.sqlite3")
+        try await Self.sync(SearchIndex(path: file), library)
+        let legacy = Legacy.Concepts(pages: library.pages)
+        let marks = "Primitives/marks.md"
+
+        /// The concept ranker of a no-op sync after a relaunch, with the
+        /// outline of `marks` as `outline` in its row.
+        func noOp(withOutline outline: String) async throws -> ConceptRanker {
+            let database = try SQLiteDatabase(path: file.path(percentEncoded: false))
+            let update = try database.prepare("UPDATE doc SET outline = ? WHERE path = ?")
+            update.bind(1, outline)
+            update.bind(2, marks)
+            _ = try update.step()
+            withExtendedLifetime(database) {}
+            let relaunched = SearchIndex(path: file)
+            let report = try await Self.sync(relaunched, library)
+            #expect(report == SyncReport(unchanged: library.pages.count))
+            return await relaunched.ranker
+        }
+
+        for unreadable in ["", "not json", "{}", "[[\"one\"]]", "[[1, 2]]"] {
+            let ranker = try await noOp(withOutline: unreadable)
+            #expect(ranker.entries == legacy.entries, "\(unreadable.debugDescription) is parsed")
+            #expect(ranker.vocabulary == legacy.vocabulary)
+        }
+        // One that reads is taken as it is: the page is not parsed.
+        let trusted = try await noOp(withOutline: "[]")
+        let read = trusted.entries.first { $0.path == marks }
+        let parsed = legacy.entries.first { $0.path == marks }
+        #expect(read?.headings.isEmpty == true)
+        #expect(parsed?.headings.isEmpty == false)
+    }
+
+    @Test("on the real wiki: a sync that keeps rows reads their outlines; its rankers are as before")
+    func corpusStoredOutlines() async throws {
+        guard let library = Self.corpus, let contentRoot = CorpusTests.contentRoot else { return }
+        let scratch = Scratch()
+        defer { scratch.delete() }
+        let clock = ContinuousClock()
+        let file = scratch.file("search.sqlite3")
+        try await Self.sync(SearchIndex(path: file), library)
+
+        // What a no-op sync built before besides reading the hashes: both
+        // rankers, from the pages.
+        var start = clock.now
+        _ = Legacy.Concepts(pages: library.pages)
+        _ = Legacy.References(pages: library.pages, backlinks: library.backlinks)
+        let before = start.duration(to: clock.now)
+
+        var noOps: [Duration] = []
+        for _ in 0..<3 {
+            let relaunched = SearchIndex(path: file)
+            start = clock.now
+            let report = try await Self.sync(relaunched, library)
+            noOps.append(start.duration(to: clock.now))
+            #expect(report == SyncReport(unchanged: library.pages.count))
+        }
+        let relaunched = SearchIndex(path: file)
+        try await Self.sync(relaunched, library)
+        try await Self.expectLegacy(relaunched, file: file, library, after: "a no-op after a relaunch")
+
+        // One page changed, a heading added: only it is parsed.
+        let page = try #require(library.pages.first { $0.kind == .assumption })
+        let text = try String(contentsOf: contentRoot.appending(path: page.path), encoding: .utf8)
+        let edited = library.replacing(page, with: text + "\n## A heading added\n\nzzqx.\n")
+        start = clock.now
+        let changed = try await Self.sync(relaunched, edited)
+        let changedTime = start.duration(to: clock.now)
+        #expect(changed == SyncReport(updated: 1, unchanged: library.pages.count - 1))
+        try await Self.expectLegacy(relaunched, file: file, edited, after: "one page changed")
+
+        print("""
+            Search sync, the concept ranker from stored outlines (S4), on \(library.pages.count) pages:
+              both rankers from the pages, as a no-op built them before \(Self.milliseconds(before)); \
+            a no-op sync after a relaunch now, fastest of 3 \
+            \(Self.milliseconds(noOps.min() ?? .zero)); \
+            after one page changed \(Self.milliseconds(changedTime))
             """)
     }
 }
