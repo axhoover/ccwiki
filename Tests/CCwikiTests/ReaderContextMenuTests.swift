@@ -280,6 +280,35 @@ struct ReaderContextMenuTests {
         #expect(items.map(\.title) == ["Copy Link to Section", "Copy CCwiki Link to Section"])
     }
 
+    // MARK: Save Section (plans/efficiency.md §3.3)
+
+    @Test("under a heading, Save Section saves the right-click's section, and reads Remove Section from Saved once it is saved")
+    func saveSection() {
+        var asked: [String] = []
+        let item = Self.target(heading: Self.section).saveSectionItem { path, heading in
+            asked.append("\(path)#\(heading.id)")
+            return false
+        }
+        #expect(item == ReaderContextTarget.SaveSectionItem(
+            title: "Save Section", path: Self.pagePath, section: Self.section))
+        #expect(asked == ["\(Self.pagePath)#syntax"], "the section is the right-click's, on its page")
+
+        let saved = Self.target(heading: Self.section).saveSectionItem { _, _ in true }
+        #expect(saved?.title == "Remove Section from Saved")
+        #expect(ReaderContextTarget.saveSectionTitle(isSaved: false) == "Save Section")
+        #expect(ReaderContextTarget.saveSectionTitle(isSaved: true) == "Remove Section from Saved")
+    }
+
+    @Test("outside a section, or on a page the wiki does not have, there is no Save Section")
+    func noSaveSection() {
+        let unsaved: (String, CorrectionTarget.Section) -> Bool? = { _, _ in false }
+        let notAPage: (String, CorrectionTarget.Section) -> Bool? = { _, _ in nil }
+        #expect(Self.target(heading: nil).saveSectionItem(isSaved: unsaved) == nil)
+        #expect(ReaderContextTarget().saveSectionItem(isSaved: unsaved) == nil)
+        #expect(ReaderContextTarget(tex: "\\secpar").saveSectionItem(isSaved: unsaved) == nil)
+        #expect(Self.target(heading: Self.section).saveSectionItem(isSaved: notAPage) == nil)
+    }
+
     @Test("the bridge message carries the selection after the link")
     func readsSelection() {
         let message: [String: Any] = [

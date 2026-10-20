@@ -217,6 +217,14 @@ final class ReaderSession: Identifiable {
         webController.sectionLinks = { [weak self] path, section in
             self?.sectionLinks(path: path, id: section.id, text: section.title)
         }
+        // Its Save Section (§3.3): whether the section is saved, and saving
+        // it with its heading, or taking it out.
+        webController.isSectionSaved = { [weak self] path, section in
+            self?.isSectionSaved(path: path, id: section.id)
+        }
+        webController.onToggleSavedSection = { [weak self] path, section in
+            self?.toggleSavedSection(path: path, id: section.id, text: section.title)
+        }
     }
 
     // MARK: Starting
@@ -785,6 +793,22 @@ final class ReaderSession: Identifiable {
     ) -> ReaderContextTarget.SectionLinks? {
         guard let index = model.index, let page = index.pages[path] else { return nil }
         return ReaderContextTarget.SectionLinks(page: page, id: id, text: text, index: index)
+    }
+
+    /// Whether section `id` of the page at `path` is in the sidebar's Saved,
+    /// for Save Section in the same two menus (plans/efficiency.md §3.3).
+    /// Nil for a path that is not a page of the wiki, which has nothing to
+    /// save.
+    func isSectionSaved(path: String, id: String) -> Bool? {
+        guard model.index?.pages[path] != nil else { return nil }
+        return model.isSaved(path, anchor: id)
+    }
+
+    /// Save Section, or Remove Section from Saved: section `id` of the page
+    /// at `path`, whose heading reads `text`, which its Saved row shows.
+    func toggleSavedSection(path: String, id: String, text: String) {
+        guard let page = model.index?.pages[path] else { return }
+        model.toggleSaved(page, anchor: id, sectionTitle: text)
     }
 
     /// What the window is showing, as a title: for printing, and anything

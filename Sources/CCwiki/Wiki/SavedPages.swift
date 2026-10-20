@@ -18,10 +18,26 @@ struct SavedPages: Equatable, Sendable {
         var path: String
         /// A heading's id, for a saved section; nil for the page.
         var anchor: String?
+        /// A saved section's heading as the outline showed it when it was
+        /// saved; nil for the page. Shown, never looked up.
+        var sectionTitle: String?
         /// The page's title, never a section's heading: reconciliation looks
         /// it up.
         var title: String
         var savedAt: Date
+
+        /// A saved section's name: its heading, or its id where an entry
+        /// has no heading. Nil for the page.
+        var sectionName: String? {
+            anchor.map { sectionTitle ?? $0 }
+        }
+
+        /// The entry on one line, as Wiki ▸ Saved Pages lists it: the
+        /// page's title, then a section's name after a §, as a variant is
+        /// named ("Host § Title").
+        var menuTitle: String {
+            sectionName.map { "\(title) § \($0)" } ?? title
+        }
 
         /// A page and a section of it are two entries. Not a string, so the
         /// sidebar's scroll to a page's row in the tree, by path, never
@@ -50,10 +66,16 @@ struct SavedPages: Equatable, Sendable {
     }
 
     /// Saves a page, or a section of one, at the end of the list, where a new
-    /// bookmark goes. Saving one already saved changes nothing.
-    mutating func add(path: String, anchor: String? = nil, title: String, at date: Date = Date()) {
+    /// bookmark goes. Saving one already saved changes nothing. A section
+    /// keeps its heading, `sectionTitle`; the page keeps none.
+    mutating func add(
+        path: String, anchor: String? = nil, sectionTitle: String? = nil, title: String,
+        at date: Date = Date()
+    ) {
         guard !path.isEmpty, !contains(path: path, anchor: anchor) else { return }
-        entries.append(Entry(path: path, anchor: anchor, title: title, savedAt: date))
+        entries.append(Entry(
+            path: path, anchor: anchor, sectionTitle: anchor == nil ? nil : sectionTitle,
+            title: title, savedAt: date))
     }
 
     mutating func remove(path: String, anchor: String? = nil) {

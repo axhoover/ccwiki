@@ -45,6 +45,12 @@ final class WebController: NSObject {
     /// heading the right-click fell under. `nil`, or no links, leaves the
     /// group out.
     var sectionLinks: ((String, CorrectionTarget.Section) -> ReaderContextTarget.SectionLinks?)?
+    /// Whether that section is saved, for the group's Save Section
+    /// (plans/efficiency.md §3.3). `nil`, or a nil answer for a section that
+    /// cannot be saved, leaves the item out.
+    var isSectionSaved: ((String, CorrectionTarget.Section) -> Bool?)?
+    /// Save Section chosen, or Remove Section from Saved.
+    var onToggleSavedSection: ((String, CorrectionTarget.Section) -> Void)?
     /// What the page reported under the last right-click, for the menu.
     @ObservationIgnored fileprivate var contextTarget: ReaderContextTarget?
 
@@ -648,21 +654,33 @@ final class ReaderWebView: WKWebView {
         }
         // The section the click fell under, as a link to it on the site, a
         // wikilink and a link that opens CCwiki there (plans/efficiency.md
-        // §3.2). It joins the page's group, and without one starts its own.
+        // §3.2), then Save Section (§3.3). It joins the page's group, and
+        // without one starts its own.
         var sectionItems: [ReaderContextTarget.CopyItem] = []
         if let target, let links = controller?.sectionLinks {
             sectionItems = target.sectionItems(links: links)
         }
-        if !sectionItems.isEmpty {
+        var saveItem: ReaderContextTarget.SaveSectionItem?
+        if let target, let isSaved = controller?.isSectionSaved {
+            saveItem = target.saveSectionItem(isSaved: isSaved)
+        }
+        let hasSectionGroup = !sectionItems.isEmpty || saveItem != nil
+        if hasSectionGroup {
             if siteURL == nil { menu.addItem(.separator()) }
             for item in sectionItems { menu.addItem(Self.menuItem(for: item)) }
+            if let saveItem {
+                let onToggleSaved = controller?.onToggleSavedSection
+                menu.addItem(ClosureMenuItem(saveItem.title) {
+                    onToggleSaved?(saveItem.path, saveItem.section)
+                })
+            }
         }
         // What this page's objects derive, in the Relations Explorer. Only on
         // a page with something to explore: an object, a reduction or a
         // barrier, never a complexity class. It joins the page's group, and
         // without one it starts its own, apart from WebKit's Copy and Look Up.
         if let query = controller?.exploreHere?() {
-            if siteURL == nil, sectionItems.isEmpty { menu.addItem(.separator()) }
+            if siteURL == nil, !hasSectionGroup { menu.addItem(.separator()) }
             let onExplore = controller?.onExplore
             menu.addItem(ClosureMenuItem("Explore From This Page…") { onExplore?(query) })
         }
@@ -764,6 +782,18 @@ struct ReaderContextTarget: Equatable, Sendable {
             items.append(CopyItem(title: "Copy CCwiki Link to Section", text: app, isAlternate: false))
             return items
         }
+    }
+
+    /// Save Section, the section group's last item (plans/efficiency.md
+    /// §3.3): the section the right-click fell under, saved to the
+    /// sidebar's Saved, or taken out when it is there.
+    struct SaveSectionItem: Equatable, Sendable {
+        /// Save Section, or Remove Section from Saved.
+        let title: String
+        /// The page the right-click was on.
+        let path: String
+        /// The section it fell under.
+        let section: CorrectionTarget.Section
     }
 
     /// The formula's LaTeX as written on the page, without delimiters.
@@ -920,6 +950,28 @@ struct ReaderContextTarget: Equatable, Sendable {
               let found = links(selection.path, heading)
         else { return [] }
         return found.copyItems
+    }
+
+    /// Save Section, after the section group's links (plans/efficiency.md
+    /// §3.3), for the section the right-click fell under, titled as
+    /// `isSaved` says it is from the page's path and the heading. Nothing
+    /// outside a section, or where `isSaved` answers nil: a page the wiki
+    /// does not have.
+    func saveSectionItem(
+        isSaved: (String, CorrectionTarget.Section) -> Bool?
+    ) -> SaveSectionItem? {
+        guard let selection, let heading = selection.heading,
+              let saved = isSaved(selection.path, heading)
+        else { return nil }
+        return SaveSectionItem(
+            title: Self.saveSectionTitle(isSaved: saved), path: selection.path, section: heading)
+    }
+
+    /// Save Section's title in the page's menu and the outline's: Remove
+    /// Section from Saved once it is saved, as Save Page becomes Remove from
+    /// Saved. "Section" says which, since the page's group sits just above.
+    static func saveSectionTitle(isSaved: Bool) -> String {
+        isSaved ? "Remove Section from Saved" : "Save Section"
     }
 
     /// WebKit's own Open Link, which the link items follow, where Safari

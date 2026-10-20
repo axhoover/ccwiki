@@ -118,6 +118,19 @@ struct SavedPagesTests {
         #expect(Self.paths(saved) == ["A.md", "B.md", "B.md", "C.md", "D.md"])
     }
 
+    @Test("a saved section keeps its heading, and the menu names it after its page")
+    func sectionTitles() {
+        var saved = SavedPages()
+        saved.add(path: "A.md", sectionTitle: "Syntax", title: "Alpha", at: Self.earlier)
+        saved.add(path: "A.md", anchor: "syntax", sectionTitle: "Syntax", title: "Alpha", at: Self.earlier)
+        saved.add(path: "B.md", anchor: "proof", title: "Beta", at: Self.earlier)
+        #expect(saved.entries.map(\.sectionTitle) == [nil, "Syntax", nil], "the page keeps no heading")
+        #expect(saved.entries.map(\.sectionName) == [nil, "Syntax", "proof"],
+                "a section saved without its heading is named by its id")
+        #expect(saved.entries.map(\.menuTitle) == ["Alpha", "Alpha § Syntax", "Beta § proof"])
+        #expect(saved.entries.map(\.title) == ["Alpha", "Alpha", "Beta"], "the title is the page's")
+    }
+
     // MARK: JSON
 
     @Test("the list reads back from its JSON as it was written, order, sections and dates")
@@ -129,6 +142,20 @@ struct SavedPagesTests {
         #expect(SavedPages(json: json) == saved)
         let empty = try #require(SavedPages().json)
         #expect(SavedPages(json: empty).isEmpty)
+    }
+
+    @Test("a section's heading reads back from its JSON, and an entry written without one reads by its id")
+    func jsonSectionTitle() throws {
+        var saved = SavedPages()
+        saved.add(path: "A.md", anchor: "syntax", sectionTitle: "Syntax", title: "A", at: Self.earlier)
+        let json = try #require(saved.json)
+        #expect(SavedPages(json: json) == saved)
+        #expect(SavedPages(json: json).entries.map(\.sectionTitle) == ["Syntax"])
+
+        let without = Data(#"[{"path": "A.md", "anchor": "syntax", "title": "A", "savedAt": 0}]"#.utf8)
+        let read = SavedPages(json: without)
+        #expect(read.entries.map(\.sectionTitle) == [nil])
+        #expect(read.entries.map(\.menuTitle) == ["A § syntax"])
     }
 
     @Test("bad data reads as the entries that can be read, or as nothing saved")
@@ -275,6 +302,29 @@ struct SavedPagesTests {
         let reconciled = saved.reconciled(with: after)
         #expect(Self.paths(reconciled) == [Self.prf, Self.renamedOWF, Self.lwe],
                 "the first is kept, where it was")
+    }
+
+    @Test("a saved section follows its renamed page, with its id and heading, apart from the page")
+    func reconcilesSection() throws {
+        let clone = try FixtureClone()
+        defer { clone.delete() }
+        let before = WikiIndex.build(contentRoot: clone.content)
+        let owf = try #require(before.pages[Self.owf])
+        var saved = SavedPages()
+        saved.add(path: owf.path, title: owf.title, at: Self.earlier)
+        saved.add(
+            path: owf.path, anchor: "definition", sectionTitle: "Definition", title: owf.title,
+            at: Self.earlier)
+
+        try clone.remove(FixtureClone.owf)
+        try clone.write("content/" + Self.renamedOWF, FixtureClone.page(
+            type: "primitive", title: "One-way functions", aliases: ["One-way function"],
+            body: "# One-way functions\n\n## Definition\n\nEasy to compute and hard to invert.\n"))
+        let reconciled = saved.reconciled(with: WikiIndex.build(contentRoot: clone.content))
+
+        #expect(Self.paths(reconciled) == [Self.renamedOWF, Self.renamedOWF])
+        #expect(reconciled.entries.map(\.anchor) == [nil, "definition"])
+        #expect(reconciled.entries.map(\.menuTitle) == ["One-way functions", "One-way functions § Definition"])
     }
 }
 

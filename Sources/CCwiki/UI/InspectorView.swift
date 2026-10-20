@@ -173,14 +173,16 @@ struct InspectorView: View {
 }
 
 /// One heading of the outline. A click scrolls the page to it; its menu
-/// opens its section in a new tab or window, and copies a link to it, a
-/// wikilink and a CCwiki link, as the page's own menu does
-/// (plans/efficiency.md §3.2).
+/// opens its section in a new tab or window, copies a link to it, a
+/// wikilink and a CCwiki link, and saves it, as the page's own menu does
+/// (plans/efficiency.md §3.2, §3.3).
 ///
 /// A view of its own, compared by its page, its heading and whether it is
 /// the one being read, so its menu's links, which parse and resolve a
 /// wikilink, are worked out when the row changes rather than on every
-/// scroll that moves the highlight (SWIFTUI-RULES §6.3).
+/// scroll that moves the highlight (SWIFTUI-RULES §6.3). Whether the
+/// section is saved is not compared: the menu reads it from the model,
+/// which tells the row itself when the saved pages change.
 private struct OutlineRow: View, Equatable {
     @Environment(AppModel.self) private var model
     @Environment(ReaderSession.self) private var session
@@ -213,7 +215,9 @@ private struct OutlineRow: View, Equatable {
     }
 
     /// New Tab and New Window open at the section, as a link to it would;
-    /// then its links (plans/efficiency.md §3.2).
+    /// then its links (plans/efficiency.md §3.2), and Save Section (§3.3).
+    /// Whether it is saved is read here, so a save from anywhere retitles
+    /// the item.
     @ViewBuilder
     private var menu: some View {
         if let path {
@@ -222,6 +226,11 @@ private struct OutlineRow: View, Equatable {
                 Divider()
                 ForEach(links.copyItems, id: \.title) { item in
                     Button(item.title) { model.copyToPasteboard(item.text) }
+                }
+            }
+            if let isSaved = session.isSectionSaved(path: path, id: heading.id) {
+                Button(ReaderContextTarget.saveSectionTitle(isSaved: isSaved)) {
+                    session.toggleSavedSection(path: path, id: heading.id, text: heading.text)
                 }
             }
         }

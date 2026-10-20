@@ -301,6 +301,9 @@ private struct CitingRow: View, Equatable {
 /// out of the tree's selection, and ⌘-click is a link's. The sidebar applies
 /// `.selectionDisabled()`.
 ///
+/// A saved section reads as its page's title over its heading, and opens
+/// the page there.
+///
 /// A page the wiki no longer has, and that reconciliation could not find by
 /// its title, stays where the reader put it, dimmed, and a click searches
 /// the wiki for its title.
@@ -384,10 +387,12 @@ private struct SavedRow: View {
         }
     }
 
-    /// The second line: the paper a reference's key stands for, as in the
-    /// tree, or why the row is dimmed.
+    /// The second line: why the row is dimmed, a saved section's heading
+    /// after a §, under its page's title, or the paper a reference's key
+    /// stands for, as in the tree.
     private var subtitle: String? {
         guard let page else { return "No longer in the wiki" }
+        if let section = entry.sectionName { return "§ " + section }
         return page.kind == .reference ? page.displayTitle : nil
     }
 

@@ -1640,13 +1640,15 @@ final class AppModel {
     }
 
     /// Wiki ▸ Save Page, or Remove from Saved when the page is saved; with
-    /// `anchor`, the same for that section. The entry keeps the page's
-    /// title either way, since reconciliation looks it up.
-    func toggleSaved(_ page: WikiPage, anchor: String? = nil) {
+    /// `anchor`, Save Section or Remove Section from Saved for that section,
+    /// whose heading reads `sectionTitle`. The entry keeps the page's title
+    /// either way, since reconciliation looks it up.
+    func toggleSaved(_ page: WikiPage, anchor: String? = nil, sectionTitle: String? = nil) {
         if savedPages.contains(path: page.path, anchor: anchor) {
             savedPages.remove(path: page.path, anchor: anchor)
         } else {
-            savedPages.add(path: page.path, anchor: anchor, title: page.title)
+            savedPages.add(
+                path: page.path, anchor: anchor, sectionTitle: sectionTitle, title: page.title)
         }
     }
 
