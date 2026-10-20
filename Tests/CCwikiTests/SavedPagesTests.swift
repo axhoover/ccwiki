@@ -284,6 +284,30 @@ struct SavedPagesTests {
 @MainActor
 struct SavedPagesModelTests {
 
+    @Test("a load re-points a saved page whose file went, and writes the list back")
+    func loadReconciles() async throws {
+        let stored = CCwikiSettings.savedPages
+        defer { CCwikiSettings.savedPages = stored }
+        // Put back as soon as the model has read it. Every model is made on
+        // the main actor, so no other test's model reads this list.
+        let gone = "Primitives/gone.md"
+        CCwikiSettings.savedPages = SavedPages([.init(
+            path: gone, anchor: nil, title: "OWF",
+            savedAt: Date(timeIntervalSinceReferenceDate: 813_196_800))])
+        let fixture = try ModelFixture()
+        CCwikiSettings.savedPages = stored
+        defer { fixture.delete() }
+        let model = fixture.model
+        #expect(model.savedPages.entries.map(\.path) == [gone], "the model reads the list when it is made")
+
+        // "OWF" is the alias of the fixture's one-way function page.
+        await model.loadLibrary(reason: .pulled)
+        let owf = FixtureClone.relative(FixtureClone.owf)
+        #expect(model.savedPages.entries.map(\.path) == [owf])
+        #expect(model.savedPages.entries.map(\.title) == ["One-way function"])
+        #expect(CCwikiSettings.savedPages == model.savedPages, "the reconciled list is in the defaults")
+    }
+
     @Test("the Saved section is open or closed as it was left, at the next launch")
     func sectionStaysAsLeft() throws {
         let stored = CCwikiSettings.showsSavedPages
