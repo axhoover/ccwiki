@@ -1012,6 +1012,84 @@ struct DerivationTests {
         #expect(empty.answer(from: ["owf"], to: "pke", options: .standard).unsupported
             == .unknownObject("owf"))
     }
+
+    // MARK: The loop (plans/efficiency.md §2.6)
+
+    @Test("the current loop decides every closure as the 21df5d7 loop does, on every rule's fixture")
+    func loopsAgree() throws {
+        let derivation = try Self.everyRule()
+        let ids = derivation.manifest.objectsByID.keys.sorted(by: Derivation.precedes)
+        var starts: [Set<String>] = ids.map { [$0] }
+        for (position, first) in ids.enumerated() {
+            for second in ids[(position + 1)...] { starts.append([first, second]) }
+        }
+        var compared = 0
+        for (name, engine) in derivation.namedEngines {
+            for start in starts {
+                for options in [Derivation.Options.standard, .all] {
+                    let legacy = engine.closure(from: start, options: options, loop: .legacy)
+                    let current = engine.closure(from: start, options: options)
+                    #expect(current.decidesLike(legacy), "\(name) \(start.sorted()) \(options.settingName)")
+                    compared += 1
+                }
+            }
+        }
+        #expect(compared == 9 * starts.count * 2)
+        // The fixture reaches every branch the loops differ in.
+        let met = derivation.closure(from: ["g", "m"], options: .standard)
+        #expect(met.established[Derivation.StepKey(relationID: "red-m-to-g", isReverse: false)] != nil)
+        #expect(met.facts["h"]?.establishedInputs["g"] != nil)
+        #expect(derivation.closure(from: ["g"], options: .standard).facts["h"]?.assumes.count == 1)
+        #expect(derivation.closure(from: ["s"], options: .standard).weakFacts["w"] != nil)
+        #expect(derivation.closure(from: ["rom"], options: .all).refused.count == 1)
+        #expect(derivation.closure(from: ["h"], options: .all).facts["k"] != nil)
+    }
+
+    /// The rules' fixtures above in one manifest, so the loops meet them side
+    /// by side: preconditions assumed, met by a `metBy` producer and refused;
+    /// a weakened fact accepted and refused; a model node, a stub, an
+    /// idealised step after an assumed precondition and one in model
+    /// `other` with a reverse precondition; a conjunction across them; and
+    /// a quarantined step for the relaxed engine.
+    private static func everyRule() throws -> Derivation {
+        let assumptions = ["g", "s", "hh", "rr", "ff", "dd", "e"]
+        let primitives = ["h", "j", "m", "t", "u", "w", "v", "y", "q", "r", "oihf", "ot", "ke", "k",
+                          "z", "f2"]
+        let objects: [[String: Any]] = assumptions.map { Fx.object($0, type: "assumption") }
+            + primitives.map { Fx.object($0) } + [Fx.object("rom", type: "glossary")]
+        let reductions: [[String: Any]] = [
+            Fx.reduction("red-g-to-h", ["g"], "h"), Fx.reduction("red-j-to-g", ["j"], "g"),
+            Fx.reduction("red-m-to-g", ["m"], "g"), Fx.reduction("red-g-to-t", ["g"], "t"),
+            Fx.reduction("red-g-to-u", ["g"], "u"), Fx.reduction("red-u-to-t", ["u"], "t"),
+            Fx.reduction("red-s-to-w", ["s"], "w"), Fx.reduction("red-w-to-v", ["w"], "v"),
+            Fx.reduction("red-w-to-y", ["w"], "y"), Fx.reduction("red-q-to-r", ["q"], "r"),
+            Fx.reduction("red-r-to-w", ["r"], "w"), Fx.reduction("red-w-to-g", ["w"], "g"),
+            Fx.reduction("red-rom-to-oihf", ["rom"], "oihf"),
+            Fx.reduction("red-oihf-to-ot", ["oihf"], "ot", reductionClass: "free"),
+            Fx.reduction("red-oihf-to-ke", ["oihf"], "ke", reductionClass: "relativizing"),
+            Fx.reduction("red-hh-to-k", ["hh"], "k", status: "stub"),
+            Fx.reduction("red-h-to-k", ["h"], "k", model: "rom"),
+            Fx.reduction("red-rr-eq-ff", ["rr"], "ff", reductionClass: "free", model: "other",
+                         kind: "equivalence"),
+            Fx.reduction("red-dd-to-ff", ["dd"], "ff"),
+            Fx.reduction("red-h-v-to-z", ["h", "v"], "z"),
+            Fx.reduction("red-e-to-f2", ["e"], "f2"),
+        ]
+        let curation = DerivationCuration(
+            quarantine: ["red-e-to-f2": "The Statement has a second hypothesis."],
+            equivalences: ["red-rr-eq-ff": .init(forward: "record", reverse: "record")],
+            requires: [
+                .init(relationID: "red-g-to-h", isReverse: false, hypothesis: "g",
+                      notion: "g in its strong regime", metBy: ["red-m-to-g"]),
+                .init(relationID: "red-g-to-t", isReverse: false, hypothesis: "g",
+                      notion: "g over a large field", metBy: []),
+                .init(relationID: "red-rr-eq-ff", isReverse: true, hypothesis: "ff",
+                      notion: "ff against fixed advice", metBy: []),
+            ],
+            weakens: [.init(relationID: "red-s-to-w", notion: "selective w only", acceptedBy: ["red-w-to-v"])])
+        let manifest = try Fx.manifest(objects: objects, reductions: reductions)
+        return Derivation(manifest: manifest, curation: curation)
+    }
 }
 
 // MARK: - Fixture
