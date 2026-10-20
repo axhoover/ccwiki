@@ -1765,6 +1765,9 @@ click:
 **As built** (track F: `aa37e65`, a typing fix, then four commits for a
 review's six findings). The model, the line map and the landing are as
 specified. The tests are `BacklinkMentionTests` and `SourceLineMapTests`.
+The corpus test compares against `Legacy.backlinkMap(of:)`, L's copy in
+`Legacy/LegacyWiki.swift`: the `Legacy.Backlinks.backlinkMap` named above
+was the plan's name for it, and no such type was built.
 - **The groups' open state is the window's.** `ReaderSession` keeps what
   the reader opened and closed (`isBacklinkGroupOpen(_:among:)`,
   `toggleBacklinkGroup(_:among:)`). Held in the inspector's view, it was

@@ -107,9 +107,10 @@ here, and CI is the first compiler.
 - BacklinkMentionTests covers mentions, code, markdown links, the landing
   on LF, CR LF and a lone CR and past the relation-meta splice, a new
   window's line, and the groups. On the corpus, every target's linking
-  pages and first lines equal `Legacy.Backlinks.backlinkMap`'s. The
-  mentions equal the distinct (source, target, line) triples. The body's
-  line map equals the file's on every line of every page.
+  pages and first lines equal `Legacy.backlinkMap(of:)`'s (L's copy at
+  21df5d7, Legacy/LegacyWiki.swift). The mentions equal the distinct
+  (source, target, line) triples. The body's line map equals the file's
+  on every line of every page.
 - SectionLinkCorpusTests checks every heading of every page: the site
   fragment is the id, the wikilink resolves to the section, and the CCwiki
   link reads back from both channels.
@@ -127,7 +128,16 @@ here, and CI is the first compiler.
   nowhere stray;
 - ⌥⌘I keeping the groups' state;
 - the section group and Save Section in the page's menu and the outline's,
-  and a link copied from CCwiki Dev opening Dev;
+  none under the page's title, and a link copied from CCwiki Dev opening
+  Dev;
+- Save Section from the page's menu, then a right-click on the same
+  heading in the Outline: it reads Remove Section from Saved, in this
+  window and another. The outline's row is an equatable leaf, so this
+  relies on Observation reaching it through `.equatable()`;
+- a saved section's Saved row: the page's title over "§ Heading";
+- VoiceOver reading a section row's "§" as "section". If it does not,
+  give a section's row an `.accessibilityLabel` of the page's title, then
+  "section" and `entry.sectionName`;
 - dragging a Saved row, which is a plain button, Move Up and Move Down,
   and the VoiceOver actions;
 - Wiki ▸ Saved Pages with a missing page;
