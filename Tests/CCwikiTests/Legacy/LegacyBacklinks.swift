@@ -10,11 +10,13 @@ import Foundation
 // are here too, as 21df5d7 wrote them, each behind a switch. Do not edit;
 // delete in the next batch.
 
-/// Code as it stood before a change, kept in the tests only, to run old and
-/// new on the same inputs in one process (plans/efficiency.md §2.1).
-enum Legacy {}
+/// The backlinks path as D1 timed it, kept in the tests only, to run old and
+/// new on the same inputs in one process. Not under `Legacy`, which a
+/// track's copies declare for its equivalence tests (plans/efficiency.md
+/// §2.1): a namespace of its own builds beside theirs whichever lands first.
+enum LegacyD1 {}
 
-extension Legacy {
+extension LegacyD1 {
 
     /// `WikiIndex.backlinkMap()` as 46685be built it, with 21df5d7's four
     /// changes to it each behind a switch: so one run times the old path,
@@ -713,7 +715,7 @@ private struct D1LinkScanner {
 
     private let cache = Cache()
 
-    init(_ text: String, parser: Legacy.D1Backlinks) {
+    init(_ text: String, parser: LegacyD1.D1Backlinks) {
         let bytes = Array(text.utf8)
         let utf8 = text.utf8
         func offset(_ index: String.Index) -> Int {
@@ -735,8 +737,8 @@ private struct D1LinkScanner {
         self.wikilinkEnds = wikilinkEnds
     }
 
-    func links() -> [Legacy.D1Backlinks.MarkdownLink] {
-        var result: [Legacy.D1Backlinks.MarkdownLink] = []
+    func links() -> [LegacyD1.D1Backlinks.MarkdownLink] {
+        var result: [LegacyD1.D1Backlinks.MarkdownLink] = []
         // The end of the inline content the scan is in, worked out once per
         // block rather than once per delimiter.
         var blockEnd = -1
@@ -747,7 +749,7 @@ private struct D1LinkScanner {
             let c = bytes[i]
 
             if c == .backslash, i + 1 < bytes.count,
-               Legacy.D1Backlinks.isASCIIPunctuation(UInt32(bytes[i + 1])) {
+               LegacyD1.D1Backlinks.isASCIIPunctuation(UInt32(bytes[i + 1])) {
                 i += 2
             } else if c == .dollar {
                 i = skipMath(at: i, limit: blockEnd, allowsBlock: true)
@@ -766,10 +768,10 @@ private struct D1LinkScanner {
                     i = end
                 } else if let link = parseLink(at: i, limit: blockEnd, depth: 0) {
                     if let destination = link.destination {
-                        let decoded = Legacy.D1Backlinks.unescape(
+                        let decoded = LegacyD1.D1Backlinks.unescape(
                             String(decoding: bytes[destination], as: UTF8.self))
-                        if Legacy.D1Backlinks.isWikiDestination(decoded) {
-                            result.append(Legacy.D1Backlinks.MarkdownLink(
+                        if LegacyD1.D1Backlinks.isWikiDestination(decoded) {
+                            result.append(LegacyD1.D1Backlinks.MarkdownLink(
                                 destination: decoded, range: index(i)..<index(link.end)))
                         }
                     }
@@ -889,7 +891,7 @@ private struct D1LinkScanner {
                 if level == 0 { return j }
                 j += 1
             } else if c == .backslash, j + 1 < limit,
-                      Legacy.D1Backlinks.isASCIIPunctuation(UInt32(bytes[j + 1])) {
+                      LegacyD1.D1Backlinks.isASCIIPunctuation(UInt32(bytes[j + 1])) {
                 j += 2
             } else if c == .dollar {
                 j = skipMath(at: j, limit: limit, allowsBlock: false)

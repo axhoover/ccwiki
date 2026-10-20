@@ -626,7 +626,7 @@ import Testing
 
     /// The backlinks phase went from 680 ms at 46685be to 1,605 ms at
     /// 21df5d7 on the same wiki (efficiency.md §1.1). Here both run in one
-    /// process on one library, through `Legacy.D1Backlinks`: 46685be's path,
+    /// process on one library, through `LegacyD1.D1Backlinks`: 46685be's path,
     /// with each of 21df5d7's four changes to it alone, and with all four,
     /// interleaved run by run so whatever slows the runner slows them alike.
     /// Old and new must agree wherever no body holds `\r`, which is the
@@ -635,7 +635,7 @@ import Testing
     @Test("backlinks at 46685be against 21df5d7, each change alone, in one process")
     func backlinksOldAgainstNew() throws {
         guard let source = Self.source else { return }
-        typealias D1 = Legacy.D1Backlinks
+        typealias D1 = LegacyD1.D1Backlinks
         let index = WikiIndex.build(contentRoot: source.appending(path: "content"))
         let variants: [(name: String, changes: D1.Changes)] = [
             ("46685be, copied", []),
