@@ -59,6 +59,33 @@ struct DerivationEquivalenceTests {
         return best ?? .zero
     }
 
+    /// `work` on each item, a few at a time: as many as leave one
+    /// cooperative thread free. A sweep queued whole held every thread for
+    /// up to a minute of debug CPU, and a test racing a deadline behind it
+    /// lost. The low priority asked for may not hold, since a group's child
+    /// can start at its parent's priority; the width is what leaves the
+    /// thread. Results come in the order the items finish.
+    static func fewAtATime<Item: Sendable, Output: Sendable>(
+        _ items: [Item], _ work: @escaping @Sendable (Item) -> Output
+    ) async -> [Output] {
+        let width = max(1, ProcessInfo.processInfo.activeProcessorCount - 1)
+        return await withTaskGroup(of: Output.self, returning: [Output].self) { group in
+            var pending = items.makeIterator()
+            for _ in 0..<width {
+                guard let item = pending.next() else { break }
+                group.addTask(priority: .low) { work(item) }
+            }
+            var all: [Output] = []
+            while let one = await group.next() {
+                all.append(one)
+                if let item = pending.next() {
+                    group.addTask(priority: .low) { work(item) }
+                }
+            }
+            return all
+        }
+    }
+
     // MARK: X1, X5: the forward-chaining loop
 
     @Test("the current loop decides every closure as the 21df5d7 loop does",
@@ -67,32 +94,24 @@ struct DerivationEquivalenceTests {
         let corpus = try #require(Self.corpus())
         let derivation = corpus.derivation
         let starts = Self.startSets(corpus)
-        let mismatches = await withTaskGroup(of: [String].self, returning: [String].self) { group in
-            for (name, engine) in derivation.namedEngines {
-                // Asked at low priority, which may not hold: a group's child
-                // can start at its parent's priority. One task per engine.
-                group.addTask(priority: .low) {
-                    var found: [String] = []
-                    for start in starts {
-                        // Both settings from one run, as Derivation.init
-                        // builds the single-object closures.
-                        let both = engine.closures(from: start)
-                        for options in [Derivation.Options.standard, .all] {
-                            let legacy = engine.closure(from: start, options: options, loop: .legacy)
-                            let current = engine.closure(from: start, options: options)
-                            let shared = options.includesIdealisedModels ? both.all : both.standard
-                            if !current.decidesLike(legacy) || !shared.decidesLike(legacy) {
-                                found.append("\(name) \(start.sorted()) \(options.settingName)")
-                            }
-                        }
+        // One task per engine, a few at a time.
+        let mismatches = await Self.fewAtATime(derivation.namedEngines) { named -> [String] in
+            var found: [String] = []
+            for start in starts {
+                // Both settings from one run, as Derivation.init builds the
+                // single-object closures.
+                let both = named.engine.closures(from: start)
+                for options in [Derivation.Options.standard, .all] {
+                    let legacy = named.engine.closure(from: start, options: options, loop: .legacy)
+                    let current = named.engine.closure(from: start, options: options)
+                    let shared = options.includesIdealisedModels ? both.all : both.standard
+                    if !current.decidesLike(legacy) || !shared.decidesLike(legacy) {
+                        found.append("\(named.name) \(start.sorted()) \(options.settingName)")
                     }
-                    return found
                 }
             }
-            var all: [String] = []
-            for await found in group { all += found }
-            return all
-        }
+            return found
+        }.flatMap { $0 }
         let compared = starts.count * 2 * derivation.namedEngines.count
         #expect(mismatches.isEmpty, "\(mismatches.count) of \(compared) closures differ: \(mismatches.prefix(10))")
 
@@ -250,58 +269,34 @@ struct DerivationEquivalenceTests {
         // What it rests on: every object a closure derives, in full,
         // weakened or as a `metBy` producer's fact, plain Horn closure
         // reaches too. Every engine, every object, both settings.
-        let escapes = await withTaskGroup(of: [String].self, returning: [String].self) { group in
-            for (name, engine) in derivation.namedEngines {
-                // Asked at low priority, which may not hold: a group's child
-                // can start at its parent's priority. One task per engine.
-                group.addTask(priority: .low) {
-                    var found: [String] = []
-                    for id in ids {
-                        for options in [Derivation.Options.standard, .all] {
-                            let closure = engine.closure(from: [id], options: options)
-                            let derived = Set(closure.facts.keys).union(closure.weakFacts.keys)
-                                .union(closure.established.values.map(\.objectID))
-                            for object in derived.sorted()
-                            where !engine.mayReach(object, from: [id], options: options) {
-                                found.append("\(name): \(id) ⇒ \(object), \(options.settingName)")
-                            }
-                        }
+        // One task per engine, a few at a time.
+        let escapes = await Self.fewAtATime(derivation.namedEngines) { named -> [String] in
+            var found: [String] = []
+            for id in ids {
+                for options in [Derivation.Options.standard, .all] {
+                    let closure = named.engine.closure(from: [id], options: options)
+                    let derived = Set(closure.facts.keys).union(closure.weakFacts.keys)
+                        .union(closure.established.values.map(\.objectID))
+                    for object in derived.sorted()
+                    where !named.engine.mayReach(object, from: [id], options: options) {
+                        found.append("\(named.name): \(id) ⇒ \(object), \(options.settingName)")
                     }
-                    return found
                 }
             }
-            var all: [String] = []
-            for await found in group { all += found }
-            return all
-        }
+            return found
+        }.flatMap { $0 }
         #expect(escapes.isEmpty, "closures past their Horn closure: \(escapes.prefix(10))")
 
         // Implied-by for every target in both settings: the pair closures the
         // prefilter skips are all run here, once.
         let targets = ids.filter { derivation.nodeType($0) != Derivation.excludedType }
         // A few at a time: all of them (468 on the wiki) queued at once held
-        // every cooperative thread for about a minute of debug CPU, and a
-        // test racing a deadline behind them lost. The width is what leaves
-        // a thread free. The low priority asked for may not hold, since a
-        // group's child can start at its parent's priority.
+        // every cooperative thread for about a minute of debug CPU.
         let jobs: [(target: String, options: Derivation.Options)] = targets.flatMap { target in
             [Derivation.Options.standard, .all].map { (target: target, options: $0) }
         }
-        let width = max(1, ProcessInfo.processInfo.activeProcessorCount - 1)
-        let backward = await withTaskGroup(of: Backward.self, returning: [Backward].self) { group in
-            var pending = jobs.makeIterator()
-            for _ in 0..<width {
-                guard let job = pending.next() else { break }
-                group.addTask(priority: .low) { Self.backward(derivation, job.target, job.options) }
-            }
-            var all: [Backward] = []
-            while let one = await group.next() {
-                all.append(one)
-                if let job = pending.next() {
-                    group.addTask(priority: .low) { Self.backward(derivation, job.target, job.options) }
-                }
-            }
-            return all
+        let backward = await Self.fewAtATime(jobs) { job in
+            Self.backward(derivation, job.target, job.options)
         }
         let differing = backward.compactMap(\.differs)
         #expect(backward.count == targets.count * 2)
