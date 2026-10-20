@@ -1234,8 +1234,9 @@ final class AppModel {
         rebuildBrowseState()
         // A saved page whose file went is looked up in the new wiki, in the
         // same step, so no sidebar shows it against the new index first.
-        // Assigned only when it changes: a load that moved no saved page
-        // redraws no sidebar for it.
+        // Assigned only when it changes: an equal assignment still tells
+        // every reader on Swift 6.1 (W2's probe, plans/efficiency.md §5),
+        // and a load that moved no saved page should redraw no sidebar.
         let saved = savedPages.reconciled(with: library.index)
         if saved != savedPages { savedPages = saved }
         macros = MacroTable.load(cloneRoot: paths.clone)
@@ -1624,18 +1625,20 @@ final class AppModel {
 
     // MARK: Saved pages
 
-    /// Whether the page at `path` is saved, as a page rather than a section.
-    func isSaved(_ path: String) -> Bool {
-        savedPages.contains(path: path)
+    /// Whether the page at `path` is saved: the page itself, or with
+    /// `anchor`, that section of it.
+    func isSaved(_ path: String, anchor: String? = nil) -> Bool {
+        savedPages.contains(path: path, anchor: anchor)
     }
 
-    /// Wiki ▸ Save Page, or Remove from Saved when the page is saved. The
-    /// page, never the section being read.
-    func toggleSaved(_ page: WikiPage) {
-        if savedPages.contains(path: page.path) {
-            savedPages.remove(path: page.path)
+    /// Wiki ▸ Save Page, or Remove from Saved when the page is saved; with
+    /// `anchor`, the same for that section. The entry keeps the page's
+    /// title either way, since reconciliation looks it up.
+    func toggleSaved(_ page: WikiPage, anchor: String? = nil) {
+        if savedPages.contains(path: page.path, anchor: anchor) {
+            savedPages.remove(path: page.path, anchor: anchor)
         } else {
-            savedPages.add(path: page.path, title: page.title)
+            savedPages.add(path: page.path, anchor: anchor, title: page.title)
         }
     }
 

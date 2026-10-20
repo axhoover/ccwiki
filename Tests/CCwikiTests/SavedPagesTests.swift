@@ -160,7 +160,8 @@ struct SavedPagesTests {
             type: "primitive", title: "One-way functions", aliases: ["OWF", "One-way function"],
             body: "# One-way functions\n\nEasy to compute and hard to invert.\n"))
         let after = WikiIndex.build(contentRoot: clone.content)
-        #expect(after.pages[Self.owf] == nil && after.pages[Self.lwe] == nil)
+        #expect(after.pages[Self.owf] == nil)
+        #expect(after.pages[Self.lwe] == nil)
 
         let reconciled = saved.reconciled(with: after)
         #expect(Self.paths(reconciled) == [Self.prf, Self.renamedOWF, Self.lwe],
