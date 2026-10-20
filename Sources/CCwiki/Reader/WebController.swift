@@ -78,8 +78,8 @@ final class WebController: NSObject {
     @ObservationIgnored private var loadedPath: String?
     /// Searched for once the next render reports back.
     @ObservationIgnored private var pendingFind: [String]?
-    /// Revealed once the next render reports back, if it is of this page: a
-    /// 0-based rendered line.
+    /// Revealed once the render of this page reports back: a 0-based
+    /// rendered line. Only the page asked for last keeps one.
     @ObservationIgnored private var pendingReveal: (path: String, line: Int)?
 
     /// An offline reader has nothing worth persisting, and a non-persistent
@@ -147,6 +147,8 @@ final class WebController: NSObject {
             return
         }
         if isReady, request.path == loadedPath, request.anchor == nil {
+            // What this asks for replaces a reveal the page still waits on.
+            pendingReveal = nil
             if let needle { Task { _ = await findFirst(of: needle) } }
             if let line { revealSourceLines(line..<(line + 1), mark: true) }
             return
@@ -157,6 +159,9 @@ final class WebController: NSObject {
     }
 
     func render(_ request: RenderRequest) {
+        // A reveal waits for its own page. Once another is asked for, the
+        // reveal's page will not be the one on screen when it reports back.
+        if let reveal = pendingReveal, reveal.path != request.path { pendingReveal = nil }
         guard isReady else {
             pendingRequest = request
             return
@@ -317,11 +322,14 @@ final class WebController: NSObject {
                 Task { _ = await findFirst(of: needle) }
             }
             if let reveal = pendingReveal {
-                pendingReveal = nil
-                // Another page may have been asked for since; a failed
-                // render sends no path.
+                // Only its own page's render ends the wait: an earlier
+                // page's, still on its way, leaves it waiting. A failed
+                // render sends no path, and ends it with nothing to reveal.
                 if message["path"] as? String == reveal.path {
+                    pendingReveal = nil
                     revealSourceLines(reveal.line..<(reveal.line + 1), mark: true)
+                } else if message["ok"] as? Bool == false {
+                    pendingReveal = nil
                 }
             }
             if let errors = message["pseudocodeErrors"] as? Int, errors > 0 {
