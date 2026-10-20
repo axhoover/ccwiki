@@ -37,6 +37,23 @@ enum CCwikiURL {
         return "\(base)/page/\(encoded)" + (anchor.map { "#\($0)" } ?? "")
     }
 
+    /// A page as another app links to it: `page(path:anchor:)` in the scheme
+    /// this build answers to from outside, `ccwiki://` for the release and
+    /// `ccwiki-dev://` for CCwiki Dev, so a link copied from Dev opens Dev
+    /// (plans/efficiency.md §3.2). The anchor is percent-encoded, as another
+    /// app expects a fragment to be; `internalString(for:channel:)` and
+    /// `destination(of:)` read the link back.
+    static func external(
+        page path: String, anchor: String?,
+        channel: BuildIdentity.Channel = BuildIdentity.current
+    ) -> String {
+        let fragment = anchor.map {
+            "#" + ($0.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? $0)
+        } ?? ""
+        let link = page(path: path) + fragment
+        return BuildIdentity.externalURLScheme(for: channel) + String(link.dropFirst(scheme.count))
+    }
+
     static func folder(slug: String) -> String {
         let encoded = slug.addingPercentEncoding(withAllowedCharacters: segmentAllowed) ?? slug
         return "\(base)/folder/\(encoded)"

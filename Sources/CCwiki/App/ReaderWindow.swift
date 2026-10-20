@@ -14,6 +14,9 @@ struct ReaderWindow: Codable, Hashable, Sendable {
     /// Found on the page once `opening` renders: a search hit opened in a new
     /// tab still lands on its match.
     var find: [String]? = nil
+    /// The 0-based line of the page's body revealed once `opening` renders:
+    /// a backlink's mention opened in a new tab still lands on its line.
+    var revealing: Int? = nil
 }
 
 /// A window the app is opening itself, and how it joins the others.
