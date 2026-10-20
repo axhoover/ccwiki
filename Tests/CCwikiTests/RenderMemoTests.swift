@@ -3,12 +3,15 @@ import JavaScriptCore
 import Testing
 @testable import CCwiki
 
-/// The renderer's memo (plans/render-pipeline.md, "The KaTeX memo"):
-/// `ccwiki.js` renders each formula once while the macro table stands, the
-/// least recently used going first after 1,000. It must not change a byte,
-/// so the corpus suite renders every formula of the wiki through it twice
-/// and compares each page with the same page rendered by KaTeX itself, in
-/// a second context, through the patch as it was before the memo.
+/// The renderer's two memos (plans/render-pipeline.md, "The KaTeX memo" and
+/// "The review"): `ccwiki.js` renders each formula once while the macro
+/// table stands, the least recently used going first after 1,000, and
+/// `reviewEntries` renders a block's HTML only when an entry shows it.
+/// Neither may change a byte. The corpus suites render every formula of the
+/// wiki through the first twice and compare each page with the same page
+/// rendered by KaTeX itself, in a second context, through the patch as it
+/// was before the memo; and review edits to every page with today's
+/// `ccwiki-markdown.js` and with 21df5d7's (`Fixtures/legacy`).
 struct RenderMemoTests {
 
     // MARK: - The memo's rules, on a KaTeX that counts
@@ -232,6 +235,165 @@ struct RenderMemoTests {
             + (summary.map { "  " + $0 } + lines.map { "    " + $0 }).joined(separator: "\n"))
     }
 
+    // MARK: - The review's blocks, rendered when shown
+
+    /// `ccwiki-markdown.js` as it was at 21df5d7, which rendered every
+    /// block of both texts as it parsed them.
+    private static let legacyMarkdown = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appending(path: "Fixtures/legacy/ccwiki-markdown.js")
+    private static let currentMarkdown = MarkdownScript.webRoot.appending(path: "ccwiki-markdown.js")
+
+    /// A modified Markdown file of the review's payload (corrections §6.3).
+    private static func modified(
+        _ old: String, _ new: String, _ hunks: [([Int], [Int])], links: [String: Any] = [:]
+    ) -> [String: Any] {
+        [
+            "id": "x", "path": "content/X.md", "status": "modified", "isMarkdown": true,
+            "old": old, "new": new, "bodyLine": ["old": 1, "new": 1],
+            "hunks": hunks.map { ["old": $0.0, "new": $0.1] }, "flags": [Any](), "links": links,
+        ]
+    }
+
+    private static func pageLink(_ name: String) -> [String: Any] {
+        ["href": "ccwiki://wiki/page/\(name).md", "kind": "page", "external": false, "isImage": false]
+    }
+
+    /// What the corpus lacks: two destinations markdown-it makes one href
+    /// of, line ends other than LF, a combining mark at a line's start,
+    /// fences, comments, repeated headings, a footnote, a reference
+    /// definition, math, pseudocode, a table and a callout.
+    private static func hazards() -> [[String: Any]] {
+        let twoTargets: [String: Any] = ["x y": pageLink("A"), "x%20y": pageLink("B")]
+        return [
+            modified("[a](<x y>)\n\nB.\n\nC.", "[a](x%20y)\n\nB.\n\nC.", [([0, 1], [0, 1])]),
+            modified("[a](<x y>)\n\nB.\n\nC.", "[a](x%20y)\n\nB.\n\nC.", [([0, 1], [0, 1])], links: twoTargets),
+            modified("[a](x%20y) and [b](<x y>)\n\nB.", "[a](<x y>) and [b](x%20y)\n\nB.",
+                     [([0, 1], [0, 1])], links: twoTargets),
+            modified("Keep [k](<x y>).\n\nB.\n\nC.\n\nD.", "Keep [k](<x y>).\n\nB.\n\nC, [c](x%20y).\n\nD.",
+                     [([4, 5], [4, 5])], links: twoTargets),
+            modified("# T\r\n\r\nOne.\r\n\r\nTwo.", "# T\r\n\r\nOne.\r\n\r\nTwo, changed.", [([4, 5], [4, 5])]),
+            modified("a\rb\n\nc\n\nd", "a\rb\n\nc2\n\nd", [([2, 3], [2, 3])]),
+            modified("x\n\u{0301}y\n\nz\n\nw", "x\n\u{0301}y\n\nz2\n\nw", [([3, 4], [3, 4])]),
+            modified("```\ncode\n```\n\ntext\n\nmore", "```\ncode2\n```\n\ntext\n\nmore", [([1, 2], [1, 2])]),
+            modified("a %%hidden%% b\n\n%%\nmulti\n%%\n\nc\n\nd", "a %%hidden%% b\n\n%%\nmulti\n%%\n\nc2\n\nd",
+                     [([6, 7], [6, 7])]),
+            modified("## S\n\nx\n\n## S\n\ny\n\n## S\n\nz", "## S\n\nx\n\n## S\n\ny2\n\n## S\n\nz", [([6, 7], [6, 7])]),
+            modified("Text[^1].\n\nMore.\n\n[^1]: Note.", "Text[^1].\n\nMore.\n\n[^1]: Note, changed.",
+                     [([4, 5], [4, 5])]),
+            modified("[a][r]\n\n[r]: https://x.org\n\nEnd.", "[a][r]\n\n[r]: https://y.org\n\nEnd.", [([2, 3], [2, 3])]),
+            modified("$\\calA$ and $$\\calB$$\n\n$$\nx\n$$\n\n```pseudocode\n\\State $x$\n```\n\nEnd.",
+                     "$\\calA$ and $$\\calB$$\n\n$$\ny\n$$\n\n```pseudocode\n\\State $x$\n```\n\nEnd.",
+                     [([3, 4], [3, 4])]),
+            modified("| a | b |\n|---|---|\n| [[p\\|q]] | $\\|x\\|$ |\n\nT.",
+                     "| a | b |\n|---|---|\n| [[p\\|r]] | $\\|x\\|$ |\n\nT.", [([2, 3], [2, 3])]),
+            modified("> [!note] Title\n> Body.\n\nAfter.", "> [!note] Title\n> Body, changed.\n\nAfter.",
+                     [([1, 2], [1, 2])]),
+        ]
+    }
+
+    @Test("the review's entries are the ones it had when every block was rendered, on the hazards")
+    func reviewHazards() throws {
+        let table = #"{ "\\calA": "\\mathcal{A}", "\\calB": "\\mathcal{B}" }"#
+        let before = try Self.reviewer(Self.legacyMarkdown, table: table)
+        let after = try Self.reviewer(Self.currentMarkdown, table: table)
+        for file in Self.hazards() {
+            let call = "JSON.stringify(CCwikiMarkdown.reviewEntries(md, \(MarkdownScript.literal(file))))"
+            #expect(try after.text(call) == before.text(call), "\(file["new"] as? String ?? "")")
+        }
+    }
+
+    @Test("a link written two ways in a change keeps each side's destination")
+    func reviewLinkDestinations() throws {
+        let after = try Self.reviewer(Self.currentMarkdown, table: "{}")
+        let file = Self.modified("[a](<x y>)\n\nB.", "[a](x%20y)\n\nB.", [([0, 1], [0, 1])])
+        let raw = try after.json("CCwikiMarkdown.reviewEntries(md, \(MarkdownScript.literal(file)))")
+        let entries = try #require(raw as? [[String: Any]])
+        func html(_ kind: String) -> String {
+            let entry = entries.first { ($0["kind"] as? String) == kind }
+            return entry?["html"] as? String ?? ""
+        }
+        // The old block renders after the new text is parsed.
+        #expect(html("removed").contains("Nothing resolves to “x y”"))
+        #expect(html("added").contains("Nothing resolves to “x%20y”"))
+    }
+
+    /// What the review is sent for an edit to `page`: its middle non-blank
+    /// line changed, its first and last, the page added and the page
+    /// deleted.
+    private static func reviewFiles(_ page: WikiPage) -> [(name: String, file: [String: Any])] {
+        let lines = page.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let filled = lines.indices.filter { !lines[$0].allSatisfy(\.isWhitespace) }
+        var files: [(name: String, file: [String: Any])] = []
+        if let first = filled.first, let last = filled.last {
+            let middle = filled[filled.count / 2]
+            var edited = lines
+            edited[middle] += " (edited)"
+            files.append((name: "middle", file: modified(
+                page.body, edited.joined(separator: "\n"), [([middle, middle + 1], [middle, middle + 1])])))
+            var ends = lines
+            ends[first] += " (first)"
+            var hunks = [([first, first + 1], [first, first + 1])]
+            if last != first {
+                ends[last] += " (last)"
+                hunks.append(([last, last + 1], [last, last + 1]))
+            }
+            files.append((name: "ends", file: modified(page.body, ends.joined(separator: "\n"), hunks)))
+        }
+        var added = modified("", page.body, [([0, 0], [0, lines.count])])
+        added["status"] = "added"
+        var deleted = modified(page.body, "", [([0, lines.count], [0, 0])])
+        deleted["status"] = "deleted"
+        files.append((name: "added", file: added))
+        files.append((name: "deleted", file: deleted))
+        return files
+    }
+
+    @Test("on the corpus, the review of edits to every page is the review it was, rendering fewer blocks")
+    func corpusReview() throws {
+        guard let corpus = Self.corpus() else { return }
+        let before = try Self.reviewer(Self.legacyMarkdown, table: corpus.table)
+        let after = try Self.reviewer(Self.currentMarkdown, table: corpus.table)
+        let clock = ContinuousClock()
+        var spent: [String: (before: Duration, after: Duration)] = [:]
+        var renders: [String: (before: Int, after: Int)] = [:]
+        var different: [String] = []
+        var count = 0
+        for page in corpus.pages {
+            for (name, file) in Self.reviewFiles(page) {
+                let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
+                    + MarkdownScript.literal(file) + "))"
+                let started = clock.now
+                let old = try before.text(call)
+                let halfway = clock.now
+                let new = try after.text(call)
+                let done = clock.now
+                if new != old { different.append("\(name): \(page.path)") }
+                let time = spent[name] ?? (before: .zero, after: .zero)
+                spent[name] = (before: time.before + started.duration(to: halfway),
+                               after: time.after + halfway.duration(to: done))
+                let renderedBefore = try before.count("blockRenders")
+                let renderedAfter = try after.count("blockRenders")
+                let made = renders[name] ?? (before: 0, after: 0)
+                renders[name] = (before: made.before + renderedBefore, after: made.after + renderedAfter)
+                count += 1
+            }
+        }
+        #expect(different.isEmpty, "reviewed otherwise:\n  \(different.prefix(20).joined(separator: "\n  "))")
+        let middle = try #require(renders["middle"])
+        #expect(middle.after < middle.before, "the blocks in gaps are never rendered")
+        #expect(renders["added"].map { $0.after == $0.before } == true, "a new file shows every block")
+
+        let lines = ["middle", "ends", "added", "deleted"].compactMap { name -> String? in
+            guard let made = renders[name], let time = spent[name] else { return nil }
+            return "\(name): \(made.before) blocks rendered, \(Self.milliseconds(time.before)) ms before; "
+                + "\(made.after), \(Self.milliseconds(time.after)) ms after"
+        }
+        print("The review's blocks rendered when shown, on the real wiki "
+            + "(plans/render-pipeline.md, \"The review\"), \(count) files, identical:\n"
+            + lines.map { "  " + $0 }.joined(separator: "\n"))
+    }
+
     // MARK: - Contexts
 
     private static func milliseconds(_ duration: Duration) -> Int {
@@ -272,6 +434,31 @@ struct RenderMemoTests {
         try script.evaluate("var TABLE = " + table + ";\n" + unpatchedSetup, named: "setup.js")
         return script
     }
+
+    /// `file`, a `ccwiki-markdown.js`, behind the vendored KaTeX and
+    /// markdown-it; `md` is made with `table` and counts in `blockRenders`
+    /// the blocks it renders.
+    private static func reviewer(_ file: URL, table: String) throws -> MarkdownScript {
+        let script = MarkdownScript(context: JSContext())
+        try script.evaluate(MarkdownScript.prelude, named: "prelude.js")
+        let libraries = [vendored[0]] + MarkdownScript.scripts.filter { $0.hasPrefix("vendor/") }
+        for name in libraries {
+            try script.evaluate(try source(name), named: name)
+        }
+        try script.evaluate(try String(contentsOf: file, encoding: .utf8), named: file.lastPathComponent)
+        try script.evaluate("var TABLE = " + table + ";\n" + reviewerSetup, named: "setup.js")
+        return script
+    }
+
+    private static let reviewerSetup = #"""
+        var md = CCwikiMarkdown.create(TABLE);
+        var blockRenders = 0;
+        var renderBlocks = md.renderer.render;
+        md.renderer.render = function () {
+          blockRenders++;
+          return renderBlocks.apply(this, arguments);
+        };
+        """#
 
     /// Ahead of `MarkdownScript.scripts`, as `index.html` loads them. They
     /// replace the prelude's stand-in `katex`.

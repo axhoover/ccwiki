@@ -952,7 +952,8 @@
    *  text still resolves. Lines in none of markdown-it's blocks are added
    *  by `withSourceBlocks`. */
   function topLevelBlocks(md, source, env) {
-    var tokens = md.parse(source, env);
+    var parsed = parseWithDestinations(md, source, env);
+    var tokens = parsed.tokens;
     var lines = source.split("\n");
     var blocks = [];
     for (var i = 0; i < tokens.length; i++) {
@@ -964,23 +965,53 @@
         if (end < 0) continue;
       }
       if (token.map) {
-        var html = "";
-        try {
-          html = md.renderer.render(tokens.slice(i, end + 1), md.options, env);
-        } catch (e) {
-          html = "<pre>" + md.utils.escapeHtml(lines.slice(token.map[0], token.map[1]).join("\n")) +
-            "</pre>";
-        }
-        blocks.push({
-          start: token.map[0],
-          end: token.map[1],
-          text: lines.slice(token.map[0], token.map[1]).join("\n"),
-          html: html,
-        });
+        blocks.push(renderedWhenRead(md, tokens.slice(i, end + 1), env, lines, token.map,
+          parsed.destinations));
       }
       i = end;
     }
     return withSourceBlocks(md, lines, blocks);
+  }
+
+  /** A block whose HTML is rendered when an entry first reads it, and
+   *  kept: most blocks of a changed file end up in a `gap`, which shows
+   *  none. One that fails to render shows its lines. */
+  function renderedWhenRead(md, tokens, env, lines, map, destinations) {
+    var html = null;
+    return {
+      start: map[0],
+      end: map[1],
+      text: lines.slice(map[0], map[1]).join("\n"),
+      get html() {
+        if (html !== null) return html;
+        // The other text may have been parsed since this one. `link_open`
+        // reads each link's destination from what `normalizeLink` last saw
+        // for its href (`create`), so this text's are seen again first.
+        destinations.forEach(function (url) { md.normalizeLink(url); });
+        try {
+          html = md.renderer.render(tokens, md.options, env);
+        } catch (e) {
+          html = "<pre>" + md.utils.escapeHtml(lines.slice(map[0], map[1]).join("\n")) + "</pre>";
+        }
+        return html;
+      },
+    };
+  }
+
+  /** `md.parse(source, env)`, and each destination `normalizeLink` was
+   *  asked about during it, in order. */
+  function parseWithDestinations(md, source, env) {
+    var destinations = [];
+    var normalizeLink = md.normalizeLink;
+    md.normalizeLink = function (url) {
+      destinations.push(url);
+      return normalizeLink.apply(this, arguments);
+    };
+    try {
+      return { tokens: md.parse(source, env), destinations: destinations };
+    } finally {
+      md.normalizeLink = normalizeLink;
+    }
   }
 
   /** `blocks`, in order, with a block for each run of non-blank lines in

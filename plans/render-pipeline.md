@@ -574,6 +574,39 @@ a finding's id, `<rule>:<path>:<line>`, whose line finds its entry.
 `WebController` keeps the last review's JSON and sends it whenever the shell
 says `ready`.
 
+**Blocks render when shown.** A block's HTML is rendered the first time
+an entry reads it, and kept (`renderedWhenRead`, a getter): a `gap` shows
+no HTML, so the blocks it stands for never render, and most blocks of a
+changed file are in one. The review renders when it opens and at every
+save while it is open. A one-line edit to each page of the wiki renders
+3,512 blocks instead of 12,748 (about 1.4 s → 0.7 s for all of them in
+V8); an edit to its first and last lines 5,240 instead of 12,814; a page
+added or deleted renders every block, as before.
+
+That puts every render after both parses, and one thing a render reads
+can change in between: `link_open` finds a Markdown link's destination,
+which Swift keyed it by, from its href, in what `normalizeLink` last saw
+for that href (markdown-it keeps only the href; `create` in
+`ccwiki-markdown.js`), and `[a](<x y>)` and `[a](x%20y)` make one href.
+So `parseWithDestinations`
+records the destinations each text's parse asks `normalizeLink` about,
+and a block's first read asks again for its text's before it renders: the
+table is what it was when that text was parsed, as when every block
+rendered as its text was parsed. Without that, a review of such an edit
+called the removed link's missing target by the added one's spelling.
+
+The entries are byte for byte the same: in node, with the vendored KaTeX
+and the wiki's macros, 7,064 reviews of every page (a middle line edited,
+the first and last, a line inserted, removed or followed by a blank one,
+every 7th line, the page added and deleted) and 15 hazards the wiki lacks
+(the two-way link, CR LF, a lone CR, a combining mark at a line's start,
+fences, `%%` comments, repeated headings, a footnote, a reference
+definition, math, pseudocode, a table, a callout) gave the same JSON
+before and after, 41 MB of it; without the second ask, 3 of the hazards
+did not. `RenderMemoTests` compares the two on the hazards on every run,
+and on four of those edits to every page on a corpus run, against a copy
+of the file as it was (`Tests/CCwikiTests/Fixtures/legacy`).
+
 ## 4. Serving content: a custom scheme, not `file://`
 
 `CCwikiSchemeHandler` serves `ccwiki://wiki/…` from two roots:
