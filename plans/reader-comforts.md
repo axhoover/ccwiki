@@ -995,7 +995,8 @@ housekeeping. A load now:
    sets `loadedRevision`, so nothing renders before the load's facts are
    settled;
 3. tells each window's session (`sessionsDidLoad`), which renders its page
-   as §3.6 says, and refreshes the quick switcher and ⇧⌘F's query;
+   as §3.6 says, refreshes the quick switcher if one is up (opening one
+   refreshes it anyway), and runs ⇧⌘F's open query again;
 4. waits for the sync, then runs ⌘S's and ⇧⌘R's open queries again
    (`searchDidSync`);
 5. runs the worktree housekeeping, when `runsJobHousekeeping(reason)`.

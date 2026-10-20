@@ -474,8 +474,9 @@ final class AppModel {
     private var recentPages: [String] = CCwikiSettings.recentPages
     static let recentPagesLimit = 12
     /// The page on screen in the window that presented the quick switcher,
-    /// which its list leaves out. Set by `ReaderSession.presentQuickSwitcher`.
-    @ObservationIgnored var quickSwitcherExcludedPath: String?
+    /// which its list leaves out. Set by `resetQuickSwitcher`, through
+    /// `ReaderSession.presentQuickSwitcher`.
+    @ObservationIgnored private(set) var quickSwitcherExcludedPath: String?
 
     // MARK: Jobs
 
@@ -1251,12 +1252,16 @@ final class AppModel {
 
     /// What a load means for the readers, as soon as the library and its
     /// revision are in place: each window's session decides what to render
-    /// again (`ReaderSession.libraryDidLoad`), and the quick switcher's list
-    /// follows the new wiki. ⇧⌘F's open query runs again too: it reads the
-    /// pages `apply` just replaced, not the search index.
+    /// again (`ReaderSession.libraryDidLoad`), and a quick switcher that is
+    /// up follows the new wiki. One that is not is left alone: opening it
+    /// works its list out anyway (`resetQuickSwitcher`). ⇧⌘F's open query
+    /// runs again too: it reads the pages `apply` just replaced, not the
+    /// search index.
     private func sessionsDidLoad(_ update: LibraryUpdate) {
         for session in sessions.values { session.libraryDidLoad(update) }
-        refreshQuickSwitcher()
+        if sessions.values.contains(where: { $0.quickSwitcherPresented }) {
+            refreshQuickSwitcher()
+        }
         scheduleGrep()
     }
 
@@ -1737,6 +1742,20 @@ final class AppModel {
         quickSwitcherRecentCount = isEmptyQuery
             ? quickSwitcherResults.prefix(recent.count).count { recent.contains($0.path) }
             : 0
+    }
+
+    /// ⌘O from a window reading `path`: the switcher opens on an empty
+    /// query, its list without `path`. The list is worked out once either
+    /// way, which with an empty query is a sort of every page: clearing a
+    /// query refreshes it (`didSet`), and an empty one is refreshed here,
+    /// since the page left out may have been another window's.
+    func resetQuickSwitcher(excluding path: String?) {
+        quickSwitcherExcludedPath = path
+        if quickSwitcherQuery.isEmpty {
+            refreshQuickSwitcher()
+        } else {
+            quickSwitcherQuery = ""
+        }
     }
 
     /// Closes every quick switcher but `id`'s. The query, results and left-out

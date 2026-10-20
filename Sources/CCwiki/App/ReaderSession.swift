@@ -585,9 +585,7 @@ final class ReaderSession: Identifiable {
     /// two at once would share one query and fight over the left-out page.
     func presentQuickSwitcher() {
         model.dismissQuickSwitchers(except: id)
-        model.quickSwitcherExcludedPath = location.path
-        model.quickSwitcherQuery = ""
-        model.refreshQuickSwitcher()
+        model.resetQuickSwitcher(excluding: location.path)
         quickSwitcherPresented = true
     }
 
