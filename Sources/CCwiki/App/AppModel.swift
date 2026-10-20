@@ -417,7 +417,17 @@ final class AppModel {
         }
     }
 
+    /// Where the sync is. It changes only when the sync moves to its next
+    /// phase (`enterSyncPhase`), a few times per sync, so the toolbar, the
+    /// menus and every window's empty state that read it are not redrawn
+    /// for each line git prints.
     private(set) var syncState: SyncState = .idle
+    /// The line git, or the download, printed last in the phase that is
+    /// running: one per progress update, 412 or more for a clone. Only the
+    /// status bar's `SyncProgressText` and the sync log's heading read it,
+    /// so a line redraws one `Text` per window (plans/efficiency.md, U4).
+    /// Nil until the phase prints a line.
+    private(set) var syncProgress: String?
     private(set) var syncLog: [String] = []
     private var syncTask: Task<Void, Never>?
 
@@ -474,8 +484,9 @@ final class AppModel {
     private var recentPages: [String] = CCwikiSettings.recentPages
     static let recentPagesLimit = 12
     /// The page on screen in the window that presented the quick switcher,
-    /// which its list leaves out. Set by `ReaderSession.presentQuickSwitcher`.
-    @ObservationIgnored var quickSwitcherExcludedPath: String?
+    /// which its list leaves out. Set by `resetQuickSwitcher`, through
+    /// `ReaderSession.presentQuickSwitcher`.
+    @ObservationIgnored private(set) var quickSwitcherExcludedPath: String?
 
     // MARK: Jobs
 
@@ -1099,8 +1110,9 @@ final class AppModel {
     @ObservationIgnored private var loadTask: Task<LibraryUpdate?, Never>?
 
     /// Read the clone and bring everything built from it up to date: the
-    /// parsed wiki, the dates, the search index, then the page on screen
-    /// (plans/reader-comforts.md §3.2).
+    /// parsed wiki and the dates, then the page on screen while the search
+    /// index is written (plans/reader-comforts.md §3.2). Returns once the
+    /// index is written.
     ///
     /// Serialized: a load waits for the one before it, so ⌘R during the
     /// launch load cannot finish first and be overwritten by the older one.
@@ -1174,19 +1186,22 @@ final class AppModel {
         }
 
         // The search index is written while git is asked whether the commit
-        // moved meanwhile; the page on screen waits for both.
+        // moved meanwhile. The page on screen renders once git has answered,
+        // with everything the load knows settled, but not after the index:
+        // nothing a render reads is in it. Until plans/efficiency.md's U1 it
+        // waited for both (reader-comforts §3.2).
         async let searched = syncSearchIndex(with: update.library)
         let revisionAfter = await LibraryRefresh.currentRevision(
             store: paths.wikiStore, git: git, clone: cloneRoot)
         loadedRevision = revisionBefore == revisionAfter ? revisionAfter : nil
 
+        sessionsDidLoad(update)
         _ = await searched
+        searchDidSync()
 
         if LibraryRefresh.runsJobHousekeeping(reason) {
             await refreshJobHousekeeping()
         }
-
-        libraryDidLoad(update)
         return update
     }
 
@@ -1245,19 +1260,28 @@ final class AppModel {
         await refreshOrphanedWorktrees()
     }
 
-    /// What a load means for the readers: each window's session decides
-    /// what to render again (`ReaderSession.libraryDidLoad`), and the quick
-    /// switcher's list follows the new wiki.
-    ///
-    /// The open queries of ⌘S, ⇧⌘R and ⇧⌘F run again too: one typed during
-    /// the launch load was answered by an index with nothing in it yet, and
-    /// one answered before a pull lists the pages as they were.
-    private func libraryDidLoad(_ update: LibraryUpdate) {
+    /// What a load means for the readers, as soon as the library and its
+    /// revision are in place: each window's session decides what to render
+    /// again (`ReaderSession.libraryDidLoad`), and a quick switcher that is
+    /// up follows the new wiki. One that is not is left alone: opening it
+    /// works its list out anyway (`resetQuickSwitcher`). ⇧⌘F's open query
+    /// runs again too: it reads the pages `apply` just replaced, not the
+    /// search index.
+    private func sessionsDidLoad(_ update: LibraryUpdate) {
         for session in sessions.values { session.libraryDidLoad(update) }
-        refreshQuickSwitcher()
+        if sessions.values.contains(where: { $0.quickSwitcherPresented }) {
+            refreshQuickSwitcher()
+        }
+        scheduleGrep()
+    }
+
+    /// The search index now holds the load: the open queries of ⌘S and ⇧⌘R
+    /// run again. One typed during the launch load was answered by an index
+    /// with nothing in it yet, and one answered before a pull lists the
+    /// pages as they were.
+    private func searchDidSync() {
         scheduleSearch()
         scheduleReferenceSearch()
-        scheduleGrep()
     }
 
     var gitService: GitService? {
@@ -1286,15 +1310,15 @@ final class AppModel {
         // which is all the reader needs. A clone with no git to update it is
         // the one dead end, and it says so.
         if git == nil, store == .git {
-            syncState = .failed("This wiki copy is a git clone, and git is no longer available "
-                + "to update it. Reset Clone in Settings > Storage downloads a snapshot instead.")
+            enterSyncPhase(.failed("This wiki copy is a git clone, and git is no longer available "
+                + "to update it. Reset Clone in Settings > Storage downloads a snapshot instead."))
             return
         }
 
         syncLog = []
-        syncState = .running(
+        enterSyncPhase(.running(
             store == .none ? (git != nil ? "Cloning the wiki…" : "Downloading the wiki…")
-                : (git != nil ? "Fetching…" : "Checking for a newer snapshot…"))
+                : (git != nil ? "Fetching…" : "Checking for a newer snapshot…")))
 
         syncTask = Task { [weak self] in
             guard let self else { return }
@@ -1318,14 +1342,14 @@ final class AppModel {
                 // to, in case this is the first launch after a manual pull.
                 if reloads { await loadLibrary(reason: .offline, after: outcome) }
                 await refreshPushCapability()
-                syncState = .failed(outcome.summary)
+                enterSyncPhase(.failed(outcome.summary))
             case .failed(let message):
-                syncState = .failed(message)
+                enterSyncPhase(.failed(message))
                 warn(message)
             default:
                 var update: LibraryUpdate?
                 if reloads {
-                    syncState = .running("Indexing…")
+                    enterSyncPhase(.running("Indexing…"))
                     update = await loadLibrary(
                         reason: Self.loadReason(after: outcome, afterReset: afterReset),
                         after: outcome)
@@ -1337,7 +1361,7 @@ final class AppModel {
                 let summary = await LibraryRefresh.summary(
                     after: outcome, changes: update?.changes,
                     store: paths.wikiStore, git: git, clone: paths.clone)
-                syncState = .succeeded(summary)
+                enterSyncPhase(.succeeded(summary))
                 warnings.removeAll { $0.contains("Fast-forward failed") }
                 scheduleStatusReset()
             }
@@ -1363,7 +1387,7 @@ final class AppModel {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(8))
             guard let self, case .succeeded = self.syncState else { return }
-            self.syncState = .idle
+            self.enterSyncPhase(.idle)
         }
     }
 
@@ -1383,7 +1407,20 @@ final class AppModel {
         sync(afterReset: true)
     }
 
-    private func appendSyncLine(_ line: ProcessLine) {
+    /// The sync moves to its next phase, and the line under it starts over:
+    /// what git printed in one phase is no status for the next. Every change
+    /// of `syncState` comes through here. Internal so the observation tests
+    /// can drive a sync without git.
+    func enterSyncPhase(_ state: SyncState) {
+        syncState = state
+        if syncProgress != nil { syncProgress = nil }
+    }
+
+    /// A line from git or the download: into the log and, while a phase
+    /// runs, under it in the status bar (`syncProgress`), never into
+    /// `syncState`. Internal so the observation tests can drive a sync
+    /// without git.
+    func appendSyncLine(_ line: ProcessLine) {
         if line.isProgress, !syncLog.isEmpty, syncLog[syncLog.count - 1].hasSuffix("%") {
             syncLog[syncLog.count - 1] = line.text
         } else {
@@ -1391,7 +1428,7 @@ final class AppModel {
         }
         if syncLog.count > 400 { syncLog.removeFirst(200) }
         if case .running = syncState, !line.text.isEmpty {
-            syncState = .running(line.text)
+            syncProgress = line.text
         }
     }
 
@@ -1592,19 +1629,35 @@ final class AppModel {
                               includesIdealisedModels: explorerQuery.includesIdealisedModels))
     }
 
-    /// A question the explorer can ask about these objects, or `nil` when it
-    /// would only be turned away: a complexity class is related by
-    /// containment, never derived (R2), and an id the manifest does not have
-    /// is no question at all. Nor is any question when nothing can be
-    /// derived, as without the bundled curation. For "Explore From Here…" on
-    /// recorded rows.
+    /// A question the explorer can ask about these objects, with its models
+    /// toggle as it is now, or `nil` when it would only be turned away
+    /// (`canExplore`).
     func explorerQuestion(from: [String], to: String? = nil) -> ExplorerQuery? {
-        let named = from + (to.map { [$0] } ?? [])
-        guard !named.isEmpty, !derivation.participants(.all).isEmpty, named.allSatisfy({ id in
-            relations.object(id).map { $0.type != Derivation.excludedType } ?? false
-        }) else { return nil }
+        guard canExplore(from: from, to: to) else { return nil }
         return ExplorerQuery(from: from, to: to,
                              includesIdealisedModels: explorerQuery.includesIdealisedModels)
+    }
+
+    /// Whether the explorer can ask about these objects. It reads the wiki,
+    /// never the explorer's question, so a view deciding whether to offer
+    /// "Explore From Here…" is not redrawn by every edit in the explorer:
+    /// the item asks through `explore(from:to:)`, which reads the toggle when
+    /// it is clicked (SWIFTUI-RULES §3.5).
+    func canExplore(from: [String], to: String? = nil) -> Bool {
+        Self.canExplore(from: from, to: to, manifest: relations, derivation: derivation)
+    }
+
+    /// `canExplore(from:to:)` over a given wiki. A complexity class is
+    /// related by containment, never derived (R2), and an id the manifest
+    /// does not have is no question at all. Nor is any question when nothing
+    /// can be derived, as without the bundled curation.
+    nonisolated static func canExplore(
+        from: [String], to: String?, manifest: RelationsManifest, derivation: Derivation
+    ) -> Bool {
+        let named = from + (to.map { [$0] } ?? [])
+        return !named.isEmpty && !derivation.participants(.all).isEmpty && named.allSatisfy { id in
+            manifest.object(id).map { $0.type != Derivation.excludedType } ?? false
+        }
     }
 
     /// Put the current question on Recent, newest first, once. Called when a
@@ -1728,6 +1781,20 @@ final class AppModel {
         quickSwitcherRecentCount = isEmptyQuery
             ? quickSwitcherResults.prefix(recent.count).count { recent.contains($0.path) }
             : 0
+    }
+
+    /// ⌘O from a window reading `path`: the switcher opens on an empty
+    /// query, its list without `path`. The list is worked out once either
+    /// way, which with an empty query is a sort of every page: clearing a
+    /// query refreshes it (`didSet`), and an empty one is refreshed here,
+    /// since the page left out may have been another window's.
+    func resetQuickSwitcher(excluding path: String?) {
+        quickSwitcherExcludedPath = path
+        if quickSwitcherQuery.isEmpty {
+            refreshQuickSwitcher()
+        } else {
+            quickSwitcherQuery = ""
+        }
     }
 
     /// Closes every quick switcher but `id`'s. The query, results and left-out

@@ -985,6 +985,28 @@ load reads the revision (HEAD, or the snapshot marker) before its scan and
 records it as `loadedRevision` only if it is the same after the build;
 otherwise it records nil, so the next sync reloads.
 
+**The page renders before the search index is written** (plans/efficiency.md,
+U1). This supersedes the order this plan first gave, here and in §4.1's
+`AppModel` row, where the page waited for `searchIndex.sync` and the
+housekeeping. A load now:
+
+1. puts the library and its dates on screen (`apply`);
+2. starts `searchIndex.sync`, and meanwhile asks for the revision again and
+   sets `loadedRevision`, so nothing renders before the load's facts are
+   settled;
+3. tells each window's session (`sessionsDidLoad`), which renders its page
+   as §3.6 says, refreshes the quick switcher if one is up (opening one
+   refreshes it anyway), and runs ⇧⌘F's open query again;
+4. waits for the sync, then runs ⌘S's and ⇧⌘R's open queries again
+   (`searchDidSync`);
+5. runs the worktree housekeeping, when `runsJobHousekeeping(reason)`.
+
+Nothing a render reads is in the search index, so the page no longer waits
+for it: about 1.1 s in CI's debug build when the sync has nothing to write,
+and about 3 s on the launch after an app update, which rewrites every row. A
+search typed meanwhile waits on the actor, as before, and `loadLibrary` still
+returns after step 5.
+
 **The job-related git calls move out of the load.** `repairWorktrees` and
 `refreshOrphanedWorktrees` run at launch, after a fresh clone or Reset Clone,
 and after each job, as audit §3.5 recommends. `refreshPushCapability` runs
