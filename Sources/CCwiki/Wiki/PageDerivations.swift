@@ -160,8 +160,8 @@ struct PageDerivations: Sendable {
             }
             for role in Role.allCases {
                 let links = role == .implies
-                    ? derivation.derivedImplications(of: id, options: .standard)
-                    : derivation.derivedSources(of: id, options: .standard)
+                    ? derivation.derivedImplications(of: id)
+                    : derivation.derivedSources(of: id)
                 let rows = links
                     .filter { $0.fact.depth >= 2 }
                     .map { Self.row($0, of: id, role: role, writer: writer) }
@@ -216,8 +216,6 @@ struct PageDerivations: Sendable {
 
         let claim = "\(writer.label(source)) \(DerivationWording.derivedArrow) "
             + writer.label(target)
-        let proof = writer.derivation.closure(from: [source], options: .standard).proof(of: target)
-        let unstated = proof.map { writer.unstatedSteps($0) } ?? 0
         let provenance = DerivationWording.derivedBy(link.relationCount) + "; "
             + DerivationWording.steps(fact.depth) + "."
         var helpLines = [claim, provenance]
@@ -225,7 +223,9 @@ struct PageDerivations: Sendable {
             let qualified = qualifiers.joined(separator: "; ")
             helpLines.append(qualified.prefix(1).uppercased() + qualified.dropFirst())
         }
-        helpLines.append(DerivationWording.chainClass(fact.chainClass, unstatedSteps: unstated))
+        // Counted from the proof the link table built at load: a row builds
+        // no proof tree, on the main actor or anywhere.
+        helpLines.append(DerivationWording.chainClass(fact.chainClass, unstatedSteps: link.unstatedSteps))
         helpLines.append("Click to see the proof.")
         let help = helpLines.joined(separator: "\n")
 

@@ -50,13 +50,13 @@ enum PreviewExcerpt {
     static func scope(of body: String, anchor: String?) -> Scope? {
         let text = withoutComments(body)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let headings = headingLines(in: text, lines: lines)
-        let firstH1 = headings.first { $0.level == 1 }
 
         guard let anchor, !anchor.isEmpty else {
-            let start = firstH1.map { $0.index + 1 } ?? 0
+            let start = firstH1Line(in: text, lines: lines).map { $0 + 1 } ?? 0
             return Scope(heading: nil, isWholePage: true, lines: Array(lines[start...]))
         }
+        let headings = headingLines(in: text, lines: lines)
+        let firstH1 = headings.first { $0.level == 1 }
         guard let target = headings.first(where: { $0.id == anchor }) else { return nil }
         let next = headings.first(where: { $0.index > target.index && $0.level <= target.level })
         let end = next?.index ?? lines.count
@@ -82,11 +82,50 @@ enum PreviewExcerpt {
         return result
     }
 
+    /// The index of the line holding the first H1, the one `headingLines`
+    /// would find first at level 1, read only as far as that line and with
+    /// no heading slugged: a whole page's card needs nothing more, and most
+    /// bodies open with their H1 (plans/efficiency.md, L5).
+    ///
+    /// The lines are the ones `CodeMask` reads, and its fences are read by
+    /// its own rule, unless the text holds a CR, where `CodeMask` ends a line
+    /// and the split does not, or `%%` the deletion left, which `CodeMask`
+    /// would mask as a comment. Then every heading is read, as before.
+    private static func firstH1Line(in text: String, lines: [Substring]) -> Int? {
+        guard readsLikeCodeMask(text) else {
+            return headingLines(in: text, lines: lines).first { $0.level == 1 }?.index
+        }
+        var fences = CodeMask.Fences()
+        for (index, line) in lines.enumerated() {
+            // A heading never opens with a backtick, so of the code
+            // `CodeMask` masks only a fence can hold its first character.
+            if fences.isCode(line) { continue }
+            guard let (level, raw) = WikiPage.atxHeading(line), level == 1 else { continue }
+            if !WikiPage.Heading.plainText(raw).isEmpty { return index }
+        }
+        return nil
+    }
+
+    /// Whether `text` has no CR and no `%%`: read by byte, as the comment
+    /// pattern reads `%%` by code unit, whatever mark follows it.
+    private static func readsLikeCodeMask(_ text: String) -> Bool {
+        var previous: UInt8 = 0
+        for byte in text.utf8 {
+            // `\r`, or a second `%`.
+            if byte == 0x0D || (byte == 0x25 && previous == 0x25) { return false }
+            previous = byte
+        }
+        return true
+    }
+
     /// `%%…%%` deleted, as Quartz deletes it before it parses anything, and
     /// CRLF line ends made LF. A comment can span blank lines, so it has to
     /// go before the body is split into blocks.
     private static func withoutComments(_ text: String) -> String {
-        var result = text.replacingOccurrences(of: "\r\n", with: "\n")
+        // No CR byte, no CR LF to replace; a Character search for `\r` would
+        // miss one, since `\r\n` is a single Character.
+        var result = text.utf8.contains(0x0D)
+            ? text.replacingOccurrences(of: "\r\n", with: "\n") : text
         guard result.contains("%%") else { return result }
         result = result.replacingOccurrences(
             of: #"%%[\s\S]*?%%"#, with: "", options: .regularExpression)
@@ -102,6 +141,12 @@ enum PreviewExcerpt {
         scope(of: body, anchor: anchor).flatMap { firstParagraph(inLines: $0.lines) }
     }
 
+    /// `firstParagraph(in:anchor:)` as `inlineWithoutLinks` reduces it: the
+    /// text a card's excerpt is cut from.
+    static func firstParagraphInline(in body: String, anchor: String?) -> String? {
+        scope(of: body, anchor: anchor).flatMap { firstParagraphInline(inLines: $0.lines) }
+    }
+
     /// The first paragraph among `lines`, which start outside any block.
     ///
     /// Skipped: headings, fenced code (pseudocode included), `$$` blocks,
@@ -112,6 +157,20 @@ enum PreviewExcerpt {
     /// paragraph that is only a bold label, and one with nothing left once
     /// its links and markup are gone.
     static func firstParagraph(inLines lines: [Substring]) -> String? {
+        firstParagraphFound(inLines: lines)?.paragraph
+    }
+
+    /// `firstParagraph(inLines:)` as `inlineWithoutLinks` reduces it.
+    static func firstParagraphInline(inLines lines: [Substring]) -> String? {
+        firstParagraphFound(inLines: lines)?.inline
+    }
+
+    /// The first paragraph and its inline text without links, which the
+    /// search works out to skip a paragraph with nothing left: a card takes
+    /// the second, so it is not worked out twice.
+    private static func firstParagraphFound(
+        inLines lines: [Substring]
+    ) -> (paragraph: String, inline: String)? {
         var i = 0
         while i < lines.count {
             let line = lines[i]
@@ -152,8 +211,9 @@ enum PreviewExcerpt {
                 i = end
                 if isSkippedParagraph(paragraph) { continue }
                 let kept = withoutTrailingPlaceholder(paragraph)
-                if inlineWithoutLinks(kept).isEmpty { continue }
-                return kept
+                let inline = inlineWithoutLinks(kept)
+                if inline.isEmpty { continue }
+                return (kept, inline)
             }
         }
         return nil

@@ -585,9 +585,7 @@ final class ReaderSession: Identifiable {
     /// two at once would share one query and fight over the left-out page.
     func presentQuickSwitcher() {
         model.dismissQuickSwitchers(except: id)
-        model.quickSwitcherExcludedPath = location.path
-        model.quickSwitcherQuery = ""
-        model.refreshQuickSwitcher()
+        model.resetQuickSwitcher(excluding: location.path)
         quickSwitcherPresented = true
     }
 
@@ -724,10 +722,11 @@ final class ReaderSession: Identifiable {
     /// section being read when it is an object, so scrolling to *Collision
     /// resistance* and pressing ⌥⇧⌘E asks about CRHF. `nil` disables it.
     var currentPageExplorerQuery: ExplorerQuery? {
-        guard case .page(_, let anchor) = location else { return nil }
+        guard case .page(let path, let anchor) = location else { return nil }
         let reading = webController.activeHeadingID ?? anchor
+        let subject = PageRelations.subject(path: path, manifest: model.relations)
         guard var query = ExplorerQuery.seed(
-            for: currentRelations.subject, activeAnchor: reading,
+            for: subject, activeAnchor: reading,
             manifest: model.relations, derivation: model.derivation)
         else { return nil }
         query.includesIdealisedModels = model.explorerQuery.includesIdealisedModels
@@ -736,11 +735,14 @@ final class ReaderSession: Identifiable {
 
     /// Whether the page being read has anything to explore. The same test
     /// without the section being read, so a menu's enabled state does not
-    /// re-evaluate on every scroll.
+    /// re-evaluate on every scroll; and with the page's subject alone, not
+    /// its whole `PageRelations`, since the menu bar asks whenever it is
+    /// drawn.
     var canExploreCurrentPage: Bool {
-        guard location.path != nil else { return false }
+        guard let path = location.path else { return false }
+        let subject = PageRelations.subject(path: path, manifest: model.relations)
         return ExplorerQuery.seed(
-            for: currentRelations.subject, activeAnchor: nil,
+            for: subject, activeAnchor: nil,
             manifest: model.relations, derivation: model.derivation) != nil
     }
 }

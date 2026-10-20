@@ -63,7 +63,6 @@ struct RelationsExplorerView: View {
             .onChange(of: focus) { _, field in
                 if let field { editingField = field }
             }
-            .onChange(of: suggestionIDs) { _, ids in announceSuggestions(ids) }
             .focusedSceneValue(\.proofCopyAction, proofCopyAction)
             .onAppear { focus = .from }
             // One of Recent's two moments: the window closing.
@@ -247,7 +246,7 @@ struct RelationsExplorerView: View {
     /// was committed.
     @discardableResult
     private func commitHighlighted() -> Bool {
-        guard showsSuggestions, let id = currentHighlight else { return false }
+        guard showsSuggestions, let id = currentHighlight(in: suggestions) else { return false }
         commit(id, into: focus ?? editingField)
         return true
     }
@@ -260,9 +259,7 @@ struct RelationsExplorerView: View {
             let typed = text.replacingOccurrences(of: ",", with: "")
             let items = matcher.matches(typed, excluding: chosenIDs,
                                         limit: Theme.explorerSuggestionLimit)
-            let pick = highlightedID.flatMap { id in items.contains { $0.id == id } ? id : nil }
-                ?? items.first?.id
-            if let pick {
+            if let pick = currentHighlight(in: items) {
                 commit(pick, into: field)
             } else if field == .from {
                 fromText = typed
@@ -358,24 +355,26 @@ struct RelationsExplorerView: View {
             && !activeText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// A fuzzy match against every pickable object, on the main actor, so
+    /// each caller computes it once and passes the items on: the pane once
+    /// per evaluation, not once per row.
     private var suggestions: [RelationObjectMatcher.Item] {
         guard showsSuggestions else { return [] }
         return matcher.matches(activeText, excluding: chosenIDs, limit: Theme.explorerSuggestionLimit)
     }
 
-    private var suggestionIDs: [String] { suggestions.map { $0.id } }
-
-    /// Falls back to the first row, so Return always has a target.
-    private var currentHighlight: String? {
-        let items = suggestions
-        return highlightedID.flatMap { id in items.contains { $0.id == id } ? id : nil }
+    /// The highlighted row among `items`. Falls back to the first row, so
+    /// Return always has a target.
+    private func currentHighlight(in items: [RelationObjectMatcher.Item]) -> String? {
+        highlightedID.flatMap { id in items.contains { $0.id == id } ? id : nil }
             ?? items.first?.id
     }
 
     private func moveHighlight(_ delta: Int) -> KeyPress.Result {
         let items = suggestions
         guard showsSuggestions, !items.isEmpty else { return .ignored }
-        let current = currentHighlight.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
+        let current = currentHighlight(in: items)
+            .flatMap { id in items.firstIndex { $0.id == id } } ?? 0
         highlightedID = items[min(max(0, current + delta), items.count - 1)].id
         return .handled
     }
@@ -387,9 +386,13 @@ struct RelationsExplorerView: View {
         AccessibilityNotification.Announcement(message).post()
     }
 
+    /// The suggestions and their highlight, each computed once here. The
+    /// count is announced as the pane appears and whenever the rows change,
+    /// not on an arrow press.
     private var suggestionPane: some View {
-        VStack(spacing: 0) {
-            let items = suggestions
+        let items = suggestions
+        let highlight = currentHighlight(in: items)
+        return VStack(spacing: 0) {
             if items.isEmpty {
                 if matcher.matchesOnlyComplexityClasses(activeText) {
                     ContentUnavailableView(
@@ -403,12 +406,12 @@ struct RelationsExplorerView: View {
                     ScrollView {
                         VStack(spacing: 0) {
                             ForEach(items) { item in
-                                suggestionRow(item, isHighlighted: item.id == currentHighlight)
+                                suggestionRow(item, isHighlighted: item.id == highlight)
                             }
                         }
                         .padding(.vertical, Theme.tight)
                     }
-                    .onChange(of: currentHighlight) { _, new in
+                    .onChange(of: highlight) { _, new in
                         guard let new else { return }
                         proxy.scrollTo(new, anchor: .center)
                     }
@@ -428,6 +431,7 @@ struct RelationsExplorerView: View {
             .padding(.horizontal, Theme.large)
             .padding(.vertical, Theme.small)
         }
+        .onChange(of: items.map(\.id), initial: true) { _, ids in announceSuggestions(ids) }
     }
 
     /// Two lines: the label, then its type, its host page, or the alias that

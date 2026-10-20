@@ -56,6 +56,16 @@ struct PageRelations: Sendable {
         self.groups = groups
     }
 
+    /// What `init(path:manifest:)` makes `subject`, without building the
+    /// groups: for asking only what kind of page this is, as the menu bar's
+    /// Explore From This Page does whenever it is drawn.
+    static func subject(path: String, manifest: RelationsManifest) -> Subject {
+        if let relation = manifest.relation(onPage: path) { return .reduction(relation) }
+        if let barrier = manifest.barrier(onPage: path) { return .barrier(barrier) }
+        let ids = manifest.objectIDs(onPage: path)
+        return ids.isEmpty ? .unknown : .objects(ids)
+    }
+
     /// An object page: one block per object on the page, in the wiki's own
     /// vocabulary. The host object comes first, then its variants.
     private static func groups(

@@ -21,7 +21,9 @@ Until schema version 3, a **full** rebuild ran after every load. Now each row
 carries the fingerprint of the file it was built from, and a load rewrites only
 the rows whose file changed (§3, "Kept in step, not rebuilt"). The full rebuild
 is still the definition: it runs whenever the build that wrote the rows is not
-this one, and a sync must leave exactly what it would.
+this one, and a sync must leave exactly what it would. Since schema version 4,
+the current one, each row also keeps its page's outline, so a load does not
+parse the headings of a page whose row it keeps.
 
 ## 2. No SwiftPM dependency is needed
 
@@ -41,12 +43,13 @@ implicitly `@MainActor` and unreachable from a nonisolated context.
 ## 3. Schema: external-content FTS5
 
 ```sql
--- Schema version 3 (PRAGMA user_version); any other version is thrown away.
+-- Schema version 4 (PRAGMA user_version); any other version is thrown away.
 CREATE TABLE doc(id, path UNIQUE, slug, kind, status, title, aliases, headings, body,
-                 hash);                -- the fingerprint of the file the row was built from
+                 hash,                 -- the fingerprint of the file the row was built from
+                 outline);             -- the page's headings and their ids, as JSON
 CREATE TABLE meta(key PRIMARY KEY, value);   -- 'builder': the build that wrote the rows
 CREATE VIRTUAL TABLE doc_fts USING fts5(
-  title, aliases, headings, body,
+  title, aliases, headings, body,      -- not outline: nothing searches it
   content='doc', content_rowid='id',
   tokenize = "unicode61 remove_diacritics 2",
   prefix = '2 3');
@@ -57,6 +60,13 @@ Contentless (`content=''`) would be smaller, but `snippet()` needs the original
 text and a search result without context is barely a result. The delete trigger
 **must** pass the OLD column values — FTS5 uses them to locate the postings.
 
+Version 3 added `hash` and `meta`; version 4 added `outline`
+([efficiency.md](efficiency.md), S4). An outline is a JSON array of
+`[text, id]` pairs, one per heading, written by `SearchIndex.encoded(_:)`.
+It is not the `headings` column split on line breaks, because a heading's
+text can hold one (`&#10;`). The bump resets the index once, on the first
+launch of the build that made it, through the `user_version` check.
+
 ### Kept in step, not rebuilt
 
 Every library load calls `SearchIndex.sync(pages:backlinks:fingerprints:builder:)`
@@ -65,15 +75,32 @@ Every library load calls `SearchIndex.sync(pages:backlinks:fingerprints:builder:
 the schema version.
 
 - **A different `builder`** (an app update, or a fresh file after Settings ▸
-  Storage ▸ Rebuild resets it), or `CCWIKI_FULL_RELOAD=1`, deletes and writes
-  every row, then `optimize` and a WAL checkpoint, as every load used to. Any
-  change to how a row is built therefore rebuilds once, with no version bump
-  to remember.
-- **Otherwise** one `SELECT path, hash`, then one transaction: delete the paths
-  that are gone, `UPDATE` the rows whose hash differs (the `doc_au` trigger
-  keeps FTS in step) and insert the new ones. `optimize` runs only after more
-  than 100 writes; FTS5's automerge handles the rest. A load whose index
-  already matches, as at a launch, writes nothing at all.
+  Storage ▸ Rebuild resets it), or `CCWIKI_FULL_RELOAD=1`, rewrites every row
+  in one transaction (`writeAll`): it drops the `doc_ai` and `doc_ad`
+  triggers, deletes every row and writes each again, builds the full-text
+  index once from the new rows with FTS5's `'rebuild'`, and makes the two
+  triggers again from the same SQL the schema uses. Then `optimize` and a WAL
+  checkpoint, as every load used to. Tokenizing every row in once is cheaper
+  than tokenizing every old row out and every new one in through the
+  triggers: measured in C on the corpus, 82–87 ms instead of 195–233 for a
+  fresh file, and 85–124 ms instead of 385–469 over a populated index
+  ([efficiency.md](efficiency.md), S2). `doc_au` is untouched. Any change to
+  how a row is built therefore rebuilds once, with no version bump to
+  remember.
+- **Otherwise** one `SELECT path, hash, outline` (`writeChanges`), then one
+  transaction: delete the paths that are gone, `UPDATE` the rows whose hash
+  differs (the `doc_au` trigger keeps FTS in step) and insert the new ones.
+  `optimize` runs only after more than 100 writes; FTS5's automerge handles
+  the rest. A load whose index already matches, as at a launch, writes
+  nothing at all.
+- **The rankers are built from the outlines of the rows written and kept**
+  ([efficiency.md](efficiency.md), S1, S3, S4). Each row written returns the
+  outline it parsed, and each concept page's row that is kept gives back its
+  stored one, so `ConceptRanker` parses only a page it has neither for, such
+  as one whose stored outline does not decode. A sync that writes nothing
+  parses no page. `ReferenceRanker` names the pages citing a paper with the
+  names `ConceptRanker` gave them. Both are built when the writing ends,
+  however it ends.
 - **The stamp is written in the same transaction as the rows**, so a crash
   never leaves it over rows it does not describe. A row with no known
   fingerprint has `hash = ''`, which never matches, so it is rewritten.

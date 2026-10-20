@@ -128,8 +128,12 @@ struct FixesJobsTests {
         let center = scene.relaunched()
         try #require(center.job(id: opened.id) != nil)
 
+        // Started with a long tripwire deadline, which the job's task inherits:
+        // git and gh answer at once here, and 30 s would time the test run.
         // Clear Finished drops it, record and all, before the agent exits.
-        let job = center.startCorrection(JobCenterTests.request(scene))
+        let job = await Tripwire.$deadline.withValue(.seconds(600)) {
+            center.startCorrection(JobCenterTests.request(scene))
+        }
         center.clearFinishedJobs()
         #expect(center.job(id: opened.id) == nil)
         #expect(!FileManager.default.fileExists(
@@ -179,8 +183,12 @@ struct FixesJobsTests {
         let center = scene.relaunched()
         try #require(center.job(id: opened.id) != nil)
 
+        // Started with a long tripwire deadline, which the job's task inherits:
+        // git and gh answer at once here, and 30 s would time the test run.
         // Clear Finished drops it, record and all, before the agent exits.
-        let job = center.startCorrection(JobCenterTests.request(scene))
+        let job = await Tripwire.$deadline.withValue(.seconds(600)) {
+            center.startCorrection(JobCenterTests.request(scene))
+        }
         center.clearFinishedJobs()
         #expect(center.job(id: opened.id) == nil)
         #expect(center.otherJobBranches(excluding: job.id) == ["fix/other"])
@@ -291,7 +299,11 @@ struct FixesJobsTests {
         guard let scene = try await JobScene.make(root: root, tools: tools) else { return }
         defer { scene.delete() }
 
-        let job = scene.center.startCorrection(JobCenterTests.request(scene))
+        // Started with a long tripwire deadline, which the job's task inherits:
+        // git and gh answer at once here, and 30 s would time the test run.
+        let job = await Tripwire.$deadline.withValue(.seconds(600)) {
+            scene.center.startCorrection(JobCenterTests.request(scene))
+        }
         await job.task?.value
         guard case .at = await scene.originTip("fix/page") else {
             Issue.record("the stand-in agent could not push; nothing for the tripwire to find")

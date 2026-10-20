@@ -850,7 +850,11 @@ struct JobCenterTests {
         guard let scene = try await JobScene.make(root: root, tools: tools) else { return }
         defer { scene.delete() }
 
-        let job = scene.center.startCorrection(Self.request(scene))
+        // Started with a long tripwire deadline, which the job's task inherits:
+        // git and gh answer at once here, and 30 s would time the test run.
+        let job = await Tripwire.$deadline.withValue(.seconds(600)) {
+            scene.center.startCorrection(Self.request(scene))
+        }
         await job.task?.value
         guard case .at = await scene.originTip("fix/page") else {
             Issue.record("the stand-in agent could not push; nothing for the tripwire to find")
@@ -887,7 +891,11 @@ struct JobCenterTests {
             "20261001-090000-000-correction-page", kind: .correction(Self.request(scene)),
             state: .failed(AgentRun.nothingChanged)), in: scene.paths)
 
-        let job = scene.center.startCorrection(Self.request(scene))
+        // Started with a long tripwire deadline, which the job's task inherits:
+        // git and gh answer at once here, and 30 s would time the test run.
+        let job = await Tripwire.$deadline.withValue(.seconds(600)) {
+            scene.center.startCorrection(Self.request(scene))
+        }
         await job.task?.value
         #expect(job.branch == "fix/page")
         guard case .at = await scene.originTip("fix/page") else {
@@ -923,7 +931,11 @@ struct JobCenterTests {
             try? FileManager.default.removeItem(at: root)
             return nil
         }
-        let job = scene.center.startCorrection(request(scene))
+        // Started with a long tripwire deadline, which the job's task inherits:
+        // git and gh answer at once here, and 30 s would time the test run.
+        let job = await Tripwire.$deadline.withValue(.seconds(600)) {
+            scene.center.startCorrection(request(scene))
+        }
         await job.task?.value
         return (scene, job)
     }

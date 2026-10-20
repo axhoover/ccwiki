@@ -204,12 +204,9 @@ struct JobDetailView: View {
             Text(job.statusLabel)
                 .font(Theme.Fonts.documentTitle)
             Spacer(minLength: Theme.small)
-            if let duration = job.duration {
-                Text(Duration.seconds(duration).formatted(
-                    .units(allowed: [.minutes, .seconds], width: .narrow)))
-                    .font(Theme.Fonts.meta)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            if let startedAt = job.startedAt {
+                ElapsedTime(
+                    startedAt: startedAt, finishedAt: job.finishedAt, ticks: job.state.isActive)
             }
             if let cost = job.outcome?.costUSD {
                 Text(cost, format: .currency(code: "USD"))
@@ -502,15 +499,62 @@ struct JobDetailView: View {
                 .background(.bar)
             Divider()
         }
-        transcript
+        TranscriptView(job: job, followsTail: $followsTail)
+    }
+}
+
+// MARK: - Elapsed time
+
+/// How long the job has run: ticking each second while a process runs for
+/// it, so the time moves during a long silent tool call. Fixed otherwise,
+/// as it was: up to the finish, or, for a job waiting in review, up to
+/// when it was drawn, so a review left open for days does not redraw once
+/// a second. A view of its own, so a tick redraws these digits and nothing
+/// else (SWIFTUI-RULES §1.3, §1.4).
+private struct ElapsedTime: View {
+    let startedAt: Date
+    let finishedAt: Date?
+    /// A process runs for the job: an agent, or the publish.
+    let ticks: Bool
+
+    var body: some View {
+        if let finishedAt {
+            label(at: finishedAt)
+        } else if ticks {
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                label(at: context.date)
+            }
+        } else {
+            label(at: .now)
+        }
     }
 
-    /// The agent's work, one event per row.
-    ///
-    /// `claude --output-format stream-json` gives structure, so this is a
-    /// readable log — "▸ Bash  npm run lint" — rather than a wall of JSON. The
-    /// raw stream is on disk regardless.
-    private var transcript: some View {
+    private func label(at date: Date) -> some View {
+        Text(Duration.seconds(date.timeIntervalSince(startedAt)).formatted(
+            .units(allowed: [.minutes, .seconds], width: .narrow)))
+            .font(Theme.Fonts.meta)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+    }
+}
+
+// MARK: - Transcript
+
+/// The agent's work, one event per row.
+///
+/// `claude --output-format stream-json` gives structure, so this is a
+/// readable log — "▸ Bash  npm run lint" — rather than a wall of JSON. The
+/// raw stream is on disk regardless.
+///
+/// The only view that reads `job.log`: a flush of the transcript, up to
+/// ten a second while an agent works, redraws the list and its tail bar,
+/// not the job's header, banners and toolbar (SWIFTUI-RULES §6.3). Follow
+/// is the job view's, so it survives a switch to Changes and back.
+private struct TranscriptView: View {
+    let job: Job
+    @Binding var followsTail: Bool
+
+    var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {

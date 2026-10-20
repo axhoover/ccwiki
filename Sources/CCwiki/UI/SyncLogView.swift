@@ -14,7 +14,9 @@ struct SyncLogView: View {
             VStack(alignment: .leading, spacing: Theme.tight) {
                 Text("Sync Log")
                     .font(Theme.Fonts.documentTitle)
-                Text(Self.subtitle(for: model.syncState, hasLog: !model.syncLog.isEmpty))
+                Text(Self.subtitle(
+                    for: model.syncState, progress: model.syncProgress,
+                    hasLog: !model.syncLog.isEmpty))
                     .font(Theme.Fonts.meta)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -55,11 +57,14 @@ struct SyncLogView: View {
     /// The heading under the title. Idle is where a success settles after a
     /// few seconds as well as where a launch starts, and the log keeps the
     /// transcript until the next sync, so an idle state with a log is a sync
-    /// that finished, not one that never ran.
-    static func subtitle(for state: AppModel.SyncState, hasLog: Bool) -> String {
+    /// that finished, not one that never ran. While a sync runs, it names
+    /// the line printed last (`AppModel.syncProgress`), or else the phase.
+    static func subtitle(
+        for state: AppModel.SyncState, progress: String? = nil, hasLog: Bool
+    ) -> String {
         switch state {
         case .idle: hasLog ? "The last sync finished." : "No sync has run since launch."
-        case .running(let message): "Running: \(message)"
+        case .running(let phase): "Running: \(progress ?? phase)"
         case .succeeded(let message): message
         case .failed(let message): message
         }

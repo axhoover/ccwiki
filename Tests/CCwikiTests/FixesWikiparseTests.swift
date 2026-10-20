@@ -61,6 +61,42 @@ struct FixesWikiparseTests {
         #expect(index.backlinkMap()["Primitives/bar.md"]?.map(\.context) == ["Text bar here."])
     }
 
+    @Test("a line ends at LF, CR LF or a lone CR, and a mark after one starts the next line")
+    func lineEnds() throws {
+        func lines(_ text: String) -> [String] {
+            var result: [String] = []
+            var start = text.startIndex
+            while start < text.endIndex {
+                let (end, next) = MarkdownLineEnd.next(in: text, from: start)
+                result.append(String(text[start..<end]))
+                start = next
+            }
+            return result
+        }
+        #expect(lines("a\r\nb\rc\nd") == ["a", "b", "c", "d"])
+        #expect(lines("a\r\r\nb") == ["a", "", "b"])
+        #expect(lines("a\r") == ["a"])
+        #expect(lines("").isEmpty)
+        #expect(lines("a\n\u{301}b\r\u{301}") == ["a", "\u{301}b", "\u{301}"])
+
+        let text = "One.\r\u{301}Two [[b]] three.\r\nFour."
+        let link = try #require(WikilinkParser.links(in: text).first)
+        let start = MarkdownLineEnd.start(in: text, before: link.range.lowerBound)
+        let end = MarkdownLineEnd.next(in: text, from: link.range.upperBound).end
+        #expect(String(text[start..<end]) == "\u{301}Two [[b]] three.")
+        #expect(MarkdownLineEnd.start(in: text, before: text.startIndex) == text.startIndex)
+    }
+
+    @Test("a page with lone CR line ends is read line by line too")
+    func loneCRLines() {
+        let page = WikiPage(path: "Primitives/foo.md",
+                            text: "# Foo\r## Syntax\r```\r## Fenced [[baz]]\r```\rText [[bar]] here.\r")
+        #expect(page.headings().map(\.id) == ["foo", "syntax"])
+        #expect(WikilinkParser.links(in: page.body).map(\.target) == ["bar"])
+        let index = Self.index([page, WikiPage(path: "Primitives/bar.md", text: "# Bar\n")])
+        #expect(index.backlinkMap()["Primitives/bar.md"]?.map(\.context) == ["Text bar here."])
+    }
+
     @Test("DiffGuard reads a CRLF page's headings line by line, for its variants")
     func crlfVariantHeading() throws {
         let page = try DiffGuardTests.fixture("pseudorandom-function.md")

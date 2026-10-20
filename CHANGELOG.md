@@ -54,6 +54,16 @@ you already have.
 changed, and an open tab renders again only if its page did. A sync that
 changes nothing reloads nothing.
 
+**Less waiting.** Opening CCwiki and syncing the wiki take less time, and
+the page you are reading appears without waiting for the search index to
+be brought up to date; a search typed meanwhile answers once it is. A page
+full of formulas draws again sooner when you go Back to it, in the
+editor's live preview, and after a sync or a change in Settings, because
+each tab and each preview keeps the math it has already typeset. The
+review in the Jobs window draws only the parts of a change it shows, so
+it opens and refreshes sooner. A running job's elapsed time keeps ticking
+while the agent works quietly, instead of stopping and then jumping.
+
 **Copy a proof into a paper or a page.** In the Relations Explorer, Edit →
 Copy Proof As gives the proof on screen as LaTeX (⌥⌘C) or as wiki Markdown
 (⌥⇧⌘C). The LaTeX is an `enumerate`, one cited step per item, with

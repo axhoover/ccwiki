@@ -49,7 +49,12 @@ enum WikilinkParser {
     /// `%%comments%%` are deleted before wikilinks are parsed (`ofm.ts:145`),
     /// so links inside them never exist either.
     static func links(in text: String) -> [Wikilink] {
-        let skip = CodeMask.inertRanges(in: text)
+        links(in: text, inert: CodeMask.inertRanges(in: text))
+    }
+
+    /// `links(in:)`, with `CodeMask.inertRanges(in: text)` already found, as
+    /// `LinkParse` finds it once for both kinds of link.
+    static func links(in text: String, inert skip: [Range<String.Index>]) -> [Wikilink] {
         let ns = text as NSString
 
         return regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
@@ -92,17 +97,36 @@ enum CodeMask {
 
     static func inertRanges(in text: String) -> [Range<String.Index>] {
         var ranges = commentRanges(in: text)
-
-        var inFence = false
-        var fenceMarker: Character = "`"
-        var fenceLength = 0
+        var fences = Fences()
 
         var lineStart = text.startIndex
         while lineStart < text.endIndex {
-            let lineEnd = text[lineStart...].firstIndex(where: \.isMarkdownLineEnding) ?? text.endIndex
-            let line = text[lineStart..<lineEnd]
-            defer { lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex }
+            let (lineEnd, next) = MarkdownLineEnd.next(in: text, from: lineStart)
+            defer { lineStart = next }
 
+            if fences.isCode(text[lineStart..<lineEnd]) {
+                ranges.append(lineStart..<lineEnd)
+            } else {
+                ranges.append(contentsOf: inlineInertRanges(in: text, line: lineStart..<lineEnd))
+            }
+        }
+        return ranges
+    }
+
+    /// Which lines of a text are fenced code, read in order: the rule
+    /// `inertRanges` masks fences by, in one place, so that a scan which
+    /// stops early (`PreviewExcerpt.scope`) reads fences exactly as it does.
+    struct Fences {
+        private var inFence = false
+        private var fenceMarker: Character = "`"
+        private var fenceLength = 0
+
+        init() {}
+
+        /// Whether `line`, the text's next line, is code: a fence's opening or
+        /// closing line, or a line inside one. An unterminated fence swallows
+        /// the rest of the file, which is what a markdown parser does too.
+        mutating func isCode(_ line: Substring) -> Bool {
             let trimmed = line.drop { $0 == " " }
             if let marker = trimmed.first, marker == "`" || marker == "~" {
                 let run = trimmed.prefix { $0 == marker }.count
@@ -111,28 +135,17 @@ enum CodeMask {
                         inFence = true
                         fenceMarker = marker
                         fenceLength = run
-                        ranges.append(lineStart..<lineEnd)
-                        continue
+                        return true
                     }
                     if marker == fenceMarker, run >= fenceLength,
                        trimmed.dropFirst(run).allSatisfy({ $0 == " " }) {
                         inFence = false
-                        ranges.append(lineStart..<lineEnd)
-                        continue
+                        return true
                     }
                 }
             }
-
-            if inFence {
-                ranges.append(lineStart..<lineEnd)
-            } else {
-                ranges.append(contentsOf: inlineInertRanges(in: text, line: lineStart..<lineEnd))
-            }
+            return inFence
         }
-
-        // An unterminated fence swallows the rest of the file, which is what a
-        // markdown parser does too.
-        return ranges
     }
 
     /// Every `%% … %%` in the text, across lines. Done on the whole text
@@ -189,7 +202,8 @@ enum CodeMask {
 extension Character {
     /// A line ending as markdown-it reads one: `\n`, `\r\n` or a lone `\r`.
     /// `"\r\n"` is a single Character, so a search for `"\n"` alone reads a
-    /// page saved with CRLF endings as one long line.
+    /// page saved with CRLF endings as one long line. The load's own walks
+    /// find the same ends on bytes, with `MarkdownLineEnd`.
     var isMarkdownLineEnding: Bool { self == "\n" || self == "\r\n" || self == "\r" }
 }
 
@@ -271,8 +285,21 @@ enum MarkdownLinkParser {
     /// whose text holds a `[[wikilink]]` or another link, and an image is not
     /// one. Code and comments are masked exactly as `WikilinkParser` masks
     /// them, so the two parsers agree on what is inert.
+    ///
+    /// It finds the inert ranges and the wikilinks itself, as it did before
+    /// `LinkParse` shared them (plans/efficiency.md, L2): the equivalence
+    /// tests read it as the old code, so it must not go through `LinkParse`.
     static func links(in text: String) -> [MarkdownLink] {
-        LinkScanner(text).links()
+        let inert = CodeMask.inertRanges(in: text)
+        return LinkScanner(text, inert: inert, wikilinks: WikilinkParser.links(in: text)).links()
+    }
+
+    /// `links(in:)`, with `CodeMask.inertRanges(in: text)` and
+    /// `WikilinkParser.links(in: text)` already found.
+    static func links(
+        in text: String, inert: [Range<String.Index>], wikilinks: [Wikilink]
+    ) -> [MarkdownLink] {
+        LinkScanner(text, inert: inert, wikilinks: wikilinks).links()
     }
 
     /// A URL (`https:`, `mailto:`) or a same-page `#anchor` is not a wiki link:
@@ -340,6 +367,22 @@ enum MarkdownLinkParser {
     }
 }
 
+/// Both kinds of link in a text, from one pass over what is inert in it.
+///
+/// Taken one parser at a time, a text is read three times: each parser
+/// finds the inert ranges, and the markdown-link scan finds the wikilinks
+/// again, since a link's text cannot hold one. This finds the inert ranges
+/// once and the wikilinks once, for what needs both kinds: a page's outgoing
+/// links, and a render request's link map (plans/efficiency.md, L2).
+enum LinkParse {
+
+    static func links(in text: String) -> (wikilinks: [Wikilink], markdownLinks: [MarkdownLink]) {
+        let inert = CodeMask.inertRanges(in: text)
+        let wikilinks = WikilinkParser.links(in: text, inert: inert)
+        return (wikilinks, MarkdownLinkParser.links(in: text, inert: inert, wikilinks: wikilinks))
+    }
+}
+
 /// The scan behind `MarkdownLinkParser`: the parts of markdown-it's inline
 /// parser that decide where a link starts and ends, run over the whole body.
 ///
@@ -382,7 +425,9 @@ private struct LinkScanner {
 
     private let cache = Cache()
 
-    init(_ text: String) {
+    /// `inertRanges` are `CodeMask.inertRanges(in: text)`, and `wikilinks`
+    /// are `WikilinkParser.links(in: text)`.
+    init(_ text: String, inert inertRanges: [Range<String.Index>], wikilinks: [Wikilink]) {
         let bytes = Array(text.utf8)
         let utf8 = text.utf8
         func offset(_ index: String.Index) -> Int {
@@ -390,11 +435,11 @@ private struct LinkScanner {
         }
 
         var inert = [Bool](repeating: false, count: bytes.count)
-        for range in CodeMask.inertRanges(in: text) {
+        for range in inertRanges {
             for k in offset(range.lowerBound)..<offset(range.upperBound) { inert[k] = true }
         }
         var wikilinkEnds: [Int: Int] = [:]
-        for link in WikilinkParser.links(in: text) {
+        for link in wikilinks {
             wikilinkEnds[offset(link.range.lowerBound)] = offset(link.range.upperBound)
         }
 

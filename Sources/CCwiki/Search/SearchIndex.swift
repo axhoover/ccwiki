@@ -80,10 +80,11 @@ actor SearchIndex {
     private(set) var indexedCount = 0
     /// ⌘S's ordering rules, over the pages of the last rebuild. Held here
     /// rather than on the main actor because it is read on every keystroke,
-    /// next to the query it combines with.
-    private var ranker = ConceptRanker.empty
+    /// next to the query it combines with. Readable so the tests can hold
+    /// both rankers against ones built from the pages.
+    private(set) var ranker = ConceptRanker.empty
     /// ⇧⌘R's, over the references.
-    private var referenceRanker = ReferenceRanker.empty
+    private(set) var referenceRanker = ReferenceRanker.empty
 
     init(path: URL) {
         self.path = path
@@ -98,7 +99,9 @@ actor SearchIndex {
     /// `doc.hash` is the fingerprint of the file each row was built from, and
     /// `meta` holds `builder`, the build that wrote the rows, so a load
     /// rewrites only the rows whose file changed (plans/reader-comforts.md
-    /// §3.4).
+    /// §3.4). `doc.outline` is the page's headings with their ids, so a load
+    /// builds the concept ranker without parsing the pages it did not change
+    /// (`writeChanges`).
     private static let schema = """
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
@@ -115,7 +118,9 @@ actor SearchIndex {
           headings TEXT NOT NULL DEFAULT '',
           body     TEXT NOT NULL,
           -- '' when the file's fingerprint was not known: it never matches.
-          hash     TEXT NOT NULL DEFAULT ''
+          hash     TEXT NOT NULL DEFAULT '',
+          -- `SearchIndex.encoded(_:)`; not in the full-text index.
+          outline  TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS doc_slug ON doc(slug);
 
@@ -136,14 +141,7 @@ actor SearchIndex {
           prefix = '2 3'
         );
 
-        CREATE TRIGGER IF NOT EXISTS doc_ai AFTER INSERT ON doc BEGIN
-          INSERT INTO doc_fts(rowid, title, aliases, headings, body)
-            VALUES (new.id, new.title, new.aliases, new.headings, new.body);
-        END;
-        CREATE TRIGGER IF NOT EXISTS doc_ad AFTER DELETE ON doc BEGIN
-          INSERT INTO doc_fts(doc_fts, rowid, title, aliases, headings, body)
-            VALUES ('delete', old.id, old.title, old.aliases, old.headings, old.body);
-        END;
+        \(insertDeleteTriggers)
         CREATE TRIGGER IF NOT EXISTS doc_au AFTER UPDATE ON doc BEGIN
           INSERT INTO doc_fts(doc_fts, rowid, title, aliases, headings, body)
             VALUES ('delete', old.id, old.title, old.aliases, old.headings, old.body);
@@ -152,11 +150,26 @@ actor SearchIndex {
         END;
         """
 
+    /// The triggers that keep `doc_fts` in step with an insert into `doc` and
+    /// a delete from it. `writeAll` drops them while it writes every row,
+    /// builds the full-text index once from the rows, and makes them again
+    /// from this same text.
+    private static let insertDeleteTriggers = """
+        CREATE TRIGGER IF NOT EXISTS doc_ai AFTER INSERT ON doc BEGIN
+          INSERT INTO doc_fts(rowid, title, aliases, headings, body)
+            VALUES (new.id, new.title, new.aliases, new.headings, new.body);
+        END;
+        CREATE TRIGGER IF NOT EXISTS doc_ad AFTER DELETE ON doc BEGIN
+          INSERT INTO doc_fts(doc_fts, rowid, title, aliases, headings, body)
+            VALUES ('delete', old.id, old.title, old.aliases, old.headings, old.body);
+        END;
+        """
+
     /// Bump when the tables, tokenizer or weights change. `IF NOT EXISTS`
     /// would otherwise keep an old index behind the same file name. The
     /// index is derived, so a mismatch is answered by throwing it away.
-    /// Version 3 added `doc.hash` and `meta`.
-    static let schemaVersion = 3
+    /// Version 3 added `doc.hash` and `meta`; version 4, `doc.outline`.
+    static let schemaVersion = 4
 
     private func open() throws -> SQLiteDatabase {
         if let database { return database }
@@ -199,8 +212,10 @@ actor SearchIndex {
     /// cite each reference.
     func rebuild(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]] = [:]) throws {
         let pages = Self.sortedByPath(pages)
-        rank(pages, backlinks: backlinks)
-        _ = try writeAll(pages, digests: [:], builder: nil, in: try openOrReset())
+        var outlines: [String: ConceptRanker.Outline] = [:]
+        defer { rank(pages, outlines: outlines, backlinks: backlinks) }
+        let database = try openOrReset()
+        _ = try writeAll(pages, digests: [:], builder: nil, outlines: &outlines, in: database)
     }
 
     /// Bring the index in line with a library load: what `AppModel` calls
@@ -227,22 +242,35 @@ actor SearchIndex {
         let clock = ContinuousClock()
         let start = clock.now
         let pages = Self.sortedByPath(pages)
-        rank(pages, backlinks: backlinks)
 
-        var database = try openOrReset()
+        // Each page's outline as this sync comes to know it: parsed for a row
+        // it writes, read back from a row it keeps. The rankers are built
+        // from it when the writing ends, however it ends, and parse only the
+        // pages it lacks, so no page is parsed twice, and a sync that writes
+        // nothing parses none (`rank`).
+        var outlines: [String: ConceptRanker.Outline] = [:]
         let report: SyncReport
         do {
-            let stamped = try Self.builder(in: database)
-            if stamped != builder || LibraryChanges.areIgnored {
-                report = try writeAll(pages, digests: fingerprints.pages, builder: builder, in: database)
-            } else {
-                report = try writeChanges(
-                    pages, digests: fingerprints.pages, builder: builder, in: database)
+            defer { rank(pages, outlines: outlines, backlinks: backlinks) }
+            var database = try openOrReset()
+            do {
+                let stamped = try Self.builder(in: database)
+                if stamped != builder || LibraryChanges.areIgnored {
+                    report = try writeAll(
+                        pages, digests: fingerprints.pages, builder: builder,
+                        outlines: &outlines, in: database)
+                } else {
+                    report = try writeChanges(
+                        pages, digests: fingerprints.pages, builder: builder,
+                        outlines: &outlines, in: database)
+                }
+            } catch {
+                reset()
+                database = try open()
+                report = try writeAll(
+                    pages, digests: fingerprints.pages, builder: builder,
+                    outlines: &outlines, in: database)
             }
-        } catch {
-            reset()
-            database = try open()
-            report = try writeAll(pages, digests: fingerprints.pages, builder: builder, in: database)
         }
 
         let message = "Search index: \(report.summary) in \(start.duration(to: clock.now))"
@@ -251,10 +279,17 @@ actor SearchIndex {
     }
 
     /// The rankers, from pages sorted by path: their ties then fall the same
-    /// way whichever build made the rows.
-    private func rank(_ pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]]) {
-        ranker = ConceptRanker(pages: pages)
-        referenceRanker = ReferenceRanker(pages: pages, backlinks: backlinks)
+    /// way whichever build made the rows. `outlines` holds the headings
+    /// already parsed for the rows, by path, which are not parsed again, and
+    /// the reference ranker names the pages citing a paper with the names
+    /// the concept ranker gave them.
+    private func rank(
+        _ pages: [WikiPage], outlines: [String: ConceptRanker.Outline],
+        backlinks: [String: [WikiIndex.Backlink]]
+    ) {
+        ranker = ConceptRanker(pages: pages, headings: outlines)
+        referenceRanker = ReferenceRanker(
+            pages: pages, backlinks: backlinks, citerNames: ranker.citerNames)
     }
 
     private static func sortedByPath(_ pages: [WikiPage]) -> [WikiPage] {
@@ -271,17 +306,28 @@ actor SearchIndex {
     }
 
     /// Every row deleted and written again, then the index optimized and
-    /// the log folded into the file.
+    /// the log folded into the file. Each page's outline goes to `outlines`.
+    ///
+    /// The full-text index is built once from the new rows, by FTS5's
+    /// `'rebuild'`, rather than kept in step row by row: through the
+    /// triggers every old row was tokenized out of the index and every new
+    /// one into it, which over a populated index (the launch after an app
+    /// update) cost about four times as much. The triggers are dropped and
+    /// made again in the same transaction, so a failure leaves them as it
+    /// leaves the rows.
     private func writeAll(
         _ pages: [WikiPage], digests: [String: String], builder: String?,
-        in database: SQLiteDatabase
+        outlines: inout [String: ConceptRanker.Outline], in database: SQLiteDatabase
     ) throws -> SyncReport {
         try database.transaction {
+            try database.execute("DROP TRIGGER IF EXISTS doc_ai; DROP TRIGGER IF EXISTS doc_ad;")
             try database.execute("DELETE FROM doc")
             let insert = try database.prepare(Self.insertRow)
             for page in pages {
-                try Self.write(page, digest: digests[page.path], with: insert)
+                outlines[page.path] = try Self.write(page, digest: digests[page.path], with: insert)
             }
+            try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('rebuild')")
+            try database.execute(Self.insertDeleteTriggers)
             try Self.stamp(builder, in: database)
         }
         try database.execute("INSERT INTO doc_fts(doc_fts) VALUES('optimize')")
@@ -292,24 +338,34 @@ actor SearchIndex {
 
     /// Only the rows whose file changed, came or went. FTS5's automerge keeps
     /// the index in shape after a few writes; a pull that touched many pages
-    /// is optimized as a rebuild is.
+    /// is optimized as a rebuild is. The outline of each page written goes
+    /// to `outlines`, and so does that of each concept page kept, read from
+    /// its row.
     private func writeChanges(
         _ pages: [WikiPage], digests: [String: String], builder: String,
-        in database: SQLiteDatabase
+        outlines: inout [String: ConceptRanker.Outline], in database: SQLiteDatabase
     ) throws -> SyncReport {
-        var stored = try Self.storedHashes(in: database)
+        var stored = try Self.storedRows(in: database)
         var report = SyncReport()
         var inserts: [WikiPage] = []
         var updates: [WikiPage] = []
+        let decoder = JSONDecoder()
         for page in pages {
-            guard let hash = stored.removeValue(forKey: page.path) else {
+            guard let row = stored.removeValue(forKey: page.path) else {
                 inserts.append(page)
                 continue
             }
             // A page with no fingerprint is always rewritten: nothing says
             // its row still describes it.
-            if let digest = digests[page.path], digest == hash {
+            if let digest = digests[page.path], digest == row.hash {
                 report.unchanged += 1
+                // The row was built from this file by this build, so its
+                // outline is the page's: the concept ranker reads it rather
+                // than parse the page. One that cannot be read is left out,
+                // and the page is parsed.
+                if page.kind != .reference {
+                    outlines[page.path] = Self.outline(decoding: row.outline, with: decoder)
+                }
             } else {
                 updates.append(page)
             }
@@ -331,11 +387,11 @@ actor SearchIndex {
             // The `doc_au` trigger keeps the full-text index in step.
             let update = try database.prepare(Self.updateRow)
             for page in updates {
-                try Self.write(page, digest: digests[page.path], with: update)
+                outlines[page.path] = try Self.write(page, digest: digests[page.path], with: update)
             }
             let insert = try database.prepare(Self.insertRow)
             for page in inserts {
-                try Self.write(page, digest: digests[page.path], with: insert)
+                outlines[page.path] = try Self.write(page, digest: digests[page.path], with: insert)
             }
             try Self.stamp(builder, in: database)
         }
@@ -351,20 +407,23 @@ actor SearchIndex {
     static let optimizeAfterWrites = 100
 
     private static let insertRow = """
-        INSERT INTO doc(path, slug, kind, status, title, aliases, headings, body, hash)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        INSERT INTO doc(path, slug, kind, status, title, aliases, headings, body, hash, outline)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         """
 
     private static let updateRow = """
         UPDATE doc SET slug = ?2, kind = ?3, status = ?4, title = ?5, aliases = ?6,
-          headings = ?7, body = ?8, hash = ?9
+          headings = ?7, body = ?8, hash = ?9, outline = ?10
         WHERE path = ?1
         """
 
     /// Binds `page`'s row to `statement`, one of the two above, and runs it.
+    /// Returns the page's outline, parsed for the row, which the concept
+    /// ranker then reads rather than parse the page a second time.
     private static func write(
         _ page: WikiPage, digest: String?, with statement: SQLiteDatabase.Statement
-    ) throws {
+    ) throws -> ConceptRanker.Outline {
+        let headings = page.headings()
         statement.reset()
         statement.bind(1, page.path)
         statement.bind(2, page.slug)
@@ -376,20 +435,43 @@ actor SearchIndex {
         statement.bind(5, page.kind == .reference
             ? "\(page.title) \(page.displayTitle)" : page.title)
         statement.bind(6, page.aliases.joined(separator: "\n"))
-        statement.bind(7, page.headings().map(\.text).joined(separator: "\n"))
+        statement.bind(7, headings.map(\.text).joined(separator: "\n"))
         statement.bind(8, indexableBody(page.body))
         statement.bind(9, digest ?? "")
+        let outline = ConceptRanker.outline(headings)
+        statement.bind(10, encoded(outline))
         _ = try statement.step()
+        return outline
     }
 
-    /// Each row's path and the fingerprint it was built from.
-    private static func storedHashes(in database: SQLiteDatabase) throws -> [String: String] {
-        var stored: [String: String] = [:]
-        let select = try database.prepare("SELECT path, hash FROM doc")
+    /// Each row's fingerprint and outline, by path.
+    private static func storedRows(in database: SQLiteDatabase) throws
+        -> [String: (hash: String, outline: String)] {
+        var stored: [String: (hash: String, outline: String)] = [:]
+        let select = try database.prepare("SELECT path, hash, outline FROM doc")
         while try select.step() {
-            stored[select.string(0)] = select.string(1)
+            stored[select.string(0)] = (hash: select.string(1), outline: select.string(2))
         }
         return stored
+    }
+
+    /// An outline as `doc.outline` holds it: a JSON array of `[text, id]`
+    /// pairs. Not the `headings` column split at its line breaks, because a
+    /// heading's text can hold one: `Heading.plainText` decodes `&#10;`.
+    static func encoded(_ outline: ConceptRanker.Outline) -> String {
+        let pairs = outline.map { [$0.text, $0.id] }
+        guard let data = try? JSONEncoder().encode(pairs) else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The outline `encoded` wrote, or nil for text it did not write.
+    static func outline(
+        decoding text: String, with decoder: JSONDecoder = JSONDecoder()
+    ) -> ConceptRanker.Outline? {
+        guard let pairs = try? decoder.decode([[String]].self, from: Data(text.utf8)),
+              pairs.allSatisfy({ $0.count == 2 })
+        else { return nil }
+        return pairs.map { (text: $0[0], id: $0[1]) }
     }
 
     /// The build that wrote the rows, if one is recorded.

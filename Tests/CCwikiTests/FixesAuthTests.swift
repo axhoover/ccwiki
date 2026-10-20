@@ -65,77 +65,81 @@ struct FixesAuthTests {
     /// by every test whose gh answers, all running at once.
     @Test("isAuthenticated asks github.com alone, and caches only a definite answer")
     func isAuthenticatedCaches() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // This gh answers at once. Under the whole parallel suite, 15 s
+        // would time only the scheduler.
+        try await GitHubAuth.$deadline.withValue(.seconds(600)) {
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: "ccwiki-fake-gh-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        /// A gh whose `auth status` for github.com and whose probe say
-        /// what they are given. Asked of every host, it fails, as it does
-        /// when an Enterprise host's token has expired.
-        func gh(_ name: String, status: String, probe: String) throws -> ToolLocator {
-            let file = directory.appending(path: name)
-            let script = """
-                #!/bin/sh
-                case "$*" in
-                  "auth status --hostname github.com") \(status) ;;
-                  "api --hostname github.com user --jq .login") \(probe) ;;
-                  "auth status") echo "X Failed to log in to ghe.example.com account me" >&2; exit 1 ;;
-                  *) echo "unexpected: $*" >&2; exit 2 ;;
-                esac
+            /// A gh whose `auth status` for github.com and whose probe say
+            /// what they are given. Asked of every host, it fails, as it does
+            /// when an Enterprise host's token has expired.
+            func gh(_ name: String, status: String, probe: String) throws -> ToolLocator {
+                let file = directory.appending(path: name)
+                let script = """
+                    #!/bin/sh
+                    case "$*" in
+                      "auth status --hostname github.com") \(status) ;;
+                      "api --hostname github.com user --jq .login") \(probe) ;;
+                      "auth status") echo "X Failed to log in to ghe.example.com account me" >&2; exit 1 ;;
+                      *) echo "unexpected: $*" >&2; exit 2 ;;
+                    esac
 
-                """
-            try Data(script.utf8).write(to: file)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
-            var tools = ToolLocator(overrides: [.gh: file.path(percentEncoded: false)])
-            tools.locate([.gh])
-            try #require(tools.path(for: .gh) != nil)
-            return tools
-        }
-        let invalid = "echo '  - The token in keyring is invalid.' >&2; exit 1"
+                    """
+                try Data(script.utf8).write(to: file)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755], ofItemAtPath: file.path(percentEncoded: false))
+                var tools = ToolLocator(overrides: [.gh: file.path(percentEncoded: false)])
+                tools.locate([.gh])
+                try #require(tools.path(for: .gh) != nil)
+                return tools
+            }
+            let invalid = "echo '  - The token in keyring is invalid.' >&2; exit 1"
 
-        // Signed in to github.com; another host's trouble is not ours.
-        let signedIn = try gh("signed-in", status: "exit 0", probe: "exit 7")
-        await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
-            #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == true)
-            #expect(GitHubAuth.cachedAnswer == true)
-        }
+            // Signed in to github.com; another host's trouble is not ours.
+            let signedIn = try gh("signed-in", status: "exit 0", probe: "exit 7")
+            await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+                #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == true)
+                #expect(GitHubAuth.cachedAnswer == true)
+            }
 
-        try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
-            // A GitHub outage: not known, and asked again next time.
-            let outage = try gh(
-                "outage", status: invalid,
-                probe: "echo 'gh: Service Unavailable (HTTP 503)' >&2; exit 1")
-            #expect(await GitHubAuth.isAuthenticated(tools: outage) == nil)
-            #expect(GitHubAuth.cachedAnswer == nil)
-            #expect(await GitHubAuth.signedIn(tools: outage) == nil)
+            try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+                // A GitHub outage: not known, and asked again next time.
+                let outage = try gh(
+                    "outage", status: invalid,
+                    probe: "echo 'gh: Service Unavailable (HTTP 503)' >&2; exit 1")
+                #expect(await GitHubAuth.isAuthenticated(tools: outage) == nil)
+                #expect(GitHubAuth.cachedAnswer == nil)
+                #expect(await GitHubAuth.signedIn(tools: outage) == nil)
 
-            // Offline: the same.
-            let offline = try gh(
-                "offline", status: "echo 'error connecting to api.github.com' >&2; exit 1",
-                probe: "exit 7")
-            #expect(await GitHubAuth.isAuthenticated(tools: offline) == nil)
-            #expect(GitHubAuth.cachedAnswer == nil)
+                // Offline: the same.
+                let offline = try gh(
+                    "offline", status: "echo 'error connecting to api.github.com' >&2; exit 1",
+                    probe: "exit 7")
+                #expect(await GitHubAuth.isAuthenticated(tools: offline) == nil)
+                #expect(GitHubAuth.cachedAnswer == nil)
 
-            // A refused token is an answer, and is kept.
-            let refused = try gh(
-                "refused", status: invalid,
-                probe: "echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1")
-            #expect(await GitHubAuth.isAuthenticated(tools: refused) == false)
-            #expect(GitHubAuth.cachedAnswer == false)
-            #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == false, "from the cache")
-        }
+                // A refused token is an answer, and is kept.
+                let refused = try gh(
+                    "refused", status: invalid,
+                    probe: "echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1")
+                #expect(await GitHubAuth.isAuthenticated(tools: refused) == false)
+                #expect(GitHubAuth.cachedAnswer == false)
+                #expect(await GitHubAuth.isAuthenticated(tools: signedIn) == false, "from the cache")
+            }
 
-        // Signed in only to an Enterprise host: github.com asked without a
-        // token is a 401, not an answer GitHub gives anyone.
-        try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
-            let elsewhere = try gh(
-                "elsewhere",
-                status: "echo 'You are not logged into any accounts on github.com' >&2; exit 1",
-                probe: "echo 'gh: Requires authentication (HTTP 401)' >&2; exit 1")
-            #expect(await GitHubAuth.isAuthenticated(tools: elsewhere) == false)
-            #expect(GitHubAuth.cachedAnswer == false)
+            // Signed in only to an Enterprise host: github.com asked without a
+            // token is a 401, not an answer GitHub gives anyone.
+            try await GitHubAuth.$cache.withValue(GitHubAuth.Cache()) {
+                let elsewhere = try gh(
+                    "elsewhere",
+                    status: "echo 'You are not logged into any accounts on github.com' >&2; exit 1",
+                    probe: "echo 'gh: Requires authentication (HTTP 401)' >&2; exit 1")
+                #expect(await GitHubAuth.isAuthenticated(tools: elsewhere) == false)
+                #expect(GitHubAuth.cachedAnswer == false)
+            }
         }
     }
 

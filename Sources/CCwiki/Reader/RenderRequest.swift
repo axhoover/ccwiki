@@ -151,16 +151,7 @@ struct PageRenderer: Sendable {
         var previews: [String: LinkPreview] = [:]
         var brokenCount = 0
 
-        // A wikilink is keyed by its raw `[[…]]` text, a markdown link by its
-        // destination: the strings `ccwiki.js` looks each one up by.
-        var keyed: [(raw: String, link: Wikilink)] = WikilinkParser.links(in: markdown).map {
-            (raw: String(markdown[$0.range]), link: $0)
-        }
-        keyed += MarkdownLinkParser.links(in: markdown).map {
-            (raw: $0.destination, link: $0.wikilink)
-        }
-
-        for (raw, link) in keyed {
+        for (raw, link) in Self.keyedLinks(in: markdown) {
             guard links[raw] == nil else { continue }
 
             switch index.resolve(link, from: page.path) {
@@ -215,6 +206,21 @@ struct PageRenderer: Sendable {
             notices: allNotices)
         request.previews = previews
         return request
+    }
+
+    /// Every link in `markdown`, keyed by the string `ccwiki.js` looks it up
+    /// by: a wikilink by its raw `[[…]]` text, a markdown link by its
+    /// destination. The wikilinks, then the markdown links, each in source
+    /// order, all from one `LinkParse`.
+    static func keyedLinks(in markdown: String) -> [(raw: String, link: Wikilink)] {
+        let parsed = LinkParse.links(in: markdown)
+        var keyed: [(raw: String, link: Wikilink)] = parsed.wikilinks.map {
+            (raw: String(markdown[$0.range]), link: $0)
+        }
+        keyed += parsed.markdownLinks.map {
+            (raw: $0.destination, link: $0.wikilink)
+        }
+        return keyed
     }
 
     /// A synthetic listing for `[[Primitives]]`-style links.

@@ -985,6 +985,28 @@ load reads the revision (HEAD, or the snapshot marker) before its scan and
 records it as `loadedRevision` only if it is the same after the build;
 otherwise it records nil, so the next sync reloads.
 
+**The page renders before the search index is written** (plans/efficiency.md,
+U1). This supersedes the order this plan first gave, here and in §4.1's
+`AppModel` row, where the page waited for `searchIndex.sync` and the
+housekeeping. A load now:
+
+1. puts the library and its dates on screen (`apply`);
+2. starts `searchIndex.sync`, and meanwhile asks for the revision again and
+   sets `loadedRevision`, so nothing renders before the load's facts are
+   settled;
+3. tells each window's session (`sessionsDidLoad`), which renders its page
+   as §3.6 says, refreshes the quick switcher if one is up (opening one
+   refreshes it anyway), and runs ⇧⌘F's open query again;
+4. waits for the sync, then runs ⌘S's and ⇧⌘R's open queries again
+   (`searchDidSync`);
+5. runs the worktree housekeeping, when `runsJobHousekeeping(reason)`.
+
+Nothing a render reads is in the search index, so the page no longer waits
+for it: about 1.1 s in CI's debug build when the sync has nothing to write,
+and about 3 s on the launch after an app update, which rewrites every row. A
+search typed meanwhile waits on the actor, as before, and `loadLibrary` still
+returns after step 5.
+
 **The job-related git calls move out of the load.** `repairWorktrees` and
 `refreshOrphanedWorktrees` run at launch, after a fresh clone or Reset Clone,
 and after each job, as audit §3.5 recommends. `refreshPushCapability` runs
@@ -1198,7 +1220,7 @@ policy and moves `pageZoom`, so it gets the same review as a track.
 
 | File | Change |
 |---|---|
-| `App/AppModel.swift` | `Location` and `Document` become `Hashable, Codable` (Codable must be synthesized in this file). `webRoot` (staged once from `stagedWebRoot()`; now a computed `var` that calls `checkWebRoot()` first, §1.9). `var pageZoom` is persisted, clamped to `WebController.zoomRange`, applied in `didSet`, and the text-size methods set it. `let papers = PaperLibrary(paths:)`. `loadLibrary(reason:) async -> LibraryUpdate?` is rebuilt on the seams below and serialized (§3.2): `LoadedLibrary.update`, or `build` when nothing is loaded; then `apply`; then `LibraryRefresh.revisionFacts`, keeping `loadedRevision` only if `currentRevision` did not move; then `searchIndex.sync`; worktree housekeeping when `LibraryRefresh.runsJobHousekeeping(reason)`; then a private `libraryDidLoad(_:)` holding today's re-render tail. Add `@ObservationIgnored private var loaded: LoadedLibrary?`. `sync()` asks `LibraryRefresh.needsReload` and `await LibraryRefresh.summary`, and calls `refreshPushCapability()` after every outcome but `.failed`; the load no longer calls it. `rebuildLibrary()`, replacing `rebuildSearchIndex()`, drops `loaded`, resets the search index, then calls `loadLibrary(reason: .rebuild)`. `webController.onNavigate` takes a `LinkDisposition`, and anything but `.here` opens the site, as a modified click does today |
+| `App/AppModel.swift` | `Location` and `Document` become `Hashable, Codable` (Codable must be synthesized in this file). `webRoot` (staged once from `stagedWebRoot()`; now a computed `var` that calls `checkWebRoot()` first, §1.9). `var pageZoom` is persisted, clamped to `WebController.zoomRange`, applied in `didSet`, and the text-size methods set it. `let papers = PaperLibrary(paths:)`. `loadLibrary(reason:) async -> LibraryUpdate?` is rebuilt on the seams below and serialized (§3.2): `LoadedLibrary.update`, or `build` when nothing is loaded; then `apply`; then `LibraryRefresh.revisionFacts`, keeping `loadedRevision` only if `currentRevision` did not move; then `searchIndex.sync`; worktree housekeeping when `LibraryRefresh.runsJobHousekeeping(reason)`; then a private `libraryDidLoad(_:)` holding today's re-render tail. (U1 in plans/efficiency.md replaced this order: the sessions render in `sessionsDidLoad` once `loadedRevision` is set, before the sync is awaited, and `searchDidSync` runs ⌘S's and ⇧⌘R's queries after it; §3.2.) Add `@ObservationIgnored private var loaded: LoadedLibrary?`. `sync()` asks `LibraryRefresh.needsReload` and `await LibraryRefresh.summary`, and calls `refreshPushCapability()` after every outcome but `.failed`; the load no longer calls it. `rebuildLibrary()`, replacing `rebuildSearchIndex()`, drops `loaded`, resets the search index, then calls `loadLibrary(reason: .rebuild)`. `webController.onNavigate` takes a `LinkDisposition`, and anything but `.here` opens the site, as a modified click does today |
 | `App/LoadedLibrary.swift` (new) | `LoadedLibrary`, moved out of `AppModel.swift` and given `fingerprints`. `build(cloneRoot:)` is today's detached body, with relations-followups' `unverifiedCitations` step if that has merged by then (§10). `update(_:cloneRoot:)` calls `build` and reports `changes: nil`, `isFullBuild: true`. Also `LibraryUpdate` (with `requiresRerender` always true) and `LibraryArtifact` |
 | `Wiki/LibraryChanges.swift` (new) | `ContentFingerprints` (`.empty`; `scan` returns `.empty`) and `LibraryChanges` (`.none`; `between` returns `.none`) |
 | `App/LibraryRefresh.swift` (new) | `LibraryLoadReason`, `RevisionFacts` and `LibraryRefresh` with today's behaviour: reload after every outcome but `.failed`, the summary by `git diff` (hence `summary` is `async` and takes the store, git and clone), the revision facts by today's calls, housekeeping on every load |

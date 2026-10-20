@@ -9,7 +9,7 @@ impossible to accidentally violate.
 ## 1. Why JavaScript renders the markdown
 
 KaTeX and pseudocode.js exist only in JavaScript, and there is no Swift KaTeX.
-The wiki's 122 custom macros have to reach KaTeX's `macros` option, and 58
+The wiki's 126 custom macros have to reach KaTeX's `macros` option, and 58
 `pseudocode` blocks have to reach pseudocode.js — which itself calls
 `katex.renderToString`. So a JS engine is mandatory regardless.
 
@@ -55,7 +55,8 @@ silently rendering garbage.
 
 pseudocode.js resolves its math backend from the global `katex` symbol and calls
 `renderToString` with **no options**, so macros arrive by monkey-patching —
-exactly as the site's own plugin does. Load order is therefore mandatory:
+exactly as the site's own plugin does. The patch is also where formulas are
+remembered (§3, "The KaTeX memo"). Load order is therefore mandatory:
 `katex.min.js` → `pseudocode.js` → markdown-it and its plugins →
 `github-slugger.umd.js` → `ccwiki-markdown.js` → `ccwiki.js`.
 
@@ -323,6 +324,151 @@ pseudocode.ts:69), in `--text-secondary` for contrast. Each `.ps-line` is
 drops to a row of its own under that statement instead of hanging beside the
 next one, which is what the site does.
 
+### The KaTeX memo
+
+KaTeX is most of a render's time (62% of the corpus's, 74% of the slowest
+20 pages'), and most of it is spent again on formulas it has rendered
+before: a page's repeats, Back and Forward, the editor's preview 300 ms
+after each pause in typing, a re-render after a pull or a preference
+change, a review's refresh. So the patched `katex.renderToString` in
+`ccwiki.js`, which every formula goes through (the page's, a card's and
+pseudocode's), keeps what it rendered in a `Map`, one per web view:
+
+- **The key** is every option of the call, defaults merged, but `macros`,
+  each as its name, its type and its value, then the formula. The table
+  is not in the key: the memo is emptied whenever `ensureMarkdown`
+  installs another one, and only the current table's calls are kept.
+- **What is never kept**: a call with another table; a formula that is not
+  a string; an option that is an object or a function (`strict` and
+  `trust` can be functions), which could answer otherwise under the same
+  name; a formula with an `@`, or naming `\begin`, `\nonumber`, `\notag`
+  or `\tag` ("KaTeX's own names", below); a call that throws.
+- **What empties it, and turns it off** (the `\gdef` rule): a formula
+  holding `\gdef`, `\xdef` or `\global` (as a control word: `\gdefault` is
+  not one), or any call in KaTeX's `globalGroup`. Those are the only ways
+  a formula's own text writes the shared table: `\def`, `\edef`, `\let`
+  and `\newcommand` are local to their formula, and KaTeX undoes them when
+  it ends, error or not (`Parser.parse` ends every group in a `finally`).
+  The call itself is not kept, and the memo is emptied before it runs, so
+  nothing rendered with the old table survives it. Then nothing is kept
+  until `ensureMarkdown` installs another table: what the formula defined
+  stays in the table, and can define more when a later formula uses it,
+  which that formula's text does not show (`$\gdef\foo{\gdef\bar{1}}$`,
+  then `$\foo$`, changes what `$\bar$` renders).
+- **KaTeX's own names.** KaTeX 0.16.47 also keeps two names of its own in
+  the table between formulas: `\@eqnsw`, which a numbered environment
+  (`align`, `alignat`, `gather`, `equation`) sets at each row and
+  `\nonumber` and `\notag` set globally, and `\df@tag`, which `\tag` sets
+  and every formula deletes as it starts. KaTeX sets `\@eqnsw` before it
+  reads it, so only a formula that names it sees what another left, and
+  every name KaTeX keeps has an `@`: a formula with an `@` is never kept.
+  Nor is a formula that could set `\@eqnsw`, so each one renders, as it
+  would without the memo: a remembered `align` would not set it again,
+  and a formula naming it would then read what a `\nonumber` before the
+  `align` left. Those are the formulas naming `\nonumber`, `\notag` or
+  `\begin`, any `\begin`, since a macro can spell an environment's name.
+  A formula naming `\tag` is never kept either: a remembered one would not
+  leave `\df@tag` in the table. And a hit deletes `\df@tag`, as KaTeX does
+  when a formula starts, so the table KaTeX keeps between formulas is what
+  it would be without the memo.
+- **The copy area and `expandMacros` read the table as sent.** KaTeX writes
+  into the live table as formulas render: its own names, and a page's
+  `\gdef`s, some as token lists that point back at themselves. So
+  `ensureMarkdown` keeps a copy of the table the wiki sent (`sentMacros`),
+  and the macros page's copy buttons, Copy LaTeX (no macros) and
+  pseudocode's expanded source read that. Before, a `\nonumber`, a
+  `\notag`, a `\tag` or a page's `\gdef` anywhere in a web view made the
+  copy area's `JSON.stringify` throw, and the macros page failed to render
+  from then on; that was so on `main` too, where no wiki page has any of
+  them yet.
+- **Off**, for as long as a table stands, when any macro body holds a
+  global definition, an `@`, `\begin`, `\nonumber`, `\notag` or `\tag`: every
+  formula using that macro could change the table, or read what another
+  formula left. Off too when a macro's name is `\color` or has an `@`:
+  after every formula KaTeX deletes `\color` and `\current@color` from
+  the table, which `\color` and `\right` read, so a table naming either
+  changes at the first formula, and every name of KaTeX's own has an
+  `@`. And from a global definition on, as above.
+- **Size**: 1,000 formulas, the least recently used going first: a hit
+  moves its entry to the end of the map, and a miss at the limit deletes
+  the first.
+
+None of the 126 macros and none of the wiki's 7,320 formulas has a global
+definition, an `@`, a `\begin`, a `\nonumber`, a `\notag` or a `\tag`, and no macro
+is named `\color` (wiki at ab81f02). With every exception in place the
+output is unchanged byte for byte: in jsdom, with the real `ccwiki.js`
+before and after, all 883 files rendered twice in one web view, in path
+order, each page twice in a row, and path order then a shuffled order,
+gave 1,766 of 1,766 identical pages each time (16.6 MB), with the limit at
+1,000 and at 50. The exceptions themselves were checked in node: 1,000
+random runs of 120 steps, drawing on formulas and tables that write,
+read and delete KaTeX's names (a `\gdef` inside a `\gdef`, numbered
+environments, `\nonumber`, `\tag`, an environment a macro names,
+`\color` and `\current@color` in the table) and now and then installing
+another table, each through the vendored KaTeX behind `ccwiki.js` before
+and after, gave the same HTML in all 111,524 calls. The memo's first
+version, without the rules for what a definition defines, for the names
+KaTeX deletes and for what sets `\@eqnsw`, differed in 8 of 400 runs of
+80 steps.
+
+**The limit, from the corpus.** A render of every page calls KaTeX 7,320
+times (6,605 in prose, 92 of them display math, and 715 in pseudocode),
+on 3,299 distinct formulas and options, 4.39 M characters of HTML. The
+most distinct ones on one page is 166
+(`Assumptions/learning-with-errors.md`). The share of calls the memo
+answers, for each limit, simulated on that call sequence and checked
+against the real memo (`RenderMemoTests` prints the least recently used
+rows, without the Back columns, on every corpus run); "back k" is a page
+rendered again after k others, as Back does:
+
+| Limit | First pass | Second pass | Each page twice | Back 10 | Back 50 | Back 100 | Most kept |
+|---|---|---|---|---|---|---|---|
+| 500 | 46.5% | 46.9% | 100% | 100% | 78.6% | 53.7% | 0.8 M |
+| **1,000** | 50.5% | 51.7% | 100% | 100% | 100% | 82.1% | 1.6 M |
+| 2,000 | 53.5% | 57.3% | 100% | 100% | 100% | 100% | 3.1 M |
+| 3,300 | 54.9% | 100% | 100% | 100% | 100% | 100% | 4.9 M |
+| 1,000, first in first out | 48.5% | 49.2% | 99.9% | 99.0% | 95.8% | 77.2% | 1.6 M |
+
+The passes are in path order, which keeps a folder's pages together; in
+three shuffled orders 1,000 kept 100% of Back 100 too. "Most kept" is
+characters of HTML and keys at the most the memo held.
+
+1,000 holds any page, and the last hundred or so read, at about 1.6 M
+characters a web view (one per reader tab, editor preview and review). The
+app never renders the whole wiki in one web view, so the second pass,
+which only 3,300 or more covers, is no reason to keep three times as
+much. A hit rate is not time saved: the hits are mostly the short
+formulas every page repeats, so at 1,000 a second pass answers half the
+calls and saves none of the time (below), while a page rendered again
+saves most of it. Least recently used and not first in, first out,
+because first in, first out drops the formulas a page just used from
+among the oldest, and so misses on the page rendered again.
+
+Measured in V8 on the same machine (node 22, the test's DOM-free shell,
+`CCwiki.render` and the page's pseudocode, best of 5), before and after:
+
+| Case | Before | After |
+|---|---|---|
+| Every page, first render | 856 ms | 811 ms (−5%) |
+| Each page rendered again right after itself | 842 ms | 339 ms (−60%) |
+| The whole wiki a second time, in order | 732 ms | 732 ms |
+| `learning-with-errors`, rendered again | 38.4 ms | 8.5 ms (−78%) |
+
+`RenderMemoTests` checks the rules on a KaTeX that numbers its answers,
+checks a `\gdef`, a `\gdef` inside one, `\@eqnsw` set and cleared twice
+over, and tables naming `\color` and `\current@color` against the
+vendored KaTeX, and on the corpus renders every page twice through the
+memo and compares each with the vendored KaTeX behind the patch as it
+was before the memo.
+
+**The numbers in WebKit.** The page times each render, pseudocode and the
+passes after it included, and sends it as `ms` in its `rendered` message,
+with the page's path. `WebController` logs both at debug level under
+category `render` (a review as "a review"), so
+`log stream --level debug --predicate 'subsystem BEGINSWITH "com.axhoover.ccwiki" AND category == "render"'`
+gives the app's own before and after for a change to the renderer, which
+the V8 numbers above only stand in for.
+
 ### Copying LaTeX
 
 The page shows glyphs: copied as they stand, `\frac{1}{2}` reads "21",
@@ -478,6 +624,69 @@ as a link, titled "Added by this change", going nowhere.
 a finding's id, `<rule>:<path>:<line>`, whose line finds its entry.
 `WebController` keeps the last review's JSON and sends it whenever the shell
 says `ready`.
+
+**Blocks render when shown.** A block's HTML is rendered the first time
+an entry reads it, and kept (`renderedWhenRead`, a getter): a `gap` shows
+no HTML, so the blocks it stands for never render, and most blocks of a
+changed file are in one. The review renders when it opens and at every
+save while it is open. A one-line edit to each page of the wiki renders
+3,512 blocks instead of 12,748 (about 1.5 s → 0.9 s for all of them in
+V8, with the check for KaTeX's table below); an edit to its first and
+last lines 5,240 instead of 12,814; a page added or deleted renders
+every block, as before.
+
+That puts every render after both parses, in the order the entries
+come, not each text's, and without the blocks in gaps. Two things a
+render reads can change between renders. One is a Markdown link's
+destination: `link_open` finds the one Swift keyed it by from its href,
+in what `normalizeLink` last saw for that href (markdown-it keeps only
+the href; `create` in `ccwiki-markdown.js`), and `[a](<x y>)` and
+`[a](x%20y)` make one href. So `parseWithDestinations` records the
+destinations each text's parse asks `normalizeLink` about, and a block's
+first read asks again for its text's before it renders: what it last saw
+is what it saw when that text was parsed, as when every block rendered
+as its text was parsed. Without that, a review of such an edit called
+the removed link's missing target by the added one's spelling.
+
+The other is KaTeX's macro table, which a formula can change for every
+formula after it ("The KaTeX memo"): a `\gdef` in a gap defined nothing
+for the block shown below it, and an old block shown after a new one
+read what the new text defined. So when a block's formula could change
+the table (`\gdef`, `\xdef`, `\global`, `\nonumber`, `\notag`, `\tag`,
+or any `\begin`, as the memo has them; a `\tag` leaves `\df@tag` in the
+table, for the copy area and `expandMacros`, until the next formula
+starts), or any formula could through the table
+(a macro whose body could, one a formula defined, which KaTeX keeps as
+tokens, or a name KaTeX changes: `\color`, or one with an `@`),
+`reviewEntries` reads every block of both texts once both are parsed,
+the old text's first, which is the order they rendered in when each
+rendered as its text was parsed: parsing never calls KaTeX. That holds
+across files and reviews too: a file whose blocks render when shown
+leaves nothing in the table that a later formula reads. A formula that
+only reads what another left (`$\@eqnsw$`) does not count: while no
+formula writes, the table holds still. No wiki page has such a formula;
+only an edit that breaks a page's `$$`, so that pseudocode's `\begin`
+lands in a formula, renders every block (6 pages of the every-7th-line
+edit below).
+
+The entries are byte for byte the same: in node, with the vendored KaTeX
+and the wiki's macros, 7,064 reviews of every page (a middle line edited,
+the first and last, a line inserted, removed or followed by a blank one,
+every 7th line, the page added and deleted) and 15 hazards the wiki lacks
+(the two-way link, CR LF, a lone CR, a combining mark at a line's start,
+fences, `%%` comments, repeated headings, a footnote, a reference
+definition, math, pseudocode, a table, a callout) gave the same JSON
+before and after, 41 MB of it; without the second ask, 3 of the hazards
+did not. 300 runs of random reviews (565 reviews, 1,096 files, one to
+three a review) whose formulas write, read and delete KaTeX's names,
+some in gaps and some across files, gave the same JSON in bare contexts
+and the same review in jsdom through the shell; the first version, which
+rendered lazily whatever the formulas, differed within the first runs.
+`RenderMemoTests` compares the two on the hazards, on seven reviews in
+which a formula changes the table, and on one in which a formula only
+reads it, which must still render only the blocks it shows, on every
+run; and on four of those edits to every page on a corpus run, against a
+copy of the file as it was (`Tests/CCwikiTests/Fixtures/legacy`).
 
 ## 4. Serving content: a custom scheme, not `file://`
 

@@ -129,7 +129,7 @@ struct RelationsView: View {
                 // Under "Circumvents" the heading already says it.
                 showsCircumvention: group.role != .circumvents,
                 // The edge it rules out, with the barrier in the answer.
-                exploring: model.explorerQuestion(from: barrier.hypotheses, to: barrier.conclusion))
+                exploring: exploration(from: barrier.hypotheses, to: barrier.conclusion))
         case .object(let id):
             objectRow(id)
         case .fact(let fact):
@@ -255,27 +255,42 @@ struct RelationsView: View {
 
     // MARK: Rows
 
+    /// What "Explore From Here…" asks: the objects alone. The explorer's
+    /// models toggle is read when the item is clicked, so drawing this tab
+    /// never reads the explorer's question, and editing that question does
+    /// not rebuild every window's Relations tab (SWIFTUI-RULES §3.5).
+    private struct Exploration {
+        let from: [String]
+        var to: String? = nil
+    }
+
+    /// `from` and `to`, or `nil` when the explorer would only turn them away
+    /// (`AppModel.canExplore`).
+    private func exploration(from: [String], to: String? = nil) -> Exploration? {
+        model.canExplore(from: from, to: to) ? Exploration(from: from, to: to) : nil
+    }
+
     /// What "Explore From Here…" asks of a recorded row: the objects the row
     /// names (relations-explorer.md §2.11). The far end of a Builds on,
     /// Contained in or Equivalent to row; the whole conjunction of a Produces
     /// or Contains row, never one hypothesis of it. `nil` when that would be
     /// a complexity class, which is never derived.
-    private func exploring(_ relation: Relation, role: RelationRole, focus: String?) -> ExplorerQuery? {
+    private func exploring(_ relation: Relation, role: RelationRole, focus: String?) -> Exploration? {
         switch role {
         case .buildsOn, .containedIn:
-            return model.explorerQuestion(from: [relation.conclusion])
+            return exploration(from: [relation.conclusion])
         case .equivalentTo:
-            guard let focus else { return model.explorerQuestion(from: relation.hypotheses) }
+            guard let focus else { return exploration(from: relation.hypotheses) }
             let other = relation.conclusion == focus
                 ? (relation.hypotheses.first ?? relation.conclusion)
                 : relation.conclusion
-            return model.explorerQuestion(from: [other])
+            return exploration(from: [other])
         default:
-            return model.explorerQuestion(from: relation.hypotheses)
+            return exploration(from: relation.hypotheses)
         }
     }
 
-    private func relationRow(_ relation: Relation, edge: Edge, exploring: ExplorerQuery?) -> some View {
+    private func relationRow(_ relation: Relation, edge: Edge, exploring: Exploration?) -> some View {
         Button {
             session.open(.page(path: relation.path, anchor: nil), LinkDisposition.current)
         } label: {
@@ -309,7 +324,7 @@ struct RelationsView: View {
 
     private func barrierRow(
         _ barrier: Barrier, edge: Edge, contradictsSubject: Bool, showsCircumvention: Bool,
-        exploring: ExplorerQuery?
+        exploring: Exploration?
     ) -> some View {
         Button {
             session.open(.page(path: barrier.path, anchor: nil), LinkDisposition.current)
@@ -386,7 +401,7 @@ struct RelationsView: View {
                 pageMenu(destination.path, anchor: destination.anchor,
                          copyTitle: "Copy Name", copyText: label)
             }
-            exploreItem(model.explorerQuestion(from: [id]))
+            exploreItem(exploration(from: [id]))
         }
     }
 
@@ -547,13 +562,15 @@ struct RelationsView: View {
         Button(copyTitle) { model.copyToPasteboard(copyText) }
     }
 
-    /// "Explore From Here…", through `AppModel.explore(_:)`, which opens the
-    /// Relations Explorer on the question.
+    /// "Explore From Here…", through `AppModel.explore(from:to:)`, which
+    /// opens the Relations Explorer on the question with its own toggle.
     @ViewBuilder
-    private func exploreItem(_ query: ExplorerQuery?) -> some View {
-        if let query {
+    private func exploreItem(_ question: Exploration?) -> some View {
+        if let question {
             Divider()
-            Button("Explore From Here…") { model.explore(query) }
+            Button("Explore From Here…") {
+                model.explore(from: question.from, to: question.to)
+            }
         }
     }
 

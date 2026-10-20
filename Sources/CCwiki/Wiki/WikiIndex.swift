@@ -276,6 +276,48 @@ struct WikiIndex: Sendable {
         segment == "." || segment == ".."
     }
 
+    /// `resolve` for a sweep over every page, which repeats most links (the
+    /// corpus has 3,447 links and 972 distinct ones): each distinct link is
+    /// resolved once. `resolve` reads only what `Key` keeps of a link, and
+    /// never the page it is on, so a link resolves alike from any page.
+    /// Lives as long as the sweep, one `backlinkMap` (plans/efficiency.md, L4).
+    struct LinkResolutions {
+        private let index: WikiIndex
+        private var targets: [Key: Target] = [:]
+
+        init(_ index: WikiIndex) {
+            self.index = index
+        }
+
+        /// How many distinct links have been resolved.
+        var count: Int { targets.count }
+
+        /// `index.resolve(link, from: sourcePath)`.
+        mutating func target(of link: Wikilink, from sourcePath: String) -> Target {
+            let key = Key(link)
+            if let known = targets[key] { return known }
+            let target = index.resolve(link, from: sourcePath)
+            targets[key] = target
+            return target
+        }
+
+        /// What `resolve` reads of a link: its target, its raw anchor (which
+        /// says whether it is a block reference), and whether it is an embed.
+        /// Compared byte for byte: `String`'s `==` is canonical equivalence,
+        /// and two spellings of one accented letter need not slug alike.
+        private struct Key: Hashable {
+            let target: [UInt8]
+            let rawAnchor: [UInt8]?
+            let isEmbed: Bool
+
+            init(_ link: Wikilink) {
+                target = Array(link.target.utf8)
+                rawAnchor = link.rawAnchor.map { Array($0.utf8) }
+                isEmbed = link.isEmbed
+            }
+        }
+    }
+
     /// Every link on a page, paired with what it resolves to.
     func links(on page: WikiPage) -> [(link: Wikilink, target: Target)] {
         Self.outgoingLinks(in: page.body).map { ($0, resolve($0, from: page.path)) }
@@ -286,8 +328,8 @@ struct WikiIndex: Sendable {
     /// they stand for. The wiki writes the second kind wherever a link's text
     /// holds math, so a page reached only that way is still linked to.
     static func outgoingLinks(in body: String) -> [Wikilink] {
-        let markdownLinks = MarkdownLinkParser.links(in: body).map(\.wikilink)
-        return (WikilinkParser.links(in: body) + markdownLinks)
+        let links = LinkParse.links(in: body)
+        return (links.wikilinks + links.markdownLinks.map(\.wikilink))
             .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
@@ -298,15 +340,16 @@ struct WikiIndex: Sendable {
     /// this takes a few milliseconds.
     func backlinkMap() -> [String: [Backlink]] {
         var result: [String: [Backlink]] = [:]
+        var resolutions = LinkResolutions(self)
         for page in pages.values.sorted(by: { $0.path < $1.path }) {
             var seen: Set<String> = []
             for link in Self.outgoingLinks(in: page.body) {
-                guard case .page(let targetPath, _) = resolve(link, from: page.path),
+                guard case .page(let targetPath, _) = resolutions.target(of: link, from: page.path),
                       targetPath != page.path,
                       seen.insert(targetPath).inserted
                 else { continue }
                 result[targetPath, default: []].append(
-                    Backlink(sourcePath: page.path, context: Self.context(of: link, in: page.body)))
+                    Backlink(sourcePath: page.path, line: Self.line(of: link, in: page.body)))
             }
         }
         return result
@@ -314,27 +357,29 @@ struct WikiIndex: Sendable {
 
     struct Backlink: Identifiable, Hashable, Sendable {
         let sourcePath: String
-        /// The line the link appeared on, so the pane can show *why* the page
-        /// links here rather than just that it does.
-        let context: String
+        /// The line the link appeared on, as markdown: a slice of the linking
+        /// page's body, so a load copies nothing and reduces nothing for it.
+        let line: Substring
 
-        var id: String { sourcePath + context }
+        /// The line the link appeared on, reduced to plain text, so the pane
+        /// can show *why* the page links here rather than just that it does.
+        ///
+        /// The raw line is full of `[[wikilinks]]`, `$math$` and `_emphasis_`,
+        /// and a backlinks pane that shows markup instead of prose is
+        /// unreadable. Worked out when read: a load finds about 2,500
+        /// backlinks, and the busiest page shows 44 (plans/efficiency.md, L3).
+        var context: String { WikiIndex.plainText(String(line)) }
+
+        /// `backlinkMap` keeps one backlink per linking page for each target,
+        /// so the linking page tells a target's backlinks apart.
+        var id: String { sourcePath }
     }
 
-    /// The line a link appeared on, reduced to plain text.
-    ///
-    /// The raw line is full of `[[wikilinks]]`, `$math$` and `_emphasis_`, and
-    /// a backlinks pane that shows markup instead of prose is unreadable — the
-    /// whole point of the pane is to tell you *why* another page links here.
-    private static func context(of link: Wikilink, in body: String) -> String {
-        var start = link.range.lowerBound
-        while start > body.startIndex {
-            let previous = body.index(before: start)
-            if body[previous].isMarkdownLineEnding { break }
-            start = previous
-        }
-        let end = body[link.range.upperBound...].firstIndex(where: \.isMarkdownLineEnding) ?? body.endIndex
-        return plainText(String(body[start..<end]))
+    /// The line a link appeared on.
+    private static func line(of link: Wikilink, in body: String) -> Substring {
+        let start = MarkdownLineEnd.start(in: body, before: link.range.lowerBound)
+        let end = MarkdownLineEnd.next(in: body, from: link.range.upperBound).end
+        return body[start..<end]
     }
 
     /// Strip the markdown that carries no meaning once it is out of context.

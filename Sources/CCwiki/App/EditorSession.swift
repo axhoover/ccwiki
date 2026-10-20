@@ -77,6 +77,10 @@ final class EditorSession {
     /// for the preview to follow the cursor (§7.4).
     @ObservationIgnored private var previewLineMap: SourceLineMap?
     @ObservationIgnored private var hasRenderedPreview = false
+    /// The index the preview resolves links against, kept while the library
+    /// and the pages the job's review adds are the ones it was built from:
+    /// rebuilt when either changes, never patched (`PreviewOverlay`).
+    @ObservationIgnored private var previewOverlay: PreviewOverlay?
 
     static let saveDelay: Duration = .milliseconds(500)
     static let refreshDelay: Duration = .seconds(1)
@@ -171,10 +175,20 @@ final class EditorSession {
         if case .conflict = saveState {
             // Nothing is saved until the conflict is settled.
         } else {
-            saveState = hasUnsavedText ? .saving : .saved
+            updateSaveState()
             scheduleSave()
         }
         schedulePreview()
+    }
+
+    /// Saving while text is unsaved, saved otherwise; assigned only when
+    /// that changes. An assignment of an equal value can still notify the
+    /// readers, the editor's chrome and Jobs' Open Draft PR gate, and
+    /// typing would then redraw them on every key rather than twice per
+    /// burst.
+    private func updateSaveState() {
+        let next: SaveState = hasUnsavedText ? .saving : .saved
+        if saveState != next { saveState = next }
     }
 
     /// The cursor is on `line` (1-based): the preview follows it, at most
@@ -229,7 +243,7 @@ final class EditorSession {
         guard case .conflict(let disk, _) = saveState else { return }
         // The disk as it is now is what this write replaces.
         diskText = disk
-        saveState = hasUnsavedText ? .saving : .saved
+        updateSaveState()
         await saveNow()
     }
 
@@ -430,7 +444,9 @@ final class EditorSession {
         previewTask?.cancel()
         previewTask = nil
         guard isLoaded, hasPreview else { return }
-        var request = model.previewRequest(path: target.path, text: text, in: job)
+        let overlay = model.previewOverlay(for: job, reusing: previewOverlay)
+        previewOverlay = overlay
+        var request = model.previewRequest(path: target.path, text: text, overlay: overlay)
         request.preservesScroll = hasRenderedPreview
         // `render` skips the path it already shows.
         preview.invalidate()

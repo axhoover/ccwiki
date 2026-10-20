@@ -62,10 +62,16 @@ AppModel.loadLibrary(reason:)         serialized: one load at a time
   │    ├─ WikiIndex.assemble          slug, alias, the resolution tables
   │    ├─ manifest, labels, backlinkMap(), TextGrep, Derivation, LinkPreviews
   │    └─ LibraryChanges.between      the fingerprint difference from the last load
-  ├─ apply(library)                   one main-actor assignment
-  ├─ SearchIndex.sync(…)              only the rows whose fingerprint changed
-  ├─ LibraryRefresh.revisionFacts     HEAD, its date, modified dates (cached, range merge)
-  └─ each ReaderSession.libraryDidLoad(update)   renders again if requiresRerender
+  ├─ LibraryRefresh.revisionFacts     meanwhile: HEAD, its date, modified dates
+  │                                   (cached, range merge)
+  ├─ apply(library)                   one main-actor assignment, with the dates
+  ├─ async let SearchIndex.sync(…)    started, not awaited: only the rows whose
+  │                                   fingerprint changed
+  ├─ currentRevision again            loadedRevision, only if the commit did not move
+  ├─ sessionsDidLoad(update)          each ReaderSession.libraryDidLoad: renders again
+  │                                   if requiresRerender; ⌘O's list if one is up; ⇧⌘F
+  ├─ await the sync → searchDidSync() ⌘S's and ⇧⌘R's open queries again
+  └─ job housekeeping                 when LibraryRefresh.runsJobHousekeeping(reason)
 
 ReaderSession.open(.page(path:anchor:))         the window's own session
   ├─ reveal()                         select in its sidebar, expand its folder
@@ -84,6 +90,14 @@ a click
             ├─ here                   → back to open()
             └─ a tab or a window      → openInReader → a new ReaderSession
 ```
+
+**The page does not wait for the search index**
+([efficiency.md](efficiency.md), U1). Nothing a render reads is in it, so
+the sessions render once git has said whether the commit moved, while the
+index is still being written; a search typed meanwhile waits on the actor.
+`loadLibrary` still returns only after the sync and the housekeeping.
+Before U1 the page waited for both ([reader-comforts.md](reader-comforts.md)
+§3.2).
 
 **Cold start reads before it fetches.** `AppModel.launchIfNeeded()`, which
 every reader window and paper window calls and which runs once per process,

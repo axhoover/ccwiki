@@ -22,7 +22,11 @@ struct SidebarView: View {
                     if !session.citingPages.isEmpty {
                         Section("Cited by") {
                             ForEach(session.citingPages) { backlink in
-                                citingRow(backlink)
+                                CitingRow(backlink: backlink)
+                                    .equatable()
+                                    // A list trait: inside the EquatableView
+                                    // it never reaches the row.
+                                    .selectionDisabled()
                             }
                         }
                         .listSectionSeparator(.hidden)
@@ -80,36 +84,6 @@ struct SidebarView: View {
                 }
                 .padding(Theme.medium)
             }
-        }
-    }
-
-    /// A page that cites the reference being read. Not part of the selection
-    /// binding — the tree owns selection, and these rows are a way back rather
-    /// than a place in the hierarchy. A button, so ⌘-click is a link's: a
-    /// tab behind this one (reader-comforts §1.1).
-    private func citingRow(_ backlink: WikiIndex.Backlink) -> some View {
-        let location = AppModel.Location.page(path: backlink.sourcePath, anchor: nil)
-        return Button {
-            session.open(location, LinkDisposition.current)
-        } label: {
-            HStack(spacing: Theme.small) {
-                Image(systemName: "arrow.turn.up.left")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Text(model.title(forPath: backlink.sourcePath))
-                    .font(Theme.Fonts.row)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help(backlink.context)
-        .selectionDisabled()
-        .contextMenu {
-            OpenElsewhereItems { session.open(location, $0) }
         }
     }
 
@@ -252,6 +226,52 @@ struct SidebarView: View {
                         [model.paths.content.appending(path: page.path)])
                 }
             }
+        }
+    }
+}
+
+/// A page that cites the reference being read. Not part of the selection
+/// binding — the tree owns selection, and these rows are a way back rather
+/// than a place in the hierarchy. A button, so ⌘-click is a link's: a tab
+/// behind this one (reader-comforts §1.1). The sidebar applies
+/// `.selectionDisabled()` outside `.equatable()`: list traits do not pass
+/// through an `EquatableView`.
+///
+/// Equatable on its backlink, and drawn `.equatable()`, so its tooltip, the
+/// citing line as plain text, is worked out when the row changes rather
+/// than each time the sidebar is drawn: on every navigation, and every
+/// change to the tree or its selection.
+private struct CitingRow: View, Equatable {
+    @Environment(AppModel.self) private var model
+    @Environment(ReaderSession.self) private var session
+    let backlink: WikiIndex.Backlink
+
+    nonisolated static func == (lhs: CitingRow, rhs: CitingRow) -> Bool {
+        lhs.backlink == rhs.backlink
+    }
+
+    var body: some View {
+        let location = AppModel.Location.page(path: backlink.sourcePath, anchor: nil)
+        Button {
+            session.open(location, LinkDisposition.current)
+        } label: {
+            HStack(spacing: Theme.small) {
+                Image(systemName: "arrow.turn.up.left")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text(model.title(forPath: backlink.sourcePath))
+                    .font(Theme.Fonts.row)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(backlink.context)
+        .contextMenu {
+            OpenElsewhereItems { session.open(location, $0) }
         }
     }
 }

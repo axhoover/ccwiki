@@ -5,6 +5,234 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-20 — An efficiency pass, measured first
+
+On CI, a load's backlinks phase went from 680 to 1,605 ms between D1
+(`46685be`) and `main` (`21df5d7`), on the same wiki. Six read-only
+analyses of `main` looked for why, and for what else goes to waste, one
+each on the load, search, the renderer, derivations, the UI and the
+product. They ported the hot loops to Python, ran the real renderer in
+node and SQLite in C, on the 877-page wiki at `ab81f02`. There is no Swift
+toolchain here, so every Swift time is CI's and everything else about
+Swift is a count. They found:
+
+- **A likely cause:** the line-end predicate became a key path called
+  3.67 M times per load, which is slow in a debug build. An inference
+  until M0 runs.
+- **Work thrown away:** contexts for 2,492 backlinks when at most 44 are
+  shown, each page's links parsed three times, 3,447 resolves for 972
+  distinct links, and 595,770 derivation step visits of which 2,982 reach
+  the rule check.
+- **Waiting for nothing:** the first page waited for the search sync,
+  which nothing it renders reads.
+- **Rendering again:** KaTeX typesets every formula again on every
+  re-render, and the review renders 12,748 blocks to show 3,512.
+- **Observation fan-out:** every git progress line re-evaluated every
+  window's root view, and the explorer computed its suggestions 11 times
+  per keystroke.
+
+**The plan** is [efficiency.md](plans/efficiency.md). A critic read the
+first draft against the code; its 16 corrections and 3 missing items are
+in, and the plan overruled it on X3 with evidence (the six DerivationTests
+calls exist, and `derivedBarriers` has ten read sites, not seven). A
+review of the plan then found one blocking defect and six minor ones, all
+fixed. The blocking one: M0's backlinks copy called today's `resolve`, so
+it could never contradict the plan's cause. The copy now carries the
+whole `46685be` path, with each of `21df5d7`'s four changes behind its own
+switch. The rule for every item: the code it replaces stays where a test
+can run it, and the track's tests compare the two exactly, over the whole
+corpus on CI and on fixtures for what the corpus lacks. No test asserts a
+time.
+
+**Phase 0 (M0)** measures and changes no app code. Each load phase is its
+own fastest of 5, and the report names the wiki commit and the Swift
+version. The `46685be` copy (`LegacyD1.D1Backlinks`) is timed six ways in
+one process beside `backlinkMap()`. There are lines for four ways of
+finding line ends, the parts of a load, the explorer's queries and a ⌘O
+keystroke, and the counts the ports gave. `RenderCorpusTests` renders the
+wiki and a review in JavaScriptCore with the real KaTeX, in both
+re-render orders. A CI step, "Load and render timings, measured alone",
+runs on pull requests, `main` and manual runs. Its review found one
+blocking defect (the review timing parsed the macro table twice, which
+would have hidden J's memo) and three minor ones (a render test that
+passed when nothing rendered, the copy's tables not built from the
+index's file list, two `enum Legacy`). All four were fixed.
+
+**The six tracks**, each built on its own branch from `21df5d7`, one
+commit per item, then reviewed and fixed:
+
+- **L, the load path** (LoadEquivalenceCorpusTests, against
+  `Legacy/LegacyWiki.swift`):
+  - L1, line ends found by scanning UTF-8 bytes: CodeMask and `headings()`
+    equal the copies on every page, and on CR, CR LF and combining-mark
+    fixtures.
+  - L2, each page's links parsed once: `outgoingLinks` and the render's
+    link list equal the copies'.
+  - L3, a backlink's context built only when shown: each target's sources
+    and contexts equal the copy's, in order.
+  - L4, each distinct link resolved once per sweep: every remembered
+    target equals `resolve`.
+  - L5, a page card's scan stopped at its first H1: `scope` and every card
+    equal the copies' for every anchor of every page.
+  - L6, each section card built once per load: every heading's card, asked
+    twice, equals `sectionCard`.
+
+  Review: two minor findings. The second `enum Legacy` had already gone
+  with M0's `LegacyD1`. L2's test compared the new markdown-link code with
+  itself, so `MarkdownLinkParser.links(in:)` keeps its own parse again.
+- **S, search** (SearchEquivalenceTests, its copies nested in it; both
+  rankers, every row and every outline after full, partial and no-op
+  syncs):
+  - S1, headings parsed once per page in a full sync: 877 `headings()`
+    calls instead of 1,324.
+  - S2, the full rewrite through FTS5's `'rebuild'`: every answer equals a
+    fresh build's and one built through the triggers, and
+    `integrity-check` passes.
+  - S3, each citing page named once, with the concept ranker's names: 6,781
+    `Name` inits instead of 13,495.
+  - S4, the concept ranker built from outlines kept in the rows, schema
+    version 4: a no-op sync parses no page.
+
+  Review: no findings.
+- **X, derivation** (DerivationEquivalenceTests, and DerivationTests on a
+  new every-rule fixture; the old loop stays in production as
+  `Engine.Loop.legacy`):
+  - X1, R13's flags worked out once per step: every closure equals the
+    old loop's.
+  - X2, each quoted page parsed once: `missingQuotes` equals a parse per
+    citation.
+  - X3, the unread `.all` link table and stored `derivedBarriers` dropped,
+    and `unstatedSteps` carried on each link: every inspector row equals
+    its proof's counts.
+  - X4, a plain Horn prefilter: `implying`, `completions`, `chainExists`
+    and `isDerivable` give the same with it and without.
+  - X5, only the steps a new fact can wake visited, and phases that add
+    nothing skipped: 2,991 step visits instead of 595,770 in the port, and
+    every closure equals the old loop's, refusals included.
+
+  The golden file is unchanged. Review: one minor finding, the old loop
+  sharing X5's read-back; it now reads back as `21df5d7` did.
+- **J, the renderer's JavaScript** (RenderMemoTests, against the vendored
+  KaTeX and `Fixtures/legacy/ccwiki-markdown.js`):
+  - J1, KaTeX's HTML remembered per formula in each web view, 1,000
+    formulas, the least recently used going first: every formula of every
+    page, twice through the memo, equals KaTeX behind the old patch.
+  - J2, a review block rendered only when an entry shows it: the entries
+    equal the old file's on 15 hazards, on seven reviews whose formulas
+    change KaTeX's table, and on four edits to every page.
+  - J3, the render time the page reports, logged.
+
+  Review: three minor findings, each a way KaTeX's shared table changes
+  under the memo or the lazy review. The builder found a fourth (formulas
+  that set `\@eqnsw`). Four commits fixed them; output stays
+  byte-identical in node on the whole wiki.
+- **U, the app model and main window** (AppModelObservationTests, which
+  constructs a real `AppModel`, as W's suite does; no test did before):
+  - U1, the page rendered before the search index is written: a query
+    typed during a load is answered from the index the load wrote.
+  - U2, ⌘O's list sorted once, and only when a switcher is up: a load with
+    none up sorts nothing.
+  - U3, Explore From Here offered without reading the explorer's
+    question: `canExplore` equals a copy of the old `explorerQuestion` on
+    the fixture and the real manifest.
+  - U4, a sync's progress lines kept out of `syncState`: its readers are
+    told once per phase, never per line.
+  - U5, the sidebar's Cited by rows as equatable views, checked by
+    `make shots`.
+
+  Review: one finding, an error in the builder's report, not the code.
+- **W, the other windows** (WindowObservationTests):
+  - W1, the explorer's suggestions computed once per evaluation: 595 fuzzy
+    matches per keystroke instead of 6,545 (RelationObjectMatcherTests
+    and `make shots`).
+  - W2, the editor's `saveState` assigned only when it changes: a second
+    keystroke tells its readers nothing, and a probe prints whether this
+    toolchain notifies on an equal value.
+  - W3, the job's transcript and elapsed time as views of their own,
+    checked by `make shots`.
+  - W4, the editor preview's overlaid index kept between renders: each
+    request equals one built the `21df5d7` way.
+
+  Review: one blocking finding, W4's key (the whole review, which every
+  autosave replaces; now the pages it adds), and one minor (a review job's
+  clock ticked forever; now it ticks only while a process runs). Both
+  fixed.
+
+Where the builds departed from the plan, and why, is in the plan's "As
+built" note under each track. The swiftui-pro, typography-designer and
+macos-design skills were not installed in any of these sessions; the
+tracks followed SWIFTUI-RULES.md and the existing `Theme` fonts, and no
+type style changed.
+
+**The merge.** `claude/efficiency` holds the plan, M0 and the six tracks,
+merged in that order, the tracks as L, S, X, J, U, W, each without a
+conflict. The shared docs follow the code: search.md (schema version 4),
+architecture.md §3 and reader-comforts.md §4.1 (U1's load order),
+corrections.md §7.4 (`PreviewOverlay`), render-pipeline.md (the memo's
+rules, `\tag` included), and CHANGELOG 0.3.0 for what a reader will
+notice.
+
+**CI, first time together.** The app compiled; the tests did not, at one
+line (an `#expect` comment made of two literals joined with `+`, which
+`Comment` does not take). Then the corpus step failed one test,
+`isAuthenticatedCaches`: a fake `gh` that answers at once was not heard
+within `GitHubAuth.deadline`'s 15 s, because the new equivalence suites
+held every cooperative thread. That test took 74 s at the baseline and
+155 s there, and the git publishing tests went from about 90 to 175 s.
+The deadline became a task-local, and CI went green on `e17ca99`: 1,201
+tests, in both runs.
+
+**An integration review** of the merged tree read it five ways (Sources
+compiling together, Tests compiling and passing, the run on CI, what a
+reader sees, and whether the equivalence claims hold) and found 7
+findings; a skeptic for each confirmed 6. A fixer fixed all six, a
+review of the fixes found four more, and three of those were fixed in
+code:
+- the derivation sweeps queued every job at once and held every thread
+  (now `fewAtATime`, one task fewer than the cores, for all three sweeps);
+- `GitHubAuth.deadline` and `Tripwire.deadline` are task-locals that the
+  tests whose `gh` answers at once scope long, Approve's tests included;
+- the sidebar's Cited by rows had become selectable: `.selectionDisabled()`
+  inside an `.equatable()` row never reaches the list, so it sits outside;
+- a remembered formula did not delete `\df@tag` as KaTeX does, so after a
+  `\tag` the copy area's `JSON.stringify` could throw and a page failed
+  to render; a hit now deletes it, and a `\tag` formula is never kept;
+- the lazy review now renders every block when a formula names `\tag`;
+- two of the memo's corpus tests checked the wiki's content rather than
+  the code, and would have failed on an ordinary wiki edit.
+
+The maintainer's review of `d1797ac` noted failures older than this pass:
+the macros page's copy area read the live table, into which KaTeX writes
+token lists that point back at themselves (after a `\nonumber`, a
+`\notag` or a page's `\gdef`), so its `JSON.stringify` threw and the page
+failed to render from then on. `ccwiki.js` now keeps the table as sent
+(`sentMacros`) for the copy area, Copy LaTeX (no macros) and pseudocode's
+expansion, and `tagLeftForTheCopyArea` covers all four cases; it failed
+on three of them before the change.
+
+**Results** (efficiency.md §5, measured alone, debug build, the same
+wiki, before → the six tracks in two runs):
+- §1.3's cause is confirmed: CodeMask's line ends by key path cost
+  +946.6 ms of the +1,073.9 ms. L1 keeps the byte scan (14–18 ms against
+  300–360 ms for the key path).
+- A load in memory: 5,628 → 1,258–1,414 ms. Backlinks 1,914 → 253–279 ms,
+  previews 2,518 → 554–664 ms, derivation 727 → 114–117 ms. An update
+  after a one-page edit: 5,202 → 1,248–1,433 ms.
+- Search sync as a no-op: 1,708 → 177–198 ms; in full into a fresh file:
+  5,527 → 949–1,117 ms.
+- The explorer: answers 206–487 ms → about 6 ms; implied-by for `nizk`,
+  idealised models on, 2,427 → 97–103 ms.
+- A page rendered again right after itself: 2,152 → 1,061–1,154 ms for
+  the corpus (LWE 46 → 17 ms). The review of a one-line edit to every
+  page: 4,727 → 3,020–3,549 ms.
+- `plainText` over every backlink's line rose from 114.5 to 210–285 ms on
+  unchanged code; no load runs it any more, and it is not explained.
+
+**Left:**
+
+- `make shots` on a Mac, for U and W.
+- The reading features F1–F3, on `claude/reading-features`.
+
 ## 2026-10-16 — Lease recovery from recorded attempts, after the maintainer's review
 
 The maintainer found, with real git, that `Publisher.leaseRecovery` took

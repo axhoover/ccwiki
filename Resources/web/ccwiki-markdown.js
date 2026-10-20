@@ -887,6 +887,10 @@
     };
     md.renderer.rules.table_close = function () { return "</table></div>\n"; };
 
+    // The table KaTeX reads, and writes, for this instance's formulas: the
+    // review renders every block when a formula could change it.
+    md.katexMacros = katexOptions.macros;
+
     return md;
   }
 
@@ -946,13 +950,22 @@
   var WHITESPACE_ONLY = "Whitespace only";
   var SHOWN_AS_SOURCE = "Shown as source";
 
+  /** What, in a formula, can change KaTeX's macro table for every formula
+   *  after it: a global definition (`\gdef`, `\xdef`, `\global`), and what
+   *  sets KaTeX's own `\@eqnsw`: `\nonumber`, `\notag` and a numbered
+   *  environment, any `\begin` since a macro can spell its name (ccwiki.js,
+   *  "KaTeX memo"). And `\tag`, which leaves `\df@tag` in the table until
+   *  the next formula starts, for the copy area and `expandMacros` to read. */
+  var CHANGES_KATEX_TABLE = /\\(?:gdef|xdef|global|begin|nonumber|notag|tag)(?![A-Za-z@])/;
+
   /** The top-level blocks of `source`: their lines, `[start, end)` and
    *  0-based, their source text, and their HTML, rendered from the tokens
    *  of one parse, so a footnote or a reference definition elsewhere in the
    *  text still resolves. Lines in none of markdown-it's blocks are added
    *  by `withSourceBlocks`. */
   function topLevelBlocks(md, source, env) {
-    var tokens = md.parse(source, env);
+    var parsed = parseWithDestinations(md, source, env);
+    var tokens = parsed.tokens;
     var lines = source.split("\n");
     var blocks = [];
     for (var i = 0; i < tokens.length; i++) {
@@ -964,23 +977,79 @@
         if (end < 0) continue;
       }
       if (token.map) {
-        var html = "";
-        try {
-          html = md.renderer.render(tokens.slice(i, end + 1), md.options, env);
-        } catch (e) {
-          html = "<pre>" + md.utils.escapeHtml(lines.slice(token.map[0], token.map[1]).join("\n")) +
-            "</pre>";
-        }
-        blocks.push({
-          start: token.map[0],
-          end: token.map[1],
-          text: lines.slice(token.map[0], token.map[1]).join("\n"),
-          html: html,
-        });
+        blocks.push(renderedWhenRead(md, tokens.slice(i, end + 1), env, lines, token.map,
+          parsed.destinations));
       }
       i = end;
     }
     return withSourceBlocks(md, lines, blocks);
+  }
+
+  /** A block whose HTML is rendered when an entry first reads it, and
+   *  kept: most blocks of a changed file end up in a `gap`, which shows
+   *  none. One that fails to render shows its lines. */
+  function renderedWhenRead(md, tokens, env, lines, map, destinations) {
+    var html = null;
+    return {
+      start: map[0],
+      end: map[1],
+      text: lines.slice(map[0], map[1]).join("\n"),
+      // Whether rendering it could change what a later formula renders.
+      changesKatexTable: tokens.some(formulaChangesKatexTable),
+      get html() {
+        if (html !== null) return html;
+        // The other text may have been parsed since this one. `link_open`
+        // reads each link's destination from what `normalizeLink` last saw
+        // for its href (`create`), so this text's are seen again first.
+        destinations.forEach(function (url) { md.normalizeLink(url); });
+        try {
+          html = md.renderer.render(tokens, md.options, env);
+        } catch (e) {
+          html = "<pre>" + md.utils.escapeHtml(lines.slice(map[0], map[1]).join("\n")) + "</pre>";
+        }
+        return html;
+      },
+    };
+  }
+
+  /** `md.parse(source, env)`, and each destination `normalizeLink` was
+   *  asked about during it, in order. */
+  function parseWithDestinations(md, source, env) {
+    var destinations = [];
+    var normalizeLink = md.normalizeLink;
+    md.normalizeLink = function (url) {
+      destinations.push(url);
+      return normalizeLink.apply(this, arguments);
+    };
+    try {
+      return { tokens: md.parse(source, env), destinations: destinations };
+    } finally {
+      md.normalizeLink = normalizeLink;
+    }
+  }
+
+  /** Whether `token`, or one inside it, is a formula that can change
+   *  KaTeX's table. */
+  function formulaChangesKatexTable(token) {
+    if (token.type === "math_inline" || token.type === "math_block") {
+      return CHANGES_KATEX_TABLE.test(token.content);
+    }
+    return !!token.children && token.children.some(formulaChangesKatexTable);
+  }
+
+  /** Whether rendering `blocks` could change KaTeX's table, which every
+   *  later formula reads: a formula among them could, or any formula could
+   *  through `md`'s table. That is a macro whose body could, or one a
+   *  formula defined (KaTeX keeps it as tokens, not text), or a name KaTeX
+   *  changes: it deletes `\color` and `\current@color` after every
+   *  formula, and every name of its own has an `@`. */
+  function mayChangeKatexTable(md, blocks) {
+    var macros = md.katexMacros || {};
+    return Object.keys(macros).some(function (name) {
+      var body = macros[name];
+      return name === "\\color" || name.indexOf("@") >= 0 || typeof body !== "string" ||
+        CHANGES_KATEX_TABLE.test(body);
+    }) || blocks.some(function (block) { return block.changesKatexTable; });
   }
 
   /** `blocks`, in order, with a block for each run of non-blank lines in
@@ -1062,6 +1131,12 @@
     var status = file.status || "modified";
     var oldBlocks = status === "added" ? [] : topLevelBlocks(md, file.old || "", { links: file.links || {} });
     var newBlocks = status === "deleted" ? [] : topLevelBlocks(md, file.new || "", { links: file.links || {} });
+    // A formula that changes KaTeX's table changes what every later one
+    // renders. Then every block renders now, the old text's first, as each
+    // did when its text was parsed: parsing never calls KaTeX.
+    if (mayChangeKatexTable(md, oldBlocks.concat(newBlocks))) {
+      oldBlocks.concat(newBlocks).forEach(function (block) { return block.html; });
+    }
     var bodyLine = file.bodyLine || {};
     var entries = [];
 
