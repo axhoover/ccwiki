@@ -6,7 +6,8 @@ import Testing
 /// what it stands for: a sweep's remembered resolutions to `resolve`, a
 /// section card asked for twice to the one worked out directly, a backlink's
 /// line to the context the load used to store, and a card's scope to the
-/// first H1 on bodies whose first H1 is not their first line.
+/// first H1 on bodies whose first H1 is not their first line, and on the
+/// corpus to where reading every heading starts it.
 ///
 /// The copies of the code track L replaced, and the tests that held the new
 /// code equal to them, went after 0.1.4 (efficiency.md §2.1). The corpus
@@ -222,5 +223,25 @@ struct LoadEquivalenceCorpusTests {
         #expect(paragraphs == ["Text.", "Prose.", "Prose."])
         #expect(PreviewExcerpt.firstParagraph(in: "## Two\n# One\n\nProse.\n", anchor: nil) == "Prose.")
         #expect(PreviewExcerpt.firstParagraphInline(in: "# A\n\nSee [[b|B]].\n", anchor: nil) == "See B.")
+    }
+
+    @Test("on the corpus, a card's scope starts where reading every heading starts it")
+    func scopesOnCorpus() {
+        guard let corpus = Self.corpus else { return }
+        // A `%%` sends `scope` down the path that reads every heading. One on
+        // a line of its own after the body is unpaired: it deletes nothing
+        // and adds one line at the end. A body with a `%%`, read by byte as
+        // `scope` reads it, takes that path already, as does one that ends
+        // in a lone CR, which the `\n` would make a CR LF.
+        let pages = corpus.pages.filter { page in
+            let bytes = Array(page.body.utf8)
+            return bytes.last != 0x0D && !zip(bytes, bytes.dropFirst()).contains { $0 == 0x25 && $1 == 0x25 }
+        }
+        func lines(_ body: String) -> [Substring] {
+            PreviewExcerpt.scope(of: body, anchor: nil)?.lines ?? []
+        }
+        let differing = pages.filter { Array(lines($0.body + "\n%%").dropLast()) != lines($0.body) }
+        #expect(differing.isEmpty, "scopes differ: \(differing.map(\.path))")
+        print("L5 whole-page scopes: \(pages.count) of \(corpus.pages.count) pages compared")
     }
 }

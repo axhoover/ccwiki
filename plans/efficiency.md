@@ -349,7 +349,9 @@ attributable.
      review against the one that renders every block, which a table name
      with an `@` asks for; U3's questions, now counted; W4's overlay
      against one built afresh. L5's scope fixtures carry the text a card
-     reads, worked out by hand, and BacklinkMentionTests counts each
+     reads, worked out by hand, and on the corpus a whole page's scope is
+     held to the one `scope` gives when it reads every heading, the path
+     a `%%` still sends it down. BacklinkMentionTests counts each
      target's linking pages from the links. M0's two load reports,
      RenderCorpusTests and CI's "measured alone" step stay, as do the
      golden file and every fixture test with explicit values. The "As
