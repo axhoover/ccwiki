@@ -101,8 +101,9 @@ redesign, not a refactor.
   resolution, the frontmatter subset, and the macro table. **The fiddliest code
   in the app and the most heavily tested.**
 - [plans/render-pipeline.md](plans/render-pipeline.md) — the vendored JS, why
-  each package, the `ccwiki://` scheme handler, the CSP, and how LaTeX is
-  copied (⌘C, the context menu, the pseudocode copy row).
+  each package, the `ccwiki://` scheme handler, the CSP, how LaTeX is
+  copied (⌘C, the context menu, the pseudocode copy row), and how Find on
+  Page counts its matches ("3 of 17").
 - [plans/search.md](plans/search.md) — the FTS5 schema, tokenizer choices,
   query escaping, and the ranking backlog.
 - [plans/search-v2.md](plans/search-v2.md) — **shipped in 0.1.2**: three searches (⌘S concepts, ⇧⌘F literal, ⇧⌘R
@@ -166,7 +167,9 @@ redesign, not a refactor.
 - [plans/reader-comforts.md](plans/reader-comforts.md) — **built on
   `claude/reader-comforts` (all but D6), second of the batch**: native tabs and windows, each with its own
   `ReaderSession`; a reference's paper on request, in a window of its own; and
-  a library load that rebuilds only what changed.
+  a library load that rebuilds only what changed. Edit ▸ Undo Close Tab
+  (⌘Z), left out in its §7, was built later on
+  `claude/undo-close-tab-find-count`.
 - [plans/corrections.md](plans/corrections.md) — **built on
   `claude/page-corrections`, third of the batch**: correct a page yourself,
   have an agent draft it, or open an issue; and a review step before anything

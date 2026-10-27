@@ -4,7 +4,8 @@
 day on `claude/reader-comforts`: Phase 0, A1–A6, B1–B3, C1–C6 and D1–D5.
 Not built: D6, which waits for a release-build measurement on a Mac (§3.2).
 Background tabs ship off (`WindowTabbing.joinsInBackground = false`) until
-§5's checks on a Mac.** Three features that change no
+§5's checks on a Mac. Undo Close Tab, left out in §7, was built later, on
+`claude/undo-close-tab-find-count` (2026-10-27).** Three features that change no
 fact the app shows, only how comfortable it is to read: more than one page
 open at once, the paper behind a reference page, and a sync that does only
 the work its pull calls for.
@@ -142,6 +143,9 @@ recommendations that need a yes; §8 lists them as questions.
 - **macOS supplies the rest**: View ▸ Show Tab Bar and Show All Tabs, Window
   ▸ Merge All Windows, Move Tab to New Window, ⌃Tab and ⌃⇧Tab, ⌘W to close a
   tab, and the tab bar itself.
+- **Edit ▸ Undo Close Tab (⌘Z)** opens the tab or window closed last again,
+  with its page, Back and Forward and the heading it was read at, as a tab
+  of the key reader window. Built after this spec (§7).
 
 ### 1.2 One library, one session per window
 
@@ -354,6 +358,7 @@ except Ingest a Paper, which takes the app's own model (below).
 |---|---|---|---|
 | New Window | ⌘N | `openWindow(id:value:)` | always |
 | New Tab | ⌘T | the same, as a tab of the key reader window | always; with no reader key, a window |
+| Undo Close Tab (Edit menu, after Redo; built later, §7) | ⌘Z | `model.reopenClosedTab(beside:)`, then `openWindow`; the new window starts from the closed tab's state (`takeReopenedTab`) | a tab closed in this process is kept, and no editable text is the key window's first responder |
 | Quick Switcher… | ⌘O | `session.presentQuickSwitcher()` | a reader is key |
 | Ingest a Paper… | ⇧⌘N | `IngestCommand.perform`: `model.requestIngestSheet(in: session?.id)`, with the app's own model, then a reader window if none is open | always, as the Jobs window's button offers it |
 | Find on Page, Next, Previous | ⌘F ⌘G ⇧⌘G | `\.findAction`, from that window's `ReaderView` | as today |
@@ -408,7 +413,9 @@ them, one click away (§7).
 - **Status bar.** The sync state, warnings, job count and update progress are
   the same in every window. `lastRenderError` is the window's own.
 - **Find.** The find bar's text and state are `@State` in `ReaderView`,
-  which is already per window, so they are per tab with no change.
+  which is already per window, so they are per tab with no change. Its
+  "3 of 17" is counted in the page after each find (`FindCount`;
+  [render-pipeline.md](render-pipeline.md), "Find on Page's count").
 - **Text size.** One `AppModel.pageZoom`, persisted as today. Setting it
   applies to every session's web view.
 - **Titles.** Each window's title is its page's display title, which is what
@@ -2079,6 +2086,47 @@ fixture transport, and keep it in a temporary library.
   closed sessions' `ReaderSessionState`, and Edit ▸ Undo Close Tab (⌘Z)
   opens one in a new tab, as in Safari. Not ⇧⌘T, which AppKit gives to Show
   Tab Bar.
+
+  **Built later**, on `claude/undo-close-tab-find-count` (2026-10-27). As
+  built:
+  - **What is kept.** `sessionDidClose`, on the window's `willClose`, keeps
+    a `ClosedTab`: the session's `restorationState` and the heading being
+    read, which is what macOS keeps to restore a window. `ClosedTabs` holds
+    ten, most recent first, in memory only. A tab that showed nothing is
+    not kept. A window of several tabs closes tab by tab, so each tab is
+    kept, and ⌘Z brings them back one at a time.
+  - **Where it opens.** A fresh `ReaderWindow`, as a tab of the key reader
+    window, in front, or a window of its own with none, as ⌘T opens one.
+    The new window takes the closed tab with `takeReopenedTab(for:)` in
+    place of its scene storage, so `SessionStartPlan` starts it as a
+    restored window: its page, Back and Forward, inspector and folders, at
+    the heading it was read at. Under the screenshot harness too, since it
+    was asked for.
+  - **⌘Z and text.** Undo and Redo stay AppKit's. Its Undo goes down the
+    responder chain to the first responder's undo manager, which is how
+    the find field, the palettes, the sheets and the editor undo typing;
+    SwiftUI cannot validate an item against the responder chain, so a
+    replacement would break that. Registering on a window's undo manager,
+    as Safari does, does not fit native tabs: each tab is an `NSWindow`
+    with an undo manager of its own, so a close undone from another tab,
+    or after the last window closed, would find nothing. So Undo Close
+    Tab is an item of its own after Redo, `CommandGroup(after: .undoRedo)`
+    in `UndoCloseTabCommands`, also ⌘Z. (`CCwikiCommands`' body already
+    holds ten groups, the most a `CommandsBuilder` block is sure to take.)
+    AppKit gives a key equivalent to the first enabled item that
+    has it, so Undo keeps ⌘Z whenever text has typing to undo. Undo Close
+    Tab is disabled while editable text (`NSText`, `isEditable`) is the key
+    window's first responder. AppKit posts nothing when the first
+    responder changes, so `AppModel` reads it after every event, on
+    `NSApplication.didUpdateNotification`. The command reads it again when
+    it runs, and beeps, as an empty Undo does, if text has the keyboard.
+  - **Unproven without a Mac:** that AppKit passes ⌘Z over the disabled
+    Undo to the enabled Undo Close Tab, and that `didUpdateNotification`
+    comes after the clicks and keys that move the first responder. If the
+    first fails, ⌘Z does nothing and the menu item still works; if the
+    second, the item can look enabled in a text field, and ⌘Z there
+    beeps. Nor that closing a window of several tabs posts `willClose`
+    for each.
 - **Keeping tabs across a relaunch CCwiki starts itself** (an update, Replace
   and Relaunch). It would mean saving every window's state before
   `NSApp.terminate` and restoring it against the system setting.

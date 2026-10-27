@@ -12,6 +12,18 @@
   code. Commit messages are for the code.
 -->
 
+## 0.1.5 — unreleased
+
+**Reopen a tab you closed.** Edit → Undo Close Tab (⌘Z) brings back the
+tab or window you closed last, as a tab of the window in front, with its
+page, its Back and Forward, and the place you were reading. Press it again
+for the one before, up to ten. While you are typing in a field, ⌘Z still
+undoes your typing.
+
+**Find on Page counts.** The find bar now says "3 of 17" as you step
+through the matches with Return, ⌘G and ⇧⌘G, or "No matches". Where a
+match is inside a formula, it gives the number of matches alone.
+
 ## 0.1.4 — 2026-10-20
 
 **Correct a page from the reader.** Three ways, from the Wiki menu, the

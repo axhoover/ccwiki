@@ -21,6 +21,7 @@ right shows what links back.
 | | |
 |---|---|
 | ⌘N and ⌘T | A new window, or a new tab, at the wiki's front page. |
+| ⌘Z | Reopen the tab you closed last, where you were reading it. |
 | ⌘O | Jump to a page by name. With nothing typed, recent pages come first. |
 | ⌘S | Search the wiki. The page named for what you typed comes first. |
 | ⇧⌘R | Search the references by citation key, author, title or topic. Add a year to narrow it. |

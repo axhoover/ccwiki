@@ -153,9 +153,10 @@ a job that could not push.
 | | |
 |---|---|
 | ⌘N / ⌘T | New window / new tab |
+| ⌘Z | Undo Close Tab: reopen the tab or window closed last |
 | ⌘-click / ⌥⌘-click | Open a link in a new tab / a new window |
 | ⌘O | Quick switcher |
-| ⌘F / ⌘G / ⇧⌘G | Find on page / next / previous |
+| ⌘F / ⌘G / ⇧⌘G | Find on page / next / previous, with "3 of 17" |
 | ⌘S | Search the wiki |
 | ⇧⌘R | Search references: key, author, title, topic |
 | ⇧⌘F | Find text in all pages, literally |

@@ -199,8 +199,8 @@ struct ReaderView: View {
                 .onSubmit { Task { await find(backwards: false) } }
                 .onChange(of: findText) { _, _ in findStatus = nil }
 
-            // Monospaced digits, so "9 of 17" and "10 of 17" do not shift
-            // the arrows beside them as the count steps.
+            // Monospaced digits, so the count does not jitter as it steps:
+            // "3 of 17" and "4 of 17" are the same width.
             if let findStatus {
                 Text(findStatus)
                     .font(Theme.Fonts.meta)
