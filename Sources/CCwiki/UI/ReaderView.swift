@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The centre column: the rendered page, its metadata bar, and find-in-page.
@@ -252,6 +253,19 @@ struct ReaderView: View {
         // has gone. A render after the count clears it (above).
         guard needle == findText, drawn == session.webController.renderGeneration else { return }
         findStatus = FindCount.label(found: found, count: count)
+        if let findStatus { announce(findStatus) }
+    }
+
+    /// VoiceOver says what the bar now says, as Safari's find bar does. The
+    /// keyboard stays in the field, so nothing else would read it out.
+    private func announce(_ status: String) {
+        guard let window = session.hostWindow ?? NSApp.keyWindow else { return }
+        NSAccessibility.post(
+            element: window, notification: .announcementRequested,
+            userInfo: [
+                .announcement: status,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ])
     }
 
     private func dismissFind() {
