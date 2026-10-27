@@ -206,13 +206,16 @@ struct ReaderView: View {
                 }
 
             // Monospaced digits, so the count does not jitter as it steps:
-            // "3 of 17" and "4 of 17" are the same width.
+            // "3 of 17" and "4 of 17" are the same width. Never compressed
+            // (SWIFTUI-RULES §2.2): cut to "12 of 1…" it reads as the wrong
+            // number, so the field gives way first.
             if let findStatus {
                 Text(findStatus)
                     .font(Theme.Fonts.meta)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
 
             Button { Task { await find(backwards: true) } } label: {
