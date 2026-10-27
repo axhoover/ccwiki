@@ -5,6 +5,56 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-27 — After 0.1.4: three checks the deletions took, put back
+
+A review of `claude/after-0.1.4-cleanup` found three checks that went
+with the copies, though none needed a copy. Each is back, held to the
+current code, in a commit of its own, and the entry below now says so.
+
+- **The review's order.** On each of the 8 table-change reviews, both of
+  RenderMemoTests' reviewers take `mayChangeKatexTable`'s eager branch
+  and run the same lines, so comparing them held nothing about the order
+  the two texts render in. `21df5d7`'s copy had held it.
+  `reviewTableChanges` now pins it on one review: the old text's
+  `$\baz$` renders as an error, in `#cc0000`, before the new text's
+  `\gdef\baz{N}` runs, and the new text's renders `N`. In node, both
+  checks pass as the file is and fail with the line flipped to render
+  the new text first. render-pipeline.md §3 says what each comparison
+  holds.
+- **The search rows.** `expectLegacy` held every row to `Legacy.row`,
+  which built each column from the page, as `SearchIndex.write` binds
+  it. With the copy gone, rows were only compared index to index, both
+  written by the same code: a row that lost a heading's text or a
+  reference's display title would have passed. `expectedRows` is that
+  spec again. `expectBuilt` checks it after a full, partial, no-op and
+  rebuild sync on the hazard clone (the rebuild with no fingerprints)
+  and after the corpus syncs, and both S2 tests hold the triggers file
+  to it.
+- **The first H1 on the corpus.** Only the 17 scope fixtures held
+  `firstH1Line`'s own fence walk to the path that reads every heading.
+  That path is still in `PreviewExcerpt`, behind a CR or a `%%`, so the
+  new `scopesOnCorpus` makes it the oracle: an unpaired `%%` on a line
+  after the body sends `scope` down it and adds one line, which the test
+  drops. A body with a `%%`, read by byte, or a lone CR at its end, which
+  the `\n` would make a CR LF, takes that path already and is skipped.
+
+That makes 1,237 tests. On CI, the corpus checks give back a few seconds
+of what the deletions saved: efficiency.md §5 has 825 ms for every
+whole-page scope read the slow way, and `expectedRows` reads every
+page's headings, about 320 ms in debug, four times.
+
+**Checks.** No Swift toolchain here, so CI is the first compiler. Each
+edit was read again for symbols, labels, access, isolation and `#expect`
+comments, and `expectBuilt`'s and `scope(of:anchor:)`'s callers were
+grepped. The review's values ran in node on the vendored scripts, as the
+file is and flipped. The wiki was not on this machine, so the new
+`scopesOnCorpus` has not run: at `3fa8959` the old one held the fast
+path to `Legacy.scope`, whose whole-page branch is the path it reads
+now, and CI passed.
+
+The swiftui-pro, typography-designer and macos-design skills were not
+installed in this session. No view changed.
+
 ## 2026-10-27 — After 0.1.4: the copies kept for one release, deleted
 
 The efficiency pass kept a copy of every function it replaced, and some
@@ -18,15 +68,18 @@ commit per area. No reader will notice, so CHANGELOG.md is unchanged.
   and `Legacy/LegacyBacklinks.swift` (`LegacyD1`, M0's `46685be` path).
   LoadEquivalenceCorpusTests keeps L3, L4 and L6, which compare the app
   with itself. L5's scope fixtures now carry the text a whole page's card
-  reads, worked out by hand. IncrementalCorpusTests loses its third
-  report, backlinks at `46685be` against `21df5d7`, and the line-end A/B,
-  which only decided L1's form. BacklinkMentionTests counts each target's
-  linking pages from the links, in place of `Legacy.backlinkMap`.
-  `MarkdownLinkParser.links(in:)` parsed its own inputs only for L2's
-  test; its tests now call `LinkParse.links(in:)`, which the app runs.
-- **Search.** `SearchEquivalenceTests.Legacy`. A sync's rankers, full,
-  partial, a no-op or a rebuild, are held to the ones its pages make, a
-  ranker handed outlines or names to one that works them out, and the
+  reads, worked out by hand, and on the corpus a whole page's scope is
+  held to the one reading every heading gives. IncrementalCorpusTests
+  loses its third report, backlinks at `46685be` against `21df5d7`, and
+  the line-end A/B, which only decided L1's form. BacklinkMentionTests
+  counts each target's linking pages from the links, in place of
+  `Legacy.backlinkMap`. `MarkdownLinkParser.links(in:)` parsed its own
+  inputs only for L2's test; its tests now call `LinkParse.links(in:)`,
+  which the app runs.
+- **Search.** `SearchEquivalenceTests.Legacy`. A sync's rankers and rows,
+  full, partial, a no-op or a rebuild, are held to the ones its pages
+  make, each row column by column as `SearchIndex.write` binds it; a
+  ranker handed outlines or names to one that works them out; and the
   rows `'rebuild'` writes to the rows the triggers insert.
 - **Derivation.** `Engine.Loop`, `legacyRun`, `result(of:…dense:)`, the
   Engine's `steps`, `defaultSteps` and `establishing`, which only the old
@@ -39,7 +92,9 @@ commit per area. No reader will notice, so CHANGELOG.md is unchanged.
 - **The renderer.** `Fixtures/legacy/ccwiki-markdown.js`. The review tests
   hold the lazy review to the one that renders every block, which
   `mayChangeKatexTable` asks for when the table holds a name with an `@`
-  (`\every@block`, which no formula reads). In node, on the vendored
+  (`\every@block`, which no formula reads). On the 8 table-change
+  reviews both render every block by the same lines, so one review's
+  values hold the order, the old text's first. In node, on the vendored
   scripts, that review equals both the lazy one and `21df5d7`'s on the 15
   hazards and the 8 table-change reviews, renders the same blocks as
   `21df5d7`'s, and leaves the same table. The memo's tests against KaTeX
@@ -56,8 +111,8 @@ name. M0's two load reports, RenderCorpusTests and CI's "Load and render
 timings, measured alone" step, FixesWikiparseTests, and every fixture test
 with explicit values.
 
-**Numbers.** 4,093 lines deleted and 311 added in code and tests, 186 and
-33 of them in Sources. 1,246 tests become 1,236: seven of
+**Numbers.** 4,080 lines deleted and 358 added in code and tests, 186 and
+33 of them in Sources. 1,246 tests become 1,237: six of
 LoadEquivalenceCorpusTests', IncrementalCorpusTests' backlinks at
 `46685be`, DerivationEquivalenceTests' `quotesParsedOnce` and
 DerivationTests' `prefilterAgrees`. The others were rewritten, not removed.

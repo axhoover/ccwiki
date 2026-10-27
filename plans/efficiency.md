@@ -347,12 +347,13 @@ attributable.
      settings to a run for each), the Horn closure X4 rests on, X3 and
      the shared quote cases; J1 against KaTeX itself, and J2's lazy
      review against the one that renders every block, which a table name
-     with an `@` asks for; U3's questions, now counted; W4's overlay
-     against one built afresh. L5's scope fixtures carry the text a card
-     reads, worked out by hand, and on the corpus a whole page's scope is
-     held to the one `scope` gives when it reads every heading, the path
-     a `%%` still sends it down. BacklinkMentionTests counts each
-     target's linking pages from the links. M0's two load reports,
+     with an `@` asks for, and the order that one renders in by one
+     review's values; U3's questions, now counted; W4's overlay against
+     one built afresh. L5's scope fixtures carry the text a card reads,
+     worked out by hand, and on the corpus a whole page's scope is held
+     to the one `scope` gives when it reads every heading, the path a
+     `%%` still sends it down. BacklinkMentionTests counts each target's
+     linking pages from the links. M0's two load reports,
      RenderCorpusTests and CI's "measured alone" step stay, as do the
      golden file and every fixture test with explicit values. The "As
      built" notes below describe the tests as they were at 0.1.4, and
