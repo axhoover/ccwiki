@@ -8,9 +8,10 @@ import Testing
 /// parses the pages, a ranker handed the citing pages' names to one that
 /// names them, a sync's rankers to the ones its pages make, and the full
 /// rewrite through FTS5's `'rebuild'` to every row inserted through the
-/// triggers. On hand-made pages with the hazards the corpus lacks, and on
-/// the real wiki when `CCWIKI_WIKI` points at a clone. Timings are printed,
-/// never asserted.
+/// triggers. Every row is held to what its page makes, column by column
+/// as `SearchIndex.write` binds it. On hand-made pages with the hazards
+/// the corpus lacks, and on the real wiki when `CCWIKI_WIKI` points at a
+/// clone. Timings are printed, never asserted.
 ///
 /// The copy of the code track S replaced, and the comparisons with it, went
 /// after 0.1.4 (efficiency.md §2.1).
@@ -188,6 +189,20 @@ struct SearchEquivalenceTests {
         return rows.sorted { $0.path < $1.path }
     }
 
+    /// Every row `library`'s pages make, each column as `SearchIndex.write`
+    /// binds it. `rebuild` writes no fingerprints.
+    static func expectedRows(_ library: Library, fingerprinted: Bool = true) -> [Row] {
+        library.pages.map { page -> Row in
+            Row(
+                path: page.path, slug: page.slug, kind: page.kind.rawValue, status: page.status.rawValue,
+                title: page.kind == .reference ? "\(page.title) \(page.displayTitle)" : page.title,
+                aliases: page.aliases.joined(separator: "\n"),
+                headings: page.headings().map(\.text).joined(separator: "\n"),
+                body: SearchIndex.indexableBody(page.body),
+                hash: fingerprinted ? library.fingerprints.pages[page.path] ?? "" : "")
+        }.sorted { $0.path < $1.path }
+    }
+
     /// Every row's outline, by path: the column track S added.
     static func outlines(of file: URL) throws -> [String: String] {
         let database = try SQLiteDatabase(path: file.path(percentEncoded: false))
@@ -219,12 +234,19 @@ struct SearchEquivalenceTests {
         return "no difference"
     }
 
-    /// Asserts that every row's outline in `index`, synced with `library`,
-    /// reads back as its page's headings, and that `index` holds the rankers
-    /// the pages make when each is parsed and named afresh.
+    /// Asserts that every row of `index`, synced with `library`, holds what
+    /// its page makes, column by column (`expectedRows`); that its outline
+    /// reads back as the page's headings; and that `index` holds the
+    /// rankers the pages make when each is parsed and named afresh.
     static func expectBuilt(
-        _ index: SearchIndex, file: URL, _ library: Library, after step: String
+        _ index: SearchIndex, file: URL, _ library: Library, fingerprinted: Bool = true,
+        after step: String
     ) async throws {
+        let rows = try Self.rows(of: file)
+        let expectedRows = Self.expectedRows(library, fingerprinted: fingerprinted)
+        let sameRows = rows == expectedRows
+        #expect(sameRows, "\(step): rows, \(Self.firstDifference(rows, expectedRows, path: \.path))")
+
         let stored = try Self.outlines(of: file)
         let unread = library.pages.filter { page in
             Self.pairs(SearchIndex.outline(decoding: stored[page.path] ?? ""))
@@ -278,7 +300,7 @@ struct SearchEquivalenceTests {
         #expect(ConceptRanker(pages: pages, headings: some).entries == parsed.entries)
     }
 
-    @Test("every sync, full, partial, a no-op or a rebuild, builds the rankers its pages make")
+    @Test("every sync, full, partial, a no-op or a rebuild, builds the rows and rankers its pages make")
     func syncBuildsRankers() async throws {
         let scratch = Scratch()
         defer { scratch.delete() }
@@ -307,7 +329,8 @@ struct SearchEquivalenceTests {
         let rebuiltFile = scratch.file("rebuilt.sqlite3")
         let rebuilt = SearchIndex(path: rebuiltFile)
         try await rebuilt.rebuild(pages: second.pages, backlinks: second.backlinks)
-        try await Self.expectBuilt(rebuilt, file: rebuiltFile, second, after: "a rebuild")
+        try await Self.expectBuilt(
+            rebuilt, file: rebuiltFile, second, fingerprinted: false, after: "a rebuild")
     }
 
     @Test("on the real wiki: the ranker from the sync's outlines is the one that parses the pages")
@@ -464,7 +487,7 @@ struct SearchEquivalenceTests {
                     "\(name): \(Self.firstDifference(actual, expected, path: \.query))")
         }
         let expectedRows = try Self.rows(of: scratch.file("triggers.sqlite3"))
-        #expect(expectedRows.count == library.pages.count)
+        #expect(expectedRows == Self.expectedRows(library))
         for name in ["populated", "fresh"] {
             let rows = try Self.rows(of: scratch.file("\(name).sqlite3"))
             #expect(rows == expectedRows, "\(name)")
@@ -518,7 +541,9 @@ struct SearchEquivalenceTests {
                     "\(name): \(Self.firstDifference(actual, expected, path: \.query))")
         }
         let expectedRows = try Self.rows(of: scratch.file("triggers.sqlite3"))
-        #expect(expectedRows.count == library.pages.count)
+        let made = Self.expectedRows(library)
+        let triggersMade = expectedRows == made
+        #expect(triggersMade, "triggers: \(Self.firstDifference(expectedRows, made, path: \.path))")
         for name in ["fresh", "populated"] {
             let rows = try Self.rows(of: scratch.file("\(name).sqlite3"))
             let sameRows = rows == expectedRows

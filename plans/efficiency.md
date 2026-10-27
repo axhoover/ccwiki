@@ -342,18 +342,19 @@ attributable.
    - **What stays tests the current code alone,** each change held to the
      longer way round it saves where the app has one: L3, L4 and L6 as
      they were; S1–S4 (a sync's rankers to the pages', `'rebuild'` to the
-     triggers); X1 and X5 (one run for both settings to a run for each),
-     the Horn closure X4 rests on, X3 and the shared quote cases; J1
-     against KaTeX itself, and J2's lazy review against the one that
-     renders every block, which a table name with an `@` asks for; U3's
-     questions, now counted; W4's overlay against one built afresh. L5's
-     scope fixtures carry the text a card reads, worked out by hand, and
-     BacklinkMentionTests counts each target's linking pages from the
-     links. M0's two load reports, RenderCorpusTests and CI's "measured
-     alone" step stay, as do the golden file and every fixture test with
-     explicit values. The "As built" notes below describe the tests as
-     they were at 0.1.4, and §5's rows for what went are the last CI
-     printed.
+     triggers, and every row to the columns its page makes, as
+     `SearchIndex.write` binds them); X1 and X5 (one run for both
+     settings to a run for each), the Horn closure X4 rests on, X3 and
+     the shared quote cases; J1 against KaTeX itself, and J2's lazy
+     review against the one that renders every block, which a table name
+     with an `@` asks for; U3's questions, now counted; W4's overlay
+     against one built afresh. L5's scope fixtures carry the text a card
+     reads, worked out by hand, and BacklinkMentionTests counts each
+     target's linking pages from the links. M0's two load reports,
+     RenderCorpusTests and CI's "measured alone" step stay, as do the
+     golden file and every fixture test with explicit values. The "As
+     built" notes below describe the tests as they were at 0.1.4, and
+     §5's rows for what went are the last CI printed.
 2. **Equality is exact:** `==` on the existing Equatable values, and
    byte-identical output for JavaScript.
 3. **No test asserts a duration.** Timings are printed (§2.3).
