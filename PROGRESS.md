@@ -92,7 +92,9 @@ CI is the first compiler. The count's fixtures, the same JavaScript as
 **To check on a Mac:**
 - ⌘W on a tab, then ⌘Z: the tab comes back in the same window, on its
   page, at its heading, with Back working. The same after closing the
-  last window, from the menu bar alone.
+  last window, from the menu bar alone. Edit ▸ Undo Close Tab should be
+  enabled at once after the close: the menu reads `AppModel` by
+  observation, as Relaunch to Update does.
 - ⌘Z reaching Undo Close Tab past the disabled Undo. If AppKit stops at
   the first item with the key equivalent, ⌘Z does nothing and the menu
   item still works.
