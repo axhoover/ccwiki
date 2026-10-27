@@ -258,6 +258,27 @@ final class WebController: NSObject {
         return result.matchFound
     }
 
+    /// How many times `needle` is on the page, counted as the find bar's
+    /// find counts it, and which of them the last find selected
+    /// (`CCwiki.findCount`). Nil before the page is ready, or if the page
+    /// cannot be asked.
+    ///
+    /// The page answers with a string, "null" for nothing, and the
+    /// completion-handler form is used, as `selectionSource()` does: the
+    /// async one traps if a script's value is ever undefined.
+    func findCount(_ needle: String) async -> FindCount? {
+        guard isReady, !needle.isEmpty else { return nil }
+        let script = "(function () { try { return window.CCwiki && CCwiki.findCount "
+            + "? CCwiki.findCount(\(Self.javaScriptString(needle))) : \"null\"; } "
+            + "catch (e) { return \"null\"; } })()"
+        let json: String? = await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(script) { value, _ in
+                continuation.resume(returning: value as? String)
+            }
+        }
+        return json.flatMap(FindCount.init(json:))
+    }
+
     /// The first of `candidates` that occurs on the page, found and shown
     /// with the system's find highlight. A candidate with a capital is
     /// looked for in its own case first, as ⇧⌘F matched it (smart case,
