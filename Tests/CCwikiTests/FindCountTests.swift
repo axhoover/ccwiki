@@ -164,6 +164,37 @@ import Testing
         #expect(try count("softhyphen", script) == FindCount(total: 1, current: 0))
     }
 
+    /// Find compares with ICU's search collator, which takes letters NFKD
+    /// leaves whole for others: final sigma for sigma whatever the needle,
+    /// and "ß", "æ" and "ø" for "ss", "ae" and "o" as it takes "é" for "e".
+    @Test("ß, æ, ø and final sigma fold as find's collator folds them")
+    func collatorLetters() throws {
+        let script = try Self.loadScript()
+        try script.evaluate(#"""
+            page(h("p", null, "ΟΔΟΣ οδος Straße STRASSE Gjøsteen Gjosteen æther aether"));
+            """#)
+        #expect(try count("οδοσ", script) == FindCount(total: 2, current: 0),
+            "sigma finds final sigma")
+        #expect(try count("οδος", script) == FindCount(total: 2, current: 0),
+            "final sigma finds sigma")
+        #expect(try count("strasse", script) == FindCount(total: 2, current: 0),
+            "a needle without the letter finds it, as \"e\" finds \"é\"")
+        #expect(try count("Straße", script) == FindCount(total: 1, current: 0),
+            "a needle with the letter finds only it, as \"é\" finds only \"é\"")
+        #expect(try count("gjosteen", script) == FindCount(total: 2, current: 0))
+        #expect(try count("Gjøsteen", script) == FindCount(total: 1, current: 0))
+        #expect(try count("aether", script) == FindCount(total: 2, current: 0))
+        #expect(try count("Æther", script) == FindCount(total: 1, current: 0))
+
+        try script.evaluate(#"""
+            var words = h("p", null, "Straße and strasse");
+            page(words);
+            select(words.firstChild, 0, words.firstChild, 6);
+            """#)
+        #expect(try count("strasse", script) == FindCount(total: 2, current: 1),
+            "a selected \"ß\" is placed, though it reads as two letters")
+    }
+
     @Test("a match runs across inline elements and collapsed spaces")
     func acrossInlineElements() throws {
         let script = try Self.loadScript()

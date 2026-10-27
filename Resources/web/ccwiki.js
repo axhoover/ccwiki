@@ -900,16 +900,34 @@
   var FIND_MARKS = /\p{M}/gu;
   /** What CSS collapses, where `white-space` does not keep it. */
   var FIND_SPACE = /[ \t\n\f]/;
+  /** Letters find's collator takes for others whatever the needle: final
+   *  sigma is sigma. */
+  var FIND_SAME = { "ς": "σ" };
+  /** Letters it takes for their plain forms as it takes "é" for "e", which
+   *  NFKD leaves whole: found by the plain letters, unless the needle has
+   *  a mark or one of these. */
+  var FIND_BASES = {
+    "ß": "ss", "æ": "ae", "œ": "oe", "ø": "o",
+    "ł": "l", "đ": "d", "ð": "d", "ħ": "h",
+  };
+  var FIND_BASE_LETTER = /[ßæœøłđðħ]/;
 
   /** One character as find compares it: as its compatibility form, so
    *  the ligature "ﬁ" is "fi" and "²" is "2"; without accents unless the
    *  needle has one, so "e" finds "é" and "é" does not find "e"; in lower
-   *  case. */
+   *  case; "ς" as "σ", and "ß" as "ss" and "ø" as "o" as accents are. */
   function findFold(ch, keepMarks) {
     if (FIND_IGNORED.test(ch)) return "";
     var folded = FIND_QUOTES[ch] || ch.normalize("NFKD");
     if (!keepMarks) folded = folded.replace(FIND_MARKS, "");
-    return folded.toLowerCase();
+    folded = folded.toLowerCase();
+    var letters = "";
+    for (var i = 0; i < folded.length; i++) {
+      var letter = folded.charAt(i);
+      letter = FIND_SAME[letter] || letter;
+      letters += (!keepMarks && FIND_BASES[letter]) || letter;
+    }
+    return letters;
   }
 
   /** Whether an element's box ends a run of text, as find has it: a block
@@ -1027,7 +1045,8 @@
    *  string "null" if the page could not be read. */
   function findCount(needle) {
     try {
-      var keepMarks = FIND_MARK.test(String(needle).normalize("NFKD"));
+      var keepMarks = FIND_MARK.test(String(needle).normalize("NFKD")) ||
+        FIND_BASE_LETTER.test(String(needle).toLowerCase());
       var target = Array.from(String(needle)).map(function (ch) {
         return findFold(ch, keepMarks);
       }).join("");

@@ -632,7 +632,25 @@ document order:
 - It folds as find folds: case; compatibility forms, so the ligature "ﬁ"
   is "fi" and "²" is "2"; accents, unless the needle has one; curly
   quotes to straight; soft hyphens and zero-width characters to nothing.
+- Find compares with ICU's `@collation=search` collator at secondary
+  strength, where a plain letter in the needle finds the letter with any
+  accent. That collator takes some letters NFKD leaves whole for others,
+  and the count folds them too. Final sigma is sigma, whatever the needle.
+  "ß", "æ", "œ", "ø", "ł", "đ", "ð" and "ħ" are found by "ss", "ae", "oe",
+  "o", "l", "d", "d" and "h", as "é" is by "e", and a needle with one of
+  them keeps them, as it keeps accents. The list is what ICU 77's root
+  collation (node 22's `Intl.Collator`) equates and NFKD does not, over
+  Latin-1, Latin Extended-A and Greek.
 - Matches do not overlap: find steps on from the end of one.
+
+Where the count and find may still differ:
+
+- A needle with one accent keeps every accent. ICU decides letter by
+  letter: "é" in the needle needs "é", but its "e" elsewhere still finds
+  "ê".
+- The count folds as the root collation does. A locale's tailoring is out
+  of reach: in Danish or Norwegian "ø" and "æ" are letters of their own,
+  which "o" and "ae" do not find.
 
 **Which one is selected.** `WKWebView.find` selects its match. The count
 maps the selection's start and end into the text it read, the first
