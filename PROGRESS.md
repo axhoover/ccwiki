@@ -5,6 +5,82 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-27 — Undo Close Tab and the count, after review
+
+Six review findings on `claude/undo-close-tab-find-count`, each checked
+against the code. All six were real; two fixes differ from what the
+review proposed. One commit each, but the two stale-count findings share
+one.
+
+- **Undo Close Tab goes back where the tab was** (major). It put the tab
+  in whichever reader was key: a closed window came back as a tab of
+  another, a tab closed in window 1 opened in window 2, and with a paper
+  or Jobs key it opened as a window though its own was open. Now a
+  `ClosedTab` keeps its window number and the numbers of the tabs either
+  side, nearest first, read from `tabbedWindows` during `willClose`.
+  `ClosedTab.place(open:)` joins directly after the nearest open tab to
+  its left, else directly before the nearest to its right
+  (`ReaderWindowRequest.joinsAfter`, `WindowTabbing.join(ordered:)`),
+  else opens a window of its own. A tab that came back counts as the
+  window that reopened it (`AppModel.reopenedWindows`). The review
+  proposed one neighbour each side. That fails if AppKit still lists the
+  closed tabs as the next one closes: the middle tab names only closed
+  neighbours and becomes a second window. Taking the nearest open one
+  rebuilds a closed window in its order, whatever order its tabs closed
+  in. Safari's one-⌘Z Undo Close Window is not built: one ⌘Z per tab.
+- **The count clears whenever the page is drawn again.** A pull or a
+  preference re-renders the page in place, keeping the location, and the
+  bar kept "3 of 17" over replaced text. `WebController.renderGeneration`
+  counts the page's "rendered" messages. The bar clears on it, in place of
+  the location, and a find drops a count if it moved while the page
+  answered. The page posts "rendered" before it answers any later script,
+  so a count of the new page is caught.
+- **Final sigma, and ß, æ, œ, ø, ł, đ, ð and ħ.** Find's ICU search
+  collator equates letters NFKD leaves whole, and the count's total fell
+  short ("strasse" found "Straße" in find, not in the count). Node 22's
+  `Intl.Collator` (ICU 77) says which. Final sigma is sigma whatever the
+  needle. The others equal their plain forms at primary strength only, as
+  "é" does "e", not at tertiary as the review had ß, æ and œ, so they fold
+  as accents do: the plain letters find them, and a needle with one finds
+  only it.
+- **VoiceOver announces the count**, as Safari's find bar speaks its
+  result: `NSAccessibility.post` with `.announcementRequested`, high
+  priority, on the reader's window.
+- **The count keeps its width**: `.fixedSize(horizontal: true, vertical:
+  false)`, as `SWIFTUI-RULES` §2.2 asks of a numeric counter. At a narrow
+  reader it had truncated to "12 of 1…" while the field had room.
+
+The swiftui-pro, typography-designer and macos-design skills were not
+installed in this session. The work follows `SWIFTUI-RULES.md`: §2.2 for
+the count's width, §3.2 in rebuilding the place from the closed tab's
+record at each reopen rather than patching the stack, and `Theme.Fonts`
+as it was; no type style was added.
+
+**Checks.** No Swift toolchain here, so none of this has been compiled.
+- `FindCountTests`' fixtures, extracted from the Swift as written, pass
+  in node 22 against `ccwiki.js` over the same stand-in DOM. The new
+  sigma and ß fixtures fail against the script before this change.
+- A Python model of `ClosedTab.place` and the reopen loop, over every
+  whole and partial close of two to four tabs and both ways AppKit may
+  list closed tabs, rebuilt every window in order. `ClosedTabsTests`
+  checks the same for three tabs, partial closes of four, and the
+  neighbour rules.
+
+**To check on a Mac:**
+- [A, B, C], ⌘W on B, click another window, ⌘Z: B comes back between A
+  and C in its own window. ⌘W on A, then ⌘Z: A comes back first.
+- Two windows, close one, ⌘Z: it comes back as a window. A window of
+  three tabs closed with the close button: three ⌘Z rebuild it in order.
+  If it comes back as three windows, `tabbedWindows` no longer lists the
+  closing tab during `willClose`.
+- With a paper or the Jobs window key, ⌘Z: the tab goes back to its own
+  reader window.
+- The find bar: "3 of 17", then a pull that changes the page, or
+  Settings' maintenance notices or link previews turned on or off, and
+  the count goes. With VoiceOver on,
+  each Return or ⌘G is spoken. At a narrow reader the field shrinks
+  before the count does.
+
 ## 2026-10-27 — Undo Close Tab, and Find on Page's count
 
 The two reader comforts [efficiency.md](plans/efficiency.md) §3.4 named as

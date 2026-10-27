@@ -196,7 +196,10 @@ the bar says "3 of 17", or "17 matches" where it cannot tell which one is
 selected (a match in a formula), or "No matches". It says so explicitly
 rather than doing nothing. The count is `Theme.Fonts.meta`, secondary, with
 monospaced digits, so it does not jitter as it steps
-([render-pipeline.md](render-pipeline.md), "Find on Page's count").
+([render-pipeline.md](render-pipeline.md), "Find on Page's count"). It
+keeps its width (`SWIFTUI-RULES` §2.2), so at a narrow reader the field
+gives way, not the number. VoiceOver announces each count, since the
+keyboard stays in the field.
 
 ## 3a. References are not peers of the concept pages
 

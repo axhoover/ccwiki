@@ -22,8 +22,9 @@ again for the one before, up to ten. While you are typing in a field, ⌘Z
 still undoes your typing.
 
 **Find on Page counts.** The find bar now says "3 of 17" as you step
-through the matches with Return, ⌘G and ⇧⌘G, or "No matches". Where a
-match is inside a formula, it gives the number of matches alone.
+through the matches with Return, ⌘G and ⇧⌘G, or "No matches", and
+VoiceOver reads it out. Where a match is inside a formula, it gives the
+number of matches alone.
 
 ## 0.1.4 — 2026-10-20
 
