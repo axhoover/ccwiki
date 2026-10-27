@@ -60,6 +60,11 @@ final class WebController: NSObject {
     /// (corrections §3.5).
     private(set) var lastRenderedMarkdown: String?
     private(set) var lastRenderedRevision: String?
+    /// How many renders the page has reported: another page, or the same
+    /// page drawn again after a pull or a preference changed it. What was
+    /// read from the page before, such as Find on Page's count, is of
+    /// text that has gone.
+    private(set) var renderGeneration = 0
 
     /// Called when the shell has (re)loaded and there is nothing queued: the
     /// owner should render whatever it is showing again. That is how the
@@ -332,6 +337,7 @@ final class WebController: NSObject {
             }
 
         case "rendered":
+            renderGeneration &+= 1
             if let items = message["toc"] as? [[String: Any]] {
                 outline = items.compactMap { item in
                     guard let level = item["level"] as? Int,

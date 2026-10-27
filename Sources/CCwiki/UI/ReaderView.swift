@@ -8,7 +8,8 @@ struct ReaderView: View {
     @State private var findText = ""
     @State private var findPresented = false
     /// What the bar says after a find: "3 of 17", "17 matches" or "No
-    /// matches". Nil before one, and once the text or the page changes.
+    /// matches". Nil before one, and once the text changes or the page is
+    /// drawn again.
     @State private var findStatus: String?
 
     var body: some View {
@@ -198,8 +199,11 @@ struct ReaderView: View {
                 .textFieldStyle(.plain)
                 .onSubmit { Task { await find(backwards: false) } }
                 .onChange(of: findText) { _, _ in findStatus = nil }
-                // The count was of the page that was shown.
-                .onChange(of: session.location) { _, _ in findStatus = nil }
+                // The count was of the page as it was drawn. Another page,
+                // or this one drawn again after a pull, makes it stale.
+                .onChange(of: session.webController.renderGeneration) { _, _ in
+                    findStatus = nil
+                }
 
             // Monospaced digits, so the count does not jitter as it steps:
             // "3 of 17" and "4 of 17" are the same width.
@@ -236,11 +240,14 @@ struct ReaderView: View {
     private func find(backwards: Bool) async {
         guard !findText.isEmpty else { return }
         let needle = findText
+        let drawn = session.webController.renderGeneration
         let found = await session.webController.find(needle, backwards: backwards)
         var count: FindCount?
         if found { count = await session.webController.findCount(needle) }
         // Typed over while the page answered: the new text's find says.
-        guard needle == findText else { return }
+        // Drawn again since, by a link or a pull: the count is of text that
+        // has gone. A render after the count clears it (above).
+        guard needle == findText, drawn == session.webController.renderGeneration else { return }
         findStatus = FindCount.label(found: found, count: count)
     }
 

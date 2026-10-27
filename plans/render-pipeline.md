@@ -613,6 +613,12 @@ matched. After a find, `WebController.findCount(_:)` asks
 JSON string (`"null"` if the page could not be read), and the bar shows
 `FindCount.label`: "3 of 17", "17 matches" or "No matches".
 
+The count is of the page as it was drawn. Typing clears it, and so does
+every render the page reports (`WebController.renderGeneration`): another
+page, or the same page drawn again in place after a pull or a preference,
+which keeps the location but replaces the text and the selection. A count
+that answers after a render is dropped.
+
 **What it counts** is the text WebKit's find reads, the rendered text in
 document order:
 
