@@ -5,6 +5,90 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-27 — After 0.1.4: the copies kept for one release, deleted
+
+The efficiency pass kept a copy of every function it replaced, and some
+switches in the app that only its tests used, for one release
+([efficiency.md](plans/efficiency.md) §2.1 rule 1, §4.3). v0.1.4 shipped
+with them, so they go, on `claude/after-0.1.4-cleanup` from `3fa8959`, one
+commit per area. No reader will notice, so CHANGELOG.md is unchanged.
+
+**What went, and what each test holds the code to now:**
+- **The load path.** `Legacy/LegacyWiki.swift` (`enum Legacy`, L's copies)
+  and `Legacy/LegacyBacklinks.swift` (`LegacyD1`, M0's `46685be` path).
+  LoadEquivalenceCorpusTests keeps L3, L4 and L6, which compare the app
+  with itself. L5's scope fixtures now carry the text a whole page's card
+  reads, worked out by hand. IncrementalCorpusTests loses its third
+  report, backlinks at `46685be` against `21df5d7`, and the line-end A/B,
+  which only decided L1's form. BacklinkMentionTests counts each target's
+  linking pages from the links, in place of `Legacy.backlinkMap`.
+  `MarkdownLinkParser.links(in:)` parsed its own inputs only for L2's
+  test; its tests now call `LinkParse.links(in:)`, which the app runs.
+- **Search.** `SearchEquivalenceTests.Legacy`. A sync's rankers, full,
+  partial, a no-op or a rebuild, are held to the ones its pages make, a
+  ranker handed outlines or names to one that works them out, and the
+  rows `'rebuild'` writes to the rows the triggers insert.
+- **Derivation.** `Engine.Loop`, `legacyRun`, `result(of:…dense:)`, the
+  Engine's `steps`, `defaultSteps` and `establishing`, which only the old
+  loop read, and `prefilter:` on `implying`, `completions`, `chainExists`
+  and `isDerivable`. DerivationEquivalenceTests holds one run for both
+  settings to a run for each and keeps the Horn closure check, X3 and the
+  quote cases; X2's per-citation comparison and X4's sweep go.
+  DerivationTests' `loopsAgree` becomes `closuresAgree`, and
+  `prefilterAgrees` goes. The golden file is unchanged.
+- **The renderer.** `Fixtures/legacy/ccwiki-markdown.js`. The review tests
+  hold the lazy review to the one that renders every block, which
+  `mayChangeKatexTable` asks for when the table holds a name with an `@`
+  (`\every@block`, which no formula reads). In node, on the vendored
+  scripts, that review equals both the lazy one and `21df5d7`'s on the 15
+  hazards and the 8 table-change reviews, renders the same blocks as
+  `21df5d7`'s, and leaves the same table. The memo's tests against KaTeX
+  itself and the copy area's are unchanged.
+- **The app model and windows.** AppModelObservationTests' copy of
+  `explorerQuestion` (U3's sweep now counts what `canExplore` offers) and
+  WindowObservationTests' `legacyRequest` (a kept overlay is held to one
+  built afresh). `Job.duration`, unread since W3.
+
+**Kept on purpose.** `CurationQuote.contains(_:section:in:)`: no app code
+calls it since X2, but it is the quote rule's one-call form, which
+CurationQuoteTests, `Fixtures/quote-cases.json` and the reference engine
+name. M0's two load reports, RenderCorpusTests and CI's "Load and render
+timings, measured alone" step, FixesWikiparseTests, and every fixture test
+with explicit values.
+
+**Numbers.** 4,093 lines deleted and 311 added in code and tests, 186 and
+33 of them in Sources. 1,246 tests become 1,236: seven of
+LoadEquivalenceCorpusTests', IncrementalCorpusTests' backlinks at
+`46685be`, DerivationEquivalenceTests' `quotesParsedOnce` and
+DerivationTests' `prefilterAgrees`. The others were rewritten, not removed.
+
+**CI time, estimated from efficiency.md §5's figures, not yet measured:**
+- X4's sweep: about 190 s of CPU (171.5 s without the prefilter and 20.2 s
+  with it, summed over tasks).
+- The old loop in X1 and X5's sweep: about 15 s of CPU. The sweep that
+  stays, the current loop alone, costs a second or two.
+- M0's `46685be` backlinks: six copies five times over, about 35 s each
+  time `IncrementalCorpusTests` runs, which is twice on a pull request:
+  once in `make test-corpus`, once alone. The A/B line: about 2 s each.
+- L's corpus comparisons and BacklinkMentionTests' copy: about 13 s.
+  Search's copy, built six times on the corpus: about 5 s.
+- The renderer: none. The eager review costs what `21df5d7`'s did.
+
+In all, about 4.5 to 5 minutes of CPU per pull request run. On the clock,
+the "measured alone" step should be about 35 s shorter. The corpus step,
+where the sweeps held the cooperative threads beside every other suite,
+should be one to two minutes shorter.
+
+**Checks.** No Swift toolchain here, so none of this is compiled: CI is the
+first compiler. Every edit was read again for symbols, labels, access,
+isolation and `#expect` comments, and every caller of what changed or went
+was grepped across Sources and Tests. The review oracle ran in node. The
+L5 fixtures' expected text, and the one that rests on `# [[]]` having
+no plain text, were worked out by hand from `scope(of:anchor:)`'s rules.
+
+The swiftui-pro, typography-designer and macos-design skills were not
+installed in this session. No view changed, so nothing needs `make shots`.
+
 ## 2026-10-20 — 0.1.4: the tag found no notes
 
 `v0.1.4` was tagged on `910b422`, main's head after #14, and `release.yml`

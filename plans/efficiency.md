@@ -326,6 +326,34 @@ attributable.
      compiles and runs both versions.
    - **They are kept for one release** after this branch ships, then
      deleted, old loop included (§4.3).
+   - **After 0.1.4, they went** (`claude/after-0.1.4-cleanup`;
+     PROGRESS.md, 2026-10-27): `Legacy/LegacyWiki.swift` and
+     `Legacy/LegacyBacklinks.swift` (`LegacyD1`), the copies nested in
+     SearchEquivalenceTests, AppModelObservationTests and
+     WindowObservationTests, `Fixtures/legacy/ccwiki-markdown.js`,
+     `Engine.Loop` with `legacyRun` and `result(of:…dense:)`, and the
+     four `prefilter:` switches. With them went the tests that compared
+     old with new and nothing else: L1's, L2's and L5's corpus and fixture
+     comparisons, M0's backlinks at `46685be` with its line-end A/B, X2's
+     quotes per citation, X4's sweep with the prefilter off, and the
+     fixture's `prefilterAgrees`. `MarkdownLinkParser.links(in:)`, which
+     parsed its own inputs only for L2's test, and `Job.duration`, unread
+     since W3, went too.
+   - **What stays tests the current code alone,** each change held to the
+     longer way round it saves where the app has one: L3, L4 and L6 as
+     they were; S1–S4 (a sync's rankers to the pages', `'rebuild'` to the
+     triggers); X1 and X5 (one run for both settings to a run for each),
+     the Horn closure X4 rests on, X3 and the shared quote cases; J1
+     against KaTeX itself, and J2's lazy review against the one that
+     renders every block, which a table name with an `@` asks for; U3's
+     questions, now counted; W4's overlay against one built afresh. L5's
+     scope fixtures carry the text a card reads, worked out by hand, and
+     BacklinkMentionTests counts each target's linking pages from the
+     links. M0's two load reports, RenderCorpusTests and CI's "measured
+     alone" step stay, as do the golden file and every fixture test with
+     explicit values. The "As built" notes below describe the tests as
+     they were at 0.1.4, and §5's rows for what went are the last CI
+     printed.
 2. **Equality is exact:** `==` on the existing Equatable values, and
    byte-identical output for JavaScript.
 3. **No test asserts a duration.** Timings are printed (§2.3).
@@ -839,7 +867,8 @@ fixtures there and in FixesWikiparseTests (`lineEnds`, `loneCRLines`).
   not through `LinkParse`. L's copies read their markdown links through
   it, so the markdown half of L2's test compares the old code with the
   new; through `LinkParse` it compared the new code with itself (the
-  review's finding). No production code calls it.
+  review's finding). No production code calls it. (It went after 0.1.4,
+  with the copies; its tests call `LinkParse.links(in:)`.)
 - **L4 and L6 key exactly.** `WikiIndex.LinkResolutions` keys on (target,
   rawAnchor, isEmbed) compared byte for byte, since String's `==` is
   canonical equivalence and two spellings of an accented letter need not
@@ -1174,7 +1203,8 @@ unchanged.
   `Engine.closures(from:)`, which `Derivation.init` uses. Phase 3 also
   runs when a non-default step has no hypothesis.
 - No legacy file was written. When the copies go, `Engine.Loop.legacy`,
-  `legacyRun`, `dense:` and the `prefilter:` switches go with them.
+  `legacyRun`, `dense:` and the `prefilter:` switches go with them. (They
+  went after 0.1.4, §2.1.)
 
 ### 2.7 Track J: the renderer's JavaScript
 
@@ -2009,7 +2039,7 @@ which loads a real `AppModel` over the fixture clone.
 3. **L5 and X5 carry logic of their own.** Each lands last in its track, in
    its own commit, and can be reverted alone. X5's old loop stays in
    production behind `visits: .everyStep` (as built, `loop: .legacy`) for
-   one release.
+   one release. It went after 0.1.4 (§2.1).
 4. **U1 reorders a launch** and supersedes reader-comforts' documented
    order. Something may assume search is ready when the page appears. The
    revision check stays before the render, and the maintainer's shots check
@@ -2027,7 +2057,8 @@ which loads a real `AppModel` over the fixture clone.
 8. **CI time.** The standalone timing step adds about 2–3 minutes, only on
    pull requests, `main` and manual runs. The new corpus equivalence tests
    add about 1–2 minutes to `make test-corpus` on every push. All are
-   debug.
+   debug. The comparisons with the copies, most of that, went after 0.1.4
+   (§2.1; PROGRESS.md has the estimate).
 9. **Memory.** J1 holds at most 1,000 entries, about 1.6 M characters of
    HTML and keys, per web view. L6 holds at most a few hundred cards per
    load. L3 and F1 slices share the bodies' storage.
@@ -2081,6 +2112,7 @@ which loads a real `AppModel` over the fixture clone.
    question for the maintainer.
 2. **The Legacy copies, and the old derivation loop, are kept for one
    release** after this branch ships, then deleted in the next batch.
+   Done after 0.1.4 (§2.1).
 3. **⌘D is Save Page's shortcut** (§3.3).
 
 ---
