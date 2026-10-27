@@ -291,6 +291,20 @@ struct CCwikiCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
+        // ⌘Z opens the tab or window closed last again, as Safari's Undo
+        // Close Tab does (plans/reader-comforts.md §7). An item of its own
+        // after Undo and Redo, which stay AppKit's: Undo goes down the
+        // responder chain to the first responder's undo manager, so text
+        // keeps ⌘Z whenever it has typing to undo. AppKit gives a key
+        // equivalent to the first enabled item that has it, so this item
+        // gets ⌘Z only while Undo is disabled, and it is itself disabled
+        // while editable text has the keyboard.
+        CommandGroup(after: .undoRedo) {
+            Button("Undo Close Tab") { reopenClosedTab() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!appModel.canReopenClosedTab)
+        }
+
         // Copy Proof As ▸ Text, LaTeX (⌥⌘C), Wiki Markdown (⌥⇧⌘C): the
         // Relations Explorer's proof, so disabled in every other window.
         CommandGroup(after: .pasteboard) {
@@ -512,6 +526,18 @@ struct CCwikiCommands: Commands {
     private func beginCorrection(_ route: CorrectionRoute) {
         guard let session else { return }
         Task { await session.beginCorrection(route) }
+    }
+
+    /// Edit ▸ Undo Close Tab: a tab of the key reader window, else a window
+    /// of its own. With nothing to open, as when text took the keyboard
+    /// since the menu was last brought up to date, a beep, as AppKit gives
+    /// for an Undo with nothing to undo.
+    private func reopenClosedTab() {
+        guard let window = appModel.reopenClosedTab(beside: session?.hostWindowNumber) else {
+            NSSound.beep()
+            return
+        }
+        openWindow(id: CCwikiApp.mainWindowID, value: window)
     }
 
     /// File ▸ and Jobs ▸ Ingest a Paper…: on the key reader, else the

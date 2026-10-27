@@ -255,6 +255,18 @@ final class AppModel {
     /// of which window, in front or behind. Taken by the new window when it
     /// first sees its `NSWindow`, inside a view update, so not observed.
     @ObservationIgnored private var windowRequests = ReaderWindowRequests()
+    /// The reader tabs and windows closed in this process, most recent
+    /// first, for Edit ▸ Undo Close Tab (§7). Observed: the menu item is
+    /// enabled while there is one.
+    private(set) var closedTabs = ClosedTabs()
+    /// Closed tabs being opened again, by the id of the window each opens
+    /// in. Taken by that window as it starts, in place of restored state.
+    @ObservationIgnored private var reopenedTabs: [UUID: ClosedTab] = [:]
+    /// Whether the key window's first responder was text that can be
+    /// edited, as of the last event: the find bar's field, a palette's, a
+    /// sheet's, the explorer's or an editor's. ⌘Z is that text's Undo, and
+    /// Undo Close Tab is disabled meanwhile.
+    private(set) var keyWindowEditsText = false
 
     /// The session for the reader window `id`, created the first time the
     /// window asks (§1.3). `windowNumber` is its `NSWindow`'s, 0 or less
@@ -301,8 +313,15 @@ final class AppModel {
     /// launch does, on the page read last: a reader who closes the window
     /// and clicks the Dock icon is back where they were, as before there
     /// were tabs (§1.7).
+    ///
+    /// What the window showed is kept for Undo Close Tab, as macOS would
+    /// keep it to restore the window: its history, inspector and folders,
+    /// and the heading being read (§7).
     func sessionDidClose(_ id: UUID) {
-        guard sessions.removeValue(forKey: id) != nil else { return }
+        guard let session = sessions.removeValue(forKey: id) else { return }
+        closedTabs.remember(ClosedTab(
+            state: session.restorationState,
+            readingAnchor: session.webController.activeHeadingID))
         closedSessionIDs.insert(id)
         sessionOrder.closed(id)
         mainWindowCount = sessions.count
@@ -325,6 +344,49 @@ final class AppModel {
     /// The tabbing a new window was opened with, once, by that window.
     func takeTabbing(for windowID: UUID) -> ReaderWindowRequest? {
         windowRequests.takeTabbing(for: windowID)
+    }
+
+    // MARK: Undo Close Tab
+
+    /// Edit ▸ Undo Close Tab is enabled: a tab was closed, and no editable
+    /// text has the keyboard.
+    var canReopenClosedTab: Bool { !closedTabs.isEmpty && !keyWindowEditsText }
+
+    /// The window to open for the tab closed last: a tab of the reader
+    /// window numbered `source`, in front, or a window of its own with none,
+    /// as ⌘T opens one (§7). The caller opens it, and the window starts from
+    /// the closed tab's state (`takeReopenedTab`).
+    ///
+    /// Nil with nothing to reopen, or while editable text has the keyboard,
+    /// read now rather than as of the last event: ⌘Z is that text's.
+    func reopenClosedTab(beside source: Int?) -> ReaderWindow? {
+        guard !Self.firstResponderEditsText(), let tab = closedTabs.takeLast() else { return nil }
+        let window = ReaderWindow()
+        reopenedTabs[window.id] = tab
+        if let request = ReaderWindowRequest(
+            opening: window, as: .newTab(inBackground: false), beside: source) {
+            expectReaderWindow(request)
+        }
+        return window
+    }
+
+    /// The closed tab a new window opens again, once, by that window.
+    func takeReopenedTab(for windowID: UUID) -> ClosedTab? {
+        reopenedTabs.removeValue(forKey: windowID)
+    }
+
+    /// Whether the key window's first responder is text that can be edited:
+    /// a text field's field editor, or a text view. Either has its own Undo.
+    static func firstResponderEditsText() -> Bool {
+        guard let text = NSApp?.keyWindow?.firstResponder as? NSText else { return false }
+        return text.isEditable
+    }
+
+    /// After every event, as AppKit updates its windows: the first
+    /// responder may have changed, and AppKit says nothing when it does.
+    private func eventDidFinish() {
+        let editsText = Self.firstResponderEditsText()
+        if editsText != keyWindowEditsText { keyWindowEditsText = editsText }
     }
 
     /// The window `session` is in: the window itself, which its view hands
@@ -787,6 +849,15 @@ final class AppModel {
         ) { [weak self] _ in
             Task { @MainActor in self?.appDidBecomeActive() }
         }
+
+        // Undo Close Tab stands aside while editable text has the keyboard.
+        // AppKit posts nothing when the first responder changes, but it
+        // updates its windows after every event, and says so.
+        eventObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didUpdateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.eventDidFinish() }
+        }
     }
 
     /// What the job center reads at each call: the tools, git, the wiki and
@@ -1006,6 +1077,7 @@ final class AppModel {
     }
 
     @ObservationIgnored private var activationObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private var eventObserver: (any NSObjectProtocol)?
 
     /// CCwiki is the active app again. A tool missing at the last look may
     /// have been installed meanwhile: the blockers send the person to

@@ -224,10 +224,21 @@ private struct ReaderSessionView: View {
     ///
     /// A window macOS restored comes back with its history, inspector and
     /// folders, and its page where it was being read; saved state this build
-    /// cannot read is ignored whole, and the window starts as a new one.
+    /// cannot read is ignored whole, and the window starts as a new one. A
+    /// tab opened again by Undo Close Tab comes back the same way, from the
+    /// state it closed with, under the screenshot harness too, since it was
+    /// asked for (§7).
     private func start() async {
         if !session.isStarted {
-            let restored = restores ? ReaderSessionState.decoded(from: savedState) : nil
+            let restored: ReaderSessionState?
+            let anchor: String?
+            if let reopened = model.takeReopenedTab(for: window.id) {
+                restored = reopened.state
+                anchor = reopened.readingAnchor
+            } else {
+                restored = restores ? ReaderSessionState.decoded(from: savedState) : nil
+                anchor = savedAnchor
+            }
             if let restored { session.restoreChrome(restored) }
             let plan = SessionStartPlan.plan(
                 restored: restored, window: window,
@@ -235,7 +246,7 @@ private struct ReaderSessionView: View {
                 launchDocument: model.takeLaunchDocument(),
                 isColdStart: model.takeColdStart(),
                 lastPage: restores ? CCwikiSettings.lastPage : nil)
-            session.start(plan, readingAnchor: restored == nil ? nil : savedAnchor)
+            session.start(plan, readingAnchor: restored == nil ? nil : anchor)
         }
         await model.launchIfNeeded()
         ScreenshotRunner.run(model: model, session: session, openWindow: openWindow)

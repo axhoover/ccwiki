@@ -67,6 +67,46 @@ struct ReaderWindowRequests: Equatable, Sendable {
     }
 }
 
+/// A reader tab or window as it was when it closed: what Edit ▸ Undo Close
+/// Tab opens again (plans/reader-comforts.md §7).
+struct ClosedTab: Equatable, Sendable {
+    /// Its history, inspector and folders, as macOS restores a window.
+    var state: ReaderSessionState
+    /// The heading being read, kept apart from `state` as the window's
+    /// scene storage keeps it.
+    var readingAnchor: String?
+}
+
+/// The reader tabs and windows closed in this process, most recent first.
+/// Pure.
+///
+/// In memory only: a relaunch has nothing to undo, and a window macOS
+/// restores brings back its own state.
+struct ClosedTabs: Equatable, Sendable {
+    /// How far back Undo Close Tab goes.
+    static let limit = 10
+
+    private(set) var tabs: [ClosedTab] = []
+
+    init() {}
+
+    var isEmpty: Bool { tabs.isEmpty }
+
+    /// Keeps `tab`, the most recent now; the oldest goes past `limit`. A tab
+    /// that showed nothing, such as a window closed before the wiki first
+    /// loaded, is not kept: opened again, it would be a new tab.
+    mutating func remember(_ tab: ClosedTab) {
+        guard tab.state.history.current != .empty else { return }
+        tabs.insert(tab, at: 0)
+        if tabs.count > Self.limit { tabs.removeLast(tabs.count - Self.limit) }
+    }
+
+    /// The tab closed last, taken: the next one is the one before it.
+    mutating func takeLast() -> ClosedTab? {
+        tabs.isEmpty ? nil : tabs.removeFirst()
+    }
+}
+
 /// The reader windows, most recently key first. Pure.
 ///
 /// What "the active reader" means to a window that is not one: the
