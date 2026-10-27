@@ -70,8 +70,8 @@ struct ReaderWindowView: View {
             model.sessionBecameKey(session.id)
         }
         .onReceive(Self.windowWillClose) { notification in
-            guard let session, hostWindow(of: notification) != nil else { return }
-            model.sessionDidClose(session.id)
+            guard let session, let nsWindow = hostWindow(of: notification) else { return }
+            model.sessionDidClose(session.id, window: nsWindow)
         }
     }
 
@@ -95,7 +95,7 @@ struct ReaderWindowView: View {
            let number = request.tabbingInto,
            let source = NSApp.window(withWindowNumber: number), source !== nsWindow {
             WindowTabbing.join(
-                nsWindow, to: source,
+                nsWindow, to: source, ordered: request.joinsAfter ? .above : .below,
                 inBackground: request.inBackground && WindowTabbing.joinsInBackground)
         }
         // Claiming changes what the model's observers read, which must not

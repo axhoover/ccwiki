@@ -15,10 +15,11 @@
 ## 0.1.5 — unreleased
 
 **Reopen a tab you closed.** Edit → Undo Close Tab (⌘Z) brings back the
-tab or window you closed last, as a tab of the window in front, with its
-page, its Back and Forward, and the place you were reading. Press it again
-for the one before, up to ten. While you are typing in a field, ⌘Z still
-undoes your typing.
+tab you closed last, in its window and in its place among the tabs, with
+its page, its Back and Forward, and the place you were reading. A window
+you closed comes back as a window, a tab each time you press it. Press it
+again for the one before, up to ten. While you are typing in a field, ⌘Z
+still undoes your typing.
 
 **Find on Page counts.** The find bar now says "3 of 17" as you step
 through the matches with Return, ⌘G and ⇧⌘G, or "No matches". Where a

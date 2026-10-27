@@ -133,7 +133,7 @@ discoverable rather than folklore.
 |---|---|
 | ⌘N | New window, at Home |
 | ⌘T | New tab of the reader window in front, at Home; a window when no reader is in front |
-| ⌘Z | Undo Close Tab (Edit menu, after Redo): the tab or window closed last, back as a tab of the reader in front. Text keeps ⌘Z for its own Undo while it has the keyboard |
+| ⌘Z | Undo Close Tab (Edit menu, after Redo): the tab closed last, back in its window at its place, as in Safari; a window closed whole comes back as a window, a tab per ⌘Z. Text keeps ⌘Z for its own Undo while it has the keyboard |
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page, next, previous |
 | ⌘S | Search the wiki |

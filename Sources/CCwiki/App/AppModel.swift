@@ -262,6 +262,9 @@ final class AppModel {
     /// Closed tabs being opened again, by the id of the window each opens
     /// in. Taken by that window as it starts, in place of restored state.
     @ObservationIgnored private var reopenedTabs: [UUID: ClosedTab] = [:]
+    /// The window each closed tab was opened again as, by the closed tab's
+    /// window number: a tab that sat beside it goes back beside that one.
+    @ObservationIgnored private var reopenedWindows: [Int: UUID] = [:]
     /// Whether the key window's first responder was text that can be
     /// edited, as of the last event: the find bar's field, a palette's, a
     /// sheet's, the explorer's or an editor's. ⌘Z is that text's Undo, and
@@ -316,12 +319,11 @@ final class AppModel {
     ///
     /// What the window showed is kept for Undo Close Tab, as macOS would
     /// keep it to restore the window: its history, inspector and folders,
-    /// and the heading being read (§7).
-    func sessionDidClose(_ id: UUID) {
+    /// and the heading being read. With it goes where it was, read from
+    /// `window` while it closes: its number, and the tabs either side (§7).
+    func sessionDidClose(_ id: UUID, window: NSWindow? = nil) {
         guard let session = sessions.removeValue(forKey: id) else { return }
-        closedTabs.remember(ClosedTab(
-            state: session.restorationState,
-            readingAnchor: session.webController.activeHeadingID))
+        closedTabs.remember(Self.closedTab(session, in: window))
         closedSessionIDs.insert(id)
         sessionOrder.closed(id)
         mainWindowCount = sessions.count
@@ -352,22 +354,57 @@ final class AppModel {
     /// text has the keyboard.
     var canReopenClosedTab: Bool { !closedTabs.isEmpty && !keyWindowEditsText }
 
-    /// The window to open for the tab closed last: a tab of the reader
-    /// window numbered `source`, in front, or a window of its own with none,
-    /// as ⌘T opens one (§7). The caller opens it, and the window starts from
-    /// the closed tab's state (`takeReopenedTab`).
+    /// The window to open for the tab closed last, as in Safari: a tab of
+    /// its old window again, at its place, in front, or a window of its own
+    /// when none of that window's tabs is open (`ClosedTab.place`, §7). The
+    /// caller opens it, and the window starts from the closed tab's state
+    /// (`takeReopenedTab`).
     ///
     /// Nil with nothing to reopen, or while editable text has the keyboard,
     /// read now rather than as of the last event: ⌘Z is that text's.
-    func reopenClosedTab(beside source: Int?) -> ReaderWindow? {
+    func reopenClosedTab() -> ReaderWindow? {
         guard !Self.firstResponderEditsText(), let tab = closedTabs.takeLast() else { return nil }
         let window = ReaderWindow()
         reopenedTabs[window.id] = tab
-        if let request = ReaderWindowRequest(
-            opening: window, as: .newTab(inBackground: false), beside: source) {
-            expectReaderWindow(request)
+        if let place = tab.place(open: { openReaderWindowNumber(standingFor: $0) }) {
+            expectReaderWindow(ReaderWindowRequest(
+                window: window, tabbingInto: place.window, inBackground: false,
+                joinsAfter: place.after))
+        }
+        if tab.windowNumber > 0 {
+            reopenedWindows = reopenedWindows.filter { !closedSessionIDs.contains($0.value) }
+            reopenedWindows[tab.windowNumber] = window.id
         }
         return window
+    }
+
+    /// `session` as Undo Close Tab keeps it, with its place among the tabs
+    /// of `window`, which is closing. A window not in a tab group has none.
+    private static func closedTab(_ session: ReaderSession, in window: NSWindow?) -> ClosedTab {
+        var tab = ClosedTab(
+            state: session.restorationState,
+            readingAnchor: session.webController.activeHeadingID,
+            windowNumber: session.hostWindowNumber ?? 0)
+        let tabs = window?.tabbedWindows ?? []
+        if let index = tabs.firstIndex(where: { $0 === window }) {
+            tab.tabsBefore = tabs[..<index].reversed().map { $0.windowNumber }
+            tab.tabsAfter = tabs[(index + 1)...].map { $0.windowNumber }
+        }
+        return tab
+    }
+
+    /// The reader window open now in place of the one numbered `number`:
+    /// that window while it is open, else the window that reopened it while
+    /// that one is. Nil, neither.
+    private func openReaderWindowNumber(standingFor number: Int) -> Int? {
+        if let window = NSApp?.window(withWindowNumber: number), WindowTabbing.isOpen(window) {
+            return number
+        }
+        guard let id = reopenedWindows[number],
+              let current = sessions[id]?.hostWindowNumber,
+              let window = NSApp?.window(withWindowNumber: current), WindowTabbing.isOpen(window)
+        else { return nil }
+        return current
     }
 
     /// The closed tab a new window opens again, once, by that window.

@@ -153,7 +153,7 @@ a job that could not push.
 | | |
 |---|---|
 | ⌘N / ⌘T | New window / new tab |
-| ⌘Z | Undo Close Tab: reopen the tab or window closed last |
+| ⌘Z | Undo Close Tab: reopen the tab closed last, in its window and place |
 | ⌘-click / ⌥⌘-click | Open a link in a new tab / a new window |
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page / next / previous, with "3 of 17" |

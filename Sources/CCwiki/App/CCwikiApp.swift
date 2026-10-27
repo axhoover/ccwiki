@@ -524,8 +524,8 @@ struct CCwikiCommands: Commands {
     }
 }
 
-/// Edit ▸ Undo Close Tab (⌘Z): the tab or window closed last, opened again,
-/// as Safari's Undo Close Tab does (plans/reader-comforts.md §7).
+/// Edit ▸ Undo Close Tab (⌘Z): the tab closed last, opened again where it
+/// was, as Safari's Undo Close Tab does (plans/reader-comforts.md §7).
 ///
 /// Commands of their own, beside `CCwikiCommands`, whose body already
 /// holds the ten groups a `CommandsBuilder` block can be counted on to
@@ -533,7 +533,6 @@ struct CCwikiCommands: Commands {
 struct UndoCloseTabCommands: Commands {
     let appModel: AppModel
 
-    @FocusedValue(\.readerSession) private var session
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -550,12 +549,12 @@ struct UndoCloseTabCommands: Commands {
         }
     }
 
-    /// A tab of the key reader window, else a window of its own. With
-    /// nothing to open, as when text took the keyboard since the menu was
-    /// last brought up to date, a beep, as AppKit gives for an Undo with
-    /// nothing to undo.
+    /// Back in its old window, at its place, whichever window is key, else
+    /// a window of its own. With nothing to open, as when text took the
+    /// keyboard since the menu was last brought up to date, a beep, as
+    /// AppKit gives for an Undo with nothing to undo.
     private func reopenClosedTab() {
-        guard let window = appModel.reopenClosedTab(beside: session?.hostWindowNumber) else {
+        guard let window = appModel.reopenClosedTab() else {
             NSSound.beep()
             return
         }

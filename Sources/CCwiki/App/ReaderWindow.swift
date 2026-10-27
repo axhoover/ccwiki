@@ -25,6 +25,9 @@ struct ReaderWindowRequest: Equatable, Sendable {
     /// `NSWindow.windowNumber` of the reader to join as a tab; nil, a window.
     var tabbingInto: Int?
     var inBackground: Bool
+    /// Whether the tab goes directly after that window, as a new tab does,
+    /// or directly before it: a closed tab going back to its place (§7).
+    var joinsAfter = true
 }
 
 extension ReaderWindowRequest {
@@ -75,6 +78,42 @@ struct ClosedTab: Equatable, Sendable {
     /// The heading being read, kept apart from `state` as the window's
     /// scene storage keeps it.
     var readingAnchor: String?
+    /// Its own `NSWindow.windowNumber`: a tab that sat beside it and closes
+    /// later goes back beside the window that reopens it.
+    var windowNumber = 0
+    /// The other tabs of its window as it closed, by window number, nearest
+    /// first: those to its left, and those to its right. None, it was a
+    /// window of its own.
+    var tabsBefore: [Int] = []
+    var tabsAfter: [Int] = []
+
+    /// Where a reopened tab joins a window: directly after it, or directly
+    /// before it.
+    struct Place: Equatable, Sendable {
+        /// The window's `NSWindow.windowNumber`.
+        var window: Int
+        var after: Bool
+    }
+
+    /// Where it goes back to, as in Safari: beside the nearest of its old
+    /// window's tabs that is open now, directly after the nearest to its
+    /// left, else directly before the nearest to its right, so it takes
+    /// its old place. Nil when none is: it comes back as a window of its
+    /// own. `open` gives the window that stands for an old tab now, if any:
+    /// that tab's own, or the one that reopened it.
+    ///
+    /// A window closed whole closes tab by tab, and ⌘Z brings the tabs back
+    /// one at a time, the first as a window and the rest into it, in their
+    /// order whichever order they closed in.
+    func place(open: (Int) -> Int?) -> Place? {
+        for number in tabsBefore {
+            if let window = open(number) { return Place(window: window, after: true) }
+        }
+        for number in tabsAfter {
+            if let window = open(number) { return Place(window: window, after: false) }
+        }
+        return nil
+    }
 }
 
 /// The reader tabs and windows closed in this process, most recent first.

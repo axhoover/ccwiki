@@ -88,4 +88,95 @@ struct ClosedTabsTests {
         #expect(plan.opensOnLoad == nil, "the page read last does not open over it")
         #expect(!plan.opensHomeOnLoad)
     }
+
+    // MARK: Where it goes back
+
+    /// The tab of window `number`, closed from between `before` and
+    /// `after`, nearest first.
+    private static func tab(number: Int, before: [Int], after: [Int]) -> ClosedTab {
+        var closedTab = Self.tab("Page \(number).md")
+        closedTab.windowNumber = number
+        closedTab.tabsBefore = before
+        closedTab.tabsAfter = after
+        return closedTab
+    }
+
+    @Test("a closed tab goes back beside the nearest of its old window's tabs still open")
+    func placeBesideNeighbours() {
+        // B of [A, B, C, D], numbered 1 to 4.
+        let tab = Self.tab(number: 2, before: [1], after: [3, 4])
+        let bothOpen = tab.place { $0 }
+        #expect(bothOpen == ClosedTab.Place(window: 1, after: true), "after the tab to its left")
+        let leftClosed = tab.place { $0 == 1 ? nil : $0 }
+        #expect(leftClosed == ClosedTab.Place(window: 3, after: false), "before the tab to its right")
+        let onlyFar = tab.place { $0 == 4 ? $0 : nil }
+        #expect(onlyFar == ClosedTab.Place(window: 4, after: false), "before the nearest one open")
+        let reopened = tab.place { $0 == 1 ? 9 : nil }
+        #expect(reopened == ClosedTab.Place(window: 9, after: true),
+            "after the window that reopened its neighbour")
+        let noneOpen = tab.place { _ in nil }
+        #expect(noneOpen == nil, "a window of its own, never a tab of another window")
+        let alone = Self.tab(number: 5, before: [], after: []).place { $0 }
+        #expect(alone == nil, "a window closed alone comes back as a window")
+    }
+
+    /// Closes `closing` of a window whose tabs are `tabs`, by number, then
+    /// reopens every closed tab as Undo Close Tab does. Gives the windows
+    /// that result, each as its tabs in order, a reopened tab named by the
+    /// number it had. `listsClosed`: AppKit still lists a closed tab among
+    /// the window's tabs when the next one closes.
+    private static func closeAndReopen(
+        _ tabs: [Int], closing: [Int], listsClosed: Bool
+    ) -> [[Int]] {
+        var closed = ClosedTabs()
+        var stillOpen = tabs
+        for number in closing {
+            let listed = listsClosed ? tabs : stillOpen
+            guard let index = listed.firstIndex(of: number) else { continue }
+            closed.remember(Self.tab(
+                number: number,
+                before: Array(listed[..<index].reversed()),
+                after: Array(listed[(index + 1)...])))
+            stillOpen.removeAll { $0 == number }
+        }
+
+        var windows: [[Int]] = stillOpen.isEmpty ? [] : [stillOpen]
+        var reopenedAs: [Int: Int] = [:]
+        func isOpen(_ number: Int) -> Bool { windows.contains { $0.contains(number) } }
+        while let tab = closed.takeLast() {
+            let number = 100 + reopenedAs.count
+            let place = tab.place { old in
+                if isOpen(old) { return old }
+                if let new = reopenedAs[old], isOpen(new) { return new }
+                return nil
+            }
+            if let place, let row = windows.firstIndex(where: { $0.contains(place.window) }),
+               let column = windows[row].firstIndex(of: place.window) {
+                windows[row].insert(number, at: place.after ? column + 1 : column)
+            } else {
+                windows.append([number])
+            }
+            reopenedAs[tab.windowNumber] = number
+        }
+        let original = Dictionary(uniqueKeysWithValues: reopenedAs.map { ($0.value, $0.key) })
+        return windows.map { window in window.map { original[$0] ?? $0 } }
+    }
+
+    /// A window's tabs close one by one, in an order AppKit chooses, and
+    /// ⌘Z brings them back one at a time.
+    @Test("closed tabs come back in their window, in their order, whatever the order they closed in")
+    func windowRebuilt() {
+        let orders = [[1, 2, 3], [3, 2, 1], [2, 1, 3], [2, 3, 1], [1, 3, 2], [3, 1, 2]]
+        for order in orders {
+            for listsClosed in [false, true] {
+                let rebuilt = Self.closeAndReopen([1, 2, 3], closing: order, listsClosed: listsClosed)
+                #expect(rebuilt == [[1, 2, 3]],
+                    "the whole window, closed in the order \(order), listed closed: \(listsClosed)")
+            }
+        }
+        for closing in [[2], [3, 2], [2, 3], [4, 1], [2, 4, 3]] {
+            let rebuilt = Self.closeAndReopen([1, 2, 3, 4], closing: closing, listsClosed: false)
+            #expect(rebuilt == [[1, 2, 3, 4]], "tabs \(closing) of a window that stays open")
+        }
+    }
 }
