@@ -11,8 +11,9 @@ import Testing
 /// Neither may change a byte. The corpus suites render every formula of the
 /// wiki through the first twice and compare each page with the same page
 /// rendered by KaTeX itself, in a second context, through the patch as it
-/// was before the memo; and review edits to every page with today's
-/// `ccwiki-markdown.js` and with 21df5d7's (`Fixtures/legacy`).
+/// was before the memo; and review edits to every page as the review shows
+/// them and with every block rendered, which `mayChangeKatexTable` asks
+/// for when the table holds a name KaTeX could take for its own.
 struct RenderMemoTests {
 
     // MARK: - The memo's rules, on a KaTeX that counts
@@ -344,13 +345,6 @@ struct RenderMemoTests {
 
     // MARK: - The review's blocks, rendered when shown
 
-    /// `ccwiki-markdown.js` as it was at 21df5d7, which rendered every
-    /// block of both texts as it parsed them.
-    private static let legacyMarkdown = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .appending(path: "Fixtures/legacy/ccwiki-markdown.js")
-    private static let currentMarkdown = MarkdownScript.webRoot.appending(path: "ccwiki-markdown.js")
-
     /// A modified Markdown file of the review's payload (corrections §6.3).
     private static func modified(
         _ old: String, _ new: String, _ hunks: [([Int], [Int])], links: [String: Any] = [:]
@@ -399,20 +393,23 @@ struct RenderMemoTests {
         ]
     }
 
-    @Test("the review's entries are the ones it had when every block was rendered, on the hazards")
+    @Test("the review's entries are the ones it gives with every block rendered, on the hazards")
     func reviewHazards() throws {
         let table = #"{ "\\calA": "\\mathcal{A}", "\\calB": "\\mathcal{B}" }"#
-        let before = try Self.reviewer(Self.legacyMarkdown, table: table)
-        let after = try Self.reviewer(Self.currentMarkdown, table: table)
+        let shown = try Self.reviewer(table: table)
+        let every = try Self.reviewer(table: table, everyBlock: true)
         for file in Self.hazards() {
-            let call = "JSON.stringify(CCwikiMarkdown.reviewEntries(md, \(MarkdownScript.literal(file))))"
-            #expect(try after.text(call) == before.text(call), "\(file["new"] as? String ?? "")")
+            let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
+                + MarkdownScript.literal(file) + "))"
+            let new = file["new"] as? String ?? ""
+            #expect(try shown.text(call) == every.text(call), "\(new)")
+            #expect(try shown.count("blockRenders") < every.count("blockRenders"), "fewer blocks for \(new)")
         }
     }
 
     @Test("a link written two ways in a change keeps each side's destination")
     func reviewLinkDestinations() throws {
-        let after = try Self.reviewer(Self.currentMarkdown, table: "{}")
+        let after = try Self.reviewer(table: "{}")
         let file = Self.modified("[a](<x y>)\n\nB.", "[a](x%20y)\n\nB.", [([0, 1], [0, 1])])
         let raw = try after.json("CCwikiMarkdown.reviewEntries(md, \(MarkdownScript.literal(file)))")
         let entries = try #require(raw as? [[String: Any]])
@@ -468,38 +465,38 @@ struct RenderMemoTests {
         ]
     }
 
-    @Test("a review in which a formula could change KaTeX's table renders every block, in the order it did")
+    @Test("a review in which a formula could change KaTeX's table renders every block, the old text's first")
     func reviewTableChanges() throws {
         for (table, files) in Self.tableChanges() {
-            let before = try Self.reviewer(Self.legacyMarkdown, table: table)
-            let after = try Self.reviewer(Self.currentMarkdown, table: table)
+            let shown = try Self.reviewer(table: table)
+            let every = try Self.reviewer(table: table, everyBlock: true)
             for file in files {
                 let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
                     + MarkdownScript.literal(file) + "))"
                 let old = file["old"] as? String ?? ""
-                #expect(try after.text(call) == before.text(call), "\(old)")
-                #expect(try after.count("blockRenders") == before.count("blockRenders"), "every block of \(old)")
+                #expect(try shown.text(call) == every.text(call), "\(old)")
+                #expect(try shown.count("blockRenders") == every.count("blockRenders"), "every block of \(old)")
             }
             // What the reviews left in KaTeX's table, for what reads it next.
-            let names = "Object.keys(TABLE).sort().join()"
-            #expect(try after.text(names) == before.text(names), "the table after \(table)")
+            let names = #"Object.keys(TABLE).filter(function (n) { return n !== "\\every@block"; }).sort().join()"#
+            #expect(try shown.text(names) == every.text(names), "the table after \(table)")
         }
     }
 
     @Test("a review renders only the blocks it shows while no formula can change KaTeX's table")
     func reviewRendersShownBlocks() throws {
         let table = #"{ "\\calA": "\\mathcal{A}" }"#
-        let before = try Self.reviewer(Self.legacyMarkdown, table: table)
-        let after = try Self.reviewer(Self.currentMarkdown, table: table)
+        let shown = try Self.reviewer(table: table)
+        let every = try Self.reviewer(table: table, everyBlock: true)
         // A formula that reads what another left changes nothing itself.
         let file = Self.lastLineChanged("$\\calA$ one.\n\nRead $\\@eqnsw$.\n\nC.\n\nD.\n\nE.")
         let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
             + MarkdownScript.literal(file) + "))"
-        #expect(try after.text(call) == before.text(call))
+        #expect(try shown.text(call) == every.text(call))
         // Every block of both texts, five each, against the context and
         // the block removed and added: the three before them are a gap.
-        #expect(try before.count("blockRenders") == 10)
-        #expect(try after.count("blockRenders") == 3)
+        #expect(try every.count("blockRenders") == 10)
+        #expect(try shown.count("blockRenders") == 3)
     }
 
     /// What the review is sent for an edit to `page`: its middle non-blank
@@ -533,20 +530,20 @@ struct RenderMemoTests {
         return files
     }
 
-    @Test("on the corpus, the review of edits to every page is the review it was, rendering fewer blocks")
+    @Test("on the corpus, every page's review is the one with every block rendered, and renders fewer blocks")
     func corpusReview() throws {
         guard let corpus = Self.corpus() else { return }
-        let before = try Self.reviewer(Self.legacyMarkdown, table: corpus.table)
-        let after = try Self.reviewer(Self.currentMarkdown, table: corpus.table)
+        let every = try Self.reviewer(table: corpus.table, everyBlock: true)
+        let shown = try Self.reviewer(table: corpus.table)
         let clock = ContinuousClock()
-        var spent: [String: (before: Duration, after: Duration)] = [:]
-        var renders: [String: (before: Int, after: Int)] = [:]
+        var spent: [String: (every: Duration, shown: Duration)] = [:]
+        var renders: [String: (every: Int, shown: Int)] = [:]
         var different: [String] = []
         var count = 0
         // Whether a macro could change KaTeX's table, as `mayChangeKatexTable`
         // asks: then every review renders every block. Read before the
         // reviews, whose formulas can write into the table.
-        let tableShares = try after.evaluate(#"""
+        let tableShares = try shown.evaluate(#"""
             Object.keys(TABLE).some(function (n) {
               var b = TABLE[n];
               return n === "\\color" || n.indexOf("@") >= 0 || typeof b !== "string" ||
@@ -554,44 +551,44 @@ struct RenderMemoTests {
             });
             """#)?.toBool() == true
         for page in corpus.pages {
-            // Each page's reviews start from the table as it was sent, both
-            // before and after. Left there, what one page's formula wrote
+            // Each page's reviews start from the table as it was sent, in
+            // both contexts. Left there, what one page's formula wrote
             // (`\@eqnsw` after an align) made every later review render every
             // block, as `mayChangeKatexTable` asks, so one align on the first
             // page in path order failed the fewer-blocks check below with
             // every review the same. What one review leaves for the next is
             // `reviewTableChanges`'s to check.
-            for script in [before, after] {
+            for script in [every, shown] {
                 try script.evaluate("resetTable();", named: "reset.js")
             }
             for (name, file) in Self.reviewFiles(page) {
                 let call = "blockRenders = 0; JSON.stringify(CCwikiMarkdown.reviewEntries(md, "
                     + MarkdownScript.literal(file) + "))"
                 let started = clock.now
-                let old = try before.text(call)
+                let whole = try every.text(call)
                 let halfway = clock.now
-                let new = try after.text(call)
+                let lazy = try shown.text(call)
                 let done = clock.now
-                if new != old { different.append("\(name): \(page.path)") }
-                let time = spent[name] ?? (before: .zero, after: .zero)
-                spent[name] = (before: time.before + started.duration(to: halfway),
-                               after: time.after + halfway.duration(to: done))
-                let renderedBefore = try before.count("blockRenders")
-                let renderedAfter = try after.count("blockRenders")
-                let made = renders[name] ?? (before: 0, after: 0)
-                renders[name] = (before: made.before + renderedBefore, after: made.after + renderedAfter)
+                if lazy != whole { different.append("\(name): \(page.path)") }
+                let time = spent[name] ?? (every: .zero, shown: .zero)
+                spent[name] = (every: time.every + started.duration(to: halfway),
+                               shown: time.shown + halfway.duration(to: done))
+                let renderedEvery = try every.count("blockRenders")
+                let renderedShown = try shown.count("blockRenders")
+                let made = renders[name] ?? (every: 0, shown: 0)
+                renders[name] = (every: made.every + renderedEvery, shown: made.shown + renderedShown)
                 count += 1
             }
         }
         #expect(different.isEmpty, "reviewed otherwise:\n  \(different.prefix(20).joined(separator: "\n  "))")
         let middle = try #require(renders["middle"])
-        #expect(tableShares || middle.after < middle.before, "the blocks in gaps are never rendered")
-        #expect(renders["added"].map { $0.after == $0.before } == true, "a new file shows every block")
+        #expect(tableShares || middle.shown < middle.every, "the blocks in gaps are never rendered")
+        #expect(renders["added"].map { $0.shown == $0.every } == true, "a new file shows every block")
 
         let lines = ["middle", "ends", "added", "deleted"].compactMap { name -> String? in
             guard let made = renders[name], let time = spent[name] else { return nil }
-            return "\(name): \(made.before) blocks rendered, \(Self.milliseconds(time.before)) ms before; "
-                + "\(made.after), \(Self.milliseconds(time.after)) ms after"
+            return "\(name): \(made.every) blocks rendered, \(Self.milliseconds(time.every)) ms with every "
+                + "block; \(made.shown), \(Self.milliseconds(time.shown)) ms as shown"
         }
         print("The review's blocks rendered when shown, on the real wiki "
             + "(plans/render-pipeline.md, \"The review\"), \(count) files, identical:\n"
@@ -639,18 +636,23 @@ struct RenderMemoTests {
         return script
     }
 
-    /// `file`, a `ccwiki-markdown.js`, behind the vendored KaTeX and
-    /// markdown-it; `md` is made with `table` and counts in `blockRenders`
-    /// the blocks it renders, and `resetTable()` puts the table back as sent.
-    private static func reviewer(_ file: URL, table: String) throws -> MarkdownScript {
+    /// `ccwiki-markdown.js` behind the vendored KaTeX and markdown-it; `md`
+    /// is made with `table` and counts in `blockRenders` the blocks it
+    /// renders, and `resetTable()` puts the table back as sent. With
+    /// `everyBlock`, the table also holds `\every@block`, a name KaTeX could
+    /// take for one of its own, so `mayChangeKatexTable` holds and every
+    /// review renders every block of both texts, the old text's first: the
+    /// review one that renders only what it shows must equal. No formula
+    /// reads the name.
+    private static func reviewer(table: String, everyBlock: Bool = false) throws -> MarkdownScript {
         let script = MarkdownScript(context: JSContext())
         try script.evaluate(MarkdownScript.prelude, named: "prelude.js")
         let libraries = [vendored[0]] + MarkdownScript.scripts.filter { $0.hasPrefix("vendor/") }
-        for name in libraries {
+        for name in libraries + ["ccwiki-markdown.js"] {
             try script.evaluate(try source(name), named: name)
         }
-        try script.evaluate(try String(contentsOf: file, encoding: .utf8), named: file.lastPathComponent)
-        try script.evaluate("var TABLE = " + table + ";\n" + reviewerSetup, named: "setup.js")
+        let marked = everyBlock ? #"TABLE["\\every@block"] = "";"# + "\n" : ""
+        try script.evaluate("var TABLE = " + table + ";\n" + marked + reviewerSetup, named: "setup.js")
         return script
     }
 
