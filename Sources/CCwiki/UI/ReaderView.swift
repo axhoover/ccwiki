@@ -8,7 +8,7 @@ struct ReaderView: View {
     @State private var findText = ""
     @State private var findPresented = false
     /// What the bar says after a find: "3 of 17", "17 matches" or "No
-    /// matches". Nil before one, and once the text changes.
+    /// matches". Nil before one, and once the text or the page changes.
     @State private var findStatus: String?
 
     var body: some View {
@@ -198,6 +198,8 @@ struct ReaderView: View {
                 .textFieldStyle(.plain)
                 .onSubmit { Task { await find(backwards: false) } }
                 .onChange(of: findText) { _, _ in findStatus = nil }
+                // The count was of the page that was shown.
+                .onChange(of: session.location) { _, _ in findStatus = nil }
 
             // Monospaced digits, so the count does not jitter as it steps:
             // "3 of 17" and "4 of 17" are the same width.

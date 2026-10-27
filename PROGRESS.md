@@ -9,8 +9,10 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 The two reader comforts [efficiency.md](plans/efficiency.md) §3.4 named as
 first candidates, on `claude/undo-close-tab-find-count` from `main` at
-`3fa8959` (v0.1.4). One commit each, a third that moves Undo Close
-Tab's menu item into `Commands` of its own, then the docs.
+`3fa8959` (v0.1.4). One commit each, then the docs, and three small
+commits a re-read found: Undo Close Tab's menu item in `Commands` of its
+own, escapes for the invisible characters in the count's tables, and the
+count cleared when another page shows.
 
 - **Edit ▸ Undo Close Tab (⌘Z).** A closed reader tab or window comes back
   as a tab of the key reader window, in front, or a window of its own with
@@ -20,7 +22,8 @@ Tab's menu item into `Commands` of its own, then the docs.
 - **"3 of 17" in the find bar.** After each find, the page counts the
   matches and places the selected one. The bar says "3 of 17", "17
   matches" when it cannot tell which, or "No matches", in
-  `Theme.Fonts.meta` with monospaced digits.
+  `Theme.Fonts.meta` with monospaced digits. Typing, or another page,
+  clears it until the next find.
 
 **Undo Close Tab, as built** ([reader-comforts.md](plans/reader-comforts.md)
 §7 has the whole note):
