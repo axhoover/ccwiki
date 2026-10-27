@@ -682,15 +682,19 @@ three a review) whose formulas write, read and delete KaTeX's names,
 some in gaps and some across files, gave the same JSON in bare contexts
 and the same review in jsdom through the shell; the first version, which
 rendered lazily whatever the formulas, differed within the first runs.
-`RenderMemoTests` holds the review to the one that renders every block,
-which `mayChangeKatexTable` asks for when the table holds a name with an
-`@` (`\every@block`, which no formula reads): on the hazards, with fewer
-blocks rendered; on the reviews in which a formula changes the table,
-with every block rendered and the same table left; and on one in which a
-formula only reads it, which must still render only the blocks it shows,
-on every run; and on four of those edits to every page on a corpus run.
-Until 0.1.4 it held the review to a copy of the file as it was, which
-went after that release ([efficiency.md](efficiency.md) §2.1).
+`RenderMemoTests` holds the review that renders what it shows to the one
+that renders every block, which `mayChangeKatexTable` asks for when the
+table holds a name with an `@` (`\every@block`, which no formula reads):
+on the hazards, with fewer blocks rendered; on one review in which a
+formula only reads the table, which must still render only the blocks it
+shows, on every run; and on four of those edits to every page on a
+corpus run. On the eight reviews in which a formula changes the table,
+both render every block by the same lines, so the test asks only that
+every block renders. The order is held by one review's values: the old
+text's `$\baz$` renders as an error, in `#cc0000`, before the new text's
+`\gdef\baz{N}` runs, and the new text's renders `N`. Until 0.1.4 the
+review was held to a copy of the file as it was, which went after that
+release ([efficiency.md](efficiency.md) §2.1).
 
 ## 4. Serving content: a custom scheme, not `file://`
 

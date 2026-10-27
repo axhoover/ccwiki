@@ -481,6 +481,20 @@ struct RenderMemoTests {
             let names = #"Object.keys(TABLE).filter(function (n) { return n !== "\\every@block"; }).sort().join()"#
             #expect(try shown.text(names) == every.text(names), "the table after \(table)")
         }
+
+        // Both reviews above render every block, by the same lines, so
+        // they agree whatever the order. The old text's blocks render
+        // first: its `\baz` is read before the new text's `\gdef\baz{N}`
+        // runs.
+        let baz = Self.tableChanges()[1]
+        let ordered = try Self.reviewer(table: baz.table)
+        let raw = try ordered.json("CCwikiMarkdown.reviewEntries(md, \(MarkdownScript.literal(baz.files[0])))")
+        let entries = try #require(raw as? [[String: Any]])
+        func html(_ kind: String) -> String {
+            entries.last(where: { ($0["kind"] as? String) == kind }).flatMap { $0["html"] as? String } ?? ""
+        }
+        #expect(html("removed").contains("color:#cc0000"), "the old text's baz renders before the new text defines it")
+        #expect(html("added").contains(">N</span>"))
     }
 
     @Test("a review renders only the blocks it shows while no formula can change KaTeX's table")
