@@ -890,20 +890,21 @@
 
   /** Read as find reads them: curly quotes as straight ones. */
   var FIND_QUOTES = {
-    "‘": "'", "’": "'", "׳": "'",
-    "“": '"', "”": '"', "״": '"',
+    "\u2018": "'", "\u2019": "'", "\u05F3": "'",
+    "\u201C": '"', "\u201D": '"', "\u05F4": '"',
   };
   /** Read as nothing: a soft hyphen, and the zero-width characters KaTeX
    *  puts in its formulas. */
-  var FIND_IGNORED = /[­​-‍⁠﻿]/;
+  var FIND_IGNORED = /[\u00AD\u200B-\u200D\u2060\uFEFF]/;
   var FIND_MARK = /\p{M}/u;
   var FIND_MARKS = /\p{M}/gu;
   /** What CSS collapses, where `white-space` does not keep it. */
   var FIND_SPACE = /[ \t\n\f]/;
 
   /** One character as find compares it: as its compatibility form, so
-   *  "ﬁ" is "fi" and "²" is "2"; without accents unless the needle has
-   *  one, so "e" finds "é" and "é" does not find "e"; in lower case. */
+   *  the ligature "ﬁ" is "fi" and "²" is "2"; without accents unless the
+   *  needle has one, so "e" finds "é" and "é" does not find "e"; in lower
+   *  case. */
   function findFold(ch, keepMarks) {
     if (FIND_IGNORED.test(ch)) return "";
     var folded = FIND_QUOTES[ch] || ch.normalize("NFKD");

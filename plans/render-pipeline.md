@@ -623,9 +623,9 @@ document order:
   no match crosses. An inline box, an inline block, a float and a box out
   of the flow do not. Spaces collapse as on screen, except where
   `white-space` keeps them, as in a code block.
-- It folds as find folds: case; compatibility forms, so "ﬁ" is "fi" and
-  "²" is "2"; accents, unless the needle has one; curly quotes to
-  straight; soft hyphens and zero-width characters to nothing.
+- It folds as find folds: case; compatibility forms, so the ligature "ﬁ"
+  is "fi" and "²" is "2"; accents, unless the needle has one; curly
+  quotes to straight; soft hyphens and zero-width characters to nothing.
 - Matches do not overlap: find steps on from the end of one.
 
 **Which one is selected.** `WKWebView.find` selects its match. The count

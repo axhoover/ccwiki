@@ -115,7 +115,7 @@ import Testing
         """#
 
     /// `ccwiki.js` over the render tests' shell, then the stand-in DOM.
-    private func script() throws -> MarkdownScript {
+    private static func loadScript() throws -> MarkdownScript {
         let script = try MarkdownScript.load()
         try script.evaluate(RenderCorpusTests.shell, named: "shell.js")
         let source = try String(
@@ -134,7 +134,7 @@ import Testing
 
     @Test("plain text: every match, one inside a longer word too")
     func plainText() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"page(h("p", null, "A cat and a cat. Concatenate."));"#)
         #expect(try count("cat", script) == FindCount(total: 3, current: 0))
         #expect(try count("dog", script) == FindCount(total: 0, current: 0))
@@ -147,7 +147,7 @@ import Testing
 
     @Test("case, accents, quotes and ligatures fold as find folds them")
     func folding() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"page(h("p", null, "PRF, prf and Prf; a café, a cafe"));"#)
         #expect(try count("prf", script) == FindCount(total: 3, current: 0))
         #expect(try count("PRF", script) == FindCount(total: 3, current: 0))
@@ -156,7 +156,7 @@ import Testing
         #expect(try count("café", script) == FindCount(total: 1, current: 0),
             "a needle with an accent finds only the word with it")
 
-        try script.evaluate(#"page(h("p", null, "don’t “quote” ﬁnd x² soft­hyphen"));"#)
+        try script.evaluate(#"page(h("p", null, "don’t “quote” \uFB01nd x² soft\u00ADhyphen"));"#)
         #expect(try count("don't", script) == FindCount(total: 1, current: 0))
         #expect(try count("\"quote\"", script) == FindCount(total: 1, current: 0))
         #expect(try count("find", script) == FindCount(total: 1, current: 0))
@@ -166,7 +166,7 @@ import Testing
 
     @Test("a match runs across inline elements and collapsed spaces")
     func acrossInlineElements() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"""
             var em = h("em", null, "random");
             var paragraph = h("p", null, "pseudo", em, " functions");
@@ -184,7 +184,7 @@ import Testing
 
     @Test("a block, a line break or a table cell ends a run")
     func blocks() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"page(h("p", null, "end"), "\n", h("p", null, "start"));"#)
         #expect(try count("endstart", script) == FindCount(total: 0, current: 0))
         #expect(try count("end start", script) == FindCount(total: 0, current: 0))
@@ -201,7 +201,7 @@ import Testing
 
     @Test("text that is not shown is not counted")
     func hiddenText() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"""
             page(
               h("div", { "class": "byline" }, "needle"),
@@ -216,7 +216,7 @@ import Testing
     /// MathML.
     @Test("a match in a formula is counted, and the count gives only the total")
     func mathWithoutMathML() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"""
             var prose = h("p", null, "Enc and ",
               h("span", { "class": "math" },
@@ -238,7 +238,7 @@ import Testing
     /// does not render, then the HTML.
     @Test("pseudocode's MathML is counted, and its TeX annotation is not")
     func mathWithMathML() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"""
             page(h("p", null, "Return ",
               h("span", { "class": "katex" },
@@ -259,7 +259,7 @@ import Testing
 
     @Test("a code block keeps its spaces and its line breaks")
     func codeBlocks() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"page(h("pre", null, h("code", null, "x  =  1\ny = 2\n")));"#)
         #expect(try count("x  =", script) == FindCount(total: 1, current: 0))
         #expect(try count("x = 1", script) == FindCount(total: 0, current: 0))
@@ -269,7 +269,7 @@ import Testing
 
     @Test("the selected match is placed among the others")
     func indexAfterSelection() throws {
-        let script = try script()
+        let script = try Self.loadScript()
         try script.evaluate(#"""
             var words = h("p", null, "one cat, two cats, three cats");
             page(words);
