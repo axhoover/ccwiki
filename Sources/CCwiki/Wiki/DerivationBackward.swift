@@ -68,10 +68,8 @@ extension Derivation {
 
     /// Everything implying `target` (R11). A candidate pair whose plain Horn
     /// closure misses the target is passed over without a closure of its own
-    /// (`Engine.mayReach`), which on the real manifest is nearly every pair;
-    /// `prefilter: false` closes every one, for the test that holds the two
-    /// equal.
-    func implying(_ target: String, options: Options, prefilter: Bool = true) -> BackwardClosure {
+    /// (`Engine.mayReach`), which on the real manifest is nearly every pair.
+    func implying(_ target: String, options: Options) -> BackwardClosure {
         let base = manifest.objectsByID.keys
             .filter { nodeType($0) != Self.excludedType && !isModelNode($0) && $0 != target }
             .sorted(by: Self.precedes)
@@ -132,7 +130,7 @@ extension Derivation {
             return Self.precedes(left[1], right[1])
         }
         for pair in orderedCandidates {
-            if prefilter, !mainEngine.mayReach(target, from: Set(pair), options: options) { continue }
+            if !mainEngine.mayReach(target, from: Set(pair), options: options) { continue }
             let pairClosure = closure(from: Set(pair), options: options)
             guard let fact = pairClosure.fact(target) else { continue }
             let meeting = joiningRelation(pairClosure, target: target,

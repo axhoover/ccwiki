@@ -278,24 +278,15 @@ struct MarkdownLink: Equatable, Sendable {
 enum MarkdownLinkParser {
 
     /// Every inline markdown link in `text` whose destination is a wiki page,
-    /// in source order.
+    /// in source order, given `CodeMask.inertRanges(in: text)` and
+    /// `WikilinkParser.links(in: text)`. `LinkParse.links(in:)` finds both
+    /// once and calls this.
     ///
     /// A link is wherever markdown-it, with `ccwiki.js`'s math and wikilink
     /// rules, parses one — so none inside code, a `%%comment%%` or math, none
     /// whose text holds a `[[wikilink]]` or another link, and an image is not
     /// one. Code and comments are masked exactly as `WikilinkParser` masks
     /// them, so the two parsers agree on what is inert.
-    ///
-    /// It finds the inert ranges and the wikilinks itself, as it did before
-    /// `LinkParse` shared them (plans/efficiency.md, L2): the equivalence
-    /// tests read it as the old code, so it must not go through `LinkParse`.
-    static func links(in text: String) -> [MarkdownLink] {
-        let inert = CodeMask.inertRanges(in: text)
-        return LinkScanner(text, inert: inert, wikilinks: WikilinkParser.links(in: text)).links()
-    }
-
-    /// `links(in:)`, with `CodeMask.inertRanges(in: text)` and
-    /// `WikilinkParser.links(in: text)` already found.
     static func links(
         in text: String, inert: [Range<String.Index>], wikilinks: [Wikilink]
     ) -> [MarkdownLink] {

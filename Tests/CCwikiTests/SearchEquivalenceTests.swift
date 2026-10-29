@@ -3,11 +3,18 @@ import Testing
 @testable import CCwiki
 
 /// Track S of the efficiency plan (plans/efficiency.md §2.5): the search sync
-/// made cheaper without changing anything it builds. Each change is held
-/// against the code it replaced, copied at the end of this file (`Legacy`):
-/// the rankers, every row and every answer must come out exactly as before.
-/// On hand-made pages with the hazards the corpus lacks, and on the real wiki
-/// when `CCWIKI_WIKI` points at a clone. Timings are printed, never asserted.
+/// made cheaper without changing anything it builds. Each change is held to
+/// the longer way round it saves: a ranker handed the outlines to one that
+/// parses the pages, a ranker handed the citing pages' names to one that
+/// names them, a sync's rankers to the ones its pages make, and the full
+/// rewrite through FTS5's `'rebuild'` to every row inserted through the
+/// triggers. Every row is held to what its page makes, column by column
+/// as `SearchIndex.write` binds it. On hand-made pages with the hazards
+/// the corpus lacks, and on the real wiki when `CCWIKI_WIKI` points at a
+/// clone. Timings are printed, never asserted.
+///
+/// The copy of the code track S replaced, and the comparisons with it, went
+/// after 0.1.4 (efficiency.md §2.1).
 struct SearchEquivalenceTests {
 
     // MARK: Fixtures
@@ -182,6 +189,20 @@ struct SearchEquivalenceTests {
         return rows.sorted { $0.path < $1.path }
     }
 
+    /// Every row `library`'s pages make, each column as `SearchIndex.write`
+    /// binds it. `rebuild` writes no fingerprints.
+    static func expectedRows(_ library: Library, fingerprinted: Bool = true) -> [Row] {
+        library.pages.map { page -> Row in
+            Row(
+                path: page.path, slug: page.slug, kind: page.kind.rawValue, status: page.status.rawValue,
+                title: page.kind == .reference ? "\(page.title) \(page.displayTitle)" : page.title,
+                aliases: page.aliases.joined(separator: "\n"),
+                headings: page.headings().map(\.text).joined(separator: "\n"),
+                body: SearchIndex.indexableBody(page.body),
+                hash: fingerprinted ? library.fingerprints.pages[page.path] ?? "" : "")
+        }.sorted { $0.path < $1.path }
+    }
+
     /// Every row's outline, by path: the column track S added.
     static func outlines(of file: URL) throws -> [String: String] {
         let database = try SQLiteDatabase(path: file.path(percentEncoded: false))
@@ -199,14 +220,6 @@ struct SearchEquivalenceTests {
         outline?.map { [$0.text, $0.id] }
     }
 
-    /// The rows the code before track S wrote for `library`. `rebuild`
-    /// writes no fingerprints.
-    static func legacyRows(_ library: Library, fingerprinted: Bool = true) -> [Row] {
-        library.pages
-            .map { Legacy.row($0, digest: fingerprinted ? library.fingerprints.pages[$0.path] : nil) }
-            .sorted { $0.path < $1.path }
-    }
-
     /// The first path whose entries differ, for a failure that reads in a
     /// line rather than a dump of the corpus.
     static func firstDifference<T: Equatable>(
@@ -221,15 +234,16 @@ struct SearchEquivalenceTests {
         return "no difference"
     }
 
-    /// Asserts that `index`, synced with `library`, holds what the code
-    /// before track S built for it: both rankers and every row, and that
-    /// every row's outline reads back as its page's headings.
-    static func expectLegacy(
+    /// Asserts that every row of `index`, synced with `library`, holds what
+    /// its page makes, column by column (`expectedRows`); that its outline
+    /// reads back as the page's headings; and that `index` holds the
+    /// rankers the pages make when each is parsed and named afresh.
+    static func expectBuilt(
         _ index: SearchIndex, file: URL, _ library: Library, fingerprinted: Bool = true,
         after step: String
     ) async throws {
         let rows = try Self.rows(of: file)
-        let expectedRows = Self.legacyRows(library, fingerprinted: fingerprinted)
+        let expectedRows = Self.expectedRows(library, fingerprinted: fingerprinted)
         let sameRows = rows == expectedRows
         #expect(sameRows, "\(step): rows, \(Self.firstDifference(rows, expectedRows, path: \.path))")
 
@@ -241,23 +255,22 @@ struct SearchEquivalenceTests {
         #expect(unread.isEmpty, "\(step): outlines read back wrong, \(unread.prefix(3).map(\.path))")
 
         let ranker = await index.ranker
-        let legacy = Legacy.Concepts(pages: library.pages)
-        let sameEntries = ranker.entries == legacy.entries
+        let parsed = ConceptRanker(pages: library.pages)
+        let sameEntries = ranker.entries == parsed.entries
         #expect(sameEntries, """
             \(step): concept entries, \
-            \(Self.firstDifference(ranker.entries, legacy.entries, path: \.path))
+            \(Self.firstDifference(ranker.entries, parsed.entries, path: \.path))
             """)
-        let sameVocabulary = ranker.vocabulary == legacy.vocabulary
+        let sameVocabulary = ranker.vocabulary == parsed.vocabulary
         #expect(sameVocabulary, "\(step): concept vocabulary")
 
         let referenceRanker = await index.referenceRanker
         let references = referenceRanker.entries
-        let legacyReferences = Legacy.References(
-            pages: library.pages, backlinks: library.backlinks).entries
-        let sameReferences = references == legacyReferences
+        let named = ReferenceRanker(pages: library.pages, backlinks: library.backlinks).entries
+        let sameReferences = references == named
         #expect(sameReferences, """
             \(step): reference entries, \
-            \(Self.firstDifference(references, legacyReferences, path: \.path))
+            \(Self.firstDifference(references, named, path: \.path))
             """)
     }
 
@@ -273,25 +286,22 @@ struct SearchEquivalenceTests {
         let clone = try Self.hazardClone()
         defer { clone.delete() }
         let pages = Library(cloneRoot: clone.root).pages
-        let legacy = Legacy.Concepts(pages: pages)
-        #expect(legacy.entries.contains { $0.headings.count > 3 }, "the hazards have headings")
+        let parsed = ConceptRanker(pages: pages)
+        #expect(parsed.entries.contains { $0.headings.count > 3 }, "the hazards have headings")
 
         let outlines = Dictionary(
             pages.map { ($0.path, ConceptRanker.outline($0.headings())) },
             uniquingKeysWith: { first, _ in first })
         let handed = ConceptRanker(pages: pages, headings: outlines)
-        #expect(handed.entries == legacy.entries)
-        #expect(handed.vocabulary == legacy.vocabulary)
-        let parsed = ConceptRanker(pages: pages)
-        #expect(parsed.entries == legacy.entries)
-        #expect(parsed.vocabulary == legacy.vocabulary)
+        #expect(handed.entries == parsed.entries)
+        #expect(handed.vocabulary == parsed.vocabulary)
         // Only some outlines handed over: the rest are parsed.
         let some = outlines.filter { $0.key.hasPrefix("Primitives/") }
-        #expect(ConceptRanker(pages: pages, headings: some).entries == legacy.entries)
+        #expect(ConceptRanker(pages: pages, headings: some).entries == parsed.entries)
     }
 
-    @Test("every sync, full, partial or a no-op, builds the old code's ranker and rows")
-    func syncMatchesLegacy() async throws {
+    @Test("every sync, full, partial, a no-op or a rebuild, builds the rows and rankers its pages make")
+    func syncBuildsRankers() async throws {
         let scratch = Scratch()
         defer { scratch.delete() }
         let clone = try Self.hazardClone()
@@ -302,28 +312,28 @@ struct SearchEquivalenceTests {
         let index = SearchIndex(path: file)
         let full = try await Self.sync(index, first)
         #expect(full.rebuiltFromScratch)
-        try await Self.expectLegacy(index, file: file, first, after: "a full sync")
+        try await Self.expectBuilt(index, file: file, first, after: "a full sync")
 
         try Self.edit(clone)
         let second = Library(cloneRoot: clone.root)
         let partial = try await Self.sync(index, second)
         #expect(partial == SyncReport(
             inserted: 1, updated: 2, deleted: 1, unchanged: second.pages.count - 3))
-        try await Self.expectLegacy(index, file: file, second, after: "a partial sync")
+        try await Self.expectBuilt(index, file: file, second, after: "a partial sync")
 
         let relaunched = SearchIndex(path: file)
         let noOp = try await Self.sync(relaunched, second)
         #expect(noOp == SyncReport(unchanged: second.pages.count))
-        try await Self.expectLegacy(relaunched, file: file, second, after: "a no-op after a relaunch")
+        try await Self.expectBuilt(relaunched, file: file, second, after: "a no-op after a relaunch")
 
         let rebuiltFile = scratch.file("rebuilt.sqlite3")
         let rebuilt = SearchIndex(path: rebuiltFile)
         try await rebuilt.rebuild(pages: second.pages, backlinks: second.backlinks)
-        try await Self.expectLegacy(
+        try await Self.expectBuilt(
             rebuilt, file: rebuiltFile, second, fingerprinted: false, after: "a rebuild")
     }
 
-    @Test("on the real wiki: the ranker from the sync's outlines, and every row, as before")
+    @Test("on the real wiki: the ranker from the sync's outlines is the one that parses the pages")
     func corpusHeadingsOnce() async throws {
         guard let library = Self.corpus else { return }
         let scratch = Scratch()
@@ -331,8 +341,8 @@ struct SearchEquivalenceTests {
         let clock = ContinuousClock()
 
         var start = clock.now
-        let legacy = Legacy.Concepts(pages: library.pages)
-        let legacyTime = start.duration(to: clock.now)
+        let parsed = ConceptRanker(pages: library.pages)
+        let parsedTime = start.duration(to: clock.now)
         start = clock.now
         let outlines = Dictionary(
             library.pages.map { ($0.path, ConceptRanker.outline($0.headings())) },
@@ -341,9 +351,9 @@ struct SearchEquivalenceTests {
         start = clock.now
         let handed = ConceptRanker(pages: library.pages, headings: outlines)
         let handedTime = start.duration(to: clock.now)
-        let sameEntries = handed.entries == legacy.entries
-        #expect(sameEntries, "\(Self.firstDifference(handed.entries, legacy.entries, path: \.path))")
-        let sameVocabulary = handed.vocabulary == legacy.vocabulary
+        let sameEntries = handed.entries == parsed.entries
+        #expect(sameEntries, "\(Self.firstDifference(handed.entries, parsed.entries, path: \.path))")
+        let sameVocabulary = handed.vocabulary == parsed.vocabulary
         #expect(sameVocabulary)
 
         let file = scratch.file("search.sqlite3")
@@ -353,11 +363,11 @@ struct SearchEquivalenceTests {
         let syncTime = start.duration(to: clock.now)
         #expect(full.rebuiltFromScratch)
         #expect(full.inserted == library.pages.count)
-        try await Self.expectLegacy(index, file: file, library, after: "a full sync")
+        try await Self.expectBuilt(index, file: file, library, after: "a full sync")
 
         print("""
             Search sync, headings parsed once (S1), on \(library.pages.count) pages:
-              ConceptRanker as before \(Self.milliseconds(legacyTime)); \
+              ConceptRanker parsing the pages \(Self.milliseconds(parsedTime)); \
             headings() on every page \(Self.milliseconds(headingsTime)); \
             ConceptRanker from those outlines \(Self.milliseconds(handedTime))
               full sync \(Self.milliseconds(syncTime)) (\(full.summary))
@@ -476,11 +486,14 @@ struct SearchEquivalenceTests {
             #expect(actual == expected,
                     "\(name): \(Self.firstDifference(actual, expected, path: \.query))")
         }
+        let expectedRows = try Self.rows(of: scratch.file("triggers.sqlite3"))
+        #expect(expectedRows == Self.expectedRows(library))
+        for name in ["populated", "fresh"] {
+            let rows = try Self.rows(of: scratch.file("\(name).sqlite3"))
+            #expect(rows == expectedRows, "\(name)")
+        }
         for name in ["populated", "fresh", "triggers"] {
-            let file = scratch.file("\(name).sqlite3")
-            let rows = try Self.rows(of: file)
-            #expect(rows == Self.legacyRows(library), "\(name)")
-            try Self.checkIntegrity(of: file)
+            try Self.checkIntegrity(of: scratch.file("\(name).sqlite3"))
         }
     }
 
@@ -527,13 +540,17 @@ struct SearchEquivalenceTests {
             #expect(actual == expected,
                     "\(name): \(Self.firstDifference(actual, expected, path: \.query))")
         }
-        let expectedRows = Self.legacyRows(library)
-        for name in ["triggers", "fresh", "populated"] {
-            let file = scratch.file("\(name).sqlite3")
-            let rows = try Self.rows(of: file)
+        let expectedRows = try Self.rows(of: scratch.file("triggers.sqlite3"))
+        let made = Self.expectedRows(library)
+        let triggersMade = expectedRows == made
+        #expect(triggersMade, "triggers: \(Self.firstDifference(expectedRows, made, path: \.path))")
+        for name in ["fresh", "populated"] {
+            let rows = try Self.rows(of: scratch.file("\(name).sqlite3"))
             let sameRows = rows == expectedRows
             #expect(sameRows, "\(name): \(Self.firstDifference(rows, expectedRows, path: \.path))")
-            try Self.checkIntegrity(of: file)
+        }
+        for name in ["triggers", "fresh", "populated"] {
+            try Self.checkIntegrity(of: scratch.file("\(name).sqlite3"))
         }
 
         // Then one concept page changed, through `doc_au`, on each.
@@ -565,36 +582,31 @@ struct SearchEquivalenceTests {
 
     // MARK: S3. Citing pages named once
 
-    @Test("the reference ranker, naming citers with the concept ranker's names, is the old one")
+    @Test("the reference ranker, naming citers with the concept ranker's names, is the one that names them")
     func citerNames() throws {
         let clone = try Self.hazardClone()
         defer { clone.delete() }
         let library = Library(cloneRoot: clone.root)
-        let legacy = Legacy.References(pages: library.pages, backlinks: library.backlinks)
-        let citers = legacy.entries.flatMap(\.citers)
+        let named = ReferenceRanker(pages: library.pages, backlinks: library.backlinks)
+        let citers = named.entries.flatMap(\.citers)
         #expect(citers.contains { $0.via == nil }, "a page cites the paper")
         #expect(citers.contains { $0.via != nil }, "and one cites it through a reduction")
 
         let names = ConceptRanker(pages: library.pages).citerNames
         let handed = ReferenceRanker(
             pages: library.pages, backlinks: library.backlinks, citerNames: names)
-        #expect(handed.entries == legacy.entries)
-        let named = ReferenceRanker(pages: library.pages, backlinks: library.backlinks)
-        #expect(named.entries == legacy.entries)
+        #expect(handed.entries == named.entries)
         // Every page that cites a paper has the concept ranker's names.
         #expect(citers.allSatisfy { names[$0.path] == $0.names })
     }
 
-    @Test("on the real wiki: the reference ranker from the concept ranker's names, as before")
+    @Test("on the real wiki: the reference ranker from the concept ranker's names is the one that names them")
     func corpusCiterNames() async throws {
         guard let library = Self.corpus else { return }
         let clock = ContinuousClock()
 
-        var start = clock.now
-        let legacy = Legacy.References(pages: library.pages, backlinks: library.backlinks)
-        let legacyTime = start.duration(to: clock.now)
         let concepts = ConceptRanker(pages: library.pages)
-        start = clock.now
+        var start = clock.now
         let citerNames = concepts.citerNames
         let handed = ReferenceRanker(
             pages: library.pages, backlinks: library.backlinks, citerNames: citerNames)
@@ -603,20 +615,16 @@ struct SearchEquivalenceTests {
         let named = ReferenceRanker(pages: library.pages, backlinks: library.backlinks)
         let namedTime = start.duration(to: clock.now)
 
-        for (name, ranker) in [("handed the names", handed), ("naming once", named)] {
-            let same = ranker.entries == legacy.entries
-            #expect(same,
-                    "\(name): \(Self.firstDifference(ranker.entries, legacy.entries, path: \.path))")
-        }
-        let citers = legacy.entries.flatMap(\.citers)
+        let same = handed.entries == named.entries
+        #expect(same, "\(Self.firstDifference(handed.entries, named.entries, path: \.path))")
+        let citers = named.entries.flatMap(\.citers)
         let allNamed = citers.allSatisfy { citerNames[$0.path] == $0.names }
         #expect(allNamed, "every citing page is a concept page the concept ranker named")
 
         print("""
             Search sync, citing pages named once (S3), on \(library.pages.count) pages, \
             \(citers.count) citers from \(Set(citers.map(\.path)).count) pages:
-              ReferenceRanker as before \(Self.milliseconds(legacyTime)); \
-            handed the concept ranker's names \(Self.milliseconds(handedTime)); \
+              ReferenceRanker handed the concept ranker's names \(Self.milliseconds(handedTime)); \
             naming each page once itself \(Self.milliseconds(namedTime))
             """)
     }
@@ -648,7 +656,7 @@ struct SearchEquivalenceTests {
         let library = Library(cloneRoot: clone.root)
         let file = scratch.file("search.sqlite3")
         try await Self.sync(SearchIndex(path: file), library)
-        let legacy = Legacy.Concepts(pages: library.pages)
+        let fromPages = ConceptRanker(pages: library.pages)
         let marks = "Primitives/marks.md"
 
         /// The concept ranker of a no-op sync after a relaunch, with the
@@ -668,18 +676,18 @@ struct SearchEquivalenceTests {
 
         for unreadable in ["", "not json", "{}", "[[\"one\"]]", "[[1, 2]]"] {
             let ranker = try await noOp(withOutline: unreadable)
-            #expect(ranker.entries == legacy.entries, "\(unreadable.debugDescription) is parsed")
-            #expect(ranker.vocabulary == legacy.vocabulary)
+            #expect(ranker.entries == fromPages.entries, "\(unreadable.debugDescription) is parsed")
+            #expect(ranker.vocabulary == fromPages.vocabulary)
         }
         // One that reads is taken as it is: the page is not parsed.
         let trusted = try await noOp(withOutline: "[]")
         let read = trusted.entries.first { $0.path == marks }
-        let parsed = legacy.entries.first { $0.path == marks }
+        let parsed = fromPages.entries.first { $0.path == marks }
         #expect(read?.headings.isEmpty == true)
         #expect(parsed?.headings.isEmpty == false)
     }
 
-    @Test("on the real wiki: a sync that keeps rows reads their outlines; its rankers are as before")
+    @Test("on the real wiki: a sync that keeps rows reads their outlines; its rankers are the pages'")
     func corpusStoredOutlines() async throws {
         guard let library = Self.corpus, let contentRoot = CorpusTests.contentRoot else { return }
         let scratch = Scratch()
@@ -688,11 +696,11 @@ struct SearchEquivalenceTests {
         let file = scratch.file("search.sqlite3")
         try await Self.sync(SearchIndex(path: file), library)
 
-        // What a no-op sync built before besides reading the hashes: both
-        // rankers, from the pages.
+        // What a no-op sync built before S4 besides reading the hashes:
+        // both rankers, from the pages.
         var start = clock.now
-        _ = Legacy.Concepts(pages: library.pages)
-        _ = Legacy.References(pages: library.pages, backlinks: library.backlinks)
+        _ = ConceptRanker(pages: library.pages)
+        _ = ReferenceRanker(pages: library.pages, backlinks: library.backlinks)
         let before = start.duration(to: clock.now)
 
         var noOps: [Duration] = []
@@ -705,7 +713,7 @@ struct SearchEquivalenceTests {
         }
         let relaunched = SearchIndex(path: file)
         try await Self.sync(relaunched, library)
-        try await Self.expectLegacy(relaunched, file: file, library, after: "a no-op after a relaunch")
+        try await Self.expectBuilt(relaunched, file: file, library, after: "a no-op after a relaunch")
 
         // One page changed, a heading added: only it is parsed.
         let page = try #require(library.pages.first { $0.kind == .assumption })
@@ -715,177 +723,14 @@ struct SearchEquivalenceTests {
         let changed = try await Self.sync(relaunched, edited)
         let changedTime = start.duration(to: clock.now)
         #expect(changed == SyncReport(updated: 1, unchanged: library.pages.count - 1))
-        try await Self.expectLegacy(relaunched, file: file, edited, after: "one page changed")
+        try await Self.expectBuilt(relaunched, file: file, edited, after: "one page changed")
 
         print("""
             Search sync, the concept ranker from stored outlines (S4), on \(library.pages.count) pages:
-              both rankers from the pages, as a no-op built them before \(Self.milliseconds(before)); \
+              both rankers from the pages, as a no-op built them before S4 \(Self.milliseconds(before)); \
             a no-op sync after a relaunch now, fastest of 3 \
             \(Self.milliseconds(noOps.min() ?? .zero)); \
             after one page changed \(Self.milliseconds(changedTime))
             """)
-    }
-}
-
-// MARK: - Legacy
-
-extension SearchEquivalenceTests {
-
-    /// Verbatim copy of Sources/CCwiki/Search/{ConceptRanker,ReferenceRanker,SearchIndex}.swift
-    /// at 21df5d7 for equivalence tests. Do not edit; delete in the next batch.
-    ///
-    /// The parts track S replaced: what `ConceptRanker.init(pages:)` and
-    /// `ReferenceRanker.init(pages:backlinks:)` built, and the row
-    /// `SearchIndex.write` bound.
-    enum Legacy {
-
-        /// `ConceptRanker.init(pages:)`, which parsed every concept page's
-        /// headings itself.
-        struct Concepts {
-            typealias Entry = ConceptRanker.Entry
-            typealias Name = ConceptRanker.Name
-
-            let entries: [Entry]
-            let vocabulary: [String: Int]
-
-            static let structuralHeadingPages = 3
-
-            init(pages: [WikiPage]) {
-                let pages = pages.filter { $0.kind != .reference }
-                let headings = pages.map { page in
-                    page.headings().map {
-                        Entry.Heading(name: Name(RelationText.plain($0.text)), id: $0.id)
-                    }
-                }
-                var pageCounts: [String: Int] = [:]
-                for list in headings {
-                    for folded in Set(list.map(\.name.folded)) { pageCounts[folded, default: 0] += 1 }
-                }
-                let entries = zip(pages, headings).map { page, list in
-                    Entry(page: page, headings: list.filter {
-                        !$0.name.folded.isEmpty
-                            && pageCounts[$0.name.folded, default: 0] < Self.structuralHeadingPages
-                    })
-                }
-                var vocabulary: [String: Int] = [:]
-                for entry in entries {
-                    for name in entry.names + entry.headings.map(\.name) {
-                        for word in name.words { vocabulary[word, default: 0] += 1 }
-                    }
-                }
-                self.entries = entries
-                self.vocabulary = vocabulary
-            }
-        }
-
-        /// `ReferenceRanker.init(pages:backlinks:)`, which named every citing
-        /// page again for each paper it cites, with the helpers it called.
-        struct References {
-            typealias Name = ConceptRanker.Name
-            typealias Entry = ReferenceRanker.Entry
-            typealias Citer = ReferenceRanker.Citer
-
-            let entries: [Entry]
-
-            init(pages: [WikiPage], backlinks: [String: [WikiIndex.Backlink]]) {
-                let byPath = Dictionary(pages.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-                entries = pages.filter { $0.kind == .reference }.map { page in
-                    let authors = page.frontmatter.string("authors") ?? ""
-                    let venue = page.frontmatter.string("venue")
-                    let keys = [page.title] + page.aliases + [page.frontmatter.string("cryptobib_key")]
-                        .compactMap { $0 }
-                    let citers = Self.citers(of: page.path, byPath: byPath, backlinks: backlinks)
-                    let titleName = Name(page.displayTitle)
-                    let authorNames = Self.authorNames(authors)
-                    let authorWords = Set(authorNames.flatMap { Name($0).words })
-                    return Entry(
-                        path: page.path,
-                        key: page.title,
-                        title: page.displayTitle,
-                        status: page.status,
-                        authors: authors,
-                        venue: venue,
-                        year: Self.year(page.frontmatter.string("published")),
-                        keys: keys.map(Name.init),
-                        titleName: titleName,
-                        firstAuthorWords: Set(authorNames.first.map { Name($0).words } ?? []),
-                        authorWords: authorWords,
-                        otherWords: authorWords
-                            .union(titleName.words)
-                            .union(Name(venue ?? "").words),
-                        citers: citers)
-                }
-            }
-
-            /// The pages citing `path`: every non-reference page linking to it, and
-            /// for each reduction or barrier among them, the concept pages linking
-            /// to that.
-            static func citers(
-                of path: String, byPath: [String: WikiPage], backlinks: [String: [WikiIndex.Backlink]]
-            ) -> [Citer] {
-                func isEdge(_ kind: PageKind) -> Bool { kind == .reduction || kind == .barrier }
-                func citer(_ page: WikiPage, via: WikiPage?) -> Citer {
-                    Citer(
-                        path: page.path, title: page.title,
-                        names: ([page.title] + page.aliases).map(Name.init),
-                        via: via.map { RelationText.plain($0.title) })
-                }
-
-                var result: [Citer] = []
-                var seen: Set<String> = []
-                for link in backlinks[path] ?? [] {
-                    guard let source = byPath[link.sourcePath], source.kind != .reference,
-                          seen.insert(source.path).inserted
-                    else { continue }
-                    result.append(citer(source, via: nil))
-                    guard isEdge(source.kind) else { continue }
-                    for hop in backlinks[source.path] ?? [] {
-                        guard let concept = byPath[hop.sourcePath],
-                              concept.kind != .reference, !isEdge(concept.kind),
-                              seen.insert(concept.path + "\u{0}" + source.path).inserted
-                        else { continue }
-                        result.append(citer(concept, via: source))
-                    }
-                }
-                return result
-            }
-
-            /// `Alice, Bob, and Carol` or `Alice and Bob`: one name per author.
-            static func authorNames(_ authors: String) -> [String] {
-                authors
-                    .replacingOccurrences(
-                        of: #",\s*(?:and\s+)?|\s+and\s+"#, with: "\n", options: .regularExpression)
-                    .split(separator: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-            }
-
-            /// The year of `1986` or `2005-05-01`.
-            static func year(_ published: String?) -> Int? {
-                guard let published, published.count >= 4,
-                      let year = Int(published.prefix(4))
-                else { return nil }
-                return year
-            }
-        }
-
-        /// The row `SearchIndex.write(_:digest:with:)` bound for `page`, its
-        /// bindings in order.
-        static func row(_ page: WikiPage, digest: String?) -> Row {
-            Row(
-                path: page.path,
-                slug: page.slug,
-                kind: page.kind.rawValue,
-                status: page.status.rawValue,
-                // References are filed under a citation key, so index the paper
-                // title too — nobody searches for "AGGM06" when they mean
-                // "one-way functions on NP-hardness".
-                title: page.kind == .reference
-                    ? "\(page.title) \(page.displayTitle)" : page.title,
-                aliases: page.aliases.joined(separator: "\n"),
-                headings: page.headings().map(\.text).joined(separator: "\n"),
-                body: SearchIndex.indexableBody(page.body),
-                hash: digest ?? "")
-        }
     }
 }

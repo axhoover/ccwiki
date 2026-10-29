@@ -93,26 +93,6 @@ struct WindowObservationTests {
 
     // MARK: The editor preview's overlay
 
-    /// The preview as `AppModel.previewRequest(path:text:in:)` built it at
-    /// 21df5d7, on every pause in typing, with the model's state passed in:
-    /// what a kept overlay must render the same as.
-    private static func legacyRequest(
-        _ page: WikiPage, index: WikiIndex, review: ReviewSnapshot?
-    ) -> RenderRequest {
-        let added = review.map(ReviewPayload.addedPages(in:)) ?? []
-        var renderer = PageRenderer(index: index.overlaying(added), hiddenPaths: [])
-        renderer.relations = .empty
-        renderer.relationLabels = .empty
-        renderer.buildsPreviews = false
-        let rendered = renderer.request(for: page)
-        return RenderRequest(
-            path: rendered.path, title: rendered.title, markdown: rendered.markdown,
-            html: nil,
-            links: ReviewPayload.markingNew(
-                rendered.links, newPages: ReviewPayload.newPagePaths(added, in: index)),
-            anchor: nil, notices: rendered.notices)
-    }
-
     /// Everything a preview request carries, as `==` can compare it:
     /// `RenderRequest` is not `Equatable`, and its JSON has no fixed key
     /// order.
@@ -127,6 +107,13 @@ struct WindowObservationTests {
 
     private static func facts(_ overlay: PreviewOverlay, _ page: WikiPage) -> [String] {
         facts(overlay.request(for: page, hiddenPaths: [], relations: .empty, labels: .empty))
+    }
+
+    /// `page`'s preview through an overlay built afresh for `index` and
+    /// `review`, as the first pause in typing builds one: what a kept
+    /// overlay must render the same as.
+    private static func fresh(_ page: WikiPage, index: WikiIndex, review: ReviewSnapshot?) -> [String] {
+        facts(PreviewOverlay(index: index, generation: 1, review: review), page)
     }
 
     /// PRF as the ingestion leaves it: citing the reference page the same
@@ -153,10 +140,9 @@ struct WindowObservationTests {
         #expect(reused.index.pages.count == kept.index.pages.count)
         #expect(reused.newPages == kept.newPages)
 
-        // A pause in typing renders through it what the old path rendered.
+        // A pause in typing renders through it what a fresh overlay renders.
         let page = try Self.editedPRF()
-        #expect(Self.facts(reused, page)
-            == Self.facts(Self.legacyRequest(page, index: index, review: review)))
+        #expect(Self.facts(reused, page) == Self.fresh(page, index: index, review: review))
         let citation = reused.request(for: page, hiddenPaths: [], relations: .empty, labels: .empty)
             .links[ReviewPayloadTests.ggmLink]
         #expect(citation?.kind == "new")
@@ -188,11 +174,10 @@ struct WindowObservationTests {
         #expect(reused.index.pages.count == index.pages.count + 1)
         #expect(reused.newPages == kept.newPages)
 
-        // The text as typed renders through it as the old path rendered it
-        // against the review taken again.
+        // The text as typed renders through it as a fresh overlay of the
+        // review taken again renders it.
         let page = WikiPage(path: "Primitives/pseudorandom-function.md", text: typed)
-        #expect(Self.facts(reused, page)
-            == Self.facts(Self.legacyRequest(page, index: index, review: retaken)))
+        #expect(Self.facts(reused, page) == Self.fresh(page, index: index, review: retaken))
     }
 
     @Test("other added pages, or a new library, build the preview's overlay again")
@@ -204,13 +189,12 @@ struct WindowObservationTests {
         let before = Self.facts(kept, page)
 
         // The review taken again no longer adds the reference page: the
-        // citation has no target, as the old path says.
+        // citation has no target, as a fresh overlay says.
         let edited = ReviewPayloadTests.snapshot(try #require(review.files.first))
         let refreshed = PreviewOverlay.reusing(kept, index: index, generation: 1, review: edited)
         #expect(refreshed.newPages.isEmpty)
         #expect(Self.facts(refreshed, page) != before)
-        #expect(Self.facts(refreshed, page)
-            == Self.facts(Self.legacyRequest(page, index: index, review: edited)))
+        #expect(Self.facts(refreshed, page) == Self.fresh(page, index: index, review: edited))
 
         // The reference page saved again: the overlay reads it anew.
         let reference = try #require(review.files.last)
@@ -224,16 +208,14 @@ struct WindowObservationTests {
         let reread = PreviewOverlay.reusing(kept, index: index, generation: 1, review: rewritten)
         let ggm = try #require(ReviewPayload.contentPath(ReviewPayloadTests.ggmPath))
         #expect(reread.index.pages[ggm]?.body.contains("revised") == true)
-        #expect(Self.facts(reread, page)
-            == Self.facts(Self.legacyRequest(page, index: index, review: rewritten)))
+        #expect(Self.facts(reread, page) == Self.fresh(page, index: index, review: rewritten))
 
         // A sync brought the page into the library: a page now, not new.
         let synced = index.overlaying(ReviewPayload.addedPages(in: review))
         let loaded = PreviewOverlay.reusing(kept, index: synced, generation: 2, review: review)
         #expect(loaded.newPages.isEmpty)
         #expect(Self.facts(loaded, page) != before)
-        #expect(Self.facts(loaded, page)
-            == Self.facts(Self.legacyRequest(page, index: synced, review: review)))
+        #expect(Self.facts(loaded, page) == Self.fresh(page, index: synced, review: review))
         let citation = loaded.request(for: page, hiddenPaths: [], relations: .empty, labels: .empty)
             .links[ReviewPayloadTests.ggmLink]
         #expect(citation?.kind == "page")
@@ -241,8 +223,7 @@ struct WindowObservationTests {
         // The job gone: the reader's index alone.
         let alone = PreviewOverlay.reusing(kept, index: index, generation: 1, review: nil)
         #expect(alone.index.pages.count == index.pages.count)
-        #expect(Self.facts(alone, page)
-            == Self.facts(Self.legacyRequest(page, index: index, review: nil)))
+        #expect(Self.facts(alone, page) == Self.fresh(page, index: index, review: nil))
     }
 }
 
