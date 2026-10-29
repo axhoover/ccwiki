@@ -12,7 +12,7 @@ import Testing
 struct MarkdownLinkTests {
 
     private func destinations(_ text: String) -> [String] {
-        MarkdownLinkParser.links(in: text).map(\.destination)
+        LinkParse.links(in: text).markdownLinks.map(\.destination)
     }
 
     // MARK: Parsing
@@ -37,7 +37,7 @@ struct MarkdownLinkTests {
     @Test("a link covers its whole source")
     func ranges() throws {
         let text = "Before [a](b) after"
-        let links = MarkdownLinkParser.links(in: text)
+        let links = LinkParse.links(in: text).markdownLinks
         let link = try #require(links.first)
         let source = String(text[link.range])
         #expect(source == "[a](b)")
@@ -118,7 +118,7 @@ struct MarkdownLinkTests {
     @Test("a markdown link becomes the wikilink it stands for")
     func asWikilink() throws {
         let text = "[k-Lin](bilinear-map-assumptions#k-linear-assumption) [p](<KEY%20-%20Title>) [e](page#)"
-        let links = MarkdownLinkParser.links(in: text).map(\.wikilink)
+        let links = LinkParse.links(in: text).markdownLinks.map(\.wikilink)
         try #require(links.count == 3)
         let anchored = links[0]
         #expect(anchored.target == "bilinear-map-assumptions")

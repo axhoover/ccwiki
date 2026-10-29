@@ -916,8 +916,6 @@ extension Derivation {
     /// derivation that needs no assumption shows that derivation.
     struct Engine: Sendable {
         let objects: ObjectTable
-        let steps: [CompiledStep]
-        let defaultSteps: [CompiledStep]
         /// Phase 2 runs. Off for R8's clean closures.
         let allowsAssuming: Bool
         /// R5 and R13 apply. Off for the relaxed closure, which is plain Horn
@@ -925,35 +923,14 @@ extension Derivation {
         let appliesRules: Bool
         /// Each chain class's mask, by `ChainClass.rank`.
         private let chainMasks: [UInt8]
-        /// R13: the steps a requirement's `metBy` names for its hypothesis.
-        /// Each also fires into a fact of its own, kept apart
-        /// (`Closure.established`), so a requirement is met whenever such a
-        /// producer fires in the closure, not only when it gave the
-        /// hypothesis's one fact. A step that concludes only a weaker notion
-        /// establishes nothing.
-        private let establishing: Set<StepKey>
         /// What phases 1 and 2 walk, and what phase 3 walks.
         private let defaultSet: StepSet
         private let fullSet: StepSet
-        /// The steps only phase 3 runs (in `steps`, not in `defaultSteps`):
+        /// The steps only phase 3 runs (in `fullSet`, not in `defaultSet`):
         /// the first hypothesis of each, and whether one has none. Phase 3
         /// adds a fact only through one of them (`runIdealisedPhase`).
         private let idealisedFirstHypotheses: [Int]
         private let hasUnconditionalIdealisedStep: Bool
-
-        /// Which loop a closure runs. Only the equivalence tests ask for
-        /// anything but `.current`.
-        enum Loop: Sendable {
-            /// The loop as of 21df5d7: every step at every layer, with R13's
-            /// flags looked up on each visit, all three phases, and every
-            /// object read back. Kept so DerivationEquivalenceTests can hold
-            /// `.current` to it on the real manifest; delete it with the
-            /// Legacy files.
-            case legacy
-            /// Semi-naive layers, R13's flags worked out once, and only the
-            /// phases that can add a fact.
-            case current
-        }
 
         /// One phase's steps, with what the loop asks of each worked out
         /// once, so a visit reads an array where it would build and hash a
@@ -963,7 +940,12 @@ extension Derivation {
             let steps: [CompiledStep]
             /// R13: the step concludes only a weaker notion.
             let makesWeak: [Bool]
-            /// R13: a `metBy` producer (`establishing`).
+            /// R13: a `metBy` producer, a step a requirement's `metBy` names
+            /// for its hypothesis. Each also fires into a fact of its own,
+            /// kept apart (`Closure.established`), so a requirement is met
+            /// whenever such a producer fires in the closure, not only when
+            /// it gave the hypothesis's one fact. A step that concludes only
+            /// a weaker notion establishes nothing.
             let establishes: [Bool]
             /// By object index: the positions of the steps with that object
             /// among their hypotheses, ascending, each step once.
@@ -997,9 +979,7 @@ extension Derivation {
         init(objects: ObjectTable, steps: [CompiledStep], order: ClassOrder,
              allowsAssuming: Bool, appliesRules: Bool) {
             self.objects = objects
-            self.steps = steps
             let defaultSteps = steps.filter { $0.step.isDefault && !$0.step.isStub }
-            self.defaultSteps = defaultSteps
             self.allowsAssuming = allowsAssuming
             self.appliesRules = appliesRules
             self.chainMasks = ChainClass.allCases.map { order.mask($0.rawValue) }
@@ -1013,7 +993,6 @@ extension Derivation {
                     establishing.insert(step.key)
                 }
             }
-            self.establishing = establishing
             let count = objects.ids.count
             self.defaultSet = StepSet(defaultSteps, objectCount: count, appliesRules: appliesRules,
                                       establishing: establishing)
@@ -1073,26 +1052,14 @@ extension Derivation {
             return false
         }
 
-        func closure(from start: Set<String>, options: Options, loop: Loop = .current) -> Closure {
+        func closure(from start: Set<String>, options: Options) -> Closure {
             let seed = seeded(start)
             var state = seed.state
-            switch loop {
-            case .legacy:
-                legacyRun(&state, defaultSteps, phase: 1)
-                if allowsAssuming {
-                    legacyRun(&state, defaultSteps, phase: 2)
-                }
-                if options.includesIdealisedModels {
-                    legacyRun(&state, steps, phase: 3)
-                }
-            case .current:
-                runDefaultPhases(&state)
-                if options.includesIdealisedModels {
-                    runIdealisedPhase(&state)
-                }
+            runDefaultPhases(&state)
+            if options.includesIdealisedModels {
+                runIdealisedPhase(&state)
             }
-            return result(of: state, start: start, outside: seed.outside, options: options,
-                          dense: loop == .legacy)
+            return result(of: state, start: start, outside: seed.outside, options: options)
         }
 
         /// Both settings of one closure from a single run. Phases 1 and 2 are
@@ -1124,25 +1091,15 @@ extension Derivation {
             return (state, outside)
         }
 
-        /// `dense` reads every object back, as 21df5d7 did, so `.legacy`
-        /// holds the read-back from `reached` to it as well as the loop.
-        /// Delete it with `Loop.legacy`.
         private func result(of state: State, start: Set<String>, outside: [String: Fact],
-                            options: Options, dense: Bool = false) -> Closure {
+                            options: Options) -> Closure {
             var facts = outside
             var weakFacts: [String: Fact] = [:]
-            if dense {
-                for (index, id) in objects.ids.enumerated() {
-                    if let fact = state.facts[index] { facts[id] = fact }
-                    if let fact = state.weak[index] { weakFacts[id] = fact }
-                }
-            } else {
-                // Every object with a fact is in `reached`; the rest go unread.
-                for indexes in state.reached {
-                    for index in indexes {
-                        if let fact = state.facts[index] { facts[objects.ids[index]] = fact }
-                        if let fact = state.weak[index] { weakFacts[objects.ids[index]] = fact }
-                    }
+            // Every object with a fact is in `reached`; the rest go unread.
+            for indexes in state.reached {
+                for index in indexes {
+                    if let fact = state.facts[index] { facts[objects.ids[index]] = fact }
+                    if let fact = state.weak[index] { weakFacts[objects.ids[index]] = fact }
                 }
             }
             let refused = state.blocked.values.sorted { Derivation.stepPrecedes($0.step, $1.step) }
@@ -1356,94 +1313,6 @@ extension Derivation {
                 if candidates.isEmpty && weakCandidates.isEmpty && establishedCandidates.isEmpty
                     && layer > state.deepest {
                     return waited
-                }
-            }
-        }
-
-        /// The loop as of 21df5d7, kept verbatim for `Loop.legacy`: every
-        /// step at every layer, R13's flags worked out on each visit.
-        /// Delete it with the Legacy files.
-        private func legacyRun(_ state: inout State, _ steps: [CompiledStep], phase: Int) {
-            var layer = 0
-            while true {
-                layer += 1
-                var candidates: [Int: Fact] = [:]
-                var weakCandidates: [Int: Fact] = [:]
-                var establishedCandidates: [StepKey: Fact] = [:]
-                for compiled in steps {
-                    let makesWeak = appliesRules && compiled.step.weakening != nil
-                    let establishes = appliesRules && establishing.contains(compiled.step.key)
-                        && state.established[compiled.step.key] == nil
-                    // Known already: only its own fact is left to find.
-                    let onlyEstablishes = state.depths[compiled.conclusion] >= 0
-                        || (makesWeak && state.weakDepths[compiled.conclusion] >= 0)
-                    if onlyEstablishes && !establishes { continue }
-
-                    // Every hypothesis known before this layer: in full, or
-                    // weakened for a step the weakening accepts.
-                    var ready = true
-                    for index in compiled.hypotheses {
-                        let depth = state.depths[index]
-                        if depth >= 0 && depth < layer { continue }
-                        let weakDepth = state.weakDepths[index]
-                        if weakDepth >= 0 && weakDepth < layer, let weak = state.weak[index] {
-                            if weak.weakening?.acceptedBy.contains(compiled.step.relationID) == true {
-                                continue
-                            }
-                            // A step that could only establish refuses nothing.
-                            if !onlyEstablishes {
-                                state.block(compiled.step, .weakened(
-                                    hypothesis: weak.objectID,
-                                    producedBy: weak.step?.relationID ?? "",
-                                    notion: weak.weakening?.notion ?? ""))
-                            }
-                        }
-                        ready = false
-                        break
-                    }
-                    guard ready else { continue }
-
-                    var inputs: [Fact] = []
-                    var weakInputs: Set<String> = []
-                    for index in compiled.hypotheses {
-                        let depth = state.depths[index]
-                        if depth >= 0 && depth < layer, let fact = state.facts[index] {
-                            inputs.append(fact)
-                        } else if let weak = state.weak[index] {
-                            inputs.append(weak)
-                            weakInputs.insert(weak.objectID)
-                        }
-                    }
-
-                    switch check(compiled, inputs, phase: phase, layer: layer,
-                                 established: state.established) {
-                    case .waits:
-                        break
-                    case .refused(let refusal):
-                        if !onlyEstablishes { state.block(compiled.step, refusal) }
-                    case .fires(let assumes, let met):
-                        let candidate = fact(compiled, inputs: inputs, weakInputs: weakInputs,
-                                             depth: layer, assumes: assumes, makesWeak: makesWeak,
-                                             met: met)
-                        if establishes {
-                            establishedCandidates[compiled.step.key] = candidate
-                        }
-                        guard !onlyEstablishes else { break }
-                        if makesWeak {
-                            Self.keepPreferred(candidate, at: compiled.conclusion, in: &weakCandidates)
-                        } else {
-                            Self.keepPreferred(candidate, at: compiled.conclusion, in: &candidates)
-                        }
-                    }
-                }
-                for (index, fact) in candidates { state.add(fact, at: index) }
-                for (index, fact) in weakCandidates { state.addWeak(fact, at: index) }
-                for (producer, fact) in establishedCandidates {
-                    state.addEstablished(fact, by: producer)
-                }
-                if candidates.isEmpty && weakCandidates.isEmpty && establishedCandidates.isEmpty
-                    && layer > state.deepest {
-                    return
                 }
             }
         }

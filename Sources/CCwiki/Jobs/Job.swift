@@ -463,11 +463,6 @@ final class Job: Identifiable {
         return formatter
     }()
 
-    var duration: TimeInterval? {
-        guard let startedAt else { return nil }
-        return (finishedAt ?? Date()).timeIntervalSince(startedAt)
-    }
-
     // MARK: What the views read
 
     /// The paper, or the page.

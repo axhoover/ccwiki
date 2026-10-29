@@ -9,9 +9,9 @@ import Testing
 /// render splices in.
 ///
 /// The corpus tests run when `CCWIKI_WIKI` names a clone, as the other
-/// corpus suites do. They hold each target's linking pages, and the first
-/// line each shows, to `Legacy.backlinkMap`, the copy of the code before
-/// track L, and count the mentions apart from `backlinkMap`.
+/// corpus suites do. They work out each target's linking pages and the
+/// lines that link from the links and how they resolve, apart from
+/// `backlinkMap`, and hold the backlinks to them.
 struct BacklinkMentionTests {
 
     // MARK: Fixtures
@@ -236,21 +236,15 @@ struct BacklinkMentionTests {
         return renderer.request(for: page).markdown
     }
 
-    @Test("on the corpus, every target's linking pages are the legacy ones, in order, and each shows the legacy line")
+    @Test("on the corpus, every target's linking pages are the pages that link to it, in order, one mention a line")
     func backlinksOnCorpus() {
         guard let corpus = Self.corpus else { return }
         let new = corpus.index.backlinkMap()
-        let old = Legacy.backlinkMap(of: corpus.index)
-        #expect(Set(new.keys) == Set(old.keys) && new.count > 500, "\(new.count) targets, \(old.count) before")
-        let differing = old.keys.filter { target in
-            (new[target] ?? []).map { [$0.sourcePath, $0.context] }
-                != (old[target] ?? []).map { [$0.sourcePath, $0.context] }
-        }.sorted()
-        #expect(differing.isEmpty, "the linking pages or their first lines differ for \(differing)")
 
-        // Every (source, target, line), counted from the links and how they
-        // resolve, without backlinkMap.
+        // Every (source, target, line), and each target's linking pages,
+        // counted from the links and how they resolve, without backlinkMap.
         var triples: Set<[String]> = []
+        var sources: [String: Set<String>] = [:]
         for page in corpus.pages {
             for link in WikiIndex.outgoingLinks(in: page.body) {
                 guard case .page(let target, _) = corpus.index.resolve(link, from: page.path),
@@ -258,8 +252,16 @@ struct BacklinkMentionTests {
                 else { continue }
                 let line = Self.lineNumber(of: link.range.lowerBound, in: page.body)
                 triples.insert([page.path, target, String(line)])
+                sources[target, default: []].insert(page.path)
             }
         }
+        #expect(Set(new.keys) == Set(sources.keys) && new.count > 500,
+                "\(new.count) targets, \(sources.count) linked to")
+        let differing = sources.keys.filter { target in
+            (new[target] ?? []).map(\.sourcePath) != (sources[target] ?? []).sorted()
+        }.sorted()
+        #expect(differing.isEmpty, "the linking pages differ for \(differing)")
+
         let backlinks = new.values.reduce(0) { $0 + $1.count }
         let mentions = new.values.reduce(0) { $0 + $1.reduce(0) { $0 + $1.mentions.count } }
         #expect(mentions == triples.count, "\(mentions) mentions, \(triples.count) lines that link")

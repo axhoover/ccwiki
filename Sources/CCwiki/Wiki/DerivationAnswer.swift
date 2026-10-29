@@ -483,10 +483,7 @@ extension Derivation {
     /// A candidate whose plain Horn closure with the start misses the target
     /// is passed over without a closure of its own (`Engine.mayReach`), which
     /// on the real manifest is nearly every candidate of a no-path answer.
-    /// `prefilter: false` closes every candidate, for the test that holds
-    /// the two equal.
-    func completions(start: [String], target: String, closure: Closure, options: Options,
-                     prefilter: Bool = true)
+    func completions(start: [String], target: String, closure: Closure, options: Options)
         -> (offered: [Completion], count: Int, restating: [Completion]) {
         let starts = Set(start)
         let givesBack = self.closure(from: starts.union([target]), options: options).facts
@@ -500,7 +497,7 @@ extension Derivation {
             // Alone it suffices: that is R11's business, not a completion.
             if self.closure(from: [candidate], options: options).fact(target) != nil { continue }
             let union = starts.union([candidate])
-            if prefilter, !mainEngine.mayReach(target, from: union, options: options) { continue }
+            if !mainEngine.mayReach(target, from: union, options: options) { continue }
             let extended = self.closure(from: union, options: options)
             guard let fact = extended.facts[target], let proof = extended.proof(of: target) else {
                 continue

@@ -6,7 +6,7 @@ import Testing
 /// plans/efficiency.md §2.3).
 ///
 /// Skipped unless `CCWIKI_WIKI` points at a clone; CI clones the wiki for it.
-/// Every run prints three reports, which land in the CI log beside the
+/// Every run prints two reports, which land in the CI log beside the
 /// relevance report:
 ///
 /// - **the load:** the full build, each phase the fastest of five runs; the
@@ -14,9 +14,11 @@ import Testing
 ///   as a no-op and after one page changed;
 /// - **its parts**, each timed alone on the library already loaded, with the
 ///   counts that check the ports the efficiency plan was counted with, and
-///   one ⌘O keystroke;
-/// - **backlinks at 46685be against 21df5d7**, in one process: the phase as
-///   D1 timed it, each of 21df5d7's four changes to it alone, and all four.
+///   one ⌘O keystroke.
+///
+/// A third, backlinks at 46685be against 21df5d7 with the line-end A/B,
+/// settled §1.3's cause and L1's form, and went after 0.1.4 with the copy
+/// it ran (efficiency.md §2.1).
 ///
 /// Each report heads with the wiki's commit and the Swift that built it, and
 /// says whether the suite ran alone (CI's standalone step sets
@@ -319,69 +321,6 @@ import Testing
 
     // MARK: The parts of a load
 
-    /// One way to find every line end in every body (efficiency.md §2.3):
-    /// (a) is how CodeMask, `headings()` and the backlink context find them
-    /// at 21df5d7, (c) how they did before it, and (d) the byte scan L1
-    /// proposes. All four are written here, not called, so the line keeps
-    /// its meaning whatever the app's code becomes.
-    enum LineEndScan: String, CaseIterable {
-        case keyPath = "(a) key path"
-        case closure = "(b) closure"
-        case newline = "(c) \"\\n\" alone"
-        case bytes = "(d) UTF-8 bytes"
-
-        /// The lines in `bodies`, counted as CodeMask's loop walks them: a
-        /// last line counts without its line end, and CR LF is one end.
-        func lines(in bodies: [String]) -> Int {
-            var count = 0
-            switch self {
-            case .keyPath:
-                for text in bodies {
-                    var lineStart = text.startIndex
-                    while lineStart < text.endIndex {
-                        let lineEnd = text[lineStart...].firstIndex(where: \.isTimedLineEnding)
-                            ?? text.endIndex
-                        count += 1
-                        lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
-                    }
-                }
-            case .closure:
-                for text in bodies {
-                    var lineStart = text.startIndex
-                    while lineStart < text.endIndex {
-                        let lineEnd = text[lineStart...].firstIndex { $0.isTimedLineEnding }
-                            ?? text.endIndex
-                        count += 1
-                        lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
-                    }
-                }
-            case .newline:
-                for text in bodies {
-                    var lineStart = text.startIndex
-                    while lineStart < text.endIndex {
-                        let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
-                        count += 1
-                        lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
-                    }
-                }
-            case .bytes:
-                for text in bodies {
-                    let utf8 = text.utf8
-                    var lineStart = utf8.startIndex
-                    while lineStart < utf8.endIndex {
-                        count += 1
-                        guard let lineEnd = utf8[lineStart...].firstIndex(where: { $0 == 0x0A || $0 == 0x0D })
-                        else { break }
-                        let next = utf8.index(after: lineEnd)
-                        lineStart = utf8[lineEnd] == 0x0D && next < utf8.endIndex && utf8[next] == 0x0A
-                            ? utf8.index(after: next) : next
-                    }
-                }
-            }
-            return count
-        }
-    }
-
     /// What `resolve` reads of a link: links that share it resolve alike.
     private struct ResolveKey: Hashable {
         let target: String
@@ -405,12 +344,6 @@ import Testing
         }
         let end = body[range.upperBound...].firstIndex(where: \.isTimedLineEnding) ?? body.endIndex
         return String(body[start..<end])
-    }
-
-    /// The path a target names, if it is a page.
-    static func pagePath(_ target: WikiIndex.Target) -> String? {
-        if case .page(let path, _) = target { return path }
-        return nil
     }
 
     /// A word for what the explorer answered.
@@ -473,28 +406,6 @@ import Testing
         lines.append("  \(contextLines.count) backlinks to \(backlinksTo.count) pages, at most "
             + "\(backlinksTo.values.max() ?? 0) to one; \(headings.value) headings on "
             + "\(concepts.count) non-reference pages")
-
-        // Line ends, four ways over the same bodies (efficiency.md §1.3).
-        var lineCounts: [LineEndScan: Int] = [:]
-        var scanTimes: [String] = []
-        for scan in LineEndScan.allCases {
-            let run = Self.fastestRun { scan.lines(in: bodies) }
-            lineCounts[scan] = run.value
-            scanTimes.append("\(scan.rawValue) \(ms(run.duration))")
-        }
-        let lineCount = lineCounts[.keyPath] ?? 0
-        #expect(lineCounts[.closure] == lineCount, "(a) and (b) find the same line ends")
-        #expect(lineCounts[.bytes] == lineCount, "(a) and (d) find the same line ends")
-        if withCR == 0 {
-            #expect(lineCounts[.newline] == lineCount, "with no \\r in any body, (c) finds them too")
-        }
-        lines.append("line ends, A/B over every body, \(lineCount) lines: "
-            + scanTimes.joined(separator: " · "))
-        if Set(lineCounts.values).count > 1 {
-            lines.append("  lines found: " + LineEndScan.allCases.map { scan in
-                "\(scan.rawValue) \(lineCounts[scan] ?? 0)"
-            }.joined(separator: " · "))
-        }
 
         // The load path, part by part.
         let codeMask = Self.fastestRun { bodies.reduce(0) { $0 + CodeMask.inertRanges(in: $1).count } }
@@ -621,101 +532,10 @@ import Testing
         #expect(ContentFingerprints.scan(cloneRoot: source) == untouched,
                 "the clone CCWIKI_WIKI names must be read, never written")
     }
-
-    // MARK: Backlinks, 46685be against 21df5d7
-
-    /// The backlinks phase went from 680 ms at 46685be to 1,605 ms at
-    /// 21df5d7 on the same wiki (efficiency.md §1.1). Here both run in one
-    /// process on one library, through `LegacyD1.D1Backlinks`: 46685be's path,
-    /// with each of 21df5d7's four changes to it alone, and with all four,
-    /// interleaved run by run so whatever slows the runner slows them alike.
-    /// Old and new must agree wherever no body holds `\r`, which is the
-    /// case the old line ends got wrong, and no link resolves to another
-    /// page for the old `resolve`.
-    @Test("backlinks at 46685be against 21df5d7, each change alone, in one process")
-    func backlinksOldAgainstNew() throws {
-        guard let source = Self.source else { return }
-        typealias D1 = LegacyD1.D1Backlinks
-        let index = WikiIndex.build(contentRoot: source.appending(path: "content"))
-        let variants: [(name: String, changes: D1.Changes)] = [
-            ("46685be, copied", []),
-            ("with CodeMask's line ends by key path", .codeMaskLineEnds),
-            ("with the context walks' three line endings", .contextLineEnds),
-            ("with GithubSlugger's Unicode properties", .sluggerProperties),
-            ("with resolve's segments", .resolveSegments),
-            ("all four: 21df5d7, copied", .all),
-        ]
-        let copies = variants.map { D1(index: index, changes: $0.changes) }
-
-        var fastest = [Duration](repeating: .zero, count: copies.count)
-        var maps = [[String: [D1.Backlink]]](repeating: [:], count: copies.count)
-        var built: [String: [WikiIndex.Backlink]] = [:]
-        var builtFastest = Duration.zero
-        for run in 0..<Self.runs {
-            for (k, copy) in copies.enumerated() {
-                let measured = Self.timed { copy.backlinkMap() }
-                maps[k] = measured.value
-                fastest[k] = run == 0 ? measured.duration : min(fastest[k], measured.duration)
-            }
-            let measured = Self.timed { index.backlinkMap() }
-            built = measured.value
-            builtFastest = run == 0 ? measured.duration : min(builtFastest, measured.duration)
-        }
-
-        // The copy is 21df5d7's path: it parses, resolves and builds what
-        // the app does, on every page.
-        let newest = copies[copies.count - 1]
-        let oldest = copies[0]
-        var unlike: [String] = []
-        var moved = 0
-        for page in index.pages.values.sorted(by: { $0.path < $1.path }) {
-            let links = WikiIndex.outgoingLinks(in: page.body)
-            if newest.outgoingLinks(in: page.body) != links { unlike.append(page.path) }
-            for link in links {
-                let target = index.resolve(link, from: page.path)
-                if newest.resolve(link, from: page.path) != target {
-                    unlike.append("\(page.path): \(page.body[link.range])")
-                }
-                if Self.pagePath(oldest.resolve(link, from: page.path)) != Self.pagePath(target) {
-                    moved += 1
-                }
-            }
-        }
-        let asBuilt = built.mapValues { backlinks in
-            backlinks.map { D1.Backlink(sourcePath: $0.sourcePath, context: $0.context) }
-        }
-        #expect(unlike.isEmpty, "the copy parses and resolves as the app does: \(unlike.prefix(10))")
-        #expect(maps[maps.count - 1] == asBuilt, "the copy builds the backlinks backlinkMap() builds")
-
-        let withCR = index.pages.values.count(where: { $0.body.utf8.contains(0x0D) })
-        let compared = withCR == 0 && moved == 0
-        if compared {
-            for (k, map) in maps.enumerated() {
-                #expect(map == asBuilt, "\(variants[k].name) gives the backlinks 21df5d7 gives")
-            }
-        }
-
-        var lines: [String] = []
-        for (k, variant) in variants.enumerated() {
-            let change = k == 0 ? "" : String(
-                format: " (%+.1f ms)", LoadTimings.milliseconds(fastest[k] - fastest[0]))
-            lines.append("\(variant.name): \(LoadTimings.format(fastest[k]))" + change)
-        }
-        lines.append("backlinkMap() as built: \(LoadTimings.format(builtFastest))")
-        let count = asBuilt.values.reduce(0) { $0 + $1.count }
-        lines.append(compared
-            ? "\(count) backlinks to \(asBuilt.count) pages, the same from all six: no body holds \\r, "
-                + "and no link resolves to another page at 46685be"
-            : "not compared: \(withCR) bodies hold \\r, and \(moved) links resolve to another page "
-                + "at 46685be")
-        print("Backlinks at 46685be against 21df5d7 (plans/efficiency.md §1.3), in one process, each "
-            + "the fastest of \(Self.runs) runs, \(Self.measuredOn(source)):\n"
-            + lines.map { "  " + $0 }.joined(separator: "\n"))
-    }
 }
 
 private extension Character {
-    /// 21df5d7's `isMarkdownLineEnding`, for the A/B and the context lines:
-    /// `\n`, `\r\n` or a lone `\r`.
+    /// 21df5d7's `isMarkdownLineEnding`, for the context lines: `\n`,
+    /// `\r\n` or a lone `\r`.
     var isTimedLineEnding: Bool { self == "\n" || self == "\r\n" || self == "\r" }
 }

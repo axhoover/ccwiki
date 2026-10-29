@@ -60,7 +60,7 @@ struct CorpusTests {
         var markdownLinks = 0
         var deadMarkdownLinks: [String] = []
         for page in index.pages.values.sorted(by: { $0.path < $1.path }) {
-            for link in MarkdownLinkParser.links(in: page.body) {
+            for link in LinkParse.links(in: page.body).markdownLinks {
                 markdownLinks += 1
                 if !index.resolve(link.wikilink, from: page.path).isResolved {
                     deadMarkdownLinks.append("\(page.path): \(page.body[link.range])")

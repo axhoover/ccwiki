@@ -2,15 +2,19 @@ import Foundation
 import Testing
 @testable import CCwiki
 
-/// Track X of plans/efficiency.md §2.6, held to the code it replaces on the
-/// real manifest. Each change keeps the old path behind a parameter with the
-/// new one as its default (`Engine.Loop`), and these suites run both and
-/// compare the results exactly, so CI proves the change equal without a
-/// reviewer having to.
+/// Track X of plans/efficiency.md §2.6 on the real manifest: what its
+/// shortcuts rest on, each held to the longer way round. One run for both
+/// settings decides as a run for each, plain Horn closure reaches everything
+/// a closure derives (the prefilter's premise), an inspector row carries its
+/// proof's counts, and a page parsed once answers every quote as a fresh
+/// parse does.
+///
+/// The 21df5d7 loop and the prefilter's off switch, which these suites ran
+/// beside the new code, went after 0.1.4 (efficiency.md §2.1).
 ///
 /// Gated on `CCWIKI_WIKI` like DerivationCorpusTests, whose corpus they share,
-/// in either of its modes: equality between two paths needs no golden file.
-/// Each prints what both paths cost; no assertion is about time.
+/// in either of its modes: none of this needs the golden file. Each prints
+/// what it compared; no assertion is about time.
 struct DerivationEquivalenceTests {
 
     /// The corpus DerivationCorpusTests loaded, exact or drifted.
@@ -48,17 +52,6 @@ struct DerivationEquivalenceTests {
         return sets
     }
 
-    /// The least disturbed of `runs` runs.
-    static func fastest(of runs: Int = 3, _ work: () -> Void) -> Duration {
-        let clock = ContinuousClock()
-        var best: Duration?
-        for _ in 0..<runs {
-            let duration = clock.measure(work)
-            best = min(best ?? duration, duration)
-        }
-        return best ?? .zero
-    }
-
     /// `work` on each item, a few at a time: as many as leave one
     /// cooperative thread free. A sweep queued whole held every thread for
     /// up to a minute of debug CPU, and a test racing a deadline behind it
@@ -88,9 +81,9 @@ struct DerivationEquivalenceTests {
 
     // MARK: X1, X5: the forward-chaining loop
 
-    @Test("the current loop decides every closure as the 21df5d7 loop does",
+    @Test("one run for both settings decides every closure as a run for each does",
           .enabled(if: DerivationEquivalenceTests.corpus() != nil, DerivationCorpusTests.state.skipComment))
-    func loops() async throws {
+    func sharedRuns() async throws {
         let corpus = try #require(Self.corpus())
         let derivation = corpus.derivation
         let starts = Self.startSets(corpus)
@@ -102,10 +95,9 @@ struct DerivationEquivalenceTests {
                 // single-object closures.
                 let both = named.engine.closures(from: start)
                 for options in [Derivation.Options.standard, .all] {
-                    let legacy = named.engine.closure(from: start, options: options, loop: .legacy)
-                    let current = named.engine.closure(from: start, options: options)
+                    let closure = named.engine.closure(from: start, options: options)
                     let shared = options.includesIdealisedModels ? both.all : both.standard
-                    if !current.decidesLike(legacy) || !shared.decidesLike(legacy) {
+                    if !shared.decidesLike(closure) {
                         found.append("\(named.name) \(start.sorted()) \(options.settingName)")
                     }
                 }
@@ -116,87 +108,16 @@ struct DerivationEquivalenceTests {
         #expect(mismatches.isEmpty, "\(mismatches.count) of \(compared) closures differ: \(mismatches.prefix(10))")
 
         // The single-object closures the derivation keeps, read back.
-        let ids = derivation.mainEngine.objects.ids
-        for id in ids {
+        for id in derivation.mainEngine.objects.ids {
             for options in [Derivation.Options.standard, .all] {
-                let legacy = derivation.mainEngine.closure(from: [id], options: options, loop: .legacy)
-                #expect(derivation.closure(from: [id], options: options).decidesLike(legacy),
+                let closure = derivation.mainEngine.closure(from: [id], options: options)
+                #expect(derivation.closure(from: [id], options: options).decidesLike(closure),
                         "the kept closure of \(id), \(options.settingName)")
             }
         }
-
-        // What Derivation.init spends its closures on: every object, both
-        // settings, on the main engine.
-        func singles(_ loop: Derivation.Engine.Loop) -> Duration {
-            Self.fastest {
-                for id in ids {
-                    for options in [Derivation.Options.standard, .all] {
-                        _ = derivation.mainEngine.closure(from: [id], options: options, loop: loop)
-                    }
-                }
-            }
-        }
-        let legacy = singles(.legacy)
-        let current = singles(.current)
-        let shared = Self.fastest {
-            for id in ids { _ = derivation.mainEngine.closures(from: [id]) }
-        }
-        let build = Self.fastest {
-            _ = Derivation(manifest: corpus.manifest, curation: corpus.curation)
-        }
-        print("derivation loops, \(corpus.modeName): \(compared) closures on \(derivation.namedEngines.count) "
-            + "engines compared, \(mismatches.count) differ; the \(ids.count * 2) single-object closures "
-            + "of a load take \(LoadTimings.format(legacy)) with the 21df5d7 loop, "
-            + "\(LoadTimings.format(current)) with the current one and \(LoadTimings.format(shared)) "
-            + "sharing a run between settings; Derivation.init \(LoadTimings.format(build)) (min of 3)")
-    }
-
-    // MARK: X2: each cited page parsed once
-
-    @Test("missingQuotes, parsing each page once, misses what a parse per citation misses",
-          .enabled(if: DerivationEquivalenceTests.corpus() != nil, DerivationCorpusTests.state.skipComment))
-    func quotesParsedOnce() throws {
-        let corpus = try #require(Self.corpus())
-        let derivation = corpus.derivation
-        let content = corpus.cloneRoot.appending(path: "content")
-        var read: [String: String] = [:]
-        var cited = 0
-        for entry in derivation.curation.entries {
-            for citation in entry.cites {
-                cited += 1
-                let path = citation.contentPath
-                if read[path] == nil {
-                    read[path] = try? String(contentsOf: content.appending(path: path), encoding: .utf8)
-                }
-            }
-        }
-        let texts = read
-
-        // The shape of 21df5d7: the page parsed again for each citation.
-        func perCitation() -> [Derivation.MissingQuote] {
-            var missing: [Derivation.MissingQuote] = []
-            for entry in derivation.curation.entries {
-                for citation in entry.cites {
-                    let found = texts[citation.contentPath].map {
-                        CurationQuote.contains(citation.quote, section: citation.section, in: $0)
-                    } ?? false
-                    if !found {
-                        missing.append(Derivation.MissingQuote(entryID: entry.id, citation: citation))
-                    }
-                }
-            }
-            return missing
-        }
-        let legacyMissing = perCitation()
-        let missing = derivation.missingQuotes { texts[$0] }
-        #expect(missing == legacyMissing)
-        #expect(Set(missing.map(\.citation)) == Set(legacyMissing.map(\.citation)))
-
-        let legacy = Self.fastest { _ = perCitation() }
-        let current = Self.fastest { _ = derivation.missingQuotes { texts[$0] } }
-        print("derivation quotes, \(corpus.modeName): \(cited) citations on \(texts.count) pages, "
-            + "\(missing.count) missing either way; \(LoadTimings.format(legacy)) parsing the page "
-            + "for each citation, \(LoadTimings.format(current)) parsing it once (min of 3)")
+        print("derivation closures, \(corpus.modeName): \(compared) closures on "
+            + "\(derivation.namedEngines.count) engines, one run for both settings against a run "
+            + "for each, \(mismatches.count) differ")
     }
 
     // MARK: X3: the inspector's rows build no proof
@@ -237,39 +158,17 @@ struct DerivationEquivalenceTests {
 
     // MARK: X4: the plain Horn prefilter
 
-    /// One target's implied-by, with and without the prefilter.
-    private struct Backward: Sendable {
-        let differs: String?
-        let filtered: Duration
-        let unfiltered: Duration
-    }
-
-    /// One target's implied-by, timed with and without the prefilter.
-    private static func backward(_ derivation: Derivation, _ target: String,
-                                 _ options: Derivation.Options) -> Backward {
-        let clock = ContinuousClock()
-        let started = clock.now
-        let filtered = derivation.implying(target, options: options)
-        let between = clock.now
-        let unfiltered = derivation.implying(target, options: options, prefilter: false)
-        let ended = clock.now
-        return Backward(
-            differs: filtered == unfiltered ? nil : "\(target), \(options.settingName)",
-            filtered: started.duration(to: between), unfiltered: between.duration(to: ended))
-    }
-
-    @Test("the Horn prefilter changes no implied-by list, completion, chain or circumvention",
+    @Test("plain Horn closure reaches everything a closure derives, on every engine",
           .enabled(if: DerivationEquivalenceTests.corpus() != nil, DerivationCorpusTests.state.skipComment))
-    func hornPrefilter() async throws {
+    func hornClosureCovers() async throws {
         let corpus = try #require(Self.corpus())
         let derivation = corpus.derivation
-        let manifest = corpus.manifest
-        let ids = manifest.objectsByID.keys.sorted(by: Derivation.precedes)
+        let ids = corpus.manifest.objectsByID.keys.sorted(by: Derivation.precedes)
 
-        // What it rests on: every object a closure derives, in full,
-        // weakened or as a `metBy` producer's fact, plain Horn closure
-        // reaches too. Every engine, every object, both settings.
-        // One task per engine, a few at a time.
+        // What the prefilter rests on: every object a closure derives, in
+        // full, weakened or as a `metBy` producer's fact, plain Horn closure
+        // reaches too. Every engine, every object, both settings, one task
+        // per engine, a few at a time.
         let escapes = await Self.fewAtATime(derivation.namedEngines) { named -> [String] in
             var found: [String] = []
             for id in ids {
@@ -286,82 +185,8 @@ struct DerivationEquivalenceTests {
             return found
         }.flatMap { $0 }
         #expect(escapes.isEmpty, "closures past their Horn closure: \(escapes.prefix(10))")
-
-        // Implied-by for every target in both settings: the pair closures the
-        // prefilter skips are all run here, once.
-        let targets = ids.filter { derivation.nodeType($0) != Derivation.excludedType }
-        // A few at a time: all of them (468 on the wiki) queued at once held
-        // every cooperative thread for about a minute of debug CPU.
-        let jobs: [(target: String, options: Derivation.Options)] = targets.flatMap { target in
-            [Derivation.Options.standard, .all].map { (target: target, options: $0) }
-        }
-        let backward = await Self.fewAtATime(jobs) { job in
-            Self.backward(derivation, job.target, job.options)
-        }
-        let differing = backward.compactMap(\.differs)
-        #expect(backward.count == targets.count * 2)
-        #expect(differing.isEmpty, "implied-by differs for \(differing.prefix(10))")
-
-        // Completions for every no-path question the golden file asks.
-        var noPath = 0
-        for record in corpus.golden["queries"]?.array ?? [] {
-            let start = record["start"]?.strings ?? []
-            let target = record["target"]?.string ?? ""
-            guard (start + [target]).allSatisfy({ manifest.object($0) != nil }) else { continue }
-            let options = Derivation.Options(includesIdealisedModels: record["includeIdealised"]?.bool ?? false)
-            guard case .notDerived(let answer) = derivation.answer(from: Set(start), to: target, options: options)
-            else { continue }
-            noPath += 1
-            let closure = derivation.closure(from: Set(start), options: options)
-            let filtered = derivation.completions(start: answer.start, target: target, closure: closure,
-                                                  options: options)
-            let unfiltered = derivation.completions(start: answer.start, target: target, closure: closure,
-                                                    options: options, prefilter: false)
-            let id = record["id"]?.string ?? "?"
-            #expect(filtered.offered == unfiltered.offered, "\(id): completions")
-            #expect(filtered.count == unfiltered.count, "\(id): completion count")
-            #expect(filtered.restating == unfiltered.restating, "\(id): the question becomes")
-            #expect(answer.completions == unfiltered.offered, "\(id): the answer's completions")
-        }
-        #expect(noPath > 0)
-
-        // R8's chains, as the invariants and the answers ask them, and R12's
-        // circumventions.
-        var chains = 0
-        func compareChain(_ start: [String], _ target: String, _ reductionClass: String) {
-            let filtered = derivation.chainExists(from: start, to: target, against: reductionClass)
-            let unfiltered = derivation.chainExists(from: start, to: target, against: reductionClass,
-                                                    prefilter: false)
-            #expect(filtered == unfiltered, "\(start) ⇒ \(target) against \(reductionClass)")
-            chains += 1
-        }
-        for barrier in manifest.barriers {
-            for rule in Derivation.consequenceRules(of: barrier, in: manifest) {
-                compareChain(barrier.hypotheses, barrier.conclusion, rule.reductionClass)
-            }
-        }
-        let derivedBarriers = derivation.allDerivedBarriers()
-        var circumventions = 0
-        for derived in derivedBarriers {
-            compareChain(derived.hypotheses, derived.conclusion, derived.reductionClass.rawValue)
-            for relationID in derived.barrier.circumventedBy {
-                let filtered = derivation.isDerivable(from: derived.hypotheses, to: derived.conclusion,
-                                                      through: relationID)
-                let unfiltered = derivation.isDerivable(from: derived.hypotheses, to: derived.conclusion,
-                                                        through: relationID, prefilter: false)
-                #expect(filtered == unfiltered,
-                        "\(derived.hypotheses) ⇒ \(derived.conclusion) through \(relationID)")
-                circumventions += 1
-            }
-        }
-
-        let fast = backward.reduce(Duration.zero) { $0 + $1.filtered }
-        let slow = backward.reduce(Duration.zero) { $0 + $1.unfiltered }
-        print("derivation prefilter, \(corpus.modeName): implied-by for \(targets.count) targets in both "
-            + "settings takes \(LoadTimings.format(fast)) with the Horn prefilter and "
-            + "\(LoadTimings.format(slow)) without (summed over tasks), \(differing.count) differ; "
-            + "\(noPath) no-path completions, \(chains) chains and \(circumventions) circumventions "
-            + "compared")
+        print("derivation Horn closure, \(corpus.modeName): \(ids.count) objects on "
+            + "\(derivation.namedEngines.count) engines in both settings, \(escapes.count) derived past it")
     }
 
     // MARK: X2: the shared quote cases
