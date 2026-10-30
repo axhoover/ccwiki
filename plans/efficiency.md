@@ -2020,7 +2020,7 @@ which loads a real `AppModel` over the fixture clone.
 | Page history and provenance (#6) | M | `git log --follow` and blame plumbing plus a diff view. Snapshot readers have no history, and reflow commits make blame misleading. It needs its own spec. |
 | A page's papers offline in one step (#7) | M | Changes PaperFetcher's queue and has to respect ePrint's rate limits, which only a Mac session can check. |
 | Notes on passages (#8) | L | The largest item. CurationQuote's re-anchoring rule makes it feasible later. |
-| Reopen Closed Tab; match counts in Find on Page | S each | Small and safe. Left out to keep this branch to three features; first candidates for the next. |
+| Reopen Closed Tab; match counts in Find on Page | S each | Small and safe. Left out to keep this branch to three features; first candidates for the next. **Built next**, on `claude/undo-close-tab-find-count`: Edit ▸ Undo Close Tab (⌘Z, [reader-comforts.md](reader-comforts.md) §7), and the find bar's "3 of 17" ([render-pipeline.md](render-pipeline.md), "Find on Page's count"). |
 | A graph canvas; "what rests only on assumption X" | — | Rejected. No reading task was found where a canvas beats the inspector and the Explorer. The second, prototyped on the reference engine, says false things at variant granularity. |
 
 ---

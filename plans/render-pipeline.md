@@ -605,6 +605,73 @@ link, selection`.
 overlaps the range scrolls to the middle, and with `mark` it is outlined for
 1.2 s (`.source-reveal`).
 
+### Find on Page's count
+
+Find on Page is `WKWebView.find`, and `WKFindResult` says only whether it
+matched. After a find, `WebController.findCount(_:)` asks
+`CCwiki.findCount(needle)`, which returns `{"total": n, "current": i}` as a
+JSON string (`"null"` if the page could not be read), and the bar shows
+`FindCount.label`: "3 of 17", "17 matches" or "No matches".
+
+The count is of the page as it was drawn. Typing clears it, and so does
+every render the page reports (`WebController.renderGeneration`): another
+page, or the same page drawn again in place after a pull or a preference,
+which keeps the location but replaces the text and the selection. A count
+that answers after a render is dropped.
+
+**What it counts** is the text WebKit's find reads, the rendered text in
+document order:
+
+- It skips what is not rendered (`display: none`, from
+  `getComputedStyle`), text that is `visibility: hidden`, and every child of
+  a `<semantics>` but its first, which is all MathML renders.
+- A block in the flow, a table row or cell, and a `<br>` end a run, which
+  no match crosses. An inline box, an inline block, a float and a box out
+  of the flow do not. Spaces collapse as on screen, except where
+  `white-space` keeps them, as in a code block.
+- It folds as find folds: case; compatibility forms, so the ligature "ﬁ"
+  is "fi" and "²" is "2"; accents, unless the needle has one; curly
+  quotes to straight; soft hyphens and zero-width characters to nothing.
+- Find compares with ICU's `@collation=search` collator at secondary
+  strength, where a plain letter in the needle finds the letter with any
+  accent. That collator takes some letters NFKD leaves whole for others,
+  and the count folds them too. Final sigma is sigma, whatever the needle.
+  "ß", "æ", "œ", "ø", "ł", "đ", "ð" and "ħ" are found by "ss", "ae", "oe",
+  "o", "l", "d", "d" and "h", as "é" is by "e", and a needle with one of
+  them keeps them, as it keeps accents. The list is what ICU 77's root
+  collation (node 22's `Intl.Collator`) equates and NFKD does not, over
+  Latin-1, Latin Extended-A and Greek.
+- Matches do not overlap: find steps on from the end of one.
+
+Where the count and find may still differ:
+
+- A needle with one accent keeps every accent. ICU decides letter by
+  letter: "é" in the needle needs "é", but its "e" elsewhere still finds
+  "ê".
+- The count folds as the root collation does. A locale's tailoring is out
+  of reach: in Danish or Norwegian "ø" and "æ" are letters of their own,
+  which "o" and "ae" do not find.
+
+**Which one is selected.** `WKWebView.find` selects its match. The count
+maps the selection's start and end into the text it read, the first
+character at or after each, so a start left at the end of the text before
+the match still lands on it. `current` is the match that starts and ends
+there, and 0 when none does.
+
+**Formulas.** KaTeX's `.katex-mathml` is a 1px box out of the flow,
+clipped with `clip-path: inset(50%)` (katex.min.css). It is rendered, so
+find matches its letters, though no one sees them, and the count reads
+them too. Its TeX `<annotation>` is not rendered, and neither reads it.
+Only pseudocode has MathML: pseudocode.js renders with KaTeX's default
+output, and the page's own math is `output: "html"`. How find runs a
+formula's letters together, across inline blocks, inline tables and MathML
+tokens, cannot be read from the page. So when any match is in a formula
+(inside `.katex`), `current` is 0, and the bar gives the total alone,
+which is true where a place might not be.
+
+`FindCountTests` runs the count in JavaScriptCore, over a stand-in DOM with
+`getComputedStyle` and a selection.
+
 ### The review
 
 `CCwiki.renderReview(payload)` shows a change the way pages are shown

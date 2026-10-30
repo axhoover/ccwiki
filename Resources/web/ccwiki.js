@@ -868,6 +868,209 @@
     });
   }, true);
 
+  // ========================================================= find count ==
+  // Find on Page is WebKit's, and `WKFindResult` says only whether it
+  // matched. So the find bar's "3 of 17" is counted here, in the text
+  // WebKit's find reads and folded as it folds it. The match it found is
+  // the page's selection: `WKWebView.find` selects it.
+  //
+  // Find reads the rendered text in document order. It skips what is not
+  // rendered (`display: none`) and what is `visibility: hidden`, but not
+  // what is only clipped out of sight. KaTeX's MathML is clipped:
+  // `.katex-mathml` is a 1px box with `clip-path: inset(50%)`, so find
+  // matches its letters, which no one sees. Its TeX annotation is not
+  // rendered at all, since `<semantics>` shows only its first child. Only
+  // pseudocode has MathML: it keeps KaTeX's default output, and the page's
+  // own math is `output: "html"`.
+  //
+  // A formula is inline blocks, tables and MathML tokens, and how WebKit's
+  // find runs their letters together cannot be read from the page. So once
+  // a match is in a formula the count gives only the total, never which
+  // match is selected: "17 matches" is true where "3 of 17" might not be.
+
+  /** Read as find reads them: curly quotes as straight ones. */
+  var FIND_QUOTES = {
+    "\u2018": "'", "\u2019": "'", "\u05F3": "'",
+    "\u201C": '"', "\u201D": '"', "\u05F4": '"',
+  };
+  /** Read as nothing: a soft hyphen, and the zero-width characters KaTeX
+   *  puts in its formulas. */
+  var FIND_IGNORED = /[\u00AD\u200B-\u200D\u2060\uFEFF]/;
+  var FIND_MARK = /\p{M}/u;
+  var FIND_MARKS = /\p{M}/gu;
+  /** What CSS collapses, where `white-space` does not keep it. */
+  var FIND_SPACE = /[ \t\n\f]/;
+  /** Letters find's collator takes for others whatever the needle: final
+   *  sigma is sigma. */
+  var FIND_SAME = { "ς": "σ" };
+  /** Letters it takes for their plain forms as it takes "é" for "e", which
+   *  NFKD leaves whole: found by the plain letters, unless the needle has
+   *  a mark or one of these. */
+  var FIND_BASES = {
+    "ß": "ss", "æ": "ae", "œ": "oe", "ø": "o",
+    "ł": "l", "đ": "d", "ð": "d", "ħ": "h",
+  };
+  var FIND_BASE_LETTER = /[ßæœøłđðħ]/;
+
+  /** One character as find compares it: as its compatibility form, so
+   *  the ligature "ﬁ" is "fi" and "²" is "2"; without accents unless the
+   *  needle has one, so "e" finds "é" and "é" does not find "e"; in lower
+   *  case; "ς" as "σ", and "ß" as "ss" and "ø" as "o" as accents are. */
+  function findFold(ch, keepMarks) {
+    if (FIND_IGNORED.test(ch)) return "";
+    var folded = FIND_QUOTES[ch] || ch.normalize("NFKD");
+    if (!keepMarks) folded = folded.replace(FIND_MARKS, "");
+    folded = folded.toLowerCase();
+    var letters = "";
+    for (var i = 0; i < folded.length; i++) {
+      var letter = folded.charAt(i);
+      letter = FIND_SAME[letter] || letter;
+      letters += (!keepMarks && FIND_BASES[letter]) || letter;
+    }
+    return letters;
+  }
+
+  /** Whether an element's box ends a run of text, as find has it: a block
+   *  in the flow, a table row or cell. An inline box, an inline block, a
+   *  float or a box out of the flow does not. */
+  function breaksRun(style) {
+    var display = String(style.display || "inline");
+    if (/^(inline|contents|ruby|math)\b/.test(display)) return false;
+    if (style.position === "absolute" || style.position === "fixed") return false;
+    return !style.cssFloat || style.cssFloat === "none";
+  }
+
+  /** The text under `root` as find reads it, folded: `text`, and for each
+   *  of its characters the text node and offset it came from and whether
+   *  it is in a formula; and `starts`, each text node's first character.
+   *  A block, a row, a cell and a line break end a run, written as a line
+   *  feed, which no needle has. Spaces collapse as they do on screen,
+   *  except where `white-space` keeps them. */
+  function findText(root, keepMarks) {
+    var chars = [], nodes = [], offsets = [], math = [];
+    var starts = new Map();
+    var space = null;   // a collapsed space, waiting for what follows it
+    var fresh = true;   // at the start of a run, where a space is dropped
+
+    function push(text, node, offset, inMath) {
+      if (node && !starts.has(node)) starts.set(node, chars.length);
+      for (var i = 0; i < text.length; i++) {
+        chars.push(text.charAt(i));
+        nodes.push(node);
+        offsets.push(offset);
+        math.push(inMath);
+      }
+    }
+    function emit(text, node, offset, inMath) {
+      if (!text) return;
+      if (space) push(" ", space.node, space.offset, space.math);
+      space = null;
+      push(text, node, offset, inMath);
+      fresh = false;
+    }
+    function endRun(node, offset) {
+      space = null;
+      if (!fresh) push("\n", node, offset, false);
+      fresh = true;
+    }
+    function readText(node, style, inMath) {
+      if (style.visibility && style.visibility !== "visible") return;
+      var whiteSpace = String(style.whiteSpace || "normal");
+      var keepsSpaces = /^(pre|pre-wrap|break-spaces)$/.test(whiteSpace);
+      var keepsBreaks = keepsSpaces || whiteSpace === "pre-line";
+      var data = String(node.data || "");
+      for (var i = 0; i < data.length;) {
+        var code = data.charCodeAt(i);
+        var width = code >= 0xD800 && code <= 0xDBFF && i + 1 < data.length ? 2 : 1;
+        var ch = data.slice(i, i + width);
+        if (ch === "\n" && keepsBreaks) {
+          endRun(node, i);
+        } else if (!keepsSpaces && FIND_SPACE.test(ch)) {
+          if (!fresh && !space) space = { node: node, offset: i, math: inMath };
+        } else {
+          emit(findFold(ch, keepMarks), node, i, inMath);
+        }
+        i += width;
+      }
+    }
+    function walk(node, style, inMath) {
+      if (node.nodeType === 3) {
+        readText(node, style, inMath);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      var own = global.getComputedStyle(node);
+      if (!own || own.display === "none") return;
+      var name = String(node.nodeName).toLowerCase();
+      var formula = inMath || !!(node.classList && node.classList.contains("katex"));
+      var breaks = name === "br" || breaksRun(own);
+      if (breaks) endRun(null, -1);
+      for (var child = node.firstChild; child; child = child.nextSibling) {
+        walk(child, own, formula);
+        // `<semantics>` renders its first child, and none of its annotations.
+        if (name === "semantics" && child.nodeType === 1) break;
+      }
+      if (breaks) endRun(null, -1);
+    }
+
+    if (root) walk(root, null, false);
+    return { text: chars.join(""), nodes: nodes, offsets: offsets, math: math, starts: starts };
+  }
+
+  /** The first character of `read` at or after (`node`, `offset`): -1 for a
+   *  node it did not read. */
+  function findPosition(read, node, offset) {
+    if (!read.starts.has(node)) return -1;
+    var i = read.starts.get(node);
+    while (i < read.nodes.length && read.nodes[i] === node && read.offsets[i] < offset) i++;
+    return i;
+  }
+
+  /** Where the selection starts and ends in `read`, or null when nothing
+   *  is selected or it starts or ends in text that was not read. */
+  function findSelection(read) {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    var range = selection.getRangeAt(0);
+    var start = findPosition(read, range.startContainer, range.startOffset);
+    var end = findPosition(read, range.endContainer, range.endOffset);
+    return start < 0 || end < 0 ? null : { start: start, end: end };
+  }
+
+  /** How many times `needle` is on the page, as find counts it, and which
+   *  of them is selected: `{total, current}` as JSON, for Swift's
+   *  `FindCount(json:)`. `current` is 1-based, and 0 when the selection is
+   *  not one of the matches, or a match is in a formula (above). Matches do
+   *  not overlap, as find steps from the end of one to the next. The
+   *  string "null" if the page could not be read. */
+  function findCount(needle) {
+    try {
+      var keepMarks = FIND_MARK.test(String(needle).normalize("NFKD")) ||
+        FIND_BASE_LETTER.test(String(needle).toLowerCase());
+      var target = Array.from(String(needle)).map(function (ch) {
+        return findFold(ch, keepMarks);
+      }).join("");
+      var read = findText(document.body, keepMarks);
+      var matches = [];
+      var at = target ? read.text.indexOf(target) : -1;
+      while (at >= 0) {
+        matches.push(at);
+        at = read.text.indexOf(target, at + target.length);
+      }
+      var inFormula = matches.some(function (start) {
+        return read.math.slice(start, start + target.length).indexOf(true) >= 0;
+      });
+      var selected = inFormula ? null : findSelection(read);
+      var current = 0;
+      if (selected && selected.end === selected.start + target.length) {
+        current = matches.indexOf(selected.start) + 1;
+      }
+      return JSON.stringify({ total: matches.length, current: current });
+    } catch (e) {
+      return "null";
+    }
+  }
+
   // ===================================================== source reveal ==
   // The editor's preview follows the line being edited (corrections §7.4).
 
@@ -1594,6 +1797,8 @@
     revealSourceLines: revealSourceLines,
     renderReview: renderReview,
     scrollToReviewEntry: scrollToReviewEntry,
+    // Find on Page's "3 of 17".
+    findCount: findCount,
   };
 
   post({ type: "ready" });

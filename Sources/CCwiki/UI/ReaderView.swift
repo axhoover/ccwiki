@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The centre column: the rendered page, its metadata bar, and find-in-page.
@@ -7,7 +8,10 @@ struct ReaderView: View {
 
     @State private var findText = ""
     @State private var findPresented = false
-    @State private var findFailed = false
+    /// What the bar says after a find: "3 of 17", "17 matches" or "No
+    /// matches". Nil before one, and once the text changes or the page is
+    /// drawn again.
+    @State private var findStatus: String?
 
     var body: some View {
         Group {
@@ -186,8 +190,8 @@ struct ReaderView: View {
 
     /// SwiftUI's `.findNavigator` is macOS 26, so this is hand-built over
     /// `WKWebView.find`, which has existed since macOS 11. `WKFindResult` only
-    /// reports whether anything matched — there is no "3 of 17" to show
-    /// without counting in JavaScript, so the bar says found / not found.
+    /// reports whether anything matched, so the page counts the matches in
+    /// JavaScript (`FindCount`) for the bar's "3 of 17".
     private var findBar: some View {
         HStack(spacing: Theme.small) {
             Image(systemName: "magnifyingglass")
@@ -195,12 +199,24 @@ struct ReaderView: View {
             TextField("Find on page", text: $findText)
                 .textFieldStyle(.plain)
                 .onSubmit { Task { await find(backwards: false) } }
-                .onChange(of: findText) { _, _ in findFailed = false }
+                .onChange(of: findText) { _, _ in findStatus = nil }
+                // The count was of the page as it was drawn. Another page,
+                // or this one drawn again after a pull, makes it stale.
+                .onChange(of: session.webController.renderGeneration) { _, _ in
+                    findStatus = nil
+                }
 
-            if findFailed {
-                Text("Not found")
+            // Monospaced digits, so the count does not jitter as it steps:
+            // "3 of 17" and "4 of 17" are the same width. Never compressed
+            // (SWIFTUI-RULES §2.2): cut to "12 of 1…" it reads as the wrong
+            // number, so the field gives way first.
+            if let findStatus {
+                Text(findStatus)
                     .font(Theme.Fonts.meta)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
 
             Button { Task { await find(backwards: true) } } label: {
@@ -223,15 +239,39 @@ struct ReaderView: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
+    /// Finds the next match, or the previous, then counts them. The count
+    /// reads the selection the find left, so it waits for the find.
     private func find(backwards: Bool) async {
         guard !findText.isEmpty else { return }
-        findFailed = !(await session.webController.find(findText, backwards: backwards))
+        let needle = findText
+        let drawn = session.webController.renderGeneration
+        let found = await session.webController.find(needle, backwards: backwards)
+        var count: FindCount?
+        if found { count = await session.webController.findCount(needle) }
+        // Typed over while the page answered: the new text's find says.
+        // Drawn again since, by a link or a pull: the count is of text that
+        // has gone. A render after the count clears it (above).
+        guard needle == findText, drawn == session.webController.renderGeneration else { return }
+        findStatus = FindCount.label(found: found, count: count)
+        if let findStatus { announce(findStatus) }
+    }
+
+    /// VoiceOver says what the bar now says, as Safari's find bar does. The
+    /// keyboard stays in the field, so nothing else would read it out.
+    private func announce(_ status: String) {
+        guard let window = session.hostWindow ?? NSApp.keyWindow else { return }
+        NSAccessibility.post(
+            element: window, notification: .announcementRequested,
+            userInfo: [
+                .announcement: status,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ])
     }
 
     private func dismissFind() {
         findPresented = false
         findText = ""
-        findFailed = false
+        findStatus = nil
     }
 
     // MARK: Empty state

@@ -5,6 +5,195 @@ learned, what surprised you (`SWIFTUI-RULES.md` §10.1). Newest at the top.
 
 ---
 
+## 2026-10-27 — Undo Close Tab and the count, after review
+
+Six review findings on `claude/undo-close-tab-find-count`, each checked
+against the code. All six were real; two fixes differ from what the
+review proposed. One commit each, but the two stale-count findings share
+one.
+
+- **Undo Close Tab goes back where the tab was** (major). It put the tab
+  in whichever reader was key: a closed window came back as a tab of
+  another, a tab closed in window 1 opened in window 2, and with a paper
+  or Jobs key it opened as a window though its own was open. Now a
+  `ClosedTab` keeps its window number and the numbers of the tabs either
+  side, nearest first, read from `tabbedWindows` during `willClose`.
+  `ClosedTab.place(open:)` joins directly after the nearest open tab to
+  its left, else directly before the nearest to its right
+  (`ReaderWindowRequest.joinsAfter`, `WindowTabbing.join(ordered:)`),
+  else opens a window of its own. A tab that came back counts as the
+  window that reopened it (`AppModel.reopenedWindows`). The review
+  proposed one neighbour each side. That fails if AppKit still lists the
+  closed tabs as the next one closes: the middle tab names only closed
+  neighbours and becomes a second window. Taking the nearest open one
+  rebuilds a closed window in its order, whatever order its tabs closed
+  in. Safari's one-⌘Z Undo Close Window is not built: one ⌘Z per tab.
+- **The count clears whenever the page is drawn again.** A pull or a
+  preference re-renders the page in place, keeping the location, and the
+  bar kept "3 of 17" over replaced text. `WebController.renderGeneration`
+  counts the page's "rendered" messages. The bar clears on it, in place of
+  the location, and a find drops a count if it moved while the page
+  answered. The page posts "rendered" before it answers any later script,
+  so a count of the new page is caught.
+- **Final sigma, and ß, æ, œ, ø, ł, đ, ð and ħ.** Find's ICU search
+  collator equates letters NFKD leaves whole, and the count's total fell
+  short ("strasse" found "Straße" in find, not in the count). Node 22's
+  `Intl.Collator` (ICU 77) says which. Final sigma is sigma whatever the
+  needle. The others equal their plain forms at primary strength only, as
+  "é" does "e", not at tertiary as the review had ß, æ and œ, so they fold
+  as accents do: the plain letters find them, and a needle with one finds
+  only it.
+- **VoiceOver announces the count**, as Safari's find bar speaks its
+  result: `NSAccessibility.post` with `.announcementRequested`, high
+  priority, on the reader's window.
+- **The count keeps its width**: `.fixedSize(horizontal: true, vertical:
+  false)`, as `SWIFTUI-RULES` §2.2 asks of a numeric counter. At a narrow
+  reader it had truncated to "12 of 1…" while the field had room.
+
+The swiftui-pro, typography-designer and macos-design skills were not
+installed in this session. The work follows `SWIFTUI-RULES.md`: §2.2 for
+the count's width, §3.2 in rebuilding the place from the closed tab's
+record at each reopen rather than patching the stack, and `Theme.Fonts`
+as it was; no type style was added.
+
+**Checks.** No Swift toolchain here, so none of this has been compiled.
+- `FindCountTests`' fixtures, extracted from the Swift as written, pass
+  in node 22 against `ccwiki.js` over the same stand-in DOM. The new
+  sigma and ß fixtures fail against the script before this change.
+- A Python model of `ClosedTab.place` and the reopen loop, over every
+  whole and partial close of two to four tabs and both ways AppKit may
+  list closed tabs, rebuilt every window in order. `ClosedTabsTests`
+  checks the same for three tabs, partial closes of four, and the
+  neighbour rules.
+
+**To check on a Mac:**
+- [A, B, C], ⌘W on B, click another window, ⌘Z: B comes back between A
+  and C in its own window. ⌘W on A, then ⌘Z: A comes back first.
+- Two windows, close one, ⌘Z: it comes back as a window. A window of
+  three tabs closed with the close button: three ⌘Z rebuild it in order.
+  If it comes back as three windows, `tabbedWindows` no longer lists the
+  closing tab during `willClose`.
+- With a paper or the Jobs window key, ⌘Z: the tab goes back to its own
+  reader window.
+- The find bar: "3 of 17", then a pull that changes the page, or
+  Settings' maintenance notices or link previews turned on or off, and
+  the count goes. With VoiceOver on,
+  each Return or ⌘G is spoken. At a narrow reader the field shrinks
+  before the count does.
+
+## 2026-10-27 — Undo Close Tab, and Find on Page's count
+
+The two reader comforts [efficiency.md](plans/efficiency.md) §3.4 named as
+first candidates, on `claude/undo-close-tab-find-count` from `main` at
+`3fa8959` (v0.1.4). One commit each, then the docs, and three small
+commits a re-read found: Undo Close Tab's menu item in `Commands` of its
+own, escapes for the invisible characters in the count's tables, and the
+count cleared when another page shows.
+
+- **Edit ▸ Undo Close Tab (⌘Z).** A closed reader tab or window comes back
+  as a tab of the key reader window, in front, or a window of its own with
+  none, as ⌘T opens one. It has its page, Back and Forward, inspector and
+  folders, at the heading it was read at. Ten are kept, most recent first,
+  in memory only.
+- **"3 of 17" in the find bar.** After each find, the page counts the
+  matches and places the selected one. The bar says "3 of 17", "17
+  matches" when it cannot tell which, or "No matches", in
+  `Theme.Fonts.meta` with monospaced digits. Typing, or another page,
+  clears it until the next find.
+
+**Undo Close Tab, as built** ([reader-comforts.md](plans/reader-comforts.md)
+§7 has the whole note):
+- `sessionDidClose` keeps a `ClosedTab`: the session's `restorationState`
+  and its reading anchor, what macOS keeps to restore a window. The pure
+  `ClosedTabs` holds ten. A tab that showed nothing is not kept.
+- `AppModel.reopenClosedTab(beside:)` takes the last one and returns a
+  fresh `ReaderWindow` with its tabbing request. The window takes the tab
+  with `takeReopenedTab(for:)` in place of its scene storage, so
+  `SessionStartPlan` starts it as a restored window.
+- **Why an item of its own, not Undo.** AppKit's Undo goes down the
+  responder chain to the first responder's undo manager, which is how
+  every field and the editor undo typing. SwiftUI cannot validate a
+  replacement against the responder chain. Registering on a window's undo
+  manager, as Safari does, does not fit native tabs: each tab is its own
+  `NSWindow` with its own undo manager. So the item is
+  `CommandGroup(after: .undoRedo)`, also ⌘Z, in `UndoCloseTabCommands`
+  beside `CCwikiCommands`, whose body already holds ten groups, the most
+  a `CommandsBuilder` block is sure to take. AppKit gives a key
+  equivalent to the first enabled item that has it, so Undo keeps ⌘Z
+  while text has typing to undo. The item is disabled while editable text
+  (`NSText`, `isEditable`) is the key window's first responder, read on
+  `NSApplication.didUpdateNotification`, since nothing is posted when the
+  first responder changes. It reads it again when it runs, and beeps if
+  text has the keyboard, as an empty Undo does (`SWIFTUI-RULES` §3.5).
+
+**The count, as built** ([render-pipeline.md](plans/render-pipeline.md),
+"Find on Page's count"): `CCwiki.findCount(needle)` reads the text
+WebKit's find reads. That is the rendered text, without `display: none`
+or `visibility: hidden`, with blocks, rows, cells and `<br>` ending runs,
+and spaces collapsed but where `white-space` keeps them. It folds case,
+compatibility forms, accents unless the needle has one, curly quotes,
+soft hyphens and zero-width characters, as find does. Matches do not
+overlap. `WKWebView.find` selects its match, and the count places it by
+where the selection starts and ends.
+- **KaTeX's MathML.** katex.min.css hides `.katex-mathml` with
+  `clip-path: inset(50%)` in a 1px box out of the flow: rendered, so
+  find matches its letters. Its TeX annotation is not rendered
+  (`<semantics>` shows its first child only). The count reads the one
+  and not the other. Only pseudocode has MathML; the page's own math is
+  `output: "html"`.
+- **Formulas give the total alone.** How find runs a formula's letters
+  together, across inline blocks, inline tables and MathML tokens,
+  cannot be read from the page. So when any match is in `.katex`, the
+  bar says "17 matches", never a place that may be wrong.
+
+The swiftui-pro, typography-designer and macos-design skills were not
+installed in this session. The work follows `SWIFTUI-RULES.md`: the count
+is a `Text` that appears with no transition, as "Not found" did (§1.1),
+with `.lineLimit(1)` (§2.3) in an existing `Theme.Fonts` role (§5.1). The
+menu item is disabled, not hidden, when it cannot run, as the HIG asks
+of menu items. No type style was added.
+
+**Checks.** No Swift toolchain here: none of this has been compiled, and
+CI is the first compiler. The count's fixtures, the same JavaScript as
+`FindCountTests`' over the same stand-in DOM, pass in node 22 against
+`ccwiki.js`. Tests:
+- `ClosedTabsTests`: most recent first, ten kept, an empty tab dropped,
+  an app page kept, and a reopened tab starting with its own history as
+  the cold start.
+- `FindCountTests`: the bar's words and the page's JSON; in
+  JavaScriptCore, plain text, folding, a match spanning `<em>`, blocks,
+  hidden text, math with and without MathML, a code block, and the place
+  after a selection.
+
+**To check on a Mac:**
+- ⌘W on a tab, then ⌘Z: the tab comes back in the same window, on its
+  page, at its heading, with Back working. The same after closing the
+  last window, from the menu bar alone. Edit ▸ Undo Close Tab should be
+  enabled at once after the close: the menu reads `AppModel` by
+  observation, as Relaunch to Update does.
+- ⌘Z reaching Undo Close Tab past the disabled Undo. If AppKit stops at
+  the first item with the key equivalent, ⌘Z does nothing and the menu
+  item still works.
+- In the find field, the palettes, a sheet, the explorer's field and an
+  editor: ⌘Z undoes typing, Undo Close Tab is disabled, and ⌘Z with
+  nothing typed beeps rather than reopening a tab. Then click the page:
+  the item is enabled again.
+- Closing a window of several tabs: each tab kept, ⌘Z bringing them back
+  one at a time.
+- The find bar: "3 of 17" stepping with ⌘G and ⇧⌘G and wrapping, "No
+  matches", and the count not jittering from "3 of 17" to "4 of 17".
+- A page with pseudocode, searching a word in its math (`Enc`):
+  WebKit's own stepping should visit as many matches as "N matches"
+  says, MathML included. If it visits fewer, the count should stop
+  reading `.katex-mathml`.
+- The count's cost on Learning with Errors, the longest page: it calls
+  `getComputedStyle` on every element, once per find.
+
+**Left:**
+- No screenshot step for the find bar's count or for Undo Close Tab.
+- Find on Page's count is not shown for a search hit that lands on its
+  match (`findFirst`), which opens no find bar.
+
 ## 2026-10-27 — After 0.1.4: three checks the deletions took, put back
 
 A review of `claude/after-0.1.4-cleanup` found three checks that went

@@ -133,6 +133,7 @@ discoverable rather than folklore.
 |---|---|
 | ⌘N | New window, at Home |
 | ⌘T | New tab of the reader window in front, at Home; a window when no reader is in front |
+| ⌘Z | Undo Close Tab (Edit menu, after Redo): the tab closed last, back in its window at its place, as in Safari; a window closed whole comes back as a window, a tab per ⌘Z. Text keeps ⌘Z for its own Undo while it has the keyboard |
 | ⌘O | Quick switcher |
 | ⌘F / ⌘G / ⇧⌘G | Find on page, next, previous |
 | ⌘S | Search the wiki |
@@ -190,8 +191,15 @@ new tab opens in front and ⌘Return closes the palette too.
 
 `.findNavigator` is macOS 26, so the find bar is hand-built over
 `WKWebView.find` (macOS 11+). `WKFindResult` only reports whether anything
-matched — there is no "3 of 17" without counting in JavaScript — so the bar says
-found or not found, and says it explicitly rather than doing nothing.
+matched, so the page counts the matches in JavaScript after each find, and
+the bar says "3 of 17", or "17 matches" where it cannot tell which one is
+selected (a match in a formula), or "No matches". It says so explicitly
+rather than doing nothing. The count is `Theme.Fonts.meta`, secondary, with
+monospaced digits, so it does not jitter as it steps
+([render-pipeline.md](render-pipeline.md), "Find on Page's count"). It
+keeps its width (`SWIFTUI-RULES` §2.2), so at a narrow reader the field
+gives way, not the number. VoiceOver announces each count, since the
+keyboard stays in the field.
 
 ## 3a. References are not peers of the concept pages
 

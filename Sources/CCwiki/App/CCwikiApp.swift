@@ -31,7 +31,10 @@ struct CCwikiApp: App {
             width: Theme.windowDefaultWidth,
             height: Theme.windowDefaultHeight)
         .windowResizability(.contentMinSize)
-        .commands { CCwikiCommands(appModel: model) }
+        .commands {
+            CCwikiCommands(appModel: model)
+            UndoCloseTabCommands(appModel: model)
+        }
 
         // A paper gets a window of its own, one per paper, keyed by its
         // reference page's path: a PDF is a document, and it stays put while
@@ -518,6 +521,44 @@ struct CCwikiCommands: Commands {
     /// active one.
     private func ingestAPaper() {
         IngestCommand.perform(in: session?.id, model: appModel, openWindow: openWindow)
+    }
+}
+
+/// Edit ▸ Undo Close Tab (⌘Z): the tab closed last, opened again where it
+/// was, as Safari's Undo Close Tab does (plans/reader-comforts.md §7).
+///
+/// Commands of their own, beside `CCwikiCommands`, whose body already
+/// holds the ten groups a `CommandsBuilder` block can be counted on to
+/// take.
+struct UndoCloseTabCommands: Commands {
+    let appModel: AppModel
+
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        // An item of its own after Undo and Redo, which stay AppKit's: Undo
+        // goes down the responder chain to the first responder's undo
+        // manager, so text keeps ⌘Z whenever it has typing to undo. AppKit
+        // gives a key equivalent to the first enabled item that has it, so
+        // this item gets ⌘Z only while Undo is disabled, and it is itself
+        // disabled while editable text has the keyboard.
+        CommandGroup(after: .undoRedo) {
+            Button("Undo Close Tab") { reopenClosedTab() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!appModel.canReopenClosedTab)
+        }
+    }
+
+    /// Back in its old window, at its place, whichever window is key, else
+    /// a window of its own. With nothing to open, as when text took the
+    /// keyboard since the menu was last brought up to date, a beep, as
+    /// AppKit gives for an Undo with nothing to undo.
+    private func reopenClosedTab() {
+        guard let window = appModel.reopenClosedTab() else {
+            NSSound.beep()
+            return
+        }
+        openWindow(id: CCwikiApp.mainWindowID, value: window)
     }
 }
 

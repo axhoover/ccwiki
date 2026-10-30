@@ -10,8 +10,10 @@ enum WindowTabbing {
     /// Until then every new tab opens in front, whatever the caller asks.
     static let joinsInBackground: Bool = false
 
-    /// Makes `window` a tab of `source`'s group, directly after `source`. In
-    /// the background, `source` stays the selected tab and the key window.
+    /// Makes `window` a tab of `source`'s group, directly after `source`
+    /// (`.above`), or directly before it (`.below`), where a closed tab goes
+    /// back to its place. In the background, `source` stays the selected tab
+    /// and the key window.
     ///
     /// Called when the new window's `WindowReader` first reports it. The
     /// window is hidden at once, so it never shows as a window of its own,
@@ -22,7 +24,10 @@ enum WindowTabbing {
     /// itself, should have done so by then, so it does not select the tab
     /// again after a background join (an unproven timing, §6). If `source`
     /// has closed in the meantime, `window` stays a window of its own.
-    static func join(_ window: NSWindow, to source: NSWindow, inBackground: Bool) {
+    static func join(
+        _ window: NSWindow, to source: NSWindow, ordered: NSWindow.OrderingMode = .above,
+        inBackground: Bool
+    ) {
         guard window !== source else { return }
         let background = inBackground && Self.joinsInBackground
         window.alphaValue = 0
@@ -33,7 +38,7 @@ enum WindowTabbing {
             // A tab shares its group's identifier, so Merge All Windows and
             // Move Tab to New Window treat it as one of the group.
             window.tabbingIdentifier = source.tabbingIdentifier
-            source.addTabbedWindow(window, ordered: .above)
+            source.addTabbedWindow(window, ordered: ordered)
             if background {
                 source.makeKeyAndOrderFront(nil)
             } else {
@@ -44,7 +49,7 @@ enum WindowTabbing {
 
     /// On screen, or a tab of a group that is: a tab that is not selected is
     /// ordered out but still open. A closed window is neither.
-    private static func isOpen(_ window: NSWindow) -> Bool {
+    static func isOpen(_ window: NSWindow) -> Bool {
         window.isVisible || (window.tabbedWindows ?? []).contains { $0.isVisible }
     }
 }
